@@ -78,7 +78,7 @@ struct PokiStatusCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Where Poki stands, which the top bar no longer says in words: its face shows it there.
                 Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
-                    .font(.footnote).foregroundStyle(soft)
+                    .font(.allo(.footnote)).foregroundStyle(soft)
                     .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
                     .accessibilityIdentifier("status.word")
                 modelRow
@@ -128,7 +128,7 @@ struct PokiStatusCard: View {
             Button(action: openModel) {
                 HStack(spacing: 8) {
                     Text("Add Model").foregroundStyle(Tint.blue).frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                    Image(systemName: "chevron.right").font(.allo(.caption, .bold)).foregroundStyle(Color(.tertiaryLabel))
                 }
                 .padding(.horizontal, 20).frame(minHeight: min(64, max(44, rowHeight))).contentShape(.rect)
             }
@@ -162,7 +162,7 @@ struct PokiStatusCard: View {
     }
 
     @ViewBuilder private func choiceGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
-        Text(verbatim: title).font(.footnote).foregroundStyle(soft)
+        Text(verbatim: title).font(.allo(.footnote)).foregroundStyle(soft)
             .padding(.horizontal, 36).padding(.top, 8).padding(.bottom, 2)
         ForEach(choices) { choice in
             let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
@@ -207,7 +207,7 @@ struct PokiStatusCard: View {
                 .accessibilityIdentifier("status.approvals.\(mode.rawValue)")
             }
             Text("Payments, deletions and actions in Wallet always need your confirmation.")
-                .font(.footnote).foregroundStyle(soft)
+                .font(.allo(.footnote)).foregroundStyle(soft)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 36).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 10)
         }
@@ -220,7 +220,7 @@ struct PokiStatusCard: View {
     /// A row of the card: its name, what is chosen, and the arrow that opens the choices under it.
     @ViewBuilder private func choiceRow(_ title: LocalizedStringKey, value: String, open: Bool) -> some View {
         let chevron = Image(systemName: open ? "chevron.up" : "chevron.down")
-            .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+            .font(.allo(.caption, .bold)).foregroundStyle(Color(.tertiaryLabel))
         Group {
             if typeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 6) {
@@ -246,7 +246,7 @@ struct PokiStatusCard: View {
     private func tickRow(_ title: String, ticked: Bool, inset: CGFloat, height: CGFloat = 44) -> some View {
         HStack(spacing: 8) {
             Text(verbatim: title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blue)
+            Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blue)
                 .opacity(ticked ? 1 : 0).frame(width: 20)
         }
         .padding(.leading, inset).padding(.trailing, 20).frame(minHeight: height).contentShape(.rect)

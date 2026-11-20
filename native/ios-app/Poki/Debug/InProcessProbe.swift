@@ -864,7 +864,7 @@ struct InProcessSection: View {
                 Text("Poki itself").tag(AutomationPath.inProcess.rawValue)
             }
             if path != running.rawValue {
-                Text("Takes effect when Poki starts again.").font(.caption).foregroundStyle(.orange)
+                Text("Takes effect when Poki starts again.").font(.allo(.caption)).foregroundStyle(.orange)
             }
             ProbeField(probe: probe).frame(height: 44)
             HStack {

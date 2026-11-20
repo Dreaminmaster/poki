@@ -64,9 +64,9 @@ struct BearWardrobeOverlay: View {
                 .accessibilityHidden(true)
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Outfits").font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text("Outfits").font(.alloRounded(.title2, .semibold)).accessibilityAddTraits(.isHeader)
                     Text("Current outfit: \(wardrobe.selection.displayName)")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.allo(.subheadline)).foregroundStyle(.secondary)
                         .contentTransition(.opacity)
                         .animation(reduceMotion ? .linear(duration: 0.15) : .easeOut(duration: 0.26), value: wardrobe.selection)
                         .accessibilityIdentifier("wardrobe.current")
@@ -134,11 +134,11 @@ private struct WardrobeLink: View {
                 Text(title)
                 Spacer(minLength: 0)
                 if let detail {
-                    Text(detail).font(.subheadline)
+                    Text(detail).font(.allo(.subheadline))
                         .foregroundStyle(active ? WardrobeTheme.blue : Color.secondary)
                         .lineLimit(1)
                 }
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                Image(systemName: "chevron.right").font(.allo(.footnote, .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
@@ -244,7 +244,7 @@ private struct BearMixView: View {
         ScrollView {
             VStack(spacing: 12) {
                 ZStack {
-                    Text("Mix and Match").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text("Mix and Match").font(.allo(.headline)).accessibilityAddTraits(.isHeader)
                     HStack {
                         Button(action: back) {
                             Image(systemName: "chevron.backward").font(.system(size: 16, weight: .semibold))
@@ -256,7 +256,7 @@ private struct BearMixView: View {
                         Spacer()
                         Button { wardrobe.selection = .bare } label: {
                             Label("Remove All", systemImage: "arrow.uturn.backward")
-                                .font(.footnote.weight(.semibold))
+                                .font(.allo(.footnote, .semibold))
                                 .padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(WardrobeTheme.panel, in: .capsule)
                         }
@@ -315,7 +315,7 @@ private struct BearMixView: View {
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(slot.name).font(.system(size: 9)).foregroundStyle(.secondary)
-                    Text(piece.name).font(.caption2.weight(.semibold)).lineLimit(1)
+                    Text(piece.name).font(.allo(.caption2, .semibold)).lineLimit(1)
                 }
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary).frame(width: 20, height: 20)
@@ -337,10 +337,10 @@ private struct BearMixView: View {
             }
             if wardrobe.colors != BearOutfitColors() {
                 Button("Reset Colors") { wardrobe.colors = BearOutfitColors() }
-                    .font(.footnote)
+                    .font(.allo(.footnote))
             }
         }
-        .font(.subheadline)
+        .font(.allo(.subheadline))
     }
 
     private func color(_ component: WritableKeyPath<BearOutfitColors, UInt32?>, outfit: BearOutfit) -> Binding<Color> {

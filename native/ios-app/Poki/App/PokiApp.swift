@@ -31,7 +31,7 @@ struct PokiApp: App {
         // Whether this phone gets the first run: not when an earlier version was used here. Read before
         // anything this version writes, like the line above.
         FirstRun.decide()
-        // Page titles in Geist, the website's typeface (prominent text only).
+        // Page titles in Allo Rounded, the face for prominent text (Shared/Typeface.swift).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
             UINavigationBar.appearance().titleTextAttributes = [.font: inline]
@@ -57,6 +57,8 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                // Body text in Allo wherever a view does not choose a font of its own.
+                .font(.allo(.body))
                 .environment(\.inDuoSplitView, inDuoSplitView)
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)

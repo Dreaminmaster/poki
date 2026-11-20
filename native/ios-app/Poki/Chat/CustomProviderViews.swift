@@ -36,7 +36,7 @@ struct CustomProviderDetail: View {
                     ForEach(Array(provider.endpoints.enumerated()), id: \.element.id) { index, endpoint in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: endpoint.normalized).lineLimit(2).truncationMode(.middle)
-                            Text(verbatim: apiLine(endpoint, first: index == 0)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: apiLine(endpoint, first: index == 0)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                         }
                         .accessibilityElement(children: .combine)
                     }

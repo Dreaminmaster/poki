@@ -25,14 +25,14 @@ struct ResultCardView: View {
                 VStack(spacing: 4) {
                     Button { actions?.say(item.fill(card.primary.say)) } label: {
                         Text(verbatim: item.fill(card.primary.label))
-                            .font(.body.weight(.semibold))
+                            .font(.allo(.body, .semibold))
                             .frame(maxWidth: .infinity, minHeight: 30)
                     }
                     .buttonStyle(.borderedProminent).buttonBorderShape(look.buttonShape).tint(look.tint)
                     .accessibilityIdentifier("resultCard.primary")
                     if let next = card.next {
                         Button(item.fill(next.label)) { actions?.say(item.fill(next.say)) }
-                            .buttonStyle(.borderless).font(.body)
+                            .buttonStyle(.borderless).font(.allo(.body))
                             .frame(minHeight: 36)
                             .accessibilityIdentifier("resultCard.next")
                     }

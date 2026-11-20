@@ -1,6 +1,6 @@
 // Draws the launch screen's word and bear at 3x (see Poki/LaunchArt/README.md) and writes two PNGs.
-//   swift make-launch-art.swift <Geist-SemiBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png>
-// The launch screen is drawn by iOS before Poki runs, so it cannot set Geist or a shadow itself: both are
+//   swift make-launch-art.swift <AlloRounded-SemiBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png>
+// The launch screen is drawn by iOS before Poki runs, so it cannot set Allo or a shadow itself: both are
 // drawn here, at build time, from the design's values.
 import CoreGraphics
 import CoreText
@@ -16,6 +16,9 @@ enum Word {
   static let size: CGFloat = 60
   static let lineHeight: CGFloat = 64
   static let tracking: CGFloat = -0.045
+  /// The picture's width, which LaunchScreen.storyboard holds the word to (132 by 64 points); the word
+  /// is centred in it.
+  static let width: CGFloat = 132
 }
 
 /// The bear along the bottom edge: 418 points wide on a 402-point screen, under a soft blue light
@@ -34,7 +37,7 @@ enum Bear {
 let scale: CGFloat = 3
 let args = CommandLine.arguments
 guard args.count == 5 else {
-  FileHandle.standardError.write("usage: make-launch-art.swift Geist-SemiBold.ttf LaunchBear.png wordmark.png bear.png\n".data(using: .utf8)!); exit(2)
+  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-SemiBold.ttf LaunchBear.png wordmark.png bear.png\n".data(using: .utf8)!); exit(2)
 }
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 
@@ -61,8 +64,8 @@ do {
   guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(URL(fileURLWithPath: args[1]) as CFURL) as? [CTFontDescriptor],
         let descriptor = descriptors.first else { FileHandle.standardError.write("cannot read \(args[1])\n".data(using: .utf8)!); exit(1) }
   let font = CTFontCreateWithFontDescriptor(descriptor, Word.size, nil)
-  let style = CTFontCopyName(font, kCTFontStyleNameKey) as String? ?? ""
-  guard style == Word.weight else { FileHandle.standardError.write("\(args[1]) is Geist \(style), not \(Word.weight)\n".data(using: .utf8)!); exit(1) }
+  let style = CTFontCopyPostScriptName(font) as String
+  guard style.hasSuffix("-\(Word.weight)") else { FileHandle.standardError.write("\(args[1]) is \(style), not \(Word.weight)\n".data(using: .utf8)!); exit(1) }
   let kern = Word.tracking * Word.size
   let line = CTLineCreateWithAttributedString(NSAttributedString(string: Word.text, attributes: [
     kCTFontAttributeName as NSAttributedString.Key: font,
@@ -70,7 +73,7 @@ do {
     kCTForegroundColorAttributeName as NSAttributedString.Key: colour(Word.colour),
   ]))
   let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
-  let side: CGFloat = 8
+  let side = max(8, (Word.width - advance) / 2)
   let context = canvas(advance + 2 * side, Word.lineHeight)
   context.scaleBy(x: scale, y: scale)
   let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)

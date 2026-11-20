@@ -213,7 +213,7 @@ struct PokiHead: View {
             ZStack {
                 if !home {
                     Text(verbatim: "Poki")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
+                        .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
                         .padding(.horizontal, 12).frame(minHeight: 24)
                         .glassSurface(in: Capsule())
                         .glassAppearing()
@@ -307,7 +307,7 @@ struct ChatTopBar: View {
 
     private func glyph(_ symbol: String, dim: Bool = false) -> some View {
         Image(systemName: symbol)
-            .font(.body.weight(.semibold))
+            .font(.allo(.body, .semibold))
             .foregroundStyle(Color(.label).opacity(dim ? 0.35 : 1))
             .frame(width: sizes.button, height: sizes.button)
             .contentShape(.circle)
@@ -325,7 +325,7 @@ struct UpdatePill: View {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Tint.blue)
                 Text("Update Available").foregroundStyle(Color(.label))
             }
-            .font(.subheadline.weight(.medium))
+            .font(.allo(.subheadline, .medium))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 8)
             .padding(.horizontal, 16).frame(minHeight: 44)
@@ -662,9 +662,9 @@ private struct ShortcutPill: View {
                     : AnyLayout(HStackLayout(spacing: 5))
                 layout {
                     if !idea.appName.isEmpty {
-                        Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                        Text(verbatim: idea.appName).font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label))
                     }
-                    Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
+                    Text(verbatim: idea.text).font(.allo(.subheadline)).foregroundStyle(Color(.label).opacity(0.7))
                 }
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
@@ -733,7 +733,7 @@ private struct ShortcutMenu: View {
                 Image(systemName: symbol).frame(width: 24)
                 Text(title).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.body).foregroundStyle(ink)
+            .font(.allo(.body)).foregroundStyle(ink)
             .padding(.horizontal, 18).frame(minHeight: 46).contentShape(.rect)
         }
         .buttonStyle(ShortcutRowStyle())

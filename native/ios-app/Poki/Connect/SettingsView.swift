@@ -68,14 +68,14 @@ struct SettingsHome: View {
                 HStack(spacing: 12) {
                     BearAvatar(size: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("This iPhone").font(.headline)
+                        Text("This iPhone").font(.allo(.headline))
                         Text(verbatim: model.identity.label.isEmpty ? "—" : "\(model.identity.label.prefix(12))…")
                             .font(.footnote.monospaced()).foregroundStyle(Color(.secondaryLabel))
                     }
                     Spacer()
                     let relay = Health.relay(model)
                     Label(relay.word, systemImage: "circle.fill")
-                        .labelStyle(.titleAndIcon).font(.subheadline)
+                        .labelStyle(.titleAndIcon).font(.allo(.subheadline))
                         .foregroundStyle(relay.color == Site.ok ? Color.green : relay.color == Site.bad ? Color.red : Color.secondary)
                 }
                 .padding(.vertical, 4)
@@ -274,13 +274,13 @@ struct ConnectorDetail: View {
                     HStack(spacing: 12) {
                         AgentBadge(name: session.client ?? "", size: 32)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: session.name).font(.body.weight(.semibold)).lineLimit(1)
+                            Text(verbatim: session.name).font(.allo(.body, .semibold)).lineLimit(1)
                             let line = session.lastLine
-                            if !line.isEmpty { Text(verbatim: line).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(2) }
+                            if !line.isEmpty { Text(verbatim: line).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).lineLimit(2) }
                         }
                         Spacer(minLength: 8)
                         Text(session.live ? AppLocalization.text(LocalizedStringResource("now")) : ChatTime.row(session.updated))
-                            .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                            .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                     }
                     .accessibilityElement(children: .combine)
                 }

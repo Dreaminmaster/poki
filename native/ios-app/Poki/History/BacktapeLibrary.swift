@@ -611,7 +611,7 @@ struct BacktapeTileView: View {
     private var line: some View {
         HStack(spacing: 10) {
             Text(verbatim: tile.start.formatted(Date.FormatStyle().hour().minute().locale(AppLocalization.locale)))
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .font(.alloRounded(.subheadline, .bold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -626,18 +626,18 @@ struct BacktapeTileView: View {
         let locale = AppLocalization.locale
         switch tile.zoom {
         case .weeks:
-            Text(verbatim: BacktapeLabels.week(tile.start)).font(.system(.title2, design: .rounded, weight: .bold))
+            Text(verbatim: BacktapeLabels.week(tile.start)).font(.alloRounded(.title2, .bold))
         case .days:
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(verbatim: tile.start.formatted(Date.FormatStyle().day().locale(locale)))
-                    .font(.system(kind == .wide ? .title3 : .headline, design: .rounded, weight: .bold))
+                    .font(.alloRounded(kind == .wide ? .title3 : .headline, .bold))
                 Text(verbatim: tile.start.formatted(Date.FormatStyle().weekday(.abbreviated).locale(locale)))
-                    .font(.caption.weight(.semibold))
+                    .font(.allo(.caption, .semibold))
                     .foregroundStyle(.secondary)
             }
         default:
             Text(verbatim: tile.start.formatted(Date.FormatStyle().hour().locale(locale)))
-                .font(.system(kind == .wide ? .title3 : .headline, design: .rounded, weight: .bold))
+                .font(.alloRounded(kind == .wide ? .title3 : .headline, .bold))
         }
     }
 
@@ -708,7 +708,7 @@ struct BacktapeZoomBar: View {
         HStack(spacing: 0) {
             ForEach(order) { item in
                 Text(LocalizedStringKey(item.title))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.allo(.subheadline, .semibold))
                     .foregroundStyle(item == zoom ? Color.primary : Color.secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 42)
@@ -832,7 +832,7 @@ struct BacktapeLibrary: View {
                     ForEach(layout.groups[zoom] ?? []) { group in
                         if let start = group.start {
                             Text(verbatim: zoom == .days ? BacktapeLabels.week(start) : BacktapeLabels.day(start))
-                                .font(.system(.title3, design: .rounded, weight: .bold))
+                                .font(.alloRounded(.title3, .bold))
                                 .padding(.top, 14)
                                 .padding(.horizontal, 4)
                                 .padding(.bottom, 2)

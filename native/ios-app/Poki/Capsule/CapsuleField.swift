@@ -128,7 +128,11 @@ final class CapsuleScroll {
 }
 
 final class CapsuleTextView: UITextView {
-    static var bodyFont: UIFont { .preferredFont(forTextStyle: .body) }
+    /// Allo Text at the body style, as the chat writes; the system font if it did not load.
+    static func textFont(compatibleWith traits: UITraitCollection? = nil) -> UIFont {
+        Typeface.uiFont(.body, compatibleWith: traits) ?? .preferredFont(forTextStyle: .body, compatibleWith: traits)
+    }
+    static var bodyFont: UIFont { textFont() }
     private var requestedCategory: UIContentSizeCategory?
     private var needsFontRefresh = false
 
@@ -142,7 +146,7 @@ final class CapsuleTextView: UITextView {
         let traits = traitCollection.modifyingTraits {
             $0.preferredContentSizeCategory = requestedCategory ?? traitCollection.preferredContentSizeCategory
         }
-        let next = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+        let next = Self.textFont(compatibleWith: traits)
         guard needsFontRefresh || font != next else { return }
         needsFontRefresh = false
         font = next

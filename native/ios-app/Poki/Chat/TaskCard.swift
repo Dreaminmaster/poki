@@ -130,7 +130,7 @@ struct TaskCard: View {
         HStack(spacing: over ? 12 : 10) {
             mark
             VStack(alignment: .leading, spacing: over ? 2 : 1) {
-                Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
+                Text(verbatim: title).font(.allo(.subheadline, .semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
                 subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? nil : 1)
                 let usedNames = (memoryUse?.skills ?? []) + usedNotes.map(\.text)
                 if !usedNames.isEmpty {
@@ -261,14 +261,14 @@ struct TaskCard: View {
                 ProgressView(value: Double(finished), total: Double(total))
                     .progressViewStyle(TaskBarStyle(track: blue ? .white.opacity(0.28) : Color(.tertiarySystemFill), fill: blue ? .white : Tint.amber))
                     .animation(.easeInOut(duration: 0.4), value: finished)
-                Text("Step \(min(finished + 1, total)) of \(total)").font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(soft)
+                Text("Step \(min(finished + 1, total)) of \(total)").font(.allo(.caption, .medium)).monospacedDigit().foregroundStyle(soft)
             }
         }
         if state == .yourTurn {
             // What holds while a step is yours: the core sends no input. It still reads the screen (that
             // is how it sees the step is over), so the card does not say it looks away.
             Text("Handed back to you. I’ll carry on when you’re done.")
-                .font(.footnote.weight(.medium)).foregroundStyle(Tint.amberInk)
+                .font(.allo(.footnote, .medium)).foregroundStyle(Tint.amberInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -280,7 +280,7 @@ private struct TaskPill: View {
     var ink: Color
     var ground: Color
     var body: some View {
-        text.font(.caption.weight(.medium)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
+        text.font(.allo(.caption, .medium)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 10).frame(minHeight: 24)
             .background(ground, in: .capsule)
     }
@@ -308,7 +308,7 @@ private struct ShotWithheld: View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         VStack(spacing: 6) {
             Image(systemName: "lock").font(.system(size: 16, weight: .medium))
-            Text("Not shown").font(.caption2.weight(.medium)).multilineTextAlignment(.center)
+            Text("Not shown").font(.allo(.caption2, .medium)).multilineTextAlignment(.center)
         }
         .foregroundStyle(Color(.tertiaryLabel))
         .frame(width: 52, height: 112)
@@ -448,7 +448,7 @@ struct ApprovalAskCard: View {
             }
             answers {
                 Button { answer(false) } label: {
-                    Text("Don’t Allow").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                    Text("Don’t Allow").font(.allo(.subheadline, .semibold)).frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 HoldToAllowButton { answer(true) }
@@ -464,7 +464,7 @@ struct ApprovalAskCard: View {
     }
 
     private var question: some View {
-        Text(verbatim: title).font(.headline).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
+        Text(verbatim: title).font(.allo(.headline)).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -472,7 +472,7 @@ struct ApprovalAskCard: View {
     @ViewBuilder private var countdown: some View {
         if let expires, expires > Date() {
             Text(timerInterval: Date()...expires, countsDown: true)
-                .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(Tint.amberInk)
+                .font(.allo(.caption, .medium)).monospacedDigit().foregroundStyle(Tint.amberInk)
                 .multilineTextAlignment(.trailing)
                 .fixedSize()
                 .padding(.horizontal, 10).frame(minHeight: 24)
@@ -580,14 +580,14 @@ struct TurnCard: View {
                 PokiAvatar(size: 48, mood: .yourTurn)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "lock").font(.subheadline.weight(.semibold)).accessibilityHidden(true)
-                        Text("Your turn").font(.headline)
+                        Image(systemName: "lock").font(.allo(.subheadline, .semibold)).accessibilityHidden(true)
+                        Text("Your turn").font(.allo(.headline))
                     }
                     // The reason comes as a phrase with no stop; a sentence follows it.
-                    Text(verbatim: Self.sentence(text)).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: Self.sentence(text)).font(.allo(.subheadline)).fixedSize(horizontal: false, vertical: true)
                     // What the core keeps to while a step is handed over: no input is sent. It still reads
                     // the screen (that is how it sees the step is over), so the card does not say it looks away.
-                    Text("I’m not tapping or typing while it’s your turn.").font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    Text("I’m not tapping or typing while it’s your turn.").font(.allo(.subheadline)).fixedSize(horizontal: false, vertical: true)
                 }
                 .foregroundStyle(Tint.amberInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -608,7 +608,7 @@ struct TurnCard: View {
 struct SolidCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold)).foregroundStyle(Tint.onSolid)
+            .font(.allo(.subheadline, .semibold)).foregroundStyle(Tint.onSolid)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(Tint.solid, in: .capsule)
             .opacity(configuration.isPressed ? 0.75 : 1)

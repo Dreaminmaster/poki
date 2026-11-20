@@ -383,7 +383,7 @@ struct HistoryRecordPage: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(LocalizedStringKey(HistoryNames.record(record.kind)))
-                        if !detail(record).isEmpty { Text(verbatim: detail(record)).font(.footnote).foregroundStyle(.secondary) }
+                        if !detail(record).isEmpty { Text(verbatim: detail(record)).font(.allo(.footnote)).foregroundStyle(.secondary) }
                     }
                     Spacer()
                     Text(verbatim: record.at.formatted(Date.FormatStyle(date: .abbreviated, time: .standard).locale(AppLocalization.locale)))

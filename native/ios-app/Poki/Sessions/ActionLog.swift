@@ -291,11 +291,11 @@ struct ActionLogView: View {
             badge(run.caller, ok: run.failed == 0, approval: false)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: title(run)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                Text(verbatim: parts.joined(separator: ", ")).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                Text(verbatim: parts.joined(separator: ", ")).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
             Spacer(minLength: 4)
             if let first = run.entries.first {
-                Text(first.at, style: .time).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                Text(first.at, style: .time).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
@@ -307,15 +307,15 @@ struct ActionLogView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(ActivityWords.label(entry.text)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 if let detail = entry.detail {
-                    Text(verbatim: detail).font(.footnote).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
+                    Text(verbatim: detail).font(.allo(.footnote)).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 }
                 let context = [AppName.display(entry.app), entry.session.flatMap { SessionStore.shared.session($0)?.name }].compactMap { $0 }.joined(separator: ", ")
                 if !context.isEmpty {
-                    Text(context).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                    Text(context).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 }
             }
             Spacer(minLength: 4)
-            Text(entry.at, style: .time).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+            Text(entry.at, style: .time).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
         }
     }
 }

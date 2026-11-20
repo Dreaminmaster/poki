@@ -82,13 +82,13 @@ struct RailwayTrainsList: View {
             HStack(spacing: 6) {
                 AppIconView(app: card.app, size: 18, carried: "rails12306")
                 Text(verbatim: AppIconStore.name(card.app) ?? card.app)
-                    .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
             if let first {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: "\(first.from) → \(first.to)").font(.headline)
+                    Text(verbatim: "\(first.from) → \(first.to)").font(.allo(.headline))
                     if let date = first.date {
-                        Text(verbatim: date).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                        Text(verbatim: date).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                     }
                 }
                 .padding(.top, 6)
@@ -112,18 +112,18 @@ private struct TrainRow: View {
                 end(train.arrive, train.to, alignment: .trailing)
                 if let price = train.price {
                     Text(verbatim: price)
-                        .font(.callout.weight(.semibold)).monospacedDigit()
+                        .font(.allo(.callout, .semibold)).monospacedDigit()
                         .foregroundStyle(RailwayTrains.fare)
                         .frame(minWidth: 58, alignment: .trailing)
                 }
             }
             if !train.seats.isEmpty {
                 Text(verbatim: train.seats.map { "\($0.name) \($0.left)" }.joined(separator: "   "))
-                    .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
             if let note = train.note {
-                Text(verbatim: note).font(.caption).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: note).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -136,17 +136,17 @@ private struct TrainRow: View {
 
     private func end(_ time: String, _ station: String, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
-            Text(verbatim: time).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(verbatim: station).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+            Text(verbatim: time).font(.alloRounded(.title3, .semibold)).monospacedDigit()
+            Text(verbatim: station).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
         }
     }
 
     private var middle: some View {
         VStack(spacing: 2) {
-            Text(verbatim: train.number).font(.subheadline.weight(.medium))
+            Text(verbatim: train.number).font(.allo(.subheadline, .medium))
             Capsule().fill(Color(.tertiaryLabel)).frame(width: 52, height: 1)
             if let duration = train.duration {
-                Text(verbatim: duration).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: duration).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }

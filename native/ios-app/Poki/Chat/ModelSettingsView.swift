@@ -138,7 +138,7 @@ struct ConnectionCheckFeedback: View {
             if let detail = result.detail { Text(verbatim: detail) }
             if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
         }
-        .font(.footnote)
+        .font(.allo(.footnote))
         .accessibilityElement(children: .combine)
     }
 }
@@ -234,7 +234,7 @@ struct AddAccount: View {
                                 ProviderTile(provider: provider)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(verbatim: provider.name).foregroundStyle(Color(.label))
-                                    Text(capabilities(provider)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                                    Text(capabilities(provider)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                                 }
                                 Spacer()
                                 // Custom endpoints can be added again and again.

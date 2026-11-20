@@ -27,7 +27,7 @@ struct MessageBubble: View {
             }
             if direction == .incoming {
                 answer
-                    .font(.body)
+                    .font(.allo(.body))
                     .tint(Tint.blueText)
                     .foregroundStyle(Color(.label))
                     .fixedSize(horizontal: false, vertical: true)
@@ -41,7 +41,7 @@ struct MessageBubble: View {
                 Spacer(minLength: typeSize.isAccessibilitySize ? 16 : .messageInsetPadding)
             } else {
                 (direction == .outgoing ? withCapsules : Text(rendered))
-                    .font(.body)
+                    .font(.allo(.body))
                     .accessibilityLabel(Text(verbatim: text))
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(direction == .guest ? Tint.onSolid : Color.white)
@@ -89,7 +89,7 @@ struct MessageBubble: View {
     private var withCapsules: Text {
         let segments = CapsuleText.segments(text)
         guard segments.contains(where: { if case .app = $0 { true } else { false } }) else { return Text(rendered) }
-        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize)))
+        let font = CapsuleTextView.textFont(compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize)))
         return segments.reduce(Text(verbatim: "")) { line, segment in
             switch segment {
             case .text(let words):
@@ -513,7 +513,7 @@ private struct AnswerTable: View {
     private var table: some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         return TableView(columnAlignments: alignments, rows: rows)
-            .font(.subheadline)
+            .font(.allo(.subheadline))
             .markdownTableBorderStyle(.init(.insideBorders, color: Color(.separator)))
             .markdownTableBackgroundStyle(.alternatingRows(Color.clear, Color(.quaternarySystemFill), header: Color(.tertiarySystemFill)))
             .clipShape(shape)
