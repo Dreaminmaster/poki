@@ -85,7 +85,7 @@ struct MemoryView: View {
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Memory"))
+        .navigationTitle(AppLocalization.text("Memory Library"))
         .navigationBarTitleDisplayMode(.inline)
         .modifier(MemorySearch(query: $query, shown: apps.count > 8))
         .headerlessTop(library.items.isEmpty && page.editing != "")

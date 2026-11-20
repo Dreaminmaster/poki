@@ -166,9 +166,6 @@ struct TestingOptionsView: View {
             Section {
                 NavigationLink("Live Activity Preview") { ActivityPreview() }
             }
-            // Screen History, an experiment that reads only when started here (issue 356). Last, so
-            // the sections above keep their place.
-            HistoryTestingSection()
         }
         .navigationTitle(AppLocalization.text("Testing Options"))
         .navigationBarTitleDisplayMode(.inline)

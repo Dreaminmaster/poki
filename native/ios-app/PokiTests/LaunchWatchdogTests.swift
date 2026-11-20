@@ -14,7 +14,7 @@ final class LaunchWatchdogTests: XCTestCase {
     private var savedModelSettings: [String: Any?] = [:]
     private var savedModelSetup: (relay: String?, enabled: Any?, setup: SetupState)?
     private let suite = "LaunchWatchdogTests"
-    private static let modelSettingKeys = ["chat.provider", "chat.customURL", "chat.customModel"]
+    private static let modelSettingKeys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
 
     override func setUp() async throws {
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("LaunchWatchdogTests-\(UUID().uuidString)", isDirectory: true)

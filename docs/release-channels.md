@@ -136,6 +136,10 @@ install. `--live` reads today's releases from GitHub in place of the saved copy;
 `scripts/release/oracle.sh` runs the picker cut from the `app-0.3.1-alpha.752` source over the same
 releases and fails when the script's port of it answers differently.
 
+## Setup-only updates
+
+A public `desktop-vX.Y.Z` prerelease can reach Poki Setup through the signed Beta catalog on its own schedule. Publish both installers from the same build and their desktop checksum list, then run **Mirror approved release to R2** on `main` with the exact desktop tag. The repository owner approves the `beta` job. Users can then find the Setup update through their normal update check. Phone updates and the phone installer continue to select the numbered Poki Beta. See [publishing an approved release](update-sources.md#publishing-an-approved-release).
+
 ## Branches
 
 - `main`: protected trunk; PRs only. Every merge is a pre-alpha.

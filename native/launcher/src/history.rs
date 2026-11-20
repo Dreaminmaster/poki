@@ -8,8 +8,8 @@
 //! - `read_once`: one read. Answers with the seconds it took, the apps on screen and the number of
 //!   elements. The screen's text is counted, and returned only when `include_text` is set.
 //! - `watch`: one subscription kept open for `seconds`. Answers with every tree dump as it arrived.
-//! - `run`: a read every `interval_ms` for `duration_s`. Reports each read as it is made, then the
-//!   reads made, the failures and the longest gap between two reads.
+//! - `run`: a read every `interval_ms` for `duration_s`, or until canceled with `continuous: true`.
+//!   Reports each read as it is made, then the reads, failures and longest gap.
 //!
 //! Nothing is stored. Password fields and keyboard keys are left out of the text before it is counted.
 
@@ -23,9 +23,10 @@ use std::{
     hash::{Hash, Hasher},
     net::IpAddr,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::Mutex,
     time::{Duration, Instant, SystemTime},
 };
+use tokio::sync::oneshot;
 
 /// UIAccessibility's private secure text field trait (AXTraitSecureTextField in idb's AXTraits.h).
 const SECURE_TRAIT: u64 = 1 << 24;
@@ -47,12 +48,12 @@ fn lock_screen_only(app: &Value) -> bool {
 /// One subscription of a run's read.
 const DEFAULT_READ_WITHIN: Duration = Duration::from_secs(10);
 
-/// The run in progress. A new run, or `cancel`, moves it on, and the older run ends at its next look.
-static RUN: AtomicU64 = AtomicU64::new(0);
+/// Replacing or dropping the sender cancels the previous run, even before its future is polled.
+static RUN: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
 /// Ends the background run, if one is going. It answers with what it measured so far.
 pub fn cancel() {
-    RUN.fetch_add(1, Ordering::SeqCst);
+    RUN.lock().unwrap().take();
 }
 
 struct Target {
@@ -98,12 +99,21 @@ fn no_tree(attempts: &[ax::Attempt]) -> Failure {
 }
 
 /// Runs one request. `emit` gets a line for every read of a run.
-pub async fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> Result<Value, Failure> {
-    match request["op"].as_str().unwrap_or("") {
-        "read_once" => read_once(&request).await,
-        "watch" => watch(&request).await,
-        "run" => run(&request, emit).await,
-        other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
+pub fn handle(request: Value, emit: impl Fn(Value) + Send + Sync + 'static) -> impl Future<Output = Result<Value, Failure>> {
+    let stopped = (request["op"] == "run").then(|| {
+        let (stop, stopped) = oneshot::channel();
+        *RUN.lock().unwrap() = Some(stop);
+        stopped
+    });
+    async move {
+        if let Some(stopped) = stopped {
+            return run(&request, emit, stopped).await;
+        }
+        match request["op"].as_str().unwrap_or("") {
+            "read_once" => read_once(&request).await,
+            "watch" => watch(&request).await,
+            other => Err(Failure::new(format!("unknown history request \"{other}\"")).code("config")),
+        }
     }
 }
 
@@ -173,15 +183,15 @@ async fn watch(request: &Value) -> Result<Value, Failure> {
     Ok(answer)
 }
 
-async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
+async fn run(request: &Value, emit: impl Fn(Value), mut stopped: oneshot::Receiver<()>) -> Result<Value, Failure> {
     let target = Target::from(request)?;
     let interval = Duration::from_millis(request["interval_ms"].as_u64().unwrap_or(5000).clamp(1000, 600_000));
-    let duration = Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400));
+    let duration = (request["continuous"].as_bool() != Some(true))
+        .then(|| Duration::from_secs(request["duration_s"].as_u64().unwrap_or(1800).clamp(10, 86_400)));
     let windows = match request["windows_ms"].as_array() {
         Some(_) => windows(request),
         None => vec![DEFAULT_READ_WITHIN],
     };
-    let me = RUN.fetch_add(1, Ordering::SeqCst) + 1;
     let mut stats = RunStats::default();
     let mut device: Option<Device> = None;
     // Wall time, not the runtime's clock: a suspended app's time must show up as a gap.
@@ -195,17 +205,13 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let include_tree = request["include_tree"].as_bool().unwrap_or(false);
     let mut ended = "finished";
     loop {
-        if RUN.load(Ordering::SeqCst) != me {
-            ended = "stopped";
-            break;
-        }
         let at = since_start();
-        if at >= duration {
+        if duration.is_some_and(|duration| at >= duration) {
             break;
         }
         let asked = Instant::now();
         let mut line = json!({"n": stats.reads + stats.failures + 1, "at_s": at.as_secs()});
-        let result = async {
+        let read = async {
             if device.is_none() {
                 device = Some(target.open().await?);
                 stats.connections += 1;
@@ -224,8 +230,12 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
             let (tree, attempts) = ax::read_tree_traced(&mut open.adapter, &open.rsd, false, &windows).await;
             tree.ok_or_else(|| no_tree(&attempts))
-        }
-        .await;
+        };
+        let result = tokio::select! {
+            biased;
+            _ = &mut stopped => { ended = "stopped"; break; }
+            result = read => result,
+        };
         let took = milliseconds(asked.elapsed());
         match result {
             Ok(tree) => {
@@ -269,9 +279,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             }
         }
         emit(line);
-        // Waits in short pieces, so Stop is answered at once.
-        while asked.elapsed() < interval && RUN.load(Ordering::SeqCst) == me {
-            tokio::time::sleep(interval.saturating_sub(asked.elapsed()).min(Duration::from_millis(250))).await;
+        tokio::select! {
+            biased;
+            _ = &mut stopped => { ended = "stopped"; break; }
+            _ = tokio::time::sleep(interval.saturating_sub(asked.elapsed())) => {}
         }
     }
     if let Some(mut open) = direct.take() {
@@ -651,7 +662,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_run_reports_failed_reads_and_ends_when_stopped() {
+    async fn a_run_stops_before_first_poll_or_after_reporting_a_read() {
+        let pending = handle(json!({"op": "run", "continuous": true, "pairing_file": "/nonexistent/pairing.plist"}), |_| {
+            panic!("a stopped run must not report a read");
+        });
+        cancel();
+        let stopped = pending.await.unwrap();
+        assert_eq!(stopped["ended"], "stopped");
+        assert_eq!(stopped["failures"], 0);
+
         let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         let seen = lines.clone();
         let (first, reported) = tokio::sync::oneshot::channel();

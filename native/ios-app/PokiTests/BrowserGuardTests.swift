@@ -85,7 +85,7 @@ final class BrowserGuardTests: XCTestCase {
             FakeCompletions.tool("do", ["actions": []]),
             FakeCompletions.text("The public history page is ready."),
         ])
-        let keys = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let previous = keys.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(keys, previous) { UserDefaults.standard.set(value, forKey: key) } }
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
@@ -251,7 +251,7 @@ final class BrowserGuardTests: XCTestCase {
             FakeCompletions.tool("web_open", ["url": address + "/filled"]),
             FakeCompletions.text("Local privacy check finished."),
         ])
-        let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let previous = settings.map { UserDefaults.standard.object(forKey: $0) }
         defer { for (key, value) in zip(settings, previous) { UserDefaults.standard.set(value, forKey: key) } }
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
