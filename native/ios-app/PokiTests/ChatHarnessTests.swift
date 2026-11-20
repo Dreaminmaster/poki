@@ -50,7 +50,7 @@ final class ChatHarnessTests: XCTestCase {
             let transport = MessageListTransport()
             let screens = [[1, 2, 3, 4], [5, 6, 1, 2], [7, 8, 5, 6]]
             func scroll() -> String {
-                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true])
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true])
             }
             func count(_ refs: [Int]) -> String {
                 FakeCompletions.tool("count_messages", ["target": target, "refs": refs])
