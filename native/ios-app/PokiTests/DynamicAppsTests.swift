@@ -67,6 +67,16 @@ final class DynamicAppsTests: XCTestCase {
         XCTAssertNil(KnownApps.launchID("Nonesuch"))
     }
 
+    func testALaunchByNamePrefersTheInstalledEditionToTheCachedEdition() {
+        let mainland = "tv.danmaku.bilianime"
+        let international = "com.bilibili.inter"
+
+        for (cached, installed) in [(international, mainland), (mainland, international)] {
+            DynamicApps.set([.init(id: cached, name: "Bilibili", user: true)])
+            XCTAssertEqual(KnownApps.launchID("Bilibili", isInstalled: { $0 == installed }), installed)
+        }
+    }
+
     func testAnExplicitBundleIDKeepsTheRequestedEdition() {
         let mainland = "tv.danmaku.bilianime"
         let international = "com.bilibili.inter"
