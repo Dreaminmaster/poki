@@ -48,7 +48,7 @@ final class ChatHarnessTests: XCTestCase {
     func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
         for target in [4, 100] {
             let transport = MessageListTransport()
-            let screens = [[1, 2, 3], [4, 5, 1], [6, 7, 4]]
+            let screens = [[1, 2, 3, 4], [5, 6, 1, 2], [7, 8, 5, 6]]
             func scroll() -> String {
                 FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true])
             }
@@ -87,6 +87,57 @@ final class ChatHarnessTests: XCTestCase {
             }
             XCTAssertEqual(transport.topMessage, 1)
         }
+    }
+
+    func testCountedMessageScrollDoesNotCountMatchingTextOnDisjointScreens() async throws {
+        let transport = MessageListTransport(messages: ["D", "E", "OK", "OK", "B", "C"], visibleCount: 3, step: 3)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [4, 5, 1]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 2 messages in the open conversation.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The gesture crossed all three starting messages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+        XCTAssertTrue(result.text.contains("couldn't match the messages"), result.text)
+    }
+
+    func testAnsweringAClarifyingQuestionKeepsTheRequestedScrollCount() async throws {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.text("Which conversation should I open?"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I finished scrolling."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let clarified = expectation(description: "Poki asks which conversation")
+        ChatModel.afterTask = { _ in clarified.fulfill() }
+        chat.send("Scroll up 100 messages.")
+        await fulfillment(of: [clarified], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Which conversation should I open?") = $0.kind { true } else { false } })
+
+        let completed = expectation(description: "Poki ends the continued scroll task")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; completed.fulfill() }
+        chat.send("The current group.")
+        await fulfillment(of: [completed], timeout: 15)
+
+        XCTAssertEqual(transport.topMessage, 3, "The continued task actually sent one scroll")
+        XCTAssertEqual(result?.success, false, result?.summary ?? "Missing scroll result")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
     }
 
     func testExistingConversationUsesTheNewCustomEndpointForTheSameModel() async throws {
@@ -1689,8 +1740,19 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
 
 private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
-    private var top = 5
+    private let messages: [String]
+    private let visibleCount: Int
+    private let step: Int
+    private var top: Int
     var topMessage: Int { lock.withLock { top } }
+
+    init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
+         visibleCount: Int = 4, step: Int = 2) {
+        self.messages = messages
+        self.visibleCount = visibleCount
+        self.step = step
+        top = messages.count - visibleCount + 1
+    }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
@@ -1704,13 +1766,13 @@ private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
             let first = topMessage
-            let rows = (0..<3).map { line in
-                let title = String(format: "Message %02d", first + line)
+            let rows = (0..<visibleCount).map { line in
+                let title = messages[first + line - 1]
                 return #"<XCUIElementTypeStaticText label="\#(title)" x="20" y="\#(140 + line * 100)" width="250" height="40"/>"#
             }.joined()
             value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
         case "/wda/pressAndDragWithVelocity", "/actions":
-            lock.withLock { top = max(1, top - 2) }
+            lock.withLock { top = max(1, top - step) }
             value = .null
         default: value = .null
         }
