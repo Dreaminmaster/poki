@@ -50,6 +50,7 @@ struct TaskCard: View {
     /// second line then says how long it took and out of how many steps it stopped.
     var ended: Date? = nil
     var plannedTotal: Int? = nil
+    var resultSummary: String? = nil
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
     @State private var open: Bool?
@@ -214,6 +215,12 @@ struct TaskCard: View {
     // MARK: The steps, what Poki sees, and how far it is
 
     @ViewBuilder private var details: some View {
+        if over, let resultSummary {
+            Text(verbatim: resultSummary)
+                .font(.subheadline)
+                .foregroundStyle(ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(steps) { step in

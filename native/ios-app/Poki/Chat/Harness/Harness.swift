@@ -19,7 +19,7 @@ enum Harness {
     }()
 
     static var instructions: String {
-        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
+        [system, countedScrollInstructions, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -29,10 +29,17 @@ enum Harness {
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
 
+    private static let countedScrollInstructions = """
+    For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools. Use count_messages only for requests measured in individual messages.
+    For a request to scroll back an exact number of messages, open the conversation and take a full read before scrolling. Call count_messages with the requested target and one current ref per distinct message bubble, oldest to newest. Use the screenshot to exclude headers, dates, controls, and duplicate labels or OCR lines in the same bubble. Include every distinguishable message in view, including any overlapping messages. Do not skip a message you cannot identify.
+    Send one vertical drag at a time with full=true, using two explicit screen points with the same x coordinate. Poki bounds the distance and slows the drag before lifting. After each drag, call count_messages with the same target and the new screen's refs. Keep at least one third of the previous messages in view, including at least three consecutive messages, using the same kind of ref for each overlapping bubble. Shorten the drag near the target or the end of the list. If count_messages asks you to reverse the last drag, reverse it and check the resulting page before trying the shorter forward drag. If that cannot be verified, stop. Use the confirmed total from count_messages. Call finish_task with success=true only after it confirms the target on screen. If you cannot continue, call finish_task with success=false and give the specific reason. Poki reports the confirmed count and last verified message.
+    If you need clarification at any point during a counted scroll in the owner's chat, call wait_for_counted_scroll_reply with your question. That pauses the task. When the owner replies, take a fresh read and recheck the messages before scrolling again.
+    """
+
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
     @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
         if inSplitView {
-            var parts = [splitViewInstructions]
+            var parts = [splitViewInstructions, countedScrollInstructions]
             if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return parts.joined(separator: "\n\n")
@@ -105,14 +112,14 @@ enum Harness {
     /// The current permission determines which ones are declared for each request.
     static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
         if !inSplitView {
-            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + [reportPlan, finishTask]
+            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + [reportPlan, finishTask]
+        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + taskTools
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
@@ -140,11 +147,25 @@ enum Harness {
         ["type": "object", "properties": properties, "required": required, "additionalProperties": false]
     }
     private static let string: [String: Any] = ["type": "string"]
+    private static let taskTools = [reportPlan, countMessages, waitForCountedScrollReply, finishTask]
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
         description: "Publish a plan before actions. Update currentStep (1-based) on each step. title names the task in two to four words, as a heading in the user's language (\"Text Mom\", \"Order the usual\"), not the user's sentence; send it with the first plan. When the task sends a message to someone, to is that person as the user named them (\"Mom\"); leave it out otherwise.",
         schema: object(["steps": ["type": "array", "items": string, "minItems": 1, "maxItems": 8], "currentStep": ["type": "integer", "minimum": 1, "maximum": 8], "title": string, "to": string], ["steps", "currentStep"]))
+
+    static let countMessages = ToolSpec(
+        name: "count_messages",
+        description: "Check one screen in a counted message scroll. target is the owner's requested number of older messages. refs are the ordered message bubbles from the latest full screen read. The first screen sets the starting point. Each subsequent screen needs an ordered overlap with the last confirmed screen.",
+        schema: object(["target": ["type": "integer", "minimum": 1],
+                        "refs": ["type": "array", "items": ["type": "integer"], "minItems": 1, "maxItems": 1000]],
+                       ["target", "refs"]))
+
+    static let countedScrollReplyTool = "wait_for_counted_scroll_reply"
+    private static let waitForCountedScrollReply = ToolSpec(
+        name: countedScrollReplyTool,
+        description: "Pause a counted message scroll in the owner's chat and ask for the information you need to continue it. The question is shown to the owner with a reply button.",
+        schema: object(["question": string], ["question"]))
 
     static let finishTask = ToolSpec(
         name: "finish_task",

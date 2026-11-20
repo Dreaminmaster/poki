@@ -45,6 +45,598 @@ final class ChatHarnessTests: XCTestCase {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
     }
 
+    func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
+        for target in [4, 100] {
+            let transport = MessageListTransport(messages: (1...10).map { String(format: "Message %02d", $0) },
+                                                 visibleCount: 6)
+            let screens = [[1, 2, 3, 4, 5, 6], [7, 8, 1, 2, 3, 4], [9, 10, 7, 8, 1, 2]]
+            func scroll() -> String {
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true])
+            }
+            func count(_ refs: [Int]) -> String {
+                FakeCompletions.tool("count_messages", ["target": target, "refs": refs])
+            }
+            var turns = [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]), count(screens[0]),
+                scroll(), count(screens[1]), scroll(), count(screens[2]),
+            ]
+            if target == 100 {
+                turns += [scroll(), count(screens[2]),
+                          FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                              "details": [], "answer": ["kind": "action"]])]
+            }
+            turns += [
+                FakeCompletions.text("I finished scrolling."),
+            ]
+            let server = try FakeCompletions(replies: turns)
+            let chat = chat(on: server, transport: transport)
+            let result = await chat.runDelegated("Scroll up \(target) messages in the open conversation.")
+            let plan = try XCTUnwrap(chat.entries.compactMap { entry -> [PlanStep]? in
+                if case .plan(let steps) = entry.kind { return steps }
+                return nil
+            }.last)
+            XCTAssertEqual(plan.map(\.state), target == 4 ? [.done] : [.failed], result.text)
+            XCTAssertEqual(result.success, target == 4, result.text)
+            let reply = try XCTUnwrap(chat.entries.compactMap { entry -> String? in
+                if case .poki(let text) = entry.kind { return text }
+                return nil
+            }.last)
+            XCTAssertTrue(reply.contains("4 of \(target)") && reply.contains("Message 01"), reply)
+            if target == 100 {
+                XCTAssertTrue(reply.contains("100") && reply.contains("stopped moving"), reply)
+            }
+            XCTAssertEqual(transport.topMessage, 1)
+        }
+    }
+
+    func testCountedMessageScrollDoesNotCountMatchingTextOnDisjointScreens() async throws {
+        let transport = MessageListTransport(messages: ["D", "E", "OK", "OK", "B", "C"], visibleCount: 3, step: 3)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [4, 5, 1]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 2 messages in the open conversation.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The gesture crossed all three starting messages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+        XCTAssertTrue(result.text.contains("couldn't match the messages"), result.text)
+    }
+
+    func testAnsweringAClarifyingQuestionKeepsTheRequestedScrollCount() async throws {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.countedScrollQuestion("Which conversation should I open?"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I finished scrolling."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let clarified = expectation(description: "Poki asks which conversation")
+        ChatModel.afterTask = { _ in clarified.fulfill() }
+        chat.send("Scroll up 100 messages.")
+        await fulfillment(of: [clarified], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Which conversation should I open?") = $0.kind { true } else { false } })
+
+        let completed = expectation(description: "Poki ends the continued scroll task")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; completed.fulfill() }
+        try await sendCountedScrollComposer("The current group.", replying: true, chat: chat)
+        await fulfillment(of: [completed], timeout: 15)
+
+        XCTAssertEqual(transport.topMessage, 3, "The continued task actually sent one scroll")
+        XCTAssertEqual(result?.success, false, result?.summary ?? "Missing scroll result")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    func testCountedMessageScrollRejectsARepeatedSequenceAfterAFullPageDrag() async throws {
+        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"], step: 4)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 620]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [5, 6, 1, 2]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 2 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The actual drag crossed the whole starting page")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+        XCTAssertTrue(result.text.contains("couldn't match the messages"), result.text)
+    }
+
+    func testClarificationKeepsTheScrollTargetButANewOrdinaryScrollDoesNot() async throws {
+        for (prompt, followUp, shouldFinish) in [
+            ("请告诉我群名。", "当前群", false),
+            ("哪个群？", "不用了，往下翻一下", true),
+        ] {
+            let transport = MessageListTransport()
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.countedScrollQuestion(prompt),
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Scrolled the conversation."),
+            ])
+            let chat = chat(on: server, transport: transport, kind: .poki)
+            chat.newConversation()
+            let clarified = expectation(description: prompt)
+            ChatModel.afterTask = { _ in clarified.fulfill() }
+            chat.send("往上翻 100 条消息")
+            await fulfillment(of: [clarified], timeout: 10)
+            XCTAssertTrue(chat.entries.contains { if case .poki(prompt) = $0.kind { true } else { false } })
+
+            let finished = expectation(description: followUp)
+            var result: TaskResult?
+            ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+            try await sendCountedScrollComposer(followUp, replying: !shouldFinish, chat: chat)
+            await fulfillment(of: [finished], timeout: 10)
+
+            XCTAssertEqual(transport.topMessage, 3)
+            XCTAssertEqual(result?.success, shouldFinish, result?.summary ?? "Missing task result")
+            if shouldFinish {
+                XCTAssertEqual(result?.summary, "Scrolled the conversation.")
+            } else {
+                XCTAssertTrue(result?.summary.contains("0 of 100") == true, result?.summary ?? "")
+            }
+        }
+    }
+
+    func testCountedScrollDoesNotUseADragDistanceAsProofOfOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["D", "E", "F", "G", "Got it", "OK", "Got it", "OK", "A", "B", "C", "Z"],
+            visibleCount: 6, step: 6, spacing: 120
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 640]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [7, 8, 9, 10, 1, 2]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 2 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The list moved six rows, although the finger travelled four")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+    }
+
+    func testCountedScrollRejectsRepeatedRowsWithDifferentMessageIdentifiers() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Z", "Got it", "OK", "Sure", "Got it", "OK", "Sure", "A", "B", "C"],
+            visibleCount: 6, step: 6, identifiesMessages: true
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 490]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [7, 8, 9, 1, 2, 3]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 3 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The two matching sequences are from different pages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 3 older messages"), result.text)
+    }
+
+    func testExplicitScrollClarificationTreatsTheGroupNameAsAnAnswer() async throws {
+        let result = try await sendAfterCountedScrollQuestion("取消订阅讨论群", replying: true)
+        XCTAssertFalse(result.success, result.summary)
+        XCTAssertTrue(result.summary.contains("0 of 100 older messages"), result.summary)
+    }
+
+    func testOrdinaryComposerRequestDoesNotInheritAnUnansweredScrollTarget() async throws {
+        let result = try await sendAfterCountedScrollQuestion("去聊天记录最早的地方", replying: false)
+        XCTAssertTrue(result.success, result.summary)
+        XCTAssertEqual(result.summary, "Scrolled the conversation.")
+    }
+
+    func testCountedScrollCountsTheLastVisibleMessageWhenTheListHitsTheTop() async throws {
+        let messages = (1...7).map { "Message 0\($0)" }
+        let transport = MessageListTransport(messages: messages, visibleCount: 6, step: 3, spacing: 60)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 460]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [7, 1, 2, 3, 4, 5]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 1)
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Message 01"), result.text)
+    }
+
+    func testCountedScrollRetakesOneShorterStepAfterAmbiguousOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Got it", "OK", "Got it", "OK", "Got it", "OK", "Got it", "OK", "C", "D"],
+            visibleCount: 6, dragSteps: [6, -6, 1]
+        )
+        func drag(_ from: Int, _ to: Int) -> String {
+            FakeCompletions.tool("do", ["actions": [["drag": [200, from, 200, to]]], "full": true])
+        }
+        func count(_ refs: [Int]) -> String {
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": refs])
+        }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]), count([1, 2, 3, 4, 5, 6]),
+            drag(160, 360), count([7, 8, 3, 4, 1, 2]),
+            drag(360, 160), count([1, 2, 3, 4, 9, 10]),
+            drag(160, 260), count([2, 1, 4, 3, 11, 9]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 6, "Only the shorter retry advances the confirmed position")
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("“OK”"), result.text)
+    }
+
+    func testCountedScrollRequiresAtLeastAThirdOfThePreviousPageToOverlap() async throws {
+        let recent = (1...10).map { "Recent \($0)" }
+        for overlap in [3, 4] {
+            let older = (1...(10 - overlap)).map { "Older \($0)" }
+            let transport = MessageListTransport(messages: older + recent, visibleCount: 10,
+                                                 step: older.count, spacing: 60)
+            let next = Array(11..<(11 + older.count)) + Array(1...overlap)
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": Array(1...10)]),
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 520]]], "full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": next]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Done."),
+            ])
+            let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+            XCTAssertEqual(transport.topMessage, 1)
+            XCTAssertEqual(result.success, overlap == 4, result.text)
+            if overlap == 3 {
+                XCTAssertTrue(result.text.contains("0 of 1 older messages"), result.text)
+            } else {
+                XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Older 6"), result.text)
+            }
+        }
+    }
+
+    func testExplicitCountWordingRequiresVerification() async throws {
+        enum Expected {
+            case messages(Int), screens(Int), ordinary
+        }
+        let requests: [(String, Expected)] = [
+            ("往上翻一百条消息", .messages(100)),
+            ("往上翻最近的 100 条消息", .messages(100)),
+            ("向上滑两百条", .messages(200)),
+            ("翻前 50 条记录", .messages(50)),
+            ("帮我翻到 30 条消息之前", .messages(30)),
+            ("翻最近二十五条聊天记录", .messages(25)),
+            ("向上滾動兩百條訊息", .messages(200)),
+            ("去 40 条消息前", .messages(40)),
+            ("往上翻100条聊天消息", .messages(100)),
+            ("往上翻100条群聊消息", .messages(100)),
+            ("上述群聊里，九十九条", .messages(99)),
+            ("这次只翻 １５０ 条私聊记录", .messages(150)),
+            ("翻一条消息", .messages(1)),
+            ("向上翻十二条", .messages(12)),
+            ("往上翻一百二十条", .messages(120)),
+            ("往上翻三千零五条", .messages(3005)),
+            ("往上翻一零零条", .messages(100)),
+            ("往上翻一〇〇条消息", .messages(100)),
+            ("往上翻一0〇条", .messages(100)),
+            ("往上翻1百2十条", .messages(120)),
+            ("往上翻3千零5条", .messages(3005)),
+            ("往上翻一百20条", .messages(120)),
+            ("往上翻九千九百九十九条", .messages(9999)),
+            ("往上翻一万条", .messages(10000)),
+            ("Scroll up 100 messages.", .messages(100)),
+            ("Scroll back by 15 older messages.", .messages(15)),
+            ("Go back two hundred messages.", .messages(200)),
+            ("Scroll up through the last 50 messages.", .messages(50)),
+            ("Scroll 30 messages up.", .messages(30)),
+            ("Go to the message 12 messages earlier.", .messages(12)),
+            ("Scroll up 100 chat messages.", .messages(100)),
+            ("Go back 45 msgs.", .messages(45)),
+            ("往上翻两页消息", .screens(2)),
+            ("向上翻３屏聊天记录", .screens(3)),
+            ("請往前翻一頁訊息", .screens(1)),
+            ("Scroll up 2 pages of messages.", .screens(2)),
+            ("Scroll up 2 pages in Messages.", .screens(2)),
+            ("Scroll back three full screens of chat messages.", .screens(3)),
+            ("Scroll up one screen in Messages.", .screens(1)),
+            ("去聊天记录最早的地方", .ordinary),
+            ("Scroll to the chat from 100 days ago.", .ordinary),
+            ("Scroll through the 100 Club chat.", .ordinary),
+        ]
+        for (request, expected) in requests {
+            var replies = [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll the chat"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+            ]
+            let transport: MessageListTransport
+            if case .screens(let screens) = expected {
+                let messages = (1...((screens + 1) * 4)).map { "Message \($0)" }
+                transport = MessageListTransport(messages: messages, step: 4)
+                replies += Array(repeating: FakeCompletions.tool("do", [
+                    "actions": [["drag": [200, 172, 200, 703]]], "full": true,
+                ]), count: screens)
+            } else {
+                transport = MessageListTransport()
+            }
+            replies += [
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the chat.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Scrolled the chat."),
+            ]
+            let server = try FakeCompletions(replies: replies)
+            let result = await chat(on: server, transport: transport).runDelegated(request)
+            switch expected {
+            case .messages(let target):
+                XCTAssertEqual(result.success, false, "\(request): \(result.text)")
+                let displayedTarget = target.formatted(.number.locale(Locale(identifier: "en_US")))
+                XCTAssertTrue(result.text.contains("0 of \(displayedTarget) older messages"), "\(request): \(result.text)")
+            case .screens:
+                XCTAssertEqual(transport.topMessage, 1, request)
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+                XCTAssertTrue(result.text.contains("result: done: Scrolled the chat."), "\(request): \(result.text)")
+            case .ordinary:
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+            }
+        }
+    }
+
+    func testQuestionsAfterReadingKeepTheCountedScrollReplyOpen() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.countedScrollQuestion("我找到了两个群。你说的是哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group after looking")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(chat.entries.contains { if case .poki("我找到了两个群。你说的是哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The reply continues the counted scroll")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    func testWaitingForACountedScrollReplyDoesNotNeedQuestionPunctuation() async throws {
+        let question = "我找到了两个群，请问你说的是哪个群"
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.countedScrollQuestion(question),
+            FakeCompletions.text(question),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "The counted task waits for the owner's group")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(said(chat).contains(question))
+
+        server.replaceReplies([
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let finished = expectation(description: "The reply continues the counted task")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    private func sendAfterCountedScrollQuestion(_ text: String, replying: Bool) async throws -> TaskResult {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.countedScrollQuestion("哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group")
+        ChatModel.afterTask = { _ in asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The composer request ends")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer(text, replying: replying, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        return try XCTUnwrap(result)
+    }
+
+    private func sendCountedScrollComposer(_ text: String, replying: Bool, chat: ChatModel) async throws {
+        let app = try XCTUnwrap(app)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: ChatView(
+            sharedDraft: .constant(text), openVoice: {}, openSetup: {}, openModel: {}
+        ).environment(app).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawCountedScrollComposer(window)
+        if replying {
+            let reply = try XCTUnwrap(composerButton(in: window, id: "chat.counted-scroll.reply"))
+            XCTAssertTrue(reply.accessibilityActivate())
+            await drawCountedScrollComposer(window)
+        }
+        let send = try XCTUnwrap(composerButton(in: window, id: "composer.main"))
+        XCTAssertTrue(send.accessibilityActivate())
+    }
+
+    private func drawCountedScrollComposer(_ window: UIWindow) async {
+        await withCheckedContinuation { done in
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { done.resume() }
+            window.layoutIfNeeded()
+            CATransaction.commit()
+        }
+        await Task.yield()
+    }
+
+    private func composerButton(in root: UIView, id: String) -> NSObject? {
+        var pending: [NSObject] = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if identifier == id && item.accessibilityTraits.contains(.button) && !item.accessibilityFrame.isEmpty { return item }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
+    }
+
+    func testCountedScrollRetainsTheActionFailureWhenItsScreenCannotBeCounted() async throws {
+        let transport = MessageListTransport(failsDrag: true)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The scroll action failed.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I stopped."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 100 messages.")
+
+        XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && !$0.ok })
+        XCTAssertEqual(result.success, false)
+        XCTAssertTrue(result.text.contains("0 of 100") && result.text.contains("Message 05"), result.text)
+        XCTAssertTrue(result.text.contains("The scroll action failed."), result.text)
+    }
+
+    func testFailedCountedScrollCardShowsCountPositionAndReason() async throws {
+        let transport = MessageListTransport(messages: (1...8).map { String(format: "Message %02d", $0) },
+                                             visibleCount: 6)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The list stopped moving.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I stopped."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 100 messages.")
+        XCTAssertEqual(result.success, false)
+        XCTAssertTrue(result.text.contains("2 of 100") && result.text.contains("Message 01"), result.text)
+
+        let entries = chat.entries.filter { entry in
+            switch entry.kind { case .request, .plan: true; default: false }
+        }
+        let restored = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(entries))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let covered = scene.windows.filter { !$0.accessibilityElementsHidden }
+        covered.forEach { $0.accessibilityElementsHidden = true }
+        let window = UIWindow(windowScene: scene)
+        defer {
+            window.isHidden = true
+            covered.forEach { $0.accessibilityElementsHidden = false }
+        }
+        window.rootViewController = UIHostingController(rootView: ChatTranscript(entries: restored))
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
+        let source = await Task.detached {
+            var code: NSString?
+            return PKInProcess.shared().sourceXML(nil, code: &code) ?? ""
+        }.value
+        XCTAssertTrue(source.contains("Count older messages"), source)
+        for detail in ["2 of 100", "Message 01", "The list stopped moving."] {
+            XCTAssertTrue(source.contains(detail), "Task card omitted \(detail)")
+        }
+        let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let png = UIGraphicsImageRenderer(bounds: window.bounds).pngData { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try png.write(to: output.appendingPathComponent("CountedScrollTaskCard.png"))
+    }
+
     func testExistingConversationUsesTheNewCustomEndpointForTheSameModel() async throws {
         let done = FakeCompletions.tool("finish_task", ["success": true, "summary": "Done."])
         let first = try FakeCompletions(replies: [done, FakeCompletions.text("First endpoint.")])
@@ -1424,6 +2016,8 @@ final class FakeCompletions: @unchecked Sendable {
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
 
+    func replaceReplies(_ next: [String]) { lock.withLock { replies = next } }
+
     init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
          holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
         self.replies = replies
@@ -1520,6 +2114,10 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     static func text(_ words: String) -> String { event(["role": "assistant", "content": words], finish: "stop") }
+
+    static func countedScrollQuestion(_ question: String) -> String {
+        tool("wait_for_counted_scroll_reply", ["question": question])
+    }
 
     /// A request's system (or developer) messages, as text.
     static func system(_ request: [String: Any]) -> String {
@@ -1642,6 +2240,62 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
             default: return reply(["error": "unknown command", "message": .string(path)], status: 404)
             }
         }
+    }
+}
+
+private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private let messages: [String]
+    private let visibleCount: Int
+    private let step: Int
+    private let spacing: Int
+    private let failsDrag: Bool
+    private let identifiesMessages: Bool
+    private var dragSteps: ArraySlice<Int>
+    private var top: Int
+    var topMessage: Int { lock.withLock { top } }
+
+    init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
+         visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false,
+         identifiesMessages: Bool = false, dragSteps: [Int] = []) {
+        self.messages = messages
+        self.visibleCount = visibleCount
+        self.step = step
+        self.spacing = spacing
+        self.failsDrag = failsDrag
+        self.identifiesMessages = identifiesMessages
+        self.dragSteps = dragSteps[...]
+        top = messages.count - visibleCount + 1
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/session": value = ["sessionId": "message-list"]
+        case "/status": value = ["ready": true]
+        case "/wda/locked": value = false
+        case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
+        case "/wda/activeAppInfo": value = ["bundleId": "local.fixture.messages", "name": "Messages fixture"]
+        case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
+        case "/source":
+            let first = topMessage
+            let rows = (0..<visibleCount).map { line in
+                let index = first + line - 1
+                let name = identifiesMessages ? #" name="message-\#(index)""# : ""
+                return #"<XCUIElementTypeStaticText\#(name) label="\#(messages[index])" x="20" y="\#(140 + line * spacing)" width="250" height="40"/>"#
+            }.joined()
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
+        case "/wda/pressAndDragWithVelocity", "/actions":
+            if failsDrag { throw TransportError.other("Fixture rejected the scroll input") }
+            lock.withLock {
+                let delta = dragSteps.popFirst() ?? step
+                top = min(messages.count - visibleCount + 1, max(1, top - delta))
+            }
+            value = .null
+        default: value = .null
+        }
+        return (200, (["value": value] as JSON).data())
     }
 }
 
