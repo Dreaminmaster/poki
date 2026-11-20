@@ -356,7 +356,8 @@ private enum AnswerBlocks {
 
     static func blocks(_ source: String) -> [Block] {
         if let done = cache[source] { return done }
-        let result = split(source)
+        let markdown = source.replacingOccurrences(of: "\r\n", with: "\n")
+        let result = split(markdown)
         if cache.count >= 300 { cache.removeAll(keepingCapacity: true) }
         cache[source] = result
         return result
