@@ -18,7 +18,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "acorn": "8.19.0",
     "sharp": "0.34.5",
-    "zod": "^4.2.0"
+    "zod": "4.6.7"
   },
   "license": "AGPL-3.0-only",
   "description": "Local MCP tools for iPhone and iOS Simulator automation on macOS.",

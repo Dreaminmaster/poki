@@ -278,6 +278,7 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
 
     override init() {
         super.init()
+        speaker.usesApplicationAudioSession = false
         speaker.delegate = self
     }
 
@@ -302,7 +303,12 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
         input.removeTap(onBus: 0)
         Self.tap(input, into: request)
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            stopListening()
+            throw error
+        }
         recognition = Self.recognize(recognizer, request) { [weak self] text in
             self?.heard = text
             self?.onHeard?(text)
@@ -325,14 +331,32 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
 
     /// Stops listening; the words heard so far (a moment later, for the last ones).
     func finish() async -> String {
-        request?.endAudio()
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        stopListening()
+        let recognition = self.recognition
+        self.recognition = nil
         try? await Task.sleep(for: .milliseconds(600))
         recognition?.cancel()
-        recognition = nil
-        request = nil
         return heard.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func cancel() {
+        stopSpeaking()
+        stopListening()
+        recognition?.cancel()
+        recognition = nil
+    }
+
+    private func stopListening() {
+        guard let request else { return }
+        self.request = nil
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        request.endAudio()
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            AppLog.shared.add("voice", "could not deactivate the dictation audio session: \(error.localizedDescription)")
+        }
     }
 
     func speak(_ text: String) {
