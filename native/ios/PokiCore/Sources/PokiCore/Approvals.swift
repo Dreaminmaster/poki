@@ -47,17 +47,32 @@ public struct SensitivityRules: Sendable, Equatable {
             guard !w.isEmpty else { continue }
             var search = lowered.startIndex..<lowered.endIndex
             while let range = lowered.range(of: w, range: search) {
-                // CJK words match anywhere; Latin words need whole-word boundaries.
-                if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
+                let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
+                // CJK words need no word boundaries, but the same guard as a Latin word: on a button,
+                // at the start of the text, or in a short one. A longer text that only mentions the
+                // word is a description, not the control (seen on the phone, Nov 20 2026: a photo in
+                // Photos whose description held 付款 asked "Allow payment?" for a drag and a swipe).
+                if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) {
+                    if elementType == "Button" || opens || Self.shortCJK(lowered) { return word }
+                    search = range.upperBound..<lowered.endIndex
+                    continue
+                }
                 let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
                 let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
-                let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
                 if boundary(before) && boundary(after) && (elementType == "Button" || opens || short) { return word }
                 // An earlier substring ("buying") must not hide a later whole word ("buy").
                 search = range.upperBound..<lowered.endIndex
             }
         }
         return nil
+    }
+
+    /// A text short enough to be a control's own words in a language without spaces between them:
+    /// at most this many letters, amounts and counts left out ("确认支付", "使用零钱支付 ¥128.50",
+    /// "Apple Pay 支付", "删除 3 张照片").
+    static let shortCJKLength = 12
+    static func shortCJK(_ text: String) -> Bool {
+        text.filter(\.isLetter).count <= shortCJKLength
     }
 
     /// Why this action needs approval, or nil.

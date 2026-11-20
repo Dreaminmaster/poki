@@ -681,14 +681,13 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(picture.text.contains("screen_changed: true (only the picture changed"), picture.text)
     }
 
-    func testCoordinatePauseExplainsWhyEvenWhenScreenDidNotChange() async {
+    func testCoordinateActionsChainInOneDo() async {
         let (core, wda, _) = makeCore()
         wda.source([("Button", "Already selected")])
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": [100, 120]], ["tap": [100, 120]]]])
-        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
-        XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
-        XCTAssertTrue(result.text.contains("not_sent from action 2: a coordinate action needs a fresh read"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 2, result.text)
+        XCTAssertFalse(result.text.contains("not_sent"), result.text)
     }
 
     func testNumbersStayAndDoListsOnlyWhatChanged() async {
