@@ -595,6 +595,14 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testTaskCardIncludesMemoryReadFromTheSkillList() async throws {
+        try await assertSkillListMemoryOnTaskCard(plan: ["Find the device name"])
+    }
+
+    func testMemoryLookupWithoutAPlanShowsTheUsedMemoryOnTheTaskCard() async throws {
+        try await assertSkillListMemoryOnTaskCard(plan: [])
+    }
+
+    private func assertSkillListMemoryOnTaskCard(plan: [String]) async throws {
         let appID = "com.apple.Preferences"
         let fixture = SkillStore(url: nil)
         let text = "Call this test device \(UUID().uuidString)"
@@ -602,8 +610,10 @@ final class ChatHarnessTests: XCTestCase {
         for number in 1...20 {
             fixture.remember("Settings test preference \(number) \(UUID().uuidString)", by: SkillStore.owner, app: appID)
         }
-        let server = try FakeCompletions(replies: [
-            FakeCompletions.tool("report_plan", ["steps": ["Find the device name"], "currentStep": 1]),
+        let planReplies = plan.isEmpty ? [] : [
+            FakeCompletions.tool("report_plan", ["steps": plan, "currentStep": 1]),
+        ]
+        let server = try FakeCompletions(replies: planReplies + [
             FakeCompletions.tool("skills", ["action": "list"]),
             FakeCompletions.tool("finish_task", [
                 "success": true, "summary": text, "details": [["label": "Device name", "value": text]],
@@ -629,6 +639,9 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.success, true, result.text)
         XCTAssertTrue(result.text.contains(text))
         let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
+        XCTAssertEqual(steps.map(\.text), plan)
+        XCTAssertNotNil(card.ended)
         XCTAssertEqual(card.memoryUse?.notes, [.init(id: old.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))])
     }
 
