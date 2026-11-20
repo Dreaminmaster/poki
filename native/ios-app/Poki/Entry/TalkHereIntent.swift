@@ -10,6 +10,9 @@ import AVFAudio
 /// with a Live Activity up: LiveActivityIntent lets this intent start one from the background. When
 /// Poki cannot talk yet (no voice set up, the first run, pairing, a task under way, no microphone
 /// permission) or the Live Activity does not start, Poki opens and Talk to Poki goes on from there.
+#if POKI_SIRI_TOOLS
+@AppIntent(.tool)
+#endif
 struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     static let title = LocalizedStringResource("Poki Anytime", table: "Entry")
     static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk.", table: "Entry"))

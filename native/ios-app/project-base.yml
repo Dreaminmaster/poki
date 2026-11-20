@@ -134,7 +134,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID)
         # The app draws with the system's colours; the Live Activity keeps the website's blue (Site).
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) POKI_APP
+        # POKI_SIRI_TOOLS: Siri AI may call Poki's actions as tools (@AppIntent(.tool)), which only
+        # the iOS 27.3 SDK knows. The IPA build (.github/actions/build-ipa) turns it on; any other
+        # build leaves it off and still builds.
+        POKI_SIRI_TOOLS_FLAG: ""
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) POKI_APP $(POKI_SIRI_TOOLS_FLAG)
         # PokiLauncher: the Rust static library from native/launcher, built for aarch64-apple-ios
         # before this project (see .github/workflows/ios-app.yml).
         SWIFT_OBJC_BRIDGING_HEADER: Poki/Runtime/Poki-Bridging-Header.h
