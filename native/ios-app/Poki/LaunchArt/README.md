@@ -11,13 +11,15 @@ light fades into the light itself.
 | `LaunchBackdrop.png` | The home page's light at rest, light appearance, 402 by 874 points at one pixel a point | `scripts/make-launch-backdrop.sh`, which has a Debug build draw `HomeBackdrop` itself |
 | `LaunchBear.png` | The bear cut out of the app icon, on a clear ground | The design's own cut-out |
 
-`scripts/make-assets.sh` writes standalone PNGs to `Poki/LaunchImages`, including the word and the bear
-with its shadow drawn by `scripts/make-launch-art.swift`. Xcode copies these files into the app bundle.
+`scripts/make-assets.sh` writes standalone PNGs to `Poki/LaunchImages`. `scripts/make-launch-art.swift`
+draws the word at 3x and the bear with its shadow at 2x. Xcode copies these files into the app bundle.
 The storyboard names the PNG files explicitly so the system's launch-screen renderer does not depend
 on an asset catalogue cached from an older installation. The app's curtain loads the same storyboard.
-The word's colour and weight are set once,
-at the top of that script. After a change to the home page's light, run `make-launch-backdrop.sh`
-again; `LaunchScreenTests` checks the packaged PNGs, the layout, and the picture against the home page's light.
+The bear's 1024-pixel source is narrower than the 1254 pixels required to draw it at 3x. Rendering
+the full picture at 2x reduces it from 1524 × 1010 to 1016 × 673 pixels and preserves its layout.
+
+Run `make-launch-backdrop.sh` after changing the home page's light. `LaunchScreenTests` checks the
+packaged PNGs, their pixel budget, the layout, and the match with the home page's light.
 
 The light is drawn for one appearance only. In Dark Mode the launch screen is the same, and the
 curtain fades it into the dark home page.
