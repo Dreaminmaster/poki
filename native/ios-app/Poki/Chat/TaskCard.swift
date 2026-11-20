@@ -12,14 +12,19 @@ enum TaskCardState: Equatable {
     case running, needsYou, yourTurn, done, failed, stopped
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false) {
+    /// `succeeded` is how the model said the whole task ended (finish_task), when it said: that, not
+    /// one step on the way, decides the card. A step that failed and was then done another way (Poki
+    /// ran a skill that was not there, then opened the app itself) does not fail the task.
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false, succeeded: Bool? = nil) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
         } else if stopped { self = .stopped }
-        else if saveFailed || steps.contains(where: { $0.state == .failed }) { self = .failed }
-        else if steps.allSatisfy({ $0.state == .done }) { self = .done }
+        else if saveFailed { self = .failed }
+        else if let succeeded { self = succeeded ? .done : .failed }
+        else if steps.indices.contains(where: { steps[$0].state == .failed && !PlanStep.recovered(steps, at: $0) }) { self = .failed }
+        else if steps.indices.allSatisfy({ steps[$0].state == .done || PlanStep.recovered(steps, at: $0) }) { self = .done }
         else { self = .stopped }
     }
 }
@@ -79,7 +84,7 @@ struct TaskCard: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: over ? 20 : 26, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: .cornerRadius, style: .continuous)
         Group {
             if over {
                 VStack(alignment: .leading, spacing: 0) {
@@ -89,39 +94,35 @@ struct TaskCard: View {
                         .accessibilityValue(Text(isOpen ? "Expanded" : "Collapsed"))
                         .accessibilityHint(Text(isOpen ? "Hides the steps" : "Shows the steps"))
                     if isOpen {
-                        VStack(alignment: .leading, spacing: 14) { details }
+                        VStack(alignment: .leading, spacing: 10) { details }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 14)
+                            .padding(.top, 10)
                             .transition(.opacity)
                     }
                 }
-                .padding(.vertical, min(18, cardInset)).padding(.horizontal, min(20, cardInset + 2))
+                .padding(.vertical, min(16, cardInset)).padding(.horizontal, min(18, cardInset))
             } else if blue {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     header
                     details
                 }
-                .padding(16)
+                .padding(min(16, cardInset + 2))
                 .accessibilityElement(children: .combine)
             } else {
                 DisclosureGroup(isExpanded: Binding(get: { isOpen }, set: { open = $0 })) {
-                    VStack(alignment: .leading, spacing: 14) { details }
+                    VStack(alignment: .leading, spacing: 10) { details }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 14)
+                        .padding(.top, 10)
                 } label: {
                     header
                 }
                 .tint(Color(.tertiaryLabel))
-                .padding(.vertical, min(20, cardInset + (isOpen ? 4 : 0)))
-                .padding(.leading, min(20, cardInset + (isOpen ? 4 : 0)))
-                .padding(.trailing, min(20, cardInset + (isOpen ? 4 : 2)))
+                .padding(.vertical, min(16, cardInset))
+                .padding(.horizontal, min(18, cardInset))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(blue ? Tint.blue : Color(.secondarySystemGroupedBackground), in: shape)
-        // Under the blue: a soft shadow in light; in dark it would read as a glow, so a hairline instead.
-        .overlay(shape.strokeBorder(blue ? Tint.ring : waits ? Tint.amberLine : Tint.line, lineWidth: 1))
-        .shadow(color: blue ? Tint.blueShadow : .clear, radius: 9, y: 6)
+        .modifier(TaskSurface(shape: shape, blue: blue, edge: waits ? Tint.amberLine : nil))
     }
 
     // MARK: The row every state has
@@ -148,18 +149,20 @@ struct TaskCard: View {
         }
     }
 
-    /// How a task ended, at the end of its result row: a green tick, a red cross or a grey stop.
+    /// How a task ended, at the end of its result row: a green tick, an orange mark or a grey stop. A
+    /// mark, not a button: a filled red circle with a cross in the corner read as Close.
     @ViewBuilder private var ending: some View {
         switch state {
-        case .done: endMark("checkmark", Tint.green).accessibilityLabel(Text("Done"))
-        case .failed: endMark("xmark", Tint.red).accessibilityLabel(Text("Failed"))
-        default: endMark("stop.fill", Color(.systemGray), size: 7).accessibilityLabel(Text("Stopped"))
+        case .done: endMark("checkmark.circle.fill", Tint.green).accessibilityLabel(Text("Done"))
+        case .failed: endMark("exclamationmark.circle.fill", Color(.systemOrange)).accessibilityLabel(Text("Failed"))
+        default: endMark("stop.circle.fill", Color(.systemGray)).accessibilityLabel(Text("Stopped"))
         }
     }
 
-    private func endMark(_ name: String, _ color: Color, size: CGFloat = 9) -> some View {
-        Image(systemName: name).font(.system(size: size * min(32, endingSide) / 20, weight: .heavy)).foregroundStyle(.white)
-            .frame(width: min(32, endingSide), height: min(32, endingSide)).background(color, in: .circle)
+    private func endMark(_ name: String, _ color: Color) -> some View {
+        Image(systemName: name).symbolRenderingMode(.palette).foregroundStyle(.white, color)
+            .font(.system(size: min(28, endingSide), weight: .semibold))
+            .frame(width: min(28, endingSide), height: min(28, endingSide))
     }
 
     /// Poki's face while the task is alive; a tick, a cross or a stop sign once it is over.
@@ -235,10 +238,12 @@ struct TaskCard: View {
             Text("Memory reported by Poki: \(note.text)").font(.subheadline).foregroundStyle(ink)
         }
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 9) {
-                ForEach(steps) { step in
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(steps.enumerated()), id: \.element.id) { i, step in
                     TaskStepRow(text: step.text, state: step.state, tone: tone,
-                                stopped: state == .stopped)
+                                stopped: state == .stopped,
+                                // A step done another way later, or one the task got past, is not a failure.
+                                retried: step.state == .failed && (state == .done || PlanStep.recovered(steps, at: i)))
                         .transition(PlanMotion.stepTransition)
                 }
                 ForEach(Array(upcoming.enumerated()), id: \.offset) { _, text in
@@ -340,6 +345,8 @@ private struct TaskStepRow: View {
     var state: PlanStep.State?
     var tone: TaskTone
     var stopped = false
+    /// Failed, then done another way: a quiet mark and no red.
+    var retried = false
     @ScaledMetric(relativeTo: .subheadline) private var side: CGFloat = 18
 
     private var now: Bool { state == .current || state == .waiting }
@@ -355,7 +362,7 @@ private struct TaskStepRow: View {
                 .animation(PlanMotion.swap, value: state)
             Text(Self.words(ActivityWords.label(text)))
                 .font(now ? .subheadline.weight(.medium) : .subheadline)
-                .foregroundStyle(state == .failed ? Tint.red : now ? ink : soft)
+                .foregroundStyle(state == .failed && !retried ? Tint.red : now ? ink : soft)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .ignore)
@@ -372,6 +379,9 @@ private struct TaskStepRow: View {
                         .frame(width: side * 0.6, height: side * 0.6)
                 }
                 .transition(PlanMotion.swapTransition)
+        case .failed? where retried:
+            Circle().fill(tone == .blue ? Color.white.opacity(0.22) : Color(.tertiarySystemFill))
+                .overlay { Image(systemName: "arrow.turn.down.right").font(.system(size: side * 0.45, weight: .bold)).foregroundStyle(soft) }
         case .failed?:
             Circle().fill(Tint.redSoft)
                 .overlay { Image(systemName: "xmark").font(.system(size: side * 0.5, weight: .bold)).foregroundStyle(Tint.red) }
@@ -393,6 +403,7 @@ private struct TaskStepRow: View {
     private var spoken: Text {
         switch state {
         case .done?: Text("Done")
+        case .failed? where retried: Text("Done another way")
         case .failed?: Text("Failed")
         case .current?, .waiting?: Text(stopped ? "Stopped" : "In progress")
         case nil: Text("Upcoming")
@@ -659,6 +670,24 @@ enum SampleShot {
             pill(CGRect(x: 50, y: 270, width: 116, height: 44), mine)
             pill(CGRect(x: 14, y: 340, width: 122, height: 30), line)
             pill(CGRect(x: 142, y: 342, width: 26, height: 26), UIColor(hex: 0x1FB86A))
+        }
+    }
+}
+
+/// The task card's surface: the chat's own (the bubbles'), or Poki's blue while it has the phone.
+private struct TaskSurface<S: InsettableShape>: ViewModifier {
+    var shape: S
+    var blue: Bool
+    var edge: Color?
+    @ViewBuilder func body(content: Content) -> some View {
+        if blue {
+            // Under the blue: a soft shadow in light; in dark it would read as a glow, so a hairline instead.
+            content
+                .background(Tint.blue, in: shape)
+                .overlay(shape.strokeBorder(Tint.ring, lineWidth: 0.5))
+                .shadow(color: Tint.blueShadow, radius: 9, y: 6)
+        } else {
+            content.chatSurface(shape, edge: edge)
         }
     }
 }

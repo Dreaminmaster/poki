@@ -50,6 +50,9 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var saveFailed: Bool?
     var failed: Bool?
     var memoryUse: TaskMemoryUse?
+    /// How the model said the whole task ended (finish_task's success), on its plan entry. Nil when it
+    /// never said, and in conversations saved before this existed: the card then reads the steps.
+    var succeeded: Bool?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
@@ -85,6 +88,13 @@ struct PlanStep: Identifiable, Equatable, Codable {
     var text: String
     var state: State
     init(_ text: String, state: State = .current) { id = UUID(); self.text = text; self.state = state }
+
+    /// The step at `index` failed and a later step was done: the task went another way past it (a
+    /// skill that was not there, then the app opened directly), so it is not where the task failed.
+    static func recovered(_ steps: [PlanStep], at index: Int) -> Bool {
+        guard steps.indices.contains(index), steps[index].state == .failed else { return false }
+        return steps[(index + 1)...].contains { $0.state == .done }
+    }
 }
 
 enum ChatNote: Equatable, Codable {
@@ -1449,6 +1459,7 @@ final class ChatModel {
         entries[i].ended = Date()
         entries[i].app = taskApp
         entries[i].total = modelPlan?.count
+        entries[i].succeeded = taskResult?.success
         if stopped { entries[i].stopped = true }
     }
 

@@ -15,8 +15,9 @@ struct MessageBubble: View {
     /// The last bubble of its run has the small corner on its side.
     var tail: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
-    @ScaledMetric(relativeTo: .body) private var verticalInset = 13.0
-    @ScaledMetric(relativeTo: .body) private var horizontalInset = 18.0
+    // Messages' own insets (iMessage's): a one line reply is one line tall, not three.
+    @ScaledMetric(relativeTo: .body) private var verticalInset = 8.0
+    @ScaledMetric(relativeTo: .body) private var horizontalInset = 13.0
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var scheme
 
@@ -31,8 +32,8 @@ struct MessageBubble: View {
                     .tint(Tint.blueText)
                     .foregroundStyle(Color(.label))
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, min(18, verticalInset))
-                    .padding(.horizontal, min(24, horizontalInset))
+                    .padding(.vertical, min(12, verticalInset))
+                    .padding(.horizontal, min(18, horizontalInset))
                     .pokiBubble(tail: tail)
                     .contextMenu { copyButton { UIPasteboard.general.string = text } }
                     // A table takes the row's width before the space beside it, so it scrolls sideways
@@ -45,8 +46,8 @@ struct MessageBubble: View {
                     .accessibilityLabel(Text(verbatim: text))
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(direction == .guest ? Tint.onSolid : Color.white)
-                    .padding(.vertical, min(18, verticalInset))
-                    .padding(.horizontal, min(24, horizontalInset))
+                    .padding(.vertical, min(12, verticalInset))
+                    .padding(.horizontal, min(18, horizontalInset))
                     .background(direction == .guest ? Tint.solid : Tint.blue, in: shape)
                     // The bubble is one flat layer with its own outline, so the lifted copy of it (the
                     // long press) is cut to the same outline and the small corner stays where it is.
@@ -522,19 +523,27 @@ private struct AnswerTable: View {
 }
 
 extension CGFloat {
-    static let cornerRadius: CGFloat = 22
-    static let tailRadius: CGFloat = 7
+    /// Every surface in the conversation (your bubble, Poki's, the task card, the approval and result
+    /// cards) has this corner, so they read as one set.
+    static let cornerRadius: CGFloat = 18
+    static let tailRadius: CGFloat = 6
     static let messageInsetPadding: CGFloat = 60
 }
 
 extension View {
-    /// Poki's bubble (ESP-376): the card's white with a soft shadow in light; in dark the card's grey
-    /// with a hairline, where a shadow does not show. The small corner sits on Poki's side.
+    /// Poki's bubble (ESP-376): the chat's surface, with the small corner on Poki's side.
     func pokiBubble(tail: Bool) -> some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: .cornerRadius, bottomLeadingRadius: tail ? .tailRadius : .cornerRadius,
                                            bottomTrailingRadius: .cornerRadius, topTrailingRadius: .cornerRadius, style: .continuous)
-        return background(Color(.secondarySystemGroupedBackground), in: shape)
-            .overlay(shape.strokeBorder(Tint.ring.opacity(0.5), lineWidth: 0.5))
+        return chatSurface(shape)
+    }
+
+    /// The one surface Poki's bubbles and the chat's cards share: the card's white with a soft shadow in
+    /// light; in dark the card's grey with a hairline, where a shadow does not show. `edge` replaces
+    /// the hairline for a card that has to stand out (a task that waits for you).
+    func chatSurface<S: InsettableShape>(_ shape: S, edge: Color? = nil) -> some View {
+        background(Color(.secondarySystemGroupedBackground), in: shape)
+            .overlay(shape.strokeBorder(edge ?? Tint.ring.opacity(0.5), lineWidth: edge == nil ? 0.5 : 1))
             // One flat layer cut to its outline (as your bubble), under the shadow.
             .clipShape(shape)
             .compositingGroup()

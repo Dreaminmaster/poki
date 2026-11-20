@@ -736,11 +736,11 @@ struct ChatTranscript<Footer: View>: View {
                 if !text.isEmpty { MessageBubble(direction: .outgoing, text: text, tail: last) }
                 if last, delivered {
                     Text("Delivered").font(.allo(.caption2, .medium)).foregroundStyle(Color(.secondaryLabel))
-                        .padding(.horizontal, 4).padding(.bottom, 8)
+                        .padding(.horizontal, 4).padding(.bottom, 4)
                         .transition(.opacity)
                 }
             }
-            .padding(.top, startsRun(i) ? 10 : 0)
+            .padding(.top, startsRun(i) ? 8 : 0)
             // Your first words rise out of the message field on their own spring. Not as a transition:
             // the list's spring for new rows took a transition over and threw the bubble 40 points
             // past its place.
@@ -756,30 +756,30 @@ struct ChatTranscript<Footer: View>: View {
                 MessageBubble(direction: .guest, text: text, tail: isLast(i, poki: false))
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, startsRun(i) ? 10 : 0)
+            .padding(.top, startsRun(i) ? 8 : 0)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         case .poki(let text):
             MessageBubble(direction: .incoming, text: text, tail: isLast(i, poki: true))
-                .padding(.top, startsRun(i) ? 10 : 0)
+                .padding(.top, startsRun(i) ? 8 : 0)
                 .transition(PlanMotion.stepTransition)
         case .plan(let steps):
             let ask = asking(at: i)
             let current = live && entry.ended == nil && isLastPlan(i)
             TaskCard(title: entry.title ?? ask.title, steps: steps,
                      state: TaskCardState(steps: steps, live: current, waiting: waiting, handedOver: handedOver,
-                                          stopped: entry.stopped == true, saveFailed: entry.saveFailed == true || entry.failed == true),
+                                          stopped: entry.stopped == true, saveFailed: entry.saveFailed == true || entry.failed == true, succeeded: current ? nil : entry.succeeded),
                      upcoming: current ? Array((plan ?? []).dropFirst(steps.count)) : [],
                      planned: !current || plan != nil,
                      asker: ask.from, app: current ? app : entry.app, usedBrowser: ChatEntry.taskUsedBrowser(in: entries, at: i), started: entry.at, shot: current ? shot : nil,
                      ended: current ? nil : entry.ended, plannedTotal: entry.total, memoryUse: entry.memoryUse)
-                .contentShape(.contextMenuPreview, .rect(cornerRadius: 26, style: .continuous))
+                .contentShape(.contextMenuPreview, .rect(cornerRadius: .cornerRadius, style: .continuous))
 
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .transition(PlanMotion.stepTransition)
         case .note(.approval(let approval)):
             HStack {
                 ApprovalNoteCard(note: approval)
-                    .contentShape(.contextMenuPreview, .rect(cornerRadius: 16, style: .continuous))
+                    .contentShape(.contextMenuPreview, .rect(cornerRadius: .cornerRadius, style: .continuous))
 
                 Spacer(minLength: .messageInsetPadding)
             }
@@ -800,7 +800,7 @@ struct ChatTranscript<Footer: View>: View {
                 .transition(PlanMotion.stepTransition)
         case .card(let card):
             ResultCardView(entry: entry.id, card: card, chosen: entry.chosen, actions: cardActions)
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .transition(PlanMotion.stepTransition)
         }
     }
@@ -1191,10 +1191,9 @@ struct ApprovalNoteCard: View {
                 Text("Say yes in the chat to allow it.").font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
         }
-        .padding(.vertical, 10).padding(.horizontal, 12)
+        .padding(.vertical, 10).padding(.horizontal, 13)
         .frame(maxWidth: 300, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5) }
+        .chatSurface(RoundedRectangle(cornerRadius: .cornerRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
