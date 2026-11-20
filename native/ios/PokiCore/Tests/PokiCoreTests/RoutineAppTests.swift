@@ -53,6 +53,46 @@ final class RoutineAppTests: XCTestCase {
         XCTAssertEqual(store.skill(named: "Return to WeChat")?.app, Self.wechat)
     }
 
+    func testSavingASkillAfterLookingAtTheSameAppAgainAfterHome() async throws {
+        let settings = "com.apple.Preferences"
+        let store = SkillStore(url: nil)
+        let wda = FakeWDA()
+        let front = LockedBox(settings)
+        wda.source([("Button", "General")])
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(front.value)]]) }
+        wda.set("POST /wda/homescreen") { [weak wda] _ in
+            front.value = Self.home
+            wda?.source([("Icon", "Settings")], app: "Home Screen")
+            return (200, ["value": .null])
+        }
+        wda.set("POST /wda/tap") { [weak wda] _ in
+            wda?.source([("Button", "About")])
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) {
+            $0.memory = store
+            $0.sensitive.enabled = false
+        }
+
+        let start = await core.call("look", [:])
+        XCTAssertTrue(start.text.contains("General"), start.text)
+        let home = await core.call("do", ["actions": [["button": "home"]]])
+        XCTAssertFalse(home.isError, home.text)
+        XCTAssertEqual(front.value, Self.home)
+
+        front.value = settings
+        wda.source([("Button", "General")])
+        let look = await core.call("look", [:])
+        XCTAssertTrue(look.text.contains("General"), look.text)
+        let tap = await core.call("do", ["actions": [["tap": 1]]])
+        XCTAssertFalse(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("About"), tap.text)
+
+        let saved = await core.call("skills", ["action": "save", "name": "Open General"])
+        XCTAssertFalse(saved.isError, saved.text)
+        XCTAssertEqual(try XCTUnwrap(store.skill(named: "Open General")).app, settings, saved.text)
+    }
+
     func testResavingAReplayKeepsTheAppWhereItsStepWasSent() async throws {
         let store = SkillStore(url: nil)
         let wda = FakeWDA()
@@ -145,7 +185,6 @@ final class RoutineAppTests: XCTestCase {
         XCTAssertEqual(store.skill(named: "Search Little Red Book")?.runs, 1)
         XCTAssertEqual(store.skill(named: "Find a train")?.app, Self.trains)
         let changes = Dictionary(uniqueKeysWithValues: store.changes.map { ($0.id, $0) })
-        XCTAssertEqual(changes["search-added"]?.routineApp, Self.xiaohongshu)
         XCTAssertEqual(changes["train-edited"]?.routine?.app, Self.trains)
         XCTAssertEqual(try Data(contentsOf: backupFile), pendingRestore)
 
@@ -158,6 +197,30 @@ final class RoutineAppTests: XCTestCase {
         XCTAssertEqual(reopened.skill(named: "Find a train")?.app, Self.trains)
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date, oldDate)
         XCTAssertEqual(try Data(contentsOf: url), upgraded)
+    }
+
+    func testLegacyHistoryKeepsItsOwnAppAfterTheSameNamedSkillIsRemoved() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("agent-memory.json")
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.fileFrom045.utf8)) as? [String: Any])
+        var changes = try XCTUnwrap(legacy["changes"] as? [[String: Any]])
+        changes.append([
+            "id": "train-added", "action": "added", "at": "2026-11-18T10:00:00Z",
+            "by": "Poki", "routineName": "Find a train", "routineApp": Self.wechat,
+        ])
+        legacy["changes"] = changes
+        try JSONSerialization.data(withJSONObject: legacy).write(to: url)
+
+        let store = SkillStore(url: url)
+        XCTAssertEqual(store.skill(named: "Find a train")?.app, Self.trains)
+        XCTAssertTrue(store.forget("Find a train"))
+
+        let reopened = SkillStore(url: url)
+        XCTAssertNil(reopened.skill(named: "Find a train"))
+        let original = try XCTUnwrap(reopened.changes.first { $0.id == "train-added" })
+        XCTAssertEqual(original.routineApp, Self.wechat)
     }
 
     func testRestoringABackupFrom045RegroupsItBeforeExport() throws {
