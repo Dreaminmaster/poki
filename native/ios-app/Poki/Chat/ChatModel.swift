@@ -151,6 +151,7 @@ final class ChatModel {
     private var taskCalls: [CallRecord] = []
     private var taskResult: TaskResult?
     private var messageScroll: MessageScroll?
+    private var countedScrollReplyQuestion: String?
     private var pendingCountedScroll: (requestID: UUID, progress: MessageScroll)?
     private var messageScreen: PokiCore.NumberedScreen?
     private var messagePane: String?
@@ -616,23 +617,16 @@ final class ChatModel {
                             engine: .pi(piModel))
     }
 
-    private func askCountedScrollQuestion(_ text: String?, replyingTo id: UUID) -> Bool {
-        guard kind == .poki, let messageScroll, taskResult == nil, let text,
-              let request = entries.last(where: { $0.id == id }),
-              Self.isClarificationQuestion(text) else { return false }
+    private func showCountedScrollQuestion(replyingTo id: UUID) -> String? {
+        guard let text = countedScrollReplyQuestion, let messageScroll,
+              let request = entries.last(where: { $0.id == id }) else { return nil }
         let original = request.countedScrollRequestID ?? id
         pendingCountedScroll = (original, messageScroll)
         var question = ChatEntry(.poki(text))
         question.countedScrollRequestID = original
         if running { Haptics.received() }
         entries.append(question)
-        return true
-    }
-
-    private static func isClarificationQuestion(_ text: String) -> Bool {
-        if text.contains(where: { "?？؟".contains($0) }) { return true }
-        return text.range(of: #"(?i)(?:^|[.!。！\n])\s*(?:please\s+(?:tell|specify|confirm|choose|provide|select|let me know)\b|请(?:你)?(?:告诉|说明|确认|选择|提供|回复)|請(?:你)?(?:告訴|說明|確認|選擇|提供|回覆))"#,
-                          options: .regularExpression) != nil
+        return text
     }
 
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
@@ -716,7 +710,7 @@ final class ChatModel {
                 }
             }
             let current = runToken == token
-            if current { ended(outcome, delivered: prepared.you.id, modelReply: loop.finalText) }
+            if current { ended(outcome, delivered: prepared.you.id) }
             else if splitSession == nil { app.finishTask() }
             logEnd("pi", outcome: outcome, session: prepared.runSession, text: prepared.text, stopped: !current || outcome == .authorizationDeclined)
             guard current else { return }
@@ -857,6 +851,7 @@ final class ChatModel {
     private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String,
                        countedScroll: MessageScroll?, splitViewSession: String? = nil) async {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
+        countedScrollReplyQuestion = nil
         pendingCountedScroll = nil
         messageScroll = countedScroll
         messageScreen = nil
@@ -930,16 +925,16 @@ final class ChatModel {
     /// The display name of the agent whose hand-off is running, while one runs.
     static var delegatedBusy: String?
 
-    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID, modelReply: String? = nil) {
+    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
         let stopped = outcome == .stopped || outcome == .authorizationDeclined
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
         // there (Advanced › When a Task Ends).
         var reply: String?
-        let waitingForReply = outcome == .done && askCountedScrollQuestion(modelReply, replyingTo: youID)
+        let waitingForReply = outcome == .waitingForReply
         if waitingForReply {
             markDelivered(youID)
-            reply = modelReply
+            reply = showCountedScrollQuestion(replyingTo: youID)
         } else if let counted = finishMessageScroll(outcome) {
             if outcome == .done { markDelivered(youID) }
             reply = counted
@@ -949,6 +944,7 @@ final class ChatModel {
             case .done:
                 markDelivered(youID)
                 reply = entries.reversed().lazy.compactMap { entry -> String? in if case .poki(let text) = entry.kind { return text }; return nil }.first
+            case .waitingForReply: break
             case .stopped, .authorizationDeclined: add(.poki(AppLocalization.text(LocalizedStringResource("Stopped."))))
             case .overTurns:
                 reply = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))
@@ -980,6 +976,7 @@ final class ChatModel {
         let reason: String?
         switch outcome {
         case .done: reason = nil
+        case .waitingForReply: return nil
         case .stopped, .authorizationDeclined: reason = AppLocalization.text(LocalizedStringResource("The task was stopped."))
         case .overTurns: reason = AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps."))
         case .stuck: reason = stuckWords()
@@ -1077,6 +1074,11 @@ final class ChatModel {
                     authorizationDeclined = answer.automationAuthorizationDeclined
                 }
                 if stopped { return }
+                if countedScrollReplyQuestion != nil {
+                    _ = showCountedScrollQuestion(replyingTo: youID)
+                    finishPlan(stopped: true)
+                    return
+                }
                 if authorizationDeclined {
                     stopAsked = true
                     ended(.authorizationDeclined, delivered: youID)
@@ -1097,10 +1099,8 @@ final class ChatModel {
                 if let counted { add(.poki(counted)) } else { add(.note(.problem(reason))) }
                 return
             case .done:
-                // A reply without tools ends the turn, as a chat does: the model may be asking the owner something.
-                let waitingForReply = askCountedScrollQuestion(turn.texts.joined(separator: "\n\n"), replyingTo: youID)
-                if !waitingForReply, let counted = finishMessageScroll(.done) { add(.poki(counted)) }
-                finishPlan(stopped: waitingForReply)
+                if let counted = finishMessageScroll(.done) { add(.poki(counted)) }
+                finishPlan()
                 return
             }
         }
@@ -1109,7 +1109,7 @@ final class ChatModel {
         add(.poki(counted ?? AppLocalization.text(LocalizedStringResource("I stopped after \(Self.maxTurns) steps. Tell me how to go on."))))
     }
 
-    /// The phone's tools go to PokiCore; the harness's two are answered here, as task-runner.mjs answers them.
+    /// The phone's tools go to PokiCore, while the chat handles task state here.
     private func perform(_ call: ToolCall) async -> PokiCore.ToolAnswer {
         let session = sessionID
         let token = runToken
@@ -1140,6 +1140,9 @@ final class ChatModel {
 
     private func performCall(_ call: ToolCall) async -> PokiCore.ToolAnswer {
         toolCalls += 1
+        if countedScrollReplyQuestion != nil {
+            return PokiCore.ToolAnswer(text: "Waiting for the owner's reply. No action was sent.", jpeg: nil, isError: true)
+        }
         let args = (call.arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
         if usesSplitView {
             switch call.name {
@@ -1160,12 +1163,20 @@ final class ChatModel {
                 if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["path"] != nil || $0["button"] != nil }) {
                     return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run skills. Finish with finish_task.")
                 }
-            case "report_plan", "finish_task", "count_messages", "status", "screen_history": break
+            case "report_plan", "finish_task", "count_messages", Harness.countedScrollReplyTool, "status", "screen_history": break
             default:
                 return splitViewRefusal("Use the two visible apps with look and do for this task.")
             }
         }
         switch call.name {
+        case Harness.countedScrollReplyTool:
+            guard kind == .poki, messageScroll != nil, taskResult == nil,
+                  let question = (args["question"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !question.isEmpty else {
+                return PokiCore.ToolAnswer(text: "Use a nonempty question during an active counted scroll in the owner's chat.", jpeg: nil, isError: true)
+            }
+            countedScrollReplyQuestion = question
+            return PokiCore.ToolAnswer(text: "Waiting for the owner's reply.", jpeg: nil, isError: false)
         case "report_plan":
             guard let steps = args["steps"] as? [String], (1...8).contains(steps.count), let current = args["currentStep"] as? Int, (1...steps.count).contains(current) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidPlan, jpeg: nil, isError: true)

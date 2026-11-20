@@ -47,8 +47,9 @@ final class ChatHarnessTests: XCTestCase {
 
     func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
         for target in [4, 100] {
-            let transport = MessageListTransport()
-            let screens = [[1, 2, 3, 4], [5, 6, 1, 2], [7, 8, 5, 6]]
+            let transport = MessageListTransport(messages: (1...10).map { String(format: "Message %02d", $0) },
+                                                 visibleCount: 6)
+            let screens = [[1, 2, 3, 4, 5, 6], [7, 8, 1, 2, 3, 4], [9, 10, 7, 8, 1, 2]]
             func scroll() -> String {
                 FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true])
             }
@@ -113,7 +114,7 @@ final class ChatHarnessTests: XCTestCase {
     func testAnsweringAClarifyingQuestionKeepsTheRequestedScrollCount() async throws {
         let transport = MessageListTransport()
         let server = try FakeCompletions(replies: [
-            FakeCompletions.text("Which conversation should I open?"),
+            FakeCompletions.countedScrollQuestion("Which conversation should I open?"),
             FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
             FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
@@ -167,7 +168,7 @@ final class ChatHarnessTests: XCTestCase {
         ] {
             let transport = MessageListTransport()
             let server = try FakeCompletions(replies: [
-                FakeCompletions.text(prompt),
+                FakeCompletions.countedScrollQuestion(prompt),
                 FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
                 FakeCompletions.tool("look", ["full": true]),
                 FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
@@ -219,6 +220,28 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(transport.topMessage, 1, "The list moved six rows, although the finger travelled four")
         XCTAssertEqual(result.success, false, result.text)
         XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+    }
+
+    func testCountedScrollRejectsRepeatedRowsWithDifferentMessageIdentifiers() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Z", "Got it", "OK", "Sure", "Got it", "OK", "Sure", "A", "B", "C"],
+            visibleCount: 6, step: 6, identifiesMessages: true
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 490]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [7, 8, 9, 1, 2, 3]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 3 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The two matching sequences are from different pages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 3 older messages"), result.text)
     }
 
     func testExplicitScrollClarificationTreatsTheGroupNameAsAnAnswer() async throws {
@@ -357,7 +380,7 @@ final class ChatHarnessTests: XCTestCase {
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
-            FakeCompletions.text("我找到了两个群。你说的是哪个群？"),
+            FakeCompletions.countedScrollQuestion("我找到了两个群。你说的是哪个群？"),
             FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
             FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
@@ -391,7 +414,7 @@ final class ChatHarnessTests: XCTestCase {
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
-            FakeCompletions.tool("wait_for_counted_scroll_reply", ["question": question]),
+            FakeCompletions.countedScrollQuestion(question),
             FakeCompletions.text(question),
         ])
         let transport = MessageListTransport()
@@ -426,7 +449,7 @@ final class ChatHarnessTests: XCTestCase {
     private func sendAfterCountedScrollQuestion(_ text: String, replying: Bool) async throws -> TaskResult {
         let transport = MessageListTransport()
         let server = try FakeCompletions(replies: [
-            FakeCompletions.text("哪个群？"),
+            FakeCompletions.countedScrollQuestion("哪个群？"),
             FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
             FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
@@ -462,7 +485,8 @@ final class ChatHarnessTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
         await drawCountedScrollComposer(window)
-        if replying, let reply = composerButton(in: window, id: "chat.counted-scroll.reply") {
+        if replying {
+            let reply = try XCTUnwrap(composerButton(in: window, id: "chat.counted-scroll.reply"))
             XCTAssertTrue(reply.accessibilityActivate())
             await drawCountedScrollComposer(window)
         }
@@ -522,15 +546,16 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testFailedCountedScrollCardShowsCountPositionAndReason() async throws {
-        let transport = MessageListTransport(messages: (1...6).map { String(format: "Message %02d", $0) })
+        let transport = MessageListTransport(messages: (1...8).map { String(format: "Message %02d", $0) },
+                                             visibleCount: 6)
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
             FakeCompletions.tool("look", ["full": true]),
-            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4, 5, 6]]),
             FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
-            FakeCompletions.tool("count_messages", ["target": 100, "refs": [5, 6, 1, 2]]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
             FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
-            FakeCompletions.tool("count_messages", ["target": 100, "refs": [5, 6, 1, 2]]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
             FakeCompletions.tool("finish_task", ["success": false, "summary": "The list stopped moving.",
                                                 "details": [], "answer": ["kind": "action"]]),
             FakeCompletions.text("I stopped."),
@@ -2046,6 +2071,10 @@ final class FakeCompletions: @unchecked Sendable {
     }
 
     static func text(_ words: String) -> String { event(["role": "assistant", "content": words], finish: "stop") }
+
+    static func countedScrollQuestion(_ question: String) -> String {
+        tool("wait_for_counted_scroll_reply", ["question": question])
+    }
 
     /// A request's system (or developer) messages, as text.
     static func system(_ request: [String: Any]) -> String {

@@ -155,10 +155,10 @@ struct MessageScroll {
     }
 
     private static func overlap(between previous: [Element], and current: [Element], tolerance: Double) -> Int? {
+        let minimum = max(3, (previous.count + 2) / 3)
         let maximum = min(previous.count, current.count)
-        guard maximum >= 2 else { return nil }
-        // A repeated label can join two disjoint pages. Require a sequence with context
-        // whose rows all moved down together, and reject competing alignments.
+        guard maximum >= minimum else { return nil }
+        // Even a shorter repeated sequence can make the longer alignment ambiguous.
         let candidates = (2...maximum).filter { length in
             let olderPageTail = current.suffix(length)
             let shift = current[current.count - length].frame.centre.y - previous[0].frame.centre.y
@@ -169,7 +169,8 @@ struct MessageScroll {
                     abs(new.frame.centre.y - old.frame.centre.y - shift) <= tolerance
             }
         }
-        return candidates.count == 1 ? candidates[0] : nil
+        guard candidates.count == 1, let length = candidates.first, length >= minimum else { return nil }
+        return length
     }
 
     private mutating func rejected(_ problem: Problem) -> PokiCore.ToolAnswer {

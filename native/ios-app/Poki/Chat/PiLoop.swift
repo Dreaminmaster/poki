@@ -13,7 +13,7 @@ import PokiCore
 /// carries the messages over; pi converts them between providers.
 @MainActor
 final class PiLoop {
-    enum Outcome: Equatable { case done, stopped, authorizationDeclined, overTurns, stuck, failed(String) }
+    enum Outcome: Equatable { case done, waitingForReply, stopped, authorizationDeclined, overTurns, stuck, failed(String) }
 
     /// This many steps in a row with the same call and the same screen end the task as stuck.
     nonisolated static let stallSteps = 6
@@ -32,10 +32,6 @@ final class PiLoop {
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
-    var finalText: String? {
-        guard case .assistant(let reply)? = messages.last, reply.stopReason == .stop else { return nil }
-        return Self.textBlocks(reply).joined(separator: "\n\n")
-    }
     var hasCurrentCustomBackups: Bool {
         guard let endpoint else { return true }
         return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
@@ -69,7 +65,9 @@ final class PiLoop {
                     ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
-                if answer.automationAuthorizationDeclined {
+                if spec.name == Harness.countedScrollReplyTool, !answer.isError {
+                    gate.end(.waitingForReply)
+                } else if answer.automationAuthorizationDeclined {
                     gate.end(.authorizationDeclined)
                 } else if answer.waitingForOwner {
                     stall.reset()
@@ -158,7 +156,11 @@ final class PiLoop {
                 if gate.stopped { agent.abort() }
             case .messageEnd(.assistant(let reply)):
                 if reply.stopReason == .error { failure.set(reply.errorMessage ?? "") }
-                let texts = Self.textBlocks(reply)
+                let texts = reply.content.compactMap { block -> String? in
+                    guard case .text(let content) = block else { return nil }
+                    let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return text.isEmpty ? nil : text
+                }
                 if !texts.isEmpty { await MainActor.run { texts.forEach(onText) } }
             default: break
             }
@@ -171,6 +173,7 @@ final class PiLoop {
         }
         if gate.stopped {
             switch gate.ending {
+            case .waitingForReply: return .waitingForReply
             case .authorizationDeclined: return .authorizationDeclined
             case .overTurns: return .overTurns
             case .stuck: return .stuck
@@ -187,14 +190,6 @@ final class PiLoop {
             return .failed(Self.words(message, provider: provider))
         }
         return .done
-    }
-
-    private nonisolated static func textBlocks(_ reply: AssistantMessage) -> [String] {
-        reply.content.compactMap { block in
-            guard case .text(let content) = block else { return nil }
-            let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
-        }
     }
 
     /// Ends the task after the step under way: nothing more is sent to the phone or the model.
@@ -270,7 +265,7 @@ final class HistoryDeliveryGrants: @unchecked Sendable {
 
 /// Set by stop(), the turn limit or the stall watch, read by the tools on pi's tasks.
 private final class StopGate: @unchecked Sendable {
-    enum Ending { case stopped, authorizationDeclined, overTurns, stuck }
+    enum Ending { case stopped, waitingForReply, authorizationDeclined, overTurns, stuck }
     private let lock = NSLock()
     private var first: Ending?
     func reset() { lock.withLock { first = nil } }
