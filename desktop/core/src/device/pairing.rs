@@ -341,19 +341,34 @@ mod record_tests {
         }
     }
 
+    /// Writing over each kind of record fails (the records folder takes no new file, so the
+    /// temporary file cannot be made): that record still reads, unchanged and private.
     #[test]
     fn a_failed_write_leaves_the_record_as_it_was_and_nothing_behind() {
         let (_lock, _dir) = crate::paths::test_home();
-        let path = remote_record_path("TEST-UDID").unwrap();
-        write_record(&path, b"kept").unwrap();
-        // A folder where the other record should go: the temporary file cannot take its place.
-        let blocked = record_path("TEST-UDID").unwrap();
-        std::fs::create_dir(&blocked).unwrap();
-        std::fs::write(blocked.join("inside"), b"").unwrap();
-        assert!(write_record(&blocked, b"record").is_err());
-        assert_eq!(names_in(&crate::paths::pairings_dir().unwrap()), ["TEST-UDID.plist", "TEST-UDID.rppairing.plist"]);
-        assert_eq!(std::fs::read(&path).unwrap(), b"kept");
-        assert_eq!(mode(&path), 0o600);
+        let dir = crate::paths::pairings_dir().unwrap();
+        let kinds: [(&str, PathBuf, fn() -> Option<Vec<u8>>); 2] = [
+            ("lockdown", record_path("TEST-UDID").unwrap(), || saved_bytes("TEST-UDID").unwrap()),
+            ("RPPairing", remote_record_path("TEST-UDID").unwrap(), || saved_remote_bytes("TEST-UDID").unwrap()),
+        ];
+        for (kind, path, _) in &kinds {
+            write_record(path, format!("{kind} kept").as_bytes()).unwrap();
+        }
+        open_up(&dir, 0o500);
+        // Root writes into a read-only folder anyway, so there is no failure to see.
+        if std::fs::write(dir.join("probe"), b"").is_ok() {
+            let _ = std::fs::remove_file(dir.join("probe"));
+            open_up(&dir, 0o700);
+            eprintln!("skipped: this user can write into a read-only folder");
+            return;
+        }
+        for (kind, path, read) in &kinds {
+            assert!(write_record(path, b"replacement").is_err(), "{kind}: the write fails");
+            assert_eq!(read().as_deref(), Some(format!("{kind} kept").as_bytes()), "{kind}: the record still reads, unchanged");
+            assert_eq!(mode(path), 0o600, "{kind}");
+        }
+        open_up(&dir, 0o700);
+        assert_eq!(names_in(&dir), ["TEST-UDID.plist", "TEST-UDID.rppairing.plist"], "nothing left behind");
     }
 
     /// The owner cannot change the mode of a file with the user immutable flag (macOS `chflags uchg`).
