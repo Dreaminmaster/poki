@@ -316,7 +316,10 @@ private struct LoopbackPage: View {
                 }
             }
         } header: {
-            Text("Status")
+            Group {
+                Text("Status")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 if model.servicesSilent, monitor.isWorking {
@@ -337,7 +340,10 @@ private struct LoopbackPage: View {
                 NavigationLink { ProxyAppPage(app: app) } label: { proxyLabel(app.name, id: app.id, installed: app.isInstalled) }
             }
         } header: {
-            Text("Use Your Proxy App")
+            Group {
+                Text("Use Your Proxy App")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
@@ -369,7 +375,10 @@ private struct LoopbackPage: View {
                 }
                 Button("Use the Current VPN") { model.chooseConnection(.proxy) }.disabled(connectionLocked)
             } header: {
-                Text("Other Ways")
+                Group {
+                    Text("Other Ways")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if model.connectionInUse { Text("Stop Poki and finish pairing before changing the local connection.") }
@@ -429,7 +438,10 @@ private struct ProxyAppPage: View {
                     Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }
                 }
             } header: {
-                Text("How To")
+                Group {
+                    Text("How To")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if !app.documented {
@@ -473,9 +485,14 @@ private struct LocalDevVPNPage: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         Form {
-            Section("How To") {
+            Section {
                 Label("No proxy app? Install LocalDevVPN, a free loopback app built for this.", systemImage: "1.circle")
                 Label("Open it and tap Connect, then return to Poki. It may disconnect another VPN app.", systemImage: "2.circle")
+            } header: {
+                Group {
+     Text("How To") 
+                }
+                .settingsHeader()
             }
             Section {
                 Button("Get LocalDevVPN on the App Store") {
@@ -544,7 +561,10 @@ private struct PairingPage: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
                     .accessibilityLabel(Text(verbatim: pin.map(String.init).joined(separator: " ")))
             } header: {
-                Text("Pairing Code")
+                Group {
+                    Text("Pairing Code")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Enter this code in Settings. It also appears on the Lock Screen.")
@@ -581,10 +601,15 @@ private struct PairingPage: View {
                             ?? AppLocalization.text(LocalizedStringResource("Paired. Checked the next time the runner starts.")), systemImage: "checkmark.seal.fill")
                 }
             } else if SetupStep.onDevicePairing {
-                Section("How To") {
+                Section {
                     Label("Connect to Wi‑Fi and tap **Start Pairing**. Allow local network access when prompted.", systemImage: "1.circle")
                     Label("Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
                     Label("Enter the code shown here and on the Lock Screen.", systemImage: "3.circle")
+                } header: {
+                    Group {
+     Text("How To") 
+                    }
+                    .settingsHeader()
                 }
             } else {
                 Section {
@@ -592,7 +617,10 @@ private struct PairingPage: View {
                     Label("Open **Poki Setup** on your Mac or PC, connect this iPhone by cable, and tap **Pair**. Tap **Trust** on the iPhone when asked.", systemImage: "2.circle")
                     Label("Send the pairing file here: tap **Scan Pairing Code** below (or scan Poki Setup's code with the Camera), AirDrop the file to this iPhone and open it with Poki, or tap **Import Pairing File** below.", systemImage: "3.circle")
                 } header: {
-                    Text("How To")
+                    Group {
+                        Text("How To")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("No Poki Setup yet? Any lockdown pairing file works: pymobiledevice3, jitterbugpair or StikPair make one.")
@@ -610,7 +638,10 @@ private struct PairingPage: View {
         Section {
             diskImage
         } header: {
-            Text("Developer Disk Image")
+            Group {
+                Text("Developer Disk Image")
+            }
+            .settingsHeader()
         }
         Section {
             if PairingScanner.available {
@@ -621,7 +652,10 @@ private struct PairingPage: View {
                 Button("Pair Again", systemImage: "arrow.triangle.2.circlepath") { Self.pair(model) }
             }
         } header: {
-            Text("Other Ways")
+            Group {
+                Text("Other Ways")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 if let importError { Text(importError).foregroundStyle(.red) }
@@ -821,10 +855,15 @@ struct SetupStepPage: View {
                 }
                 .settingsFooter()
             }
-            Section("How To") {
+            Section {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }
                 }
+            } header: {
+                Group {
+     Text("How To") 
+                }
+                .settingsHeader()
             }
             Section {
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) }

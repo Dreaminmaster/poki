@@ -28,7 +28,10 @@ struct ModelSettingsView: View {
                     ModelUsePicker(use: use, version: version)
                 }
             } header: {
-                Text("In Use").textCase(nil)
+                Group {
+                    Text("In Use").textCase(nil)
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Each list offers the models ticked under the providers below. Senses only runs on local models. Dictation in the message field needs no model.")
@@ -58,7 +61,10 @@ struct ModelSettingsView: View {
                 Button("Add Provider", systemImage: "plus") { adding = true }
                     .accessibilityIdentifier("models.provider.add")
             } header: {
-                Text("Providers").textCase(nil)
+                Group {
+                    Text("Providers").textCase(nil)
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
@@ -187,7 +193,10 @@ private struct AccountDetail: View {
             Section {
                 ProviderUseRows(provider: .account(provider))
             } header: {
-                Text("Use This Provider For")
+                Group {
+                    Text("Use This Provider For")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if !ModelAccounts.canChat(provider) {
@@ -300,12 +309,20 @@ struct KeyEntry: View {
                     Section {
                         TextField("https://…/v1", text: $url).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         TextField("Model, such as llama-4-maverick", text: $modelID).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    } header: { Text("Address and model") }
+                    } header: {
+                        Group {
+     Text("Address and model") 
+                        }
+                        .settingsHeader()
+                    }
                 }
                 Section {
                     SecureField(provider.keyPrompt, text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
                 } header: {
-                    Text("\(provider.name) key")
+                    Group {
+                        Text("\(provider.name) key")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         if !provider.wired {

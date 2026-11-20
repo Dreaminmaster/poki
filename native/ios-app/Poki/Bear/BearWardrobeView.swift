@@ -314,7 +314,7 @@ private struct BearMixView: View {
                         .clipShape(.circle)
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(slot.name).font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text(slot.name).font(.allo(size: 9, relativeTo: .caption2)).foregroundStyle(.secondary)
                     Text(piece.name).font(.allo(.caption2, .semibold)).lineLimit(1)
                 }
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))

@@ -103,7 +103,10 @@ struct SettingsHome: View {
                     Label(Self.friendly(error), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
             } header: {
-                Text("Agents")
+                Group {
+                    Text("Agents")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if model.relayAddress == nil { Text("Set your relay address first: each agent’s address is on your relay.") }
@@ -124,7 +127,10 @@ struct SettingsHome: View {
                         Button("Stop Runner", role: .destructive) { model.pauseRunner() }.disabled(!model.approvals.isEmpty)
                     }
                 } header: {
-                    Text("Runner")
+                    Group {
+                        Text("Runner")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
@@ -149,7 +155,10 @@ struct SettingsHome: View {
                 }
                 .foregroundStyle(Color(.label))
             } header: {
-                Text("This iPhone")
+                Group {
+                    Text("This iPhone")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(model.automationPath == .inProcess
@@ -203,7 +212,10 @@ struct RelayView: View {
                     .focused($focused)
                     .submitLabel(.done).onSubmit(save)
             } header: {
-                Text("Relay Address")
+                Group {
+                    Text("Relay Address")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if rejected {
@@ -214,7 +226,12 @@ struct RelayView: View {
                 }
                 .settingsFooter()
             }
-            Section("Status") { LabeledContent("Relay", value: statusText) }
+            Section { LabeledContent("Relay", value: statusText) } header: {
+                Group {
+     Text("Status") 
+                }
+                .settingsHeader()
+            }
         }
         .navigationTitle(AppLocalization.text("Relay"))
         .navigationBarTitleDisplayMode(.inline)
@@ -303,7 +320,10 @@ struct ConnectorDetail: View {
                     .accessibilityElement(children: .combine)
                 }
             } header: {
-                Text("Recent Use")
+                Group {
+                    Text("Recent Use")
+                }
+                .settingsHeader()
             }
             Section {
                 LabeledContent("Added", value: secret.created.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)))

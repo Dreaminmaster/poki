@@ -1058,7 +1058,7 @@ struct MessageListHeader: View {
                         .foregroundStyle(dark ? Color.white.opacity(0.7) : ChatColor.secondary)
                 }
                 if let subtitle, !subtitle.isEmpty {
-                    Text(verbatim: subtitle).font(.system(size: 11)).foregroundStyle(ChatColor.secondary).lineLimit(1)
+                    Text(verbatim: subtitle).font(.allo(size: 11, relativeTo: .caption2)).foregroundStyle(ChatColor.secondary).lineLimit(1)
                 }
             }
             .padding(.top, 2).padding(.bottom, 8)
@@ -1228,7 +1228,7 @@ struct ModeLabels: View {
 
     private func label(_ title: LocalizedStringKey, _ target: RootPage) -> some View {
         Button { select?(target) } label: {
-            Text(title).font(.system(size: 13, weight: .semibold)).tracking(13 * 0.06)
+            Text(title).font(.allo(size: 13, relativeTo: .footnote, .semibold)).tracking(13 * 0.06)
                 .foregroundStyle(color(target))
         }
         .buttonStyle(.plain)

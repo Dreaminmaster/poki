@@ -284,7 +284,10 @@ struct CellularShortcutSection: View {
             SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
                 .accessibilityIdentifier("cellularShortcut.lastRun")
         } header: {
-            SettingsHeader("On Cellular")
+            Group {
+                SettingsHeader("On Cellular")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 Text("On cellular, iOS lets Poki keep a connection but not open a new one. This shortcut connects it again. Turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
@@ -438,7 +441,10 @@ private struct HistoryPermissionsPage: View {
                 }
                 if chosen.isEmpty { Text("No Apps").foregroundStyle(.secondary) }
             } header: {
-                Text(LocalizedStringKey(capture.listMode == .exclude ? "Excluded" : "Included"))
+                Group {
+                    Text(LocalizedStringKey(capture.listMode == .exclude ? "Excluded" : "Included"))
+                }
+                .settingsHeader()
             }
             Section {
                 ForEach(candidates.prefix(60), id: \.self) { app in
@@ -452,7 +458,10 @@ private struct HistoryPermissionsPage: View {
                     }
                 }
             } header: {
-                Text("Add App")
+                Group {
+                    Text("Add App")
+                }
+                .settingsHeader()
             }
         }
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))

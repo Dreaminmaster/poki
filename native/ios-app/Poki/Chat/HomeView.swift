@@ -428,8 +428,9 @@ enum HomeGreeting {
 }
 
 /// The greeting as the home page draws it, for the time `date` falls in: the hello in ink and the
-/// question in grey under it, centred under Poki's picture. System Semibold 28 tracked in by 0.6,
-/// with no space between the lines.
+/// question in grey under it, centred under Poki's picture. Allo Rounded Bold 28, prominent text as
+/// the conversations' "Poki" title is (the owner, Nov 20 2026: it was the system font), tracked in a
+/// little, with no space between the lines.
 struct HomeGreetingView: View {
     var date: Date
     @Environment(\.colorScheme) private var scheme
@@ -444,8 +445,8 @@ struct HomeGreetingView: View {
                 .foregroundStyle(dark ? Color(hex: 0x8D8D87) : Color(hex: 0x6F6F69))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: size, weight: .semibold))
-        .tracking(-0.6 * size / 28)
+        .font(Prominent.font(size: 28, relativeTo: .title, .bold))
+        .tracking(-0.3 * size / 28)
         .multilineTextAlignment(.center)
         // Read as one sentence: in Chinese the hello's comma runs on into the question.
         .accessibilityElement(children: .ignore)

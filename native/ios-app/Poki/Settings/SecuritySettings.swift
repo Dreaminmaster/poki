@@ -22,7 +22,10 @@ struct SecuritySettingsView: View {
                 }
                 .accessibilityIdentifier("security.lock")
             } header: {
-                SettingsHeader("Screen History")
+                Group {
+                    SettingsHeader("Screen History")
+                }
+                .settingsHeader()
             }
 
             Section {
@@ -35,7 +38,10 @@ struct SecuritySettingsView: View {
                 }
                 .accessibilityIdentifier("security.record")
             } header: {
-                SettingsHeader("Records")
+                Group {
+                    SettingsHeader("Records")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("The Activity Log lists every step Poki took and every approval. The Observing Record lists when Screen History was reading, stopped or left an app out.")

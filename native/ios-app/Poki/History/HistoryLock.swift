@@ -762,7 +762,10 @@ struct HistoryUnlockSections: View {
                     }
                     .disabled(!HistoryLock.valid(pin) || again.isEmpty)
                 } header: {
-                    Text("Make a PIN for Screen History")
+                    Group {
+                        Text("Make a PIN for Screen History")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text(LocalizedStringKey(wrong ? "The two PINs did not match. Try again." : "Screen History is locked with a PIN of 4 to 8 digits that belongs to Poki alone. The iPhone's passcode does not open it."))
@@ -776,13 +779,19 @@ struct HistoryUnlockSections: View {
                             Text(verbatim: String(format: AppLocalization.text("Unlock with %@"), lock.biometricsLabel))
                         }
                     } header: {
-                        Text("Screen History Is Locked")
+                        Group {
+                            Text("Screen History Is Locked")
+                        }
+                        .settingsHeader()
                     }
                 } else if lock.biometricsUnavailable, let url = URL(string: UIApplication.openSettingsURLString) {
                     Section {
                         Button("Open Settings") { UIApplication.shared.open(url) }
                     } header: {
-                        Text("Screen History Is Locked")
+                        Group {
+                            Text("Screen History Is Locked")
+                        }
+                        .settingsHeader()
                     }
                 }
                 if lock.hasPIN {
@@ -853,7 +862,10 @@ struct HistoryLockSettings: View {
                     Button("Remove PIN", role: .destructive) { lock.removePIN() }.disabled(!lock.usesBiometrics)
                 }
             } header: {
-                Text("Poki PIN")
+                Group {
+                    Text("Poki PIN")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(LocalizedStringKey(mismatch ? "The two PINs did not match. Try again." : "A PIN of 4 to 8 digits that belongs to Poki alone. One of the two ways in always stays on."))

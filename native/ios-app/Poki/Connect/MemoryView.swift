@@ -72,7 +72,10 @@ struct MemoryView: View {
                     }
                     adding
                 } header: {
-                    MemoryHeader("About You")
+                    Group {
+                        MemoryHeader("About You")
+                    }
+                    .settingsHeader()
                 }
                 if !apps.isEmpty || !library.other.isEmpty {
                     Section {
@@ -85,7 +88,10 @@ struct MemoryView: View {
                                 .accessibilityIdentifier("memory.app.other")
                         }
                     } header: {
-                        MemoryHeader("Apps")
+                        Group {
+                            MemoryHeader("Apps")
+                        }
+                        .settingsHeader()
                     }
                 }
                 // Provisional memories Senses made from Screen History, apart from notes.
@@ -229,7 +235,10 @@ struct MemorySearchResults: View {
                         MemoryItemRow(item: item, showsApp: true, page: page).memorySwipes(item, page: page, library: library)
                     }
                 } header: {
-                    MemoryHeader(MemoryScope.title(kind), trailing: Text(MemoryScope.count(items.count, kind)))
+                    Group {
+                        MemoryHeader(MemoryScope.title(kind), trailing: Text(MemoryScope.count(items.count, kind)))
+                    }
+                    .settingsHeader()
                 }
             }
         }
@@ -332,7 +341,10 @@ struct MemoryScopeView: View {
             adding(app: app)
             MemoryPageEditRow(app: app)
         } header: {
-            MemoryHeader("Memory")
+            Group {
+                MemoryHeader("Memory")
+            }
+            .settingsHeader()
         }
         .accessibilityIdentifier("memory.group.memory")
     }
@@ -348,7 +360,10 @@ struct MemoryScopeView: View {
                 }
                 if kind == .memory { adding(app: app) }
             } header: {
-                MemoryHeader(MemoryScope.title(kind))
+                Group {
+                    MemoryHeader(MemoryScope.title(kind))
+                }
+                .settingsHeader()
             }
             .accessibilityIdentifier("memory.group.\(kind.rawValue)")
         }
@@ -378,7 +393,10 @@ struct MemoryRecentView: View {
                     Section {
                         ForEach(changes) { change in line(change) }
                     } header: {
-                        MemoryHeader(verbatim: day)
+                        Group {
+                            MemoryHeader(verbatim: day)
+                        }
+                        .settingsHeader()
                     }
                 }
             }

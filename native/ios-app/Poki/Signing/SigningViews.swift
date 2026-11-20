@@ -402,7 +402,10 @@ struct SigningOptionsPage: View {
                         }
                     }
                 } header: {
-                    SettingsHeader("Release Channel")
+                    Group {
+                        SettingsHeader("Release Channel")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("Poki receives updates from the selected release channel.")
@@ -434,7 +437,10 @@ struct SigningOptionsPage: View {
                         .onSubmit { save() }
                 }
             } header: {
-                SettingsHeader("Sign-In Server")
+                Group {
+                    SettingsHeader("Sign-In Server")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
@@ -510,7 +516,10 @@ struct VerificationCodeSheet: View {
                             }
                         }
                 } header: {
-                    Text("Two-Factor Authentication")
+                    Group {
+                        Text("Two-Factor Authentication")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")

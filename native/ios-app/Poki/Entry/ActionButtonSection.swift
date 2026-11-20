@@ -10,7 +10,10 @@ struct ActionButtonSection: View {
                 Image(systemName: "button.programmable")
             }
         } header: {
-            Text("Action Button", tableName: "Entry")
+            Group {
+                Text("Action Button", tableName: "Entry")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 Text("Press and hold the Action button to talk with Poki without leaving the app you’re in. Press and hold it again to end the talk. To open Poki and talk there instead, choose Controls, then Talk to Poki. To type a task, choose Shortcut, then Send Task. Control Center and the Lock Screen can hold Talk to Poki too.", tableName: "Entry")

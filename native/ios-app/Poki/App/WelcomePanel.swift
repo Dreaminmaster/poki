@@ -36,7 +36,10 @@ struct WelcomePanel: View {
                         .accessibilityIdentifier("firstRun.step.\(step.rawValue)")
                 }
             } header: {
-                SettingsHeader("This iPhone")
+                Group {
+                    SettingsHeader("This iPhone")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Each one is turned on once. They tick themselves as you go.")
@@ -55,7 +58,10 @@ struct WelcomePanel: View {
                 .accessibilityIdentifier("firstRun.models")
                 WelcomeLocalModels()
             } header: {
-                SettingsHeader("Models")
+                Group {
+                    SettingsHeader("Models")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
@@ -86,7 +92,10 @@ struct WelcomePanel: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("firstRun.notifications")
             } header: {
-                SettingsHeader("Features")
+                Group {
+                    SettingsHeader("Features")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("All optional. Each can be changed later in Settings.")
@@ -101,7 +110,10 @@ struct WelcomePanel: View {
                 }
                 .accessibilityIdentifier("firstRun.agents")
             } header: {
-                SettingsHeader("Connections")
+                Group {
+                    SettingsHeader("Connections")
+                }
+                .settingsHeader()
             }
         }
         .settingsPage()

@@ -947,7 +947,10 @@ struct InProcessSection: View {
             .monospacedDigit()
             ForEach(probe.lines.indices.reversed(), id: \.self) { i in Text(probe.lines[i]).font(.caption2.monospaced()).textSelection(.enabled) }
         } header: {
-            Text("In-process automation")
+            Group {
+                Text("In-process automation")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 Text("Taps and types from Poki itself, without Poki Runner. Self test taps the field above and types into it. Later waits, then taps the point (x, y) and types, in whatever app is in front.")

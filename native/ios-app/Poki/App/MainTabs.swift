@@ -127,7 +127,10 @@ struct AgentsView: View {
                         } label: { Label("Memory", systemImage: "brain") }
                     }
                 } header: {
-                    Text("Poki Agent")
+                    Group {
+                        Text("Poki Agent")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
@@ -167,7 +170,10 @@ struct AgentsView: View {
                     }
                     .disabled(model.relayAddress == nil)
                 } header: {
-                    Text("External Agents")
+                    Group {
+                        Text("External Agents")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text(model.relayAddress == nil
@@ -202,7 +208,10 @@ struct AgentsView: View {
                         }
                     }
                 } header: {
-                    Text("MCP Relay")
+                    Group {
+                        Text("MCP Relay")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
@@ -219,7 +228,10 @@ struct AgentsView: View {
                     }
                     NavigationLink(value: AgentsRoute.activityLog) { Label("Activity Log", systemImage: "list.bullet.rectangle") }
                 } header: {
-                    Text("Safety")
+                    Group {
+                        Text("Safety")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("When Poki asks you before a sensitive step, and the record of every action any agent ran on this iPhone.")
@@ -288,13 +300,21 @@ struct AdvancedView: View {
                 Button("Notification Settings", systemImage: "bell.badge") {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
                 }
-            } header: { Text("Notifications") }
+            } header: {
+                Group {
+     Text("Notifications") 
+                }
+                .settingsHeader()
+            }
             Section {
                 NavigationLink(value: SettingsRoute.diagnostics) { Label("Diagnostics", systemImage: "stethoscope") }
                 NavigationLink(value: SettingsRoute.log) { Label("Log", systemImage: "doc.text") }
                 NavigationLink { TestingOptionsView() } label: { Label("Testing Options", systemImage: "flask") }
             } header: {
-                Text("Debugging")
+                Group {
+                    Text("Debugging")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")

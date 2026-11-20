@@ -405,7 +405,7 @@ struct ConversationTitle: View {
         let app = app ?? session.app
         HStack(spacing: 12) {
             if let app, AppIconStore.shared.icon(app, dark: scheme == .dark) != nil { AppIconView(app: app, size: min(34, iconSize)) }
-            Text(verbatim: session.name).font(.system(size: nameSize)).foregroundStyle(Color(.label))
+            Text(verbatim: session.name).font(.allo(size: nameSize)).foregroundStyle(Color(.label))
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
         }
         .task(id: app) { if let app { await AppIconStore.shared.load(app) } }

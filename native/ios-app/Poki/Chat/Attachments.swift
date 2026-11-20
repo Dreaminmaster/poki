@@ -248,7 +248,7 @@ struct AttachmentThumb: View {
         .shadow(color: Color(red: 24 / 255, green: 56 / 255, blue: 120 / 255).opacity(0.12), radius: 6, y: 4)
         .overlay(alignment: .bottomLeading) {
             if pdf {
-                Text(verbatim: "PDF").font(.system(size: min(18, pdfLabelSize), weight: .bold)).foregroundStyle(.white)
+                Text(verbatim: "PDF").font(.allo(size: min(18, pdfLabelSize), .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Color(.systemRed), in: .capsule)
                     .padding(6)

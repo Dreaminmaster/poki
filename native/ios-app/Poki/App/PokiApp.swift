@@ -62,6 +62,9 @@ struct PokiApp: App {
             RootView().environment(model).environment(chat)
                 // Body text in Allo wherever a view does not choose a font of its own.
                 .font(.allo(.body))
+                #if DEBUG
+                .overlay { if UserDefaults.standard.string(forKey: "pokiScreen") == "fonts" { FontCompare().background(Color(.systemBackground)) } }
+                #endif
                 .environment(\.inDuoSplitView, inDuoSplitView)
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)

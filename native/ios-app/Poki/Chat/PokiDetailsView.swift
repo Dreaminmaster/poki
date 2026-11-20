@@ -85,7 +85,10 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("details.voice")
                 } header: {
-                    SettingsHeader("How Poki Works")
+                    Group {
+                        SettingsHeader("How Poki Works")
+                    }
+                    .settingsHeader()
                 }
 
                 // What Poki may do and read, and who else may use it.
@@ -101,7 +104,10 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                 } header: {
-                    SettingsHeader("Safety and Access")
+                    Group {
+                        SettingsHeader("Safety and Access")
+                    }
+                    .settingsHeader()
                 }
 
                 // The app itself.
@@ -140,7 +146,10 @@ struct PokiDetailsView: View {
                     .accessibilityIdentifier("details.health")
                     .id(Self.lastRow)
                 } header: {
-                    SettingsHeader("This App")
+                    Group {
+                        SettingsHeader("This App")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
@@ -443,7 +452,10 @@ struct ConnectionView: View {
                 }
                 .accessibilityIdentifier("liveActivity.ready")
             } header: {
-                SettingsHeader("Live Activity")
+                Group {
+                    SettingsHeader("Live Activity")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(model.showsReadyActivity
@@ -467,7 +479,10 @@ struct ConnectionView: View {
                 .accessibilityIdentifier("moreSettings.setup")
                 FirstRunAgain(row: true)
             } header: {
-                SettingsHeader("This iPhone")
+                Group {
+                    SettingsHeader("This iPhone")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
@@ -521,7 +536,10 @@ struct AdvancedSettingsView: View {
                         Button("Stop Runner", role: .destructive) { model.pauseRunner() }.disabled(!model.approvals.isEmpty)
                     }
                 } header: {
-                    SettingsHeader("Connection")
+                    Group {
+                        SettingsHeader("Connection")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
@@ -535,7 +553,10 @@ struct AdvancedSettingsView: View {
                 Section {
                     VoiceAdvancedRows()
                 } header: {
-                    SettingsHeader("Voice")
+                    Group {
+                        SettingsHeader("Voice")
+                    }
+                    .settingsHeader()
                 }
             }
 
@@ -544,7 +565,10 @@ struct AdvancedSettingsView: View {
                     ShareLink(item: runLog) { SettingsRow(title: "Share Run Log for Maintainers", symbol: "square.and.arrow.up") }
                 }
             } header: {
-                SettingsHeader("Memory")
+                Group {
+                    SettingsHeader("Memory")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
@@ -568,7 +592,10 @@ struct AdvancedSettingsView: View {
                 }
                 .accessibilityIdentifier("moreSettings.testingOptions")
             } header: {
-                SettingsHeader("Debugging")
+                Group {
+                    SettingsHeader("Debugging")
+                }
+                .settingsHeader()
             }
         }
         .navigationTitle(AppLocalization.text("Advanced"))
@@ -805,7 +832,10 @@ struct SecurityApprovalSections: View {
                 Section {
                     SensitivitySlider(level: $model.classifierLevel)
                 } header: {
-                    Text("Sensitivity").textCase(nil)
+                    Group {
+                        Text("Sensitivity").textCase(nil)
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         switch model.classifierLevel {
@@ -924,7 +954,10 @@ struct AgentsAndRelayView: View {
                     }
                 }
             } header: {
-                SettingsHeader("MCP Relay")
+                Group {
+                    SettingsHeader("MCP Relay")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
@@ -959,7 +992,10 @@ struct AgentsAndRelayView: View {
                 }
                 .disabled(model.relayAddress == nil)
             } header: {
-                SettingsHeader("Agents")
+                Group {
+                    SettingsHeader("Agents")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(model.relayAddress == nil

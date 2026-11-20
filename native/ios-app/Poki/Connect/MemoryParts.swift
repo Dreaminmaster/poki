@@ -391,10 +391,20 @@ struct MemoryAppPicker: View {
                     .settingsFooter()
                 }
                 if !known.isEmpty {
-                    Section("With Memories") { ForEach(known, id: \.self) { row($0) } }
+                    Section { ForEach(known, id: \.self) { row($0) } } header: {
+                        Group {
+     Text("With Memories") 
+                        }
+                        .settingsHeader()
+                    }
                 }
                 if !rest.isEmpty {
-                    Section("On This iPhone") { ForEach(rest, id: \.self) { row($0) } }
+                    Section { ForEach(rest, id: \.self) { row($0) } } header: {
+                        Group {
+     Text("On This iPhone") 
+                        }
+                        .settingsHeader()
+                    }
                 }
             } else {
                 let found = (known + rest).filter { MemoryFormat.appName($0).localizedCaseInsensitiveContains(q) || $0.localizedCaseInsensitiveContains(q) }

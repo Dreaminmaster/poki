@@ -22,7 +22,10 @@ struct DiagnosticsView: View {
                     Text("No interface has a 10.7.0.x address. Check that your proxy app is on and its loopback module is enabled.")
                 }
             } header: {
-                Text("Proxy Loopback Interface")
+                Group {
+                    Text("Proxy Loopback Interface")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(verbatim: "Network path: \(model.loopback.pathSummary). Wi-Fi \(model.loopback.wifiUp ? "up" : "down"), cellular \(model.loopback.cellularUp ? "up" : "down")\(model.loopback.cellularOnly ? " (cellular only)" : "")")
@@ -31,7 +34,7 @@ struct DiagnosticsView: View {
                 .settingsFooter()
             }
             .textSelection(.enabled)
-            Section("Checks") {
+            Section {
                 ForEach(results) { r in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(Self.title(r)).font(.allo(.subheadline, .semibold))
@@ -42,11 +45,21 @@ struct DiagnosticsView: View {
                     .textSelection(.enabled)
                 }
                 Button(running ? "Running…" : "Run Checks") { Task { await run() } }.disabled(running)
+            } header: {
+                Group {
+     Text("Checks") 
+                }
+                .settingsHeader()
             }
-            Section("Addresses") {
+            Section {
                 ForEach(addresses.indices, id: \.self) { i in
                     Text(verbatim: "\(addresses[i].interface)  \(addresses[i].address)").font(.caption.monospaced())
                 }
+            } header: {
+                Group {
+     Text("Addresses") 
+                }
+                .settingsHeader()
             }
             .textSelection(.enabled)
         }
@@ -74,7 +87,10 @@ struct DiagnosticsView: View {
             Button("Prepare for Cellular", action: model.prepareForCellular)
                 .disabled(!preparation.canPrepare)
         } header: {
-            Text("Cellular Startup")
+            Group {
+                Text("Cellular Startup")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 Text(AppLocalization.text(detail))
@@ -139,7 +155,10 @@ struct TestingOptionsView: View {
             Section {
                 Toggle("ask_poki Tool", isOn: $model.askPokiTool)
             } header: {
-                Text("Agents")
+                Group {
+                    Text("Agents")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
@@ -168,7 +187,10 @@ struct TestingOptionsView: View {
                     .textSelection(.enabled)
                 }
             } header: {
-                Text("Background Hold")
+                Group {
+                    Text("Background Hold")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Tap Start, leave the app for a while, then return. The log records suspension gaps and connection closures.")

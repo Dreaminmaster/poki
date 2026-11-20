@@ -15,7 +15,10 @@ struct SensesUseSection: View {
                 Text("Chat Model").tag(SensesInsightModel.chat)
             }
         } header: {
-            SettingsHeader("Use History")
+            Group {
+                SettingsHeader("Use History")
+            }
+            .settingsHeader()
         } footer: {
             Group {
                 Text(LocalizedStringKey(use.insightModel == .onDevice
@@ -55,7 +58,10 @@ struct SensesMemorySection: View {
                     .accessibilityIdentifier("memory.senses.unlock")
                 }
             } header: {
-                SettingsHeader("Learned from Screen History")
+                Group {
+                    SettingsHeader("Learned from Screen History")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Inferred on this iPhone from your Screen History. They are not notes. They are not exported or backed up, and agents get them only through a check on this iPhone. Swipe to forget one or save it as a note.")

@@ -11,6 +11,11 @@ enum Typeface {
     enum Face: String {
         case text = "AlloText"
         case rounded = "AlloRounded"
+
+        /// The family the cuts share, which SwiftUI resolves a weight in. A font named by one cut's
+        /// PostScript name is that cut only, and `.bold()` or `.fontWeight()` on it did nothing, so
+        /// headers set that way lost their weight (the owner, Nov 20 2026).
+        var family: String { self == .text ? "Allo Text" : "Allo Rounded" }
     }
 
     #if POKI_APP
@@ -34,7 +39,8 @@ enum Typeface {
         return "\(face.rawValue)-\(style)"
     }
 
-    /// The weight the system font gives a text style.
+    /// The weight the system font gives a text style: Headline is Semibold, the rest Regular (the
+    /// title styles too; SF's emphasised titles are Bold through `.bold()`).
     static func defaultWeight(_ style: Font.TextStyle) -> Font.Weight {
         style == .headline ? .semibold : .regular
     }
@@ -47,16 +53,18 @@ enum Typeface {
     }
 
     /// Allo at a text style's size, scaling with Dynamic Type.
+    /// The weight is the font's, so a `.bold()`, `.fontWeight()` or `.weight()` after it picks the cut
+    /// for its own weight: the cuts measure as heavy as SF's at Regular, Medium, Semibold and Bold.
     static func font(_ style: Font.TextStyle, _ weight: Font.Weight? = nil, face: Face = .text) -> Font {
         let weight = weight ?? defaultWeight(style)
         guard usesAllo else { return .system(style, weight: weight) }
-        return .custom(name(face, weight), size: baseSize(style.uiKit), relativeTo: style)
+        return Font.custom(face.family, size: baseSize(style.uiKit), relativeTo: style).weight(weight)
     }
 
     /// Allo at a size of its own, growing with `style` under Dynamic Type.
     static func font(size: CGFloat, relativeTo style: Font.TextStyle, _ weight: Font.Weight = .regular, face: Face = .text) -> Font {
         guard usesAllo else { return .system(size: size, weight: weight) }
-        return .custom(name(face, weight), size: size, relativeTo: style)
+        return Font.custom(face.family, size: size, relativeTo: style).weight(weight)
     }
 
     /// The UIKit font for a text style, scaled for `traits`, with Chinese, Japanese and Korean

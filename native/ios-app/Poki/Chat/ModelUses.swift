@@ -402,7 +402,10 @@ struct ModelUsePicker: View {
                 Section {
                     ForEach(group.items) { Text(verbatim: $0.name).tag($0.pick) }
                 } header: {
-                    Text(verbatim: group.name)
+                    Group {
+                        Text(verbatim: group.name)
+                    }
+                    .settingsHeader()
                 }
             }
         } label: {
@@ -461,7 +464,10 @@ struct ModelTickList: View {
                     Button("Add Model", systemImage: "plus") { typed = ""; adding = true }
                 }
             } header: {
-                Text("Models to Choose From")
+                Group {
+                    Text("Models to Choose From")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text(problem ?? footer)

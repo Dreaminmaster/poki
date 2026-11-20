@@ -15,7 +15,12 @@ struct ConnectorsView: View {
                     ForEach(store.connected) { connector in
                         NavigationLink(value: ConnectorRoute.connector(connector.id)) { row(connector) }
                     }
-                } header: { SettingsHeader("Connected") }
+                } header: {
+                    Group {
+     SettingsHeader("Connected") 
+                    }
+                    .settingsHeader()
+                }
             }
             Section {
                 ForEach(store.all.filter { c in !store.connected.contains(c) }) { connector in
@@ -26,7 +31,10 @@ struct ConnectorsView: View {
                 }
                 .accessibilityIdentifier("connectors.addCustom")
             } header: {
-                SettingsHeader("Available")
+                Group {
+                    SettingsHeader("Available")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Connectors let Poki use a service directly, without opening its app. Mention one with @ in a message.")
@@ -84,7 +92,12 @@ struct ConnectorDetailView: View {
                                             value: status(account), warns: store.problems[account.id] != nil)
                             }
                         }
-                    } header: { SettingsHeader("Accounts") }
+                    } header: {
+                        Group {
+     SettingsHeader("Accounts") 
+                        }
+                        .settingsHeader()
+                    }
                 }
                 Section {
                     if adding || accounts.isEmpty {
@@ -137,7 +150,12 @@ struct ConnectorDetailView: View {
                             store.remove(connector)
                             dismiss()
                         } label: { Label("Remove Connector", systemImage: "trash") }
-                    } header: { SettingsHeader("Server") }
+                    } header: {
+                        Group {
+     SettingsHeader("Server") 
+                        }
+                        .settingsHeader()
+                    }
                     .onAppear { address = connector.url }
                 }
             }
@@ -221,7 +239,12 @@ struct ConnectorAccountView: View {
                     } else {
                         HStack { Text("Connecting"); Spacer(); ProgressView() }
                     }
-                } header: { SettingsHeader("Tools") }
+                } header: {
+                    Group {
+     SettingsHeader("Tools") 
+                    }
+                    .settingsHeader()
+                }
 
                 Section {
                     if connector.sign == .token {

@@ -37,7 +37,10 @@ struct LocalProviderDetail: View {
                     }
                 }
             } header: {
-                Text("Models")
+                Group {
+                    Text("Models")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     if !BacktapeModel.supported {
@@ -59,7 +62,10 @@ struct LocalProviderDetail: View {
                     .accessibilityIdentifier("models.local.use.\(use.rawValue)")
                 }
             } header: {
-                Text("Use This Provider For")
+                Group {
+                    Text("Use This Provider For")
+                }
+                .settingsHeader()
             } footer: {
                 Group {
                     Text("Local models can be used for decisions and for Senses. Senses only runs on local models.")

@@ -15,9 +15,12 @@ struct AllStepsView: View {
                 Section {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in StepRow(row: row) }
                 } header: {
-                    if let first = model.recentSteps.first {
-                        Text("\(Self.stepCount(model)). Started at \(first.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")
+                    Group {
+                        if let first = model.recentSteps.first {
+                            Text("\(Self.stepCount(model)). Started at \(first.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")
+                        }
                     }
+                    .settingsHeader()
                 }
             }
         }

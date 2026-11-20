@@ -50,7 +50,10 @@ struct CustomProviderDetail: View {
                         Text("Off").tag(Bool?.some(false))
                     }
                 } header: {
-                    Text("Addresses")
+                    Group {
+                        Text("Addresses")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text(provider.endpoints.count > 1
@@ -63,7 +66,10 @@ struct CustomProviderDetail: View {
                 Section {
                     ProviderUseRows(provider: .custom(id))
                 } header: {
-                    Text("Use This Provider For")
+                    Group {
+                        Text("Use This Provider For")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("Voice needs the Realtime API at the first address.")
@@ -144,12 +150,20 @@ struct CustomProviderEditor: View {
             Form {
                 Section {
                     TextField("Name, such as Company Gateway", text: $draft.name).autocorrectionDisabled()
-                } header: { Text("Name") }
+                } header: {
+                    Group {
+     Text("Name") 
+                    }
+                    .settingsHeader()
+                }
 
                 Section {
                     addressFields($draft.endpoints[0])
                 } header: {
-                    Text("Address")
+                    Group {
+                        Text("Address")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("Automatic tries the Responses API first and uses chat completions where the address has none.")
@@ -164,7 +178,10 @@ struct CustomProviderEditor: View {
                         draft.endpoints.append(CustomEndpoint(url: "", api: draft.endpoints.first?.api ?? .automatic))
                     }
                 } header: {
-                    Text("Backup Addresses")
+                    Group {
+                        Text("Backup Addresses")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         Text("When the address can’t be reached, Poki tries these in order.")
@@ -175,7 +192,10 @@ struct CustomProviderEditor: View {
                 Section {
                     SecureField(ModelProvider.custom.keyPrompt, text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
                 } header: {
-                    Text("\(draft.displayName) key")
+                    Group {
+                        Text("\(draft.displayName) key")
+                    }
+                    .settingsHeader()
                 } footer: {
                     Group {
                         if !keyHosts.isEmpty, key.isEmpty, !newHosts.isEmpty {

@@ -45,7 +45,12 @@ struct ComposerAddSheet: View {
 
                 Section {
                     chips(MentionRecents.apps.prefix(10).map { MentionMatch(capsule: $0, insert: $0.name) })
-                } header: { SettingsHeader("Apps") }
+                } header: {
+                    Group {
+     SettingsHeader("Apps") 
+                    }
+                    .settingsHeader()
+                }
 
                 Section {
                     let connected = ConnectorCapsules.current.map { MentionMatch(capsule: $0, insert: $0.names[0]) }
@@ -53,7 +58,12 @@ struct ComposerAddSheet: View {
                     NavigationLink(value: AddRoute.connectors) {
                         SettingsRow(title: connected.isEmpty ? "Add Connectors" : "Manage Connectors", symbol: "puzzlepiece.extension")
                     }
-                } header: { SettingsHeader("Connectors") }
+                } header: {
+                    Group {
+     SettingsHeader("Connectors") 
+                    }
+                    .settingsHeader()
+                }
 
                 Section { modelPicker; approvalPicker; sensitivityPicker }
                     .id(modelVersion)

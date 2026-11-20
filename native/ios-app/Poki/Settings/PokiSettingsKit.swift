@@ -197,13 +197,20 @@ extension View {
     func settingsFooter() -> some View {
         font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
     }
+
+    /// A section header as iOS 26 draws it: body size, bold, secondary. Under the app's root Allo
+    /// body font every header was Regular (the owner, Nov 20 2026: headers had no weight); set here,
+    /// in Allo, a weight a header sets inside still wins.
+    func settingsHeader() -> some View {
+        font(.allo(.headline, .bold)).foregroundStyle(Color(.secondaryLabel))
+    }
 }
 
 /// A section's heading as the settings pages write it: in the words' own case.
 struct SettingsHeader: View {
     var title: LocalizedStringKey
     init(_ title: LocalizedStringKey) { self.title = title }
-    var body: some View { Text(title).textCase(nil) }
+    var body: some View { Text(title).textCase(nil).settingsHeader() }
 }
 
 /// A capsule button: black for the action you reach for most (Pause), outlined for the rest.
