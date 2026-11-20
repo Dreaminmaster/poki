@@ -165,13 +165,13 @@ Poki ships English, Simplified Chinese and Traditional Chinese. Settings › Lan
 
 ## Voice
 
-Voice (the waveform button beside the gear on Home, a sheet) talks to OpenAI's Realtime API (`gpt-realtime-2.1`) over WebRTC: the microphone is the
-audio track, Poki's voice plays on the speaker, and events travel on the `oai-events` data channel.
-The phone never holds an OpenAI key. The voice bridge on the person's Mac (`bin/voice-bridge.mjs`)
-keeps the key and gives the phone a client secret that expires after 60 seconds:
+Voice (the waveform button beside the gear on Home) uses OpenAI's Live API (`gpt-live-1.1`) over WebRTC.
+The microphone and speaker use audio tracks. The `oai-events` data channel carries captions and delegated tool calls.
+Poki can connect with the OpenAI key in its Accounts settings. The Mac voice bridge
+(`bin/voice-bridge.mjs`) can also exchange the WebRTC offer on the phone's behalf and keep its OpenAI key on the Mac.
 
-1. Create an API key at platform.openai.com (API keys). Realtime audio is billed to that account per
-   token; each test turn reports the tokens it used.
+1. Create an API key at platform.openai.com (API keys). Live sessions are billed by duration.
+   Backend model usage is billed separately.
 2. Keep it in the keychain, and read it from there, so it never lands in your shell history:
 
    ```sh

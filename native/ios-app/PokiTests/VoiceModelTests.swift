@@ -5,10 +5,20 @@ import XCTest
 /// The voice bridge's token answer, served to URLSession.shared without a Mac.
 final class BridgeStub: URLProtocol {
     static let address = "http://voice-bridge.test/voice/0123456789abcdef"
-    override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "voice-bridge.test" }
+    static let liveAddress = "http://voice-live-bridge.test/voice/0123456789abcdef"
+    override class func canInit(with request: URLRequest) -> Bool {
+        ["voice-bridge.test", "voice-live-bridge.test"].contains(request.url?.host())
+    }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#
+        let body: String
+        if request.url?.host() == "voice-live-bridge.test" {
+            body = request.url?.lastPathComponent == "session"
+                ? #"{"sdp":"sdp-answer"}"#
+                : #"{"value":"ek_test","live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","do"]}"#
+        } else {
+            body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#
+        }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -38,7 +48,11 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
+    private(set) var liveAnswer: String?
     func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
+    func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
+        liveAnswer = try await exchange("sdp-offer")
+    }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) {}
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
@@ -92,6 +106,38 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertFalse(h.voice.isOn, "a silent session must release the microphone")
         XCTAssertTrue(h.link.closed)
         XCTAssertEqual(h.microphone, [true, false])
+    }
+
+    func testLiveCaptionsAndStopKeepTheNextDelegatedToolFromRunning() async {
+        var executed: [String] = []
+        let h = Harness(phoneTool: { name, _ in
+            executed.append(name)
+            return ("mock result", false, nil)
+        })
+        _ = h.voice.setBridge(BridgeStub.liveAddress)
+        await h.connect()
+        XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
+        h.link.play(["type": "session.started"],
+                    ["type": "session.input_transcript.delta", "delta": "打开", "start_ms": 0, "end_ms": 200],
+                    ["type": "session.input_transcript.delta", "delta": "微信", "start_ms": 200, "end_ms": 400],
+                    ["type": "session.delegation.created", "delegation": ["id": "d1"]])
+        func call(_ id: String, _ name: String) -> [String: Any] {
+            ["type": "response.event", "delegation_id": "d1", "event": ["type": "response.output_item.done",
+                "item": ["type": "function_call", "call_id": id, "name": name, "arguments": "{}"]]]
+        }
+        h.link.play(call("c1", "look"),
+                    ["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 1600, "end_ms": 1900],
+                    call("c2", "do"),
+                    ["type": "session.output_transcript.delta", "delta": "收到。", "start_ms": 2000, "end_ms": 2300])
+        await h.time.settle()
+        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text), ["打开微信", "停。"])
+        XCTAssertEqual(h.voice.lines.filter { $0.role == .poki }.map(\.text), ["收到。"])
+        XCTAssertEqual(executed, ["look"])
+        let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
+            .compactMap { $0["item"] as? [String: String] }
+        XCTAssertEqual(Set(results.compactMap { $0["call_id"] }), ["c1", "c2"])
+        XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
+        h.voice.stop()
     }
 
     private var savedBridge: String?

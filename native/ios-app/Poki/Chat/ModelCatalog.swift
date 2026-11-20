@@ -227,11 +227,13 @@ enum ModelCatalog {
     // MARK: Voice
 
     /// Live voice models (OpenAI Realtime): the built-in one and any the key's list adds, off at first.
-    static let voiceDefault = "gpt-realtime-2.1"
+    static let voiceDefault = "gpt-live-1.1"
+    static let voiceRealtime = "gpt-realtime-2.1"
 
     static var voiceAll: [ChatModelChoice] {
-        let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault }
-        return [ChatModelChoice(id: voiceDefault, name: "GPT Realtime 2.1")] + listed.map { ChatModelChoice(id: $0, name: $0) }
+        let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault && $0 != voiceRealtime }
+        return [ChatModelChoice(id: voiceDefault, name: "GPT-Live 1.1"), ChatModelChoice(id: voiceRealtime, name: "GPT Realtime 2.1")]
+            + listed.map { ChatModelChoice(id: $0, name: $0) }
     }
 
     static var voiceEnabled: Set<String> {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Poki voice bridge: hands the Poki app short-lived OpenAI Realtime credentials, so the phone never
+// Poki voice bridge: negotiates OpenAI voice sessions so the phone never
 // holds the API key, and runs the voice tools that move the phone through the local Poki MCP.
 //
 //   OPENAI_API_KEY=... POKI_MCP_STATE_DIR=... node bin/voice-bridge.mjs [--port 47830] [--host 0.0.0.0] [--device <id>] [--mac-tools]
@@ -10,7 +10,8 @@
 //
 // The phone opens http://<this Mac>:<port>/voice/<secret>/ ; the secret is in voice-bridge.json in the
 // state directory. Endpoints under that prefix:
-//   GET  token   a client secret for one Realtime session (expires in 60 s), plus the session it opens
+//   GET  token   Live session metadata for transport=live, or a short-lived Realtime client secret
+//   POST session {sdp}: exchanges a WebRTC offer for a Live SDP answer
 //   POST tool    {call_id, name, arguments}: runs one voice tool once; the same call_id never runs twice.
 //                tap_text first comes without `checked` and taps nothing: the answer is {state: "check", app,
 //                target}, the element it would tap and the app in front. The phone checks that with Poki's
@@ -38,7 +39,8 @@ const macTools = process.argv.includes('--mac-tools');
 const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey) { console.error('Set OPENAI_API_KEY (for example from the keychain) before starting the voice bridge.'); process.exit(1); }
 
-const model = process.env.POKI_VOICE_MODEL ?? 'gpt-realtime-2.1';
+const model = process.env.POKI_VOICE_MODEL || 'gpt-live-1.1';
+const usesLive = model.startsWith('gpt-live-');
 // The phone says Poki's interface language (?language=zh-Hans): the one the session speaks from its first sentence.
 const languageName = code => { try { return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(code ?? '') ? new Intl.DisplayNames(['en'], { type: 'language' }).of(code) : 'English'; } catch { return 'English'; } };
 // The same text as the phone's own (VoiceDirect.swift); --mac-tools leaves out the phone's tools.
@@ -89,6 +91,7 @@ const macVoiceTools = [
   { name: 'go_home', description: 'Go to the Home Screen.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
 ];
 const voiceTools = macTools ? macVoiceTools : phoneTools;
+const localTools = voiceTools.filter(tool => tool.local).map(tool => tool.name);
 
 function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', language } = {}) {
   const turn = vad === 'semantic_vad'
@@ -96,7 +99,7 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
     : { type: 'server_vad', silence_duration_ms: 450, prefix_padding_ms: 300, threshold: 0.5, create_response: true, interrupt_response: true };
   return {
     type: 'realtime',
-    model,
+    model: usesLive ? 'gpt-realtime-2.1' : model,
     instructions: instructions(language),
     output_modalities: ['audio'],
     audio: {
@@ -107,6 +110,26 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
     tool_choice: 'auto',
     parallel_tool_calls: false,
     reasoning: { effort },
+  };
+}
+
+function liveConfig({ effort = 'low', voice = 'marin', language }) {
+  const backend = sessionConfig({ effort, voice, language });
+  return {
+    model,
+    instructions: `You are Poki, a voice assistant. Speak ${languageName(language)}. Switch languages only when the user clearly switches; app names, tool output and words like hello do not change the conversation language. Delegate phone requests promptly. Let the backend finish before reporting its result. A brief "嗯" is an acknowledgment; keep speaking through it. When the user asks you to stop, stop speaking. A phone action already running may finish.`,
+    audio: { output: { voice } },
+    delegation: {
+      type: 'responses',
+      responses: {
+        model: 'gpt-6-luna',
+        instructions: backend.instructions + '\nUse only the most recent screenshot as the current screen.',
+        tools: backend.tools.map(tool => ({ ...tool, strict: false })),
+        tool_choice: 'auto',
+        parallel_tool_calls: false,
+        reasoning: { effort },
+      },
+    },
   };
 }
 
@@ -223,7 +246,24 @@ async function mintToken(options) {
   // OpenAI echoes a masked key in some errors; keep even that out of logs and replies.
   const reason = (body.error?.message ?? `client_secrets ${response.status}`).replace(/sk-[\w*-]+/g, 'the API key');
   if (!response.ok) throw Object.assign(new Error(reason), { status: response.status });
-  return { value: body.value, expires_at: body.expires_at, model, local_tools: voiceTools.filter(t => t.local).map(t => t.name) };
+  return { value: body.value, expires_at: body.expires_at, model: session.model, local_tools: localTools };
+}
+
+async function exchangeOffer(sdp, options) {
+  const response = await fetch('https://api.openai.com/v1/live/sessions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session: liveConfig(options), transport: { type: 'webrtc', sdp } }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    const reason = (body.error?.message ?? `Live session ${response.status}`).replace(/sk-[\w*-]+/g, 'the API key');
+    throw Object.assign(new Error(reason), { status: response.status });
+  }
+  if (typeof body.transport?.sdp !== 'string' || !body.transport.sdp) {
+    throw Object.assign(new Error('OpenAI returned no SDP answer'), { status: 502 });
+  }
+  return { sdp: body.transport.sdp };
 }
 
 // A body that is not JSON is the caller's mistake: 400, not 500.
@@ -252,11 +292,18 @@ const server = http.createServer(async (req, res) => {
   if (!ok) return reply(404, { error: 'not found' });
   try {
     if (req.method === 'GET' && action === 'token') {
+      if (usesLive && url.searchParams.get('transport') === 'live') return reply(200, { model, live: true, local_tools: localTools });
       const options = Object.fromEntries(['effort', 'vad', 'voice', 'language'].map(k => [k, url.searchParams.get(k) ?? undefined]).filter(([, v]) => v));
       const started = Date.now();
       const token = await mintToken(options);
       console.log(JSON.stringify({ event: 'token', ms: Date.now() - started, options }));
       return reply(200, token);
+    }
+    if (req.method === 'POST' && action === 'session' && usesLive) {
+      const { sdp } = await readJSON(req) ?? {};
+      if (typeof sdp !== 'string' || !sdp.trim()) return reply(400, { error: 'SDP offer is required' });
+      const options = Object.fromEntries(['effort', 'voice', 'language'].map(key => [key, url.searchParams.get(key) || undefined]));
+      return reply(200, await exchangeOffer(sdp, options));
     }
     if (req.method === 'POST' && action === 'tool') {
       const call = await readJSON(req);

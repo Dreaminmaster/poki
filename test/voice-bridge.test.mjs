@@ -9,20 +9,21 @@ import { join } from 'node:path';
 import { fixture } from './fixture.mjs';
 import { root } from '../src/config.mjs';
 
-test('voice token requests hint Chinese transcription for each interface language', async t => {
+async function sessionBridge(t) {
   const dir = await mkdtemp(join(tmpdir(), 'poki-voice-token-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const preload = `
     import { writeFile } from 'node:fs/promises';
     import { join } from 'node:path';
     globalThis.fetch = async (url, options) => {
-      if (url !== 'https://api.openai.com/v1/realtime/client_secrets') throw new Error('Unexpected upstream URL');
-      await writeFile(join(process.env.POKI_MCP_STATE_DIR, 'request.json'), options.body);
-      return Response.json({ value: 'ek_test' });
+      await writeFile(join(process.env.POKI_MCP_STATE_DIR, 'request.json'), JSON.stringify({ url, body: JSON.parse(options.body) }));
+      if (url === 'https://api.openai.com/v1/realtime/client_secrets') return Response.json({ value: 'ek_test' });
+      if (url === 'https://api.openai.com/v1/live/sessions') return Response.json({ transport: { sdp: 'sdp-answer' } }, { status: 201 });
+      throw new Error('Unexpected upstream URL');
     };
   `;
   const child = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, join(root, 'bin/voice-bridge.mjs'), '--port', '0', '--host', '127.0.0.1'], {
-    env: { ...process.env, POKI_MCP_STATE_DIR: dir, OPENAI_API_KEY: 'unused' }, stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, POKI_MCP_STATE_DIR: dir, POKI_VOICE_MODEL: '', OPENAI_API_KEY: 'unused' }, stdio: ['ignore', 'pipe', 'inherit'],
   });
   const exited = once(child, 'exit');
   t.after(async () => { child.kill(); await exited; });
@@ -30,13 +31,42 @@ test('voice token requests hint Chinese transcription for each interface languag
   const [line] = await Promise.race([once(lines, 'line'), exited.then(() => { throw new Error('Voice bridge exited before it was ready'); })]);
   const { port } = JSON.parse(line);
   const { secret } = JSON.parse(await readFile(join(dir, 'voice-bridge.json'), 'utf8'));
+  return {
+    base: `http://127.0.0.1:${port}/voice/${secret}`,
+    request: async () => JSON.parse(await readFile(join(dir, 'request.json'), 'utf8')),
+  };
+}
+
+test('legacy voice token requests hint Chinese transcription for each interface language', async t => {
+  const { base, request } = await sessionBridge(t);
   for (const language of ['', 'zh-Hans', 'en']) {
-    const response = await fetch(`http://127.0.0.1:${port}/voice/${secret}/token?language=${language}`);
+    const response = await fetch(`${base}/token?language=${language}`);
     assert.equal(response.status, 200);
     assert.equal((await response.json()).value, 'ek_test');
-    const { session } = JSON.parse(await readFile(join(dir, 'request.json'), 'utf8'));
+    const { body: { session } } = await request();
     assert.equal(session.audio.input.transcription.language, 'zh');
   }
+});
+
+test('the voice bridge exchanges a Live offer and returns only the SDP answer', async t => {
+  const { base, request } = await sessionBridge(t);
+  const token = await fetch(`${base}/token?transport=live`);
+  assert.deepEqual(await token.json(), {
+    model: 'gpt-live-1.1', live: true, local_tools: ['get_ios_version', 'look', 'open_app', 'do'],
+  });
+  const response = await fetch(`${base}/session?language=zh-Hans`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sdp: 'sdp-offer' }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { sdp: 'sdp-answer' });
+  const upstream = await request();
+  assert.equal(upstream.url, 'https://api.openai.com/v1/live/sessions');
+  assert.deepEqual(upstream.body.transport, { type: 'webrtc', sdp: 'sdp-offer' });
+  const { session } = upstream.body;
+  assert.equal(session.model, 'gpt-live-1.1');
+  assert.equal(session.delegation.type, 'responses');
+  assert.ok(session.delegation.responses.tools.some(tool => tool.name === 'do'));
+  assert.match(session.instructions, /Chinese/i);
 });
 
 // The voice bridge in front of a fixture daemon and phone, as the Poki app reaches it.

@@ -11,8 +11,10 @@ import Speech
 ///   audio, holding the button dictates on this iPhone (Apple's speech recognition, on the device when
 ///   it can) and lets go to send it to Poki's chat; Poki reads the answer out loud.
 enum VoiceDirect {
-    /// The live voice model the owner picked (Accounts › OpenAI › Live Voice), GPT Realtime 2.1 by default.
+    /// The voice model the owner picked in Accounts › OpenAI › Live Voice.
     static var model: String { ModelCatalog.voiceModel }
+    static var usesLive: Bool { model.hasPrefix("gpt-live-") }
+    static let localTools = ["get_ios_version", "look", "open_app", "do"]
 
     /// The OpenAI API key on this iPhone, when there is one.
     static var apiKey: String? { enabled ? ModelKeys.key(.openai) : nil }
@@ -87,7 +89,7 @@ enum VoiceDirect {
     /// The Realtime session Poki opens: model, instructions, voice, turn detection and tools.
     static var session: [String: Any] {
         [
-            "type": "realtime", "model": model, "instructions": instructions, "output_modalities": ["audio"],
+            "type": "realtime", "model": usesLive ? ModelCatalog.voiceRealtime : model, "instructions": instructions, "output_modalities": ["audio"],
             "audio": [
                 "input": ["turn_detection": ["type": "server_vad", "silence_duration_ms": 450, "prefix_padding_ms": 300, "threshold": 0.5, "create_response": true, "interrupt_response": true],
                           "noise_reduction": ["type": "near_field"], "transcription": ["model": "gpt-4o-mini-transcribe", "language": "zh"]],
@@ -95,6 +97,33 @@ enum VoiceDirect {
             ],
             "tools": tools, "tool_choice": "auto", "parallel_tool_calls": false, "reasoning": ["effort": "low"],
         ]
+    }
+
+    static func exchangeLiveOffer(_ sdp: String, model: String, apiKey: String) async throws -> String {
+        let live: [String: Any] = [
+            "model": model,
+            "instructions": """
+                You are Poki, a voice assistant. Speak \(interfaceLanguage). Switch languages only when the user clearly switches. App names, tool output and words like hello do not change the conversation language. Delegate phone requests promptly. Let the backend finish before reporting its result. A brief “嗯” is an acknowledgment; keep speaking through it. When the user asks you to stop, stop speaking. A phone action already running may finish.
+                """,
+            "audio": ["output": ["voice": "marin"]],
+            "delegation": ["type": "responses", "responses": [
+                "model": "gpt-6-luna", "instructions": instructions + "\nUse only the most recent screenshot as the current screen.", "tool_choice": "auto",
+                "tools": tools.map { $0.merging(["strict": false]) { _, value in value } },
+                "parallel_tool_calls": false, "reasoning": ["effort": "low"],
+            ]],
+        ]
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/live/sessions")!, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["session": live, "transport": ["type": "webrtc", "sdp": sdp]])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status), let answer = (json?["transport"] as? [String: Any])?["sdp"] as? String, !answer.isEmpty else {
+            throw VoiceError.realtime(status, openAIError(json, fallback: "Live session \(status)"))
+        }
+        return answer
     }
 
     /// A one-minute Realtime key from OpenAI, made with the owner's API key (sent only to OpenAI).
@@ -108,12 +137,14 @@ enum VoiceDirect {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status), let value = json?["value"] as? String else {
-            // OpenAI echoes a masked key in some errors; keep even that out of the screen and the log.
-            let message = ((json?["error"] as? [String: Any])?["message"] as? String ?? "client_secrets \(status)")
-                .replacingOccurrences(of: #"sk-[\w*-]+"#, with: "the API key", options: .regularExpression)
-            throw VoiceError.realtime(status, message)
+            throw VoiceError.realtime(status, openAIError(json, fallback: "client_secrets \(status)"))
         }
-        return VoiceBridge.Token(value: value, model: model, local_tools: ["get_ios_version", "look", "open_app", "do"])
+        return VoiceBridge.Token(value: value, model: usesLive ? ModelCatalog.voiceRealtime : model, local_tools: localTools)
+    }
+
+    private static func openAIError(_ json: [String: Any]?, fallback: String) -> String {
+        ((json?["error"] as? [String: Any])?["message"] as? String ?? fallback)
+            .replacingOccurrences(of: #"sk-[\w*-]+"#, with: "the API key", options: .regularExpression)
     }
 }
 
