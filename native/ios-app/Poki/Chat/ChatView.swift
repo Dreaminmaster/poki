@@ -61,6 +61,8 @@ struct ChatView: View {
     @State private var pageHeight: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.coveredByDrawer) private var coveredByDrawer
+    @Environment(\.inDuoSplitView) private var inDuoSplitView
 
     private var sampleScene: String? { UserDefaults.standard.string(forKey: "pokiChat") }
 
@@ -126,6 +128,9 @@ struct ChatView: View {
     @ViewBuilder private var chatContent: some View {
         let status = PokiStatus.current(model: model, chat: chat)
         let home = isGreeting
+        // The Duo's left pane can inherit a leading inset from the unfolded display.
+        let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
+            ? .leading : []
         ZStack {
             ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
@@ -207,6 +212,7 @@ struct ChatView: View {
         .animation(.snappy, value: model.approvals.first?.id)
         .animation(.snappy, value: model.handoffText)
         .animation(.snappy, value: chat.demoAsk?.id)
+        .ignoresSafeArea(.container, edges: homeEdges)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: chat.running) { was, now in
             if was, !now, endedWell { DoneLinger.shared.celebrate() }

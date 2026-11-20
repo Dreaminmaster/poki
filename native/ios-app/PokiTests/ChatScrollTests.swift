@@ -37,6 +37,111 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
     }
 
+    func testHomeComposerKeepsItsMarginsInTheDuoLeftPane() throws {
+        let (reference, actual) = try duoHomeComposerFrames(size: CGSize(width: 469, height: 669), inDuoSplitView: true)
+        XCTAssertEqual(actual.minX, reference.minX, accuracy: 1, "The left safe area moved the composer")
+        XCTAssertEqual(actual.maxX, reference.maxX, accuracy: 1, "The right side of the composer moved")
+    }
+
+    func testFoldedDuoHomeRespectsItsLeadingSafeArea() throws {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        XCTAssertFalse(PKInProcess.shared().hasDuoCompanion)
+        let (reference, actual) = try duoHomeComposerFrames()
+        XCTAssertGreaterThan(actual.minX, reference.minX, "The folded home must respond to the leading safe area")
+        XCTAssertGreaterThanOrEqual(actual.minX, 84, "The folded home must keep the composer inside the safe area")
+    }
+
+    func testDuoHomeRestoresItsLeadingSafeAreaWhenFoldedDuringACompanionTask() throws {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let appWindow = try XCTUnwrap(scene.keyWindow)
+        let root = try XCTUnwrap(appWindow.rootViewController)
+        let fullFrame = appWindow.frame
+        let savedInsets = root.additionalSafeAreaInsets
+        let native = PKInProcess.shared()
+        defer {
+            native.endDuoCompanionTask()
+            root.additionalSafeAreaInsets = savedInsets
+            appWindow.frame = fullFrame
+        }
+
+        func composerFrame() -> CGRect? {
+            guard let field = Self.find(CapsuleTextView.self, in: root.view), field.bounds.width > 100 else { return nil }
+            return field.convert(field.bounds, to: root.view)
+        }
+
+        let leadingInset: CGFloat = 84
+        // Simulate the system resizing the app window while its scene stays visible.
+        appWindow.frame.size.width = (fullFrame.width * 0.75).rounded(.down)
+        root.additionalSafeAreaInsets.left = leadingInset
+        settle {
+            Self.find(LaunchCurtain.Stage.self, in: root.view) == nil &&
+                (composerFrame()?.minX ?? leadingInset) < leadingInset
+        }
+        XCTAssertLessThan(try XCTUnwrap(composerFrame()).minX, leadingInset, "Split View must reclaim the leading inset")
+        guard native.beginDuoCompanionTask() else { return XCTFail("The task must start in Split View") }
+
+        appWindow.frame = fullFrame
+        settle { (composerFrame()?.minX ?? 0) >= leadingInset }
+        XCTAssertEqual(root.view.bounds.width, fullFrame.width, accuracy: 1)
+        XCTAssertEqual(native.duoPlacement(), "fullscreen")
+        XCTAssertTrue(native.hasDuoCompanionTask)
+        let foldedHome = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: foldedHome)
+        attachment.name = "Folded Duo home during a companion task"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(composerFrame()).minX, leadingInset,
+                                   "The folded home must keep the composer inside the safe area during the task")
+    }
+
+    private func duoHomeComposerFrames(size: CGSize? = nil, inDuoSplitView: Bool = false) throws -> (CGRect, CGRect) {
+        try XCTSkipUnless(PKInProcess.canUseDuoSplitView(), "Run on the iPhone Duo simulator.")
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let root = UIHostingController(rootView: RootView().environment(app).environment(chat)
+            .environment(\.inDuoSplitView, inDuoSplitView))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let size = size ?? scene.screen.bounds.size
+        let pane = DuoPaneWindow(windowScene: scene)
+        pane.frame = CGRect(origin: .zero, size: size)
+        pane.rootViewController = root
+        pane.makeKeyAndVisible()
+        window = pane
+
+        func composerFrame() throws -> CGRect {
+            settle {
+                Self.find(LaunchCurtain.Stage.self, in: root.view) == nil
+                    && (Self.find(CapsuleTextView.self, in: root.view)?.bounds.width ?? 0) > 100
+            }
+            XCTAssertNil(Self.find(LaunchCurtain.Stage.self, in: root.view))
+            let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: root.view))
+            return field.convert(field.bounds, to: root.view)
+        }
+
+        let reference = try composerFrame()
+        XCTAssertEqual(root.view.bounds.width, size.width, accuracy: 1)
+        XCTAssertEqual(root.view.bounds.height, size.height, accuracy: 1)
+        XCTAssertEqual(root.view.safeAreaInsets.left, 0, accuracy: 1)
+        XCTAssertEqual(root.view.safeAreaInsets.right, 0, accuracy: 1)
+        root.additionalSafeAreaInsets.left = 84
+        settle { root.view.safeAreaInsets.left == 84 }
+        XCTAssertEqual(root.view.safeAreaInsets.left, 84, accuracy: 1)
+        root.view.layoutIfNeeded()
+        let actual = try composerFrame()
+
+        let screenshot = UIGraphicsImageRenderer(bounds: root.view.bounds).image { _ in
+            root.view.drawHierarchy(in: root.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: screenshot)
+        attachment.name = "Duo home with a leading safe area"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return (reference, actual)
+    }
+
     func testResizingTheRootKeepsAnUnsentDraftInTheSameConversation() throws {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         let chat = ChatModel(app: app)
@@ -170,4 +275,8 @@ final class ChatScrollTests: XCTestCase {
                 .bottomBar { Color.clear.frame(height: 80) }
         }
     }
+}
+
+private final class DuoPaneWindow: UIWindow {
+    override var safeAreaInsets: UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 0) }
 }

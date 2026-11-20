@@ -26,7 +26,9 @@ struct VoiceBridge: Equatable {
         set { UserDefaults.standard.set(newValue?.base.absoluteString, forKey: "voiceBridge") }
     }
 
-    struct Token: Decodable { let value: String; let model: String; let local_tools: [String] }
+    /// `base`: the Realtime API's address the key is for (a custom provider's); the bridge's keys are
+    /// OpenAI's, and name none.
+    struct Token: Decodable { let value: String; let model: String; let local_tools: [String]; var base: String? = nil }
     struct ToolResult: Decodable {
         let state: String
         var output = ""
@@ -419,6 +421,7 @@ final class VoiceModel {
 
     /// How voice runs now, for the settings screen.
     var route: String {
+        if case .custom = VoiceDirect.account { return AppLocalization.text(LocalizedStringResource("\(VoiceDirect.settingsAccount.name), straight from this iPhone")) }
         if VoiceDirect.apiKey != nil { return AppLocalization.text(LocalizedStringResource("Your OpenAI key, straight from this iPhone")) }
         if let bridge { return AppLocalization.text(LocalizedStringResource("Voice bridge at \(bridge.display)")) }
         if VoiceDirect.canDictate { return AppLocalization.text(LocalizedStringResource("Dictation to \(ModelKeys.selectedModelName); Poki reads the answer aloud")) }
@@ -503,7 +506,7 @@ final class VoiceModel {
             transcript = ("voice-\(UUID().uuidString.prefix(8).lowercased())", Date(), lines.count)
             if microphone { holdingMicrophone = true }
             do {
-                try await link.connect(secret: token.value, microphone: microphone, direct: false)
+                try await link.connect(secret: token.value, base: token.base.flatMap { URL(string: $0) }, microphone: microphone, direct: false)
             } catch VoiceError.noPath(let ice) {
                 // No path opened (ICE \(ice)): once more, off VPN interfaces (Poki's loopback, a proxy
                 // app) and with a fresh key, before telling the owner.
@@ -516,7 +519,7 @@ final class VoiceModel {
                 link = connection({ [weak self] event in self?.handle(event, session: number) },
                                   { [weak self] reason in self?.closed(reason, session: number) })
                 self.link = link
-                try await link.connect(secret: retry.value, microphone: microphone, direct: true)
+                try await link.connect(secret: retry.value, base: retry.base.flatMap { URL(string: $0) }, microphone: microphone, direct: true)
             }
             guard number == session else { link.close(); return }
             lastActivity = time.now()
