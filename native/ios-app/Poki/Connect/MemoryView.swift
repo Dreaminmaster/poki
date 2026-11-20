@@ -119,7 +119,7 @@ struct MemoryView: View {
         }
         .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
-        .safeAreaInset(edge: .bottom) { PokiAskBar(text: asked ?? $typed, scope: .memory) }
+        .bottomBar(softEdge: true) { PokiAskBar(text: asked ?? $typed, scope: .memory) }
         .environment(library)
         .onAppear { library.reload(); exportURL = library.exportFile() }
         .onChange(of: library.items) { exportURL = library.exportFile() }

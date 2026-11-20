@@ -42716,22 +42716,6 @@
         }
       }
     },
-    "On cellular, iOS lets Poki keep its connection but not open a new one. The Poki Loopback shortcut runs when Wi-Fi disconnects, and you can run it whenever the loopback is off. It asks Poki first and changes nothing when the connection is fine. Otherwise it turns Wi-Fi and Cellular Data off for a moment, lets Poki connect, and turns them back on. When you add it, turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持已有连接，但不允许建立新连接。Poki Loopback 快捷指令会在 Wi-Fi 断开时运行，回环连接关闭时你也可以随时运行它。它会先询问 Poki，连接正常时不做任何改动。否则它会短暂关闭 Wi-Fi 和蜂窝数据，让 Poki 连接，然后重新打开。添加时，请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用行動網路時，iOS 允許 Poki 保持已有連線，但不允許建立新連線。Poki Loopback 捷徑會在 Wi-Fi 中斷時執行，回環連線關閉時你也可以隨時執行它。它會先詢問 Poki，連線正常時不做任何更動。否則它會短暫關閉 Wi-Fi 和行動數據，讓 Poki 連線，然後重新打開。加入時，請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
-          }
-        }
-      }
-    },
     "Open Shortcuts and go to Automation." : {
       "localizations" : {
         "zh-Hans" : {
@@ -42840,6 +42824,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打開回環連線"
+          }
+        }
+      }
+    },
+    "On cellular, iOS lets Poki keep a connection but not open a new one. This shortcut connects it again. Turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持连接，但不允许建立新连接。这个快捷指令会让它重新连接。请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用行動網路時，iOS 允許 Poki 保持連線，但不允許建立新連線。這個捷徑會讓它重新連線。請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
           }
         }
       }

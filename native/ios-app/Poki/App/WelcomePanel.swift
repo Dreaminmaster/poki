@@ -106,7 +106,9 @@ struct WelcomePanel: View {
         }
         .settingsPage()
         .navigationTitle(kind == .firstRun ? AppLocalization.text("Set Up Poki") : AppLocalization.text("Check Setup"))
-        .safeAreaInset(edge: .bottom) { buttons }
+        // A safe-area bar on iOS 26, so the rows fade under the buttons through the system's scroll
+        // edge instead of showing through them (the footer's words ran into Finish Later).
+        .bottomBar(softEdge: true) { buttons }
         .onAppear { model.loopback.resume() }
         .onChange(of: path.count) { _, _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
