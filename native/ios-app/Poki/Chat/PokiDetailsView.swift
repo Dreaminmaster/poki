@@ -405,7 +405,7 @@ struct ConnectionView: View {
                     } else if !on, !model.sessionStarting, let problem = model.problem {
                         Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
                             .foregroundStyle(.red)
-                    } else if !on, !model.sessionStarting, case .downloaded = model.diskImage.state {
+                    } else if !on, !model.sessionStarting, model.isDone(.pairing), case .downloaded = model.diskImage.state {
                         Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
                     }
                 }

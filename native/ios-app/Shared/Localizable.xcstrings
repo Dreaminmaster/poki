@@ -2281,6 +2281,22 @@
         }
       }
     },
+    "Downloaded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下載"
+          }
+        }
+      }
+    },
     "Downloaded, not available" : {
       "extractionState" : "manual",
       "localizations" : {

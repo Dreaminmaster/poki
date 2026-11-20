@@ -591,11 +591,6 @@ private struct PairingPage: View {
             Section { Text(note).font(.footnote) }
         }
         Section {
-            diskImage
-        } header: {
-            Text("Developer Disk Image")
-        }
-        Section {
             if PairingScanner.available {
                 Button("Scan Pairing Code", systemImage: "qrcode.viewfinder") { scanning = true }
             }
@@ -615,6 +610,11 @@ private struct PairingPage: View {
             do { try model.importPairingFile(from: result.get()); importError = nil }
             catch { importError = AppLocalization.text(LocalizedStringResource("Invalid Pairing File: \(error.localizedDescription)")) }
         }
+        Section {
+            diskImage
+        } header: {
+            Text("Developer Disk Image")
+        }
     }
 
     @ViewBuilder private var diskImage: some View {
@@ -622,8 +622,12 @@ private struct PairingPage: View {
         case .ready:
             LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Ready")))
         case .downloaded:
-            LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Downloaded, not available")))
-            Text(DiskImageStore.unavailableMessage).font(.footnote).foregroundStyle(.orange)
+            if model.isDone(.pairing) {
+                LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Downloaded, not available")))
+                Text(DiskImageStore.unavailableMessage).font(.footnote).foregroundStyle(.orange)
+            } else {
+                LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Downloaded")))
+            }
         case .downloading(let step):
             LabeledContent("Downloading") { HStack { Text(verbatim: "\(step)"); ProgressView() } }
         case .missing:
