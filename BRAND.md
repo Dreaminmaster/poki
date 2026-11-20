@@ -12,7 +12,7 @@ The Poki bear is the character at the center of Poki, and the main thing this fi
 
 | What | Where |
 | --- | --- |
-| Illustrations, poses and expressions | The `.png` files in [`native/ios-app/Poki/Bear/`](native/ios-app/Poki/Bear) and its `Model/` folder, the `.png` files in [`native/ios-app/Poki/ActivityBears/`](native/ios-app/Poki/ActivityBears), and [`native/ios-app/Poki/Chat/PokiFace.png`](native/ios-app/Poki/Chat/PokiFace.png) |
+| Illustrations, poses and expressions | The `.png` files in [`native/ios-app/Poki/Bear/`](native/ios-app/Poki/Bear) and its `Model/` folder, the `.png` files in [`native/ios-app/Poki/ActivityBears/`](native/ios-app/Poki/ActivityBears), [`native/ios-app/Poki/LaunchArt/LaunchBear.png`](native/ios-app/Poki/LaunchArt/LaunchBear.png), and [`native/ios-app/Poki/Chat/PokiFace.png`](native/ios-app/Poki/Chat/PokiFace.png) |
 | 3D model | [`native/ios-app/Poki/Bear/Model/PokiBear.usdz`](native/ios-app/Poki/Bear/Model/PokiBear.usdz) |
 | Artwork, animations and videos of the bear on the Poki website and in Poki's release posts | Outside this repository |
 
@@ -22,7 +22,7 @@ The Poki bear is the character at the center of Poki, and the main thing this fi
 | --- | --- |
 | The Poki app icon, light and dark | [`docs/images/poki-app-icon.png`](docs/images/poki-app-icon.png) |
 | The earlier Poki icon | [`docs/images/poki-icon.png`](docs/images/poki-icon.png) |
-| Promotional images and animations | [`docs/images/poki-home.gif`](docs/images/poki-home.gif), [`docs/images/roadmap.png`](docs/images/roadmap.png), [`docs/images/roadmap.zh-CN.png`](docs/images/roadmap.zh-CN.png) |
+| Promotional images and animations | [`docs/images/poki-home.gif`](docs/images/poki-home.gif), [`docs/images/poki-order-demo.gif`](docs/images/poki-order-demo.gif), [`docs/images/poki-hero.gif`](docs/images/poki-hero.gif), [`docs/images/poki-hero.zh-CN.gif`](docs/images/poki-hero.zh-CN.gif), [`docs/images/why-1-errands.png`](docs/images/why-1-errands.png), [`docs/images/why-2-routines.png`](docs/images/why-2-routines.png), [`docs/images/why-3-standalone.png`](docs/images/why-3-standalone.png), [`docs/images/roadmap.png`](docs/images/roadmap.png), [`docs/images/roadmap.zh-CN.png`](docs/images/roadmap.zh-CN.png) |
 
 In this file, "brand assets" means the Poki bear and everything in the two tables above.
 

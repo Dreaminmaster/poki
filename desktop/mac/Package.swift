@@ -5,11 +5,13 @@ import PackageDescription
 
 let package = Package(
     name: "PokiSetup",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
             name: "PokiSetup",
-            path: "Sources/PokiSetup"
+            path: "Sources/PokiSetup",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "PokiSetupTests",

@@ -156,7 +156,7 @@ impl Prepared {
             })?;
         device::install::install_profiles(&self.phone, &built.profiles, reporter).await?;
         device::install::install_ipa(&self.phone, &built.ipa, true, reporter).await?;
-        let record = keeper::Record { version: built.version, build: built.build, release_tag: self.release.tag, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, ..self.record };
+        let record = keeper::Record { version: built.version, build: built.build, release_tag: self.release.tag, signed_at: keeper::now(), profile_expires_at: built.profile_expires_at, last_checked_at: Some(keeper::now()), last_error: None, test_build: None, ..self.record };
         keeper::put(record.clone())?;
         Ok(record)
     }

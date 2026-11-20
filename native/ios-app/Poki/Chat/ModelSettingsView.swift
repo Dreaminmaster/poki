@@ -11,7 +11,8 @@ import SwiftUI
 /// Accounts, as the Mail app lists mail accounts: every model account on this iPhone whatever its
 /// provider, each with what it is used for (the text chat, live voice) switched on or off inside it.
 /// What an account can power is worked out from its type: any wired provider can run the text chat;
-/// live voice needs OpenAI's Realtime API, so only an OpenAI API key can run it.
+/// live voice needs a Realtime API, which an OpenAI API key or a custom provider's service can open.
+/// Each custom provider is an account of its own.
 struct ModelSettingsView: View {
     /// Opened from Talk with Poki without a key: the OpenAI key's form at once, or Live Voice when the
     /// key is there but Live Voice is turned off.
@@ -36,8 +37,17 @@ struct ModelSettingsView: View {
             // With no account yet the card above has Add Account, and an empty group would only be a heading.
             if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
             Section {
-                ForEach(ModelProvider.allCases.filter(ModelAccounts.isSetUp)) { provider in
-                    NavigationLink { AccountDetail(provider: provider) } label: { AccountRow(provider: provider) }
+                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
+                    let usage = ModelAccounts.uses(provider)
+                    NavigationLink { AccountDetail(provider: provider) } label: {
+                        AccountRow(provider: provider, name: provider.name, usage: usage)
+                    }
+                }
+                ForEach(CustomProviders.all) { custom in
+                    let usage = ModelAccounts.uses(custom)
+                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
+                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+                    }
                 }
                 Button("Add Account", systemImage: "plus") { adding = true }
             } header: {
@@ -57,11 +67,11 @@ struct ModelSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $adding) { AddAccount() }
         .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
-        .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature() }
+        .navigationDestination(isPresented: $showingLiveVoice) { LiveVoiceFeature(account: .openai) }
         .task {
             guard opensVoiceKey, !openedForVoice else { return }
             openedForVoice = true
-            if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if !VoiceDirect.enabled { showingLiveVoice = true }
+            if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if VoiceDirect.account == nil { showingLiveVoice = true }
         }
     }
 }
@@ -83,7 +93,7 @@ private struct InUseCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: has ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("No Account")))
                         .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
-                    if has { Text(verbatim: provider.name).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
+                    if has { Text(verbatim: ModelKeys.selectedAccountName).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
                 }
             }
             .accessibilityElement(children: .combine)
@@ -100,8 +110,8 @@ private struct InUseCard: View {
     }
 
     @ViewBuilder private func uses(has: Bool, provider: ModelProvider, singleLine: Bool) -> some View {
-        chip("Text Chat", has ? provider.name : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
-        chip("Live Voice", VoiceDirect.apiKey != nil ? AppLocalization.text(LocalizedStringResource("OpenAI")) : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
+        chip("Text Chat", has ? ModelKeys.selectedAccountName : AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
+        chip("Live Voice", VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("No Account")), singleLine: singleLine)
         chip("Dictation", AppLocalization.text(LocalizedStringResource("On This iPhone")), singleLine: singleLine)
     }
 
@@ -124,15 +134,16 @@ private struct InUseCard: View {
 enum ModelAccounts {
     static func isSetUp(_ provider: ModelProvider) -> Bool {
         switch provider {
-        case .custom: !ModelKeys.customURL.isEmpty
+        case .custom: !CustomProviders.all.isEmpty
         case .chatgpt: ChatGPTAccount.signedIn
         default: ModelKeys.hasKey(provider)
         }
     }
 
     static func canChat(_ provider: ModelProvider) -> Bool { provider.wired }
-    /// Live voice is OpenAI's Realtime API: an OpenAI API key only (a ChatGPT sign-in can't open it).
-    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .openai }
+    /// Live voice is a Realtime API: an OpenAI API key, or a custom provider whose service has one (a
+    /// ChatGPT sign-in can't open it).
+    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .openai || provider == .custom }
 
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
@@ -146,21 +157,58 @@ enum ModelAccounts {
     static func uses(_ provider: ModelProvider) -> String {
         var out: [String] = []
         if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(AppLocalization.text(LocalizedStringResource("Text Chat"))) }
-        if canTalkLive(provider), VoiceDirect.apiKey != nil { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
+        if provider == .openai, VoiceDirect.account == .openai { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
+        return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
+    }
+
+    /// The same for one custom provider.
+    static func uses(_ custom: CustomProvider) -> String {
+        var out: [String] = []
+        if ModelKeys.selectedProvider == .custom, ModelKeys.hasUsableKey, CustomProviders.parse(ModelKeys.selectedModel)?.provider == custom.id {
+            out.append(AppLocalization.text(LocalizedStringResource("Text Chat")))
+        }
+        if VoiceDirect.account == .custom(custom.id) { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
         return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
     }
 }
 
 private struct AccountRow: View {
-    var provider: ModelProvider
+    let provider: ModelProvider
+    let name: String
+    let usage: String
     var body: some View {
         HStack(spacing: 12) {
             ProviderTile(provider: provider)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: provider.name)
-                Text(ModelAccounts.uses(provider)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: name)
+                Text(verbatim: usage).font(.footnote).foregroundStyle(Color(.secondaryLabel))
             }
         }
+    }
+}
+
+struct ConnectionCheckFeedback: View {
+    let result: ConnectionCheck.Result
+    var api: CustomAPIStyle? = nil
+    var saved = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label {
+                Text(result.words)
+            } icon: {
+                Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+            }
+            .foregroundStyle(result.passed ? Color(.systemGreen) : Color(.systemOrange))
+            if let api, result.passed {
+                Text(verbatim: AppLocalization.text(LocalizedStringResource("Answered in the \(api.name) API")))
+                    .foregroundStyle(Color(.secondaryLabel))
+            }
+            if let detail = result.detail { Text(verbatim: detail) }
+            if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
+        }
+        .font(.footnote)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -191,9 +239,9 @@ private struct AccountDetail: View {
                     } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
-                NavigationLink { LiveVoiceFeature() } label: {
+                NavigationLink { LiveVoiceFeature(account: .openai) } label: {
                     LabeledContent {
-                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.enabled ? VoiceDirect.model : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
+                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
                     } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
                 }
                 .disabled(!ModelAccounts.canTalkLive(provider))
@@ -203,14 +251,13 @@ private struct AccountDetail: View {
                 if !ModelAccounts.canChat(provider) {
                     Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
                 } else if !ModelAccounts.canTalkLive(provider) {
-                    Text("Live voice runs on OpenAI’s Realtime API, which only an OpenAI API key can open. Dictation in the message field works with this account.")
+                    Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open. Dictation in the message field works with this account.")
                 }
             }
 
             Section {
                 Button(provider.signsIn ? "Sign Out" : "Delete Account", role: .destructive) {
-                    if provider == .custom { ModelKeys.customURL = ""; ModelKeys.customModel = "" }
-                    ModelKeys.remove(provider)
+                    if provider == .custom, let current = CustomProviders.current { CustomProviders.remove(current.id) } else { ModelKeys.remove(provider) }
                     if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
                         ModelKeys.selectedProvider = other
                     }
@@ -231,8 +278,10 @@ private struct AccountDetail: View {
 }
 
 /// Account › Text Chat: which of its models Poki's card offers. Which one answers is chosen on the card.
-private struct TextChatFeature: View {
+struct TextChatFeature: View {
     var provider: ModelProvider
+    /// One custom provider's models only.
+    var custom: UUID? = nil
     @State private var version = ModelKeys.saved
     @State private var loading = false
     @State private var problem: String?
@@ -240,7 +289,7 @@ private struct TextChatFeature: View {
     var body: some View {
         Form {
             Section {
-                ForEach(ModelCatalog.all(provider)) { choice in
+                ForEach(custom.map { ModelCatalog.all(custom: $0) } ?? ModelCatalog.all(provider)) { choice in
                     Toggle(isOn: Binding(get: { ModelCatalog.enabled(provider).contains(choice.id) }, set: { ModelCatalog.set(choice.id, on: $0, for: provider) })) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(choice.name)
@@ -254,7 +303,7 @@ private struct TextChatFeature: View {
             } header: {
                 Text("Models to Choose From")
             } footer: {
-                Text(problem ?? AppLocalization.text(LocalizedStringResource("Fast models without long thinking answer quickest on the phone. Models from \(provider.name)’s list start switched off.")))
+                Text(problem ?? AppLocalization.text(LocalizedStringResource("Fast models without long thinking answer quickest on the phone. Models from \(accountName)’s list start switched off.")))
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -264,38 +313,52 @@ private struct TextChatFeature: View {
         .navigationTitle(AppLocalization.text("Text Chat"))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .task { if ModelCatalog.listed(provider).isEmpty, provider != .chatgpt { refresh() } }
+        .task {
+            let empty = custom.map { ModelCatalog.listedCustom($0).isEmpty } ?? ModelCatalog.listed(provider).isEmpty
+            if empty, provider != .chatgpt { refresh() }
+        }
     }
+
+    private var accountName: String { custom.flatMap { CustomProviders.provider($0) }?.displayName ?? provider.name }
 
     private func refresh() {
         loading = true
         problem = nil
         Task {
-            do { _ = try await ModelCatalog.refresh(provider) } catch { problem = AppLocalization.text(LocalizedStringResource("\(provider.name) didn’t return its model list. The built-in models still work.")) }
+            do { if let custom { _ = try await ModelCatalog.refresh(custom: custom) } else { _ = try await ModelCatalog.refresh(provider) } }
+            catch is CancellationError { /* The account changed while loading. */ }
+            catch let error as ModelCatalog.DiscoveryError { problem = error.message }
+            catch { problem = AppLocalization.text(LocalizedStringResource("\(accountName) didn’t return its model list. The built-in models still work.")) }
             loading = false
         }
     }
 }
 
-/// Account › Live Voice (OpenAI only): on or off, the voice model, and which voice models to offer.
-private struct LiveVoiceFeature: View {
+/// Account › Live Voice: on or off, the voice model, and which voice models to offer, for OpenAI or a
+/// custom provider. One account runs live voice at a time.
+struct LiveVoiceFeature: View {
+    var account: VoiceAccount
     @State private var version = ModelKeys.saved
 
     var body: some View {
         Form {
             Section {
-                Toggle("Use for Live Voice", isOn: Binding(get: { VoiceDirect.enabled }, set: { VoiceDirect.enabled = $0 }))
-                if VoiceDirect.enabled {
-                    Picker("Voice Model", selection: Binding(get: { ModelCatalog.voiceModel }, set: { ModelCatalog.voiceModel = $0 })) {
-                        ForEach(ModelCatalog.voiceAvailable) { Text($0.name).tag($0.id) }
+                Toggle("Use for Live Voice", isOn: Binding(get: { VoiceDirect.isOn(account) }, set: { VoiceDirect.set(account, on: $0) }))
+                if VoiceDirect.isOn(account) {
+                    Picker("Voice Model", selection: Binding(get: { ModelCatalog.voiceModelID(for: account) }, set: { ModelCatalog.setVoiceModelID($0, for: account) })) {
+                        ForEach(ModelCatalog.voiceOffered(for: account)) { Text($0.name).tag($0.id) }
                     }
                 }
             } footer: {
-                Text("Live voice is a spoken conversation with OpenAI’s Realtime model: it listens, taps and types, and answers out loud.")
+                if account == .openai {
+                    Text("Live voice is a spoken conversation with OpenAI’s Realtime model: it listens, taps and types, and answers out loud.")
+                } else {
+                    Text("Live voice is a spoken conversation with the Realtime API at this service’s first address. It listens, taps and types, and answers out loud. Turn it on only if the service offers the Realtime API.")
+                }
             }
             Section {
-                ForEach(ModelCatalog.voiceAll) { choice in
-                    Toggle(choice.name, isOn: Binding(get: { ModelCatalog.voiceEnabled.contains(choice.id) }, set: { ModelCatalog.setVoice(choice.id, on: $0) }))
+                ForEach(ModelCatalog.voiceChoices(for: account)) { choice in
+                    Toggle(choice.name, isOn: Binding(get: { ModelCatalog.voiceOn(for: account).contains(choice.id) }, set: { ModelCatalog.setVoice(choice.id, on: $0, for: account) }))
                 }
             } header: {
                 Text("Voice Models to Choose From")
@@ -319,13 +382,17 @@ struct AddAccount: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editing: ModelProvider?
     @State private var signingIn = false
+    @State private var addingCustom = false
+    @State private var addedCustom = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     ForEach(ModelProvider.allCases) { provider in
-                        Button { if provider.signsIn { signingIn = true } else { editing = provider } } label: {
+                        Button {
+                            if provider.signsIn { signingIn = true } else if provider == .custom { addingCustom = true } else { editing = provider }
+                        } label: {
                             HStack(spacing: 12) {
                                 ProviderTile(provider: provider)
                                 VStack(alignment: .leading, spacing: 1) {
@@ -333,12 +400,13 @@ struct AddAccount: View {
                                     Text(capabilities(provider)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
                                 }
                                 Spacer()
-                                if ModelAccounts.isSetUp(provider) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                // Custom endpoints can be added again and again.
+                                if provider != .custom, ModelAccounts.isSetUp(provider) { Image(systemName: "checkmark").foregroundStyle(.tint) }
                             }
                         }
                     }
                 } footer: {
-                    Text("Text chat works with every account. Live voice needs an OpenAI API key.")
+                    Text("Text chat works with every account. Live voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like.")
                 }
             }
             .listStyle(.insetGrouped)
@@ -347,6 +415,7 @@ struct AddAccount: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .sheet(item: $editing, onDismiss: { if editing == nil { dismiss() } }) { provider in KeyEntry(provider: provider) }
             .sheet(isPresented: $signingIn, onDismiss: { if ChatGPTAccount.signedIn { dismiss() } }) { ChatGPTSignIn() }
+            .sheet(isPresented: $addingCustom, onDismiss: { if addedCustom { dismiss() } }) { CustomProviderEditor(id: nil) { addedCustom = true } }
         }
     }
 
@@ -368,6 +437,7 @@ struct KeyEntry: View {
     @State private var key = ""
     @State private var url = ModelKeys.customURL
     @State private var modelID = ModelKeys.customModel
+    @State private var discovery = CustomModelDiscovery()
     @State private var failed = false
     @State private var testing = false
     @State private var result: ConnectionCheck.Result?
@@ -389,10 +459,33 @@ struct KeyEntry: View {
                 } footer: {
                     if !provider.wired {
                         Text("Poki keeps the key now; chatting with \(provider.name) comes in an update. Until then, choose Anthropic or OpenAI.")
+                    } else if provider == .custom,
+                              ModelCatalog.normalizedAddress(url) != ModelCatalog.normalizedAddress(ModelKeys.customURL),
+                              ModelKeys.hasKey(provider) {
+                        Text("The saved key belongs to the previous address. Enter a key for this service if it needs one.")
                     } else if ModelKeys.hasKey(provider) {
                         Text("A key is saved. Enter a new one to replace it.")
                     } else {
                         Text(verbatim: provider.keyHelp)
+                    }
+                }
+                if provider == .custom {
+                    Section {
+                        Button(action: fetchModels) {
+                            HStack {
+                                Text(discovery.loading ? "Reading the Model List…" : "Fetch Model List")
+                                Spacer()
+                                if discovery.loading { ProgressView() }
+                            }
+                        }
+                        .disabled(discovery.loading || testing || !validCustomAddress)
+                        .accessibilityIdentifier("keyEntry.fetchModels")
+                    } footer: {
+                        if let problem = discovery.problem {
+                            Text(problem.message)
+                        } else {
+                            Text("Choose a model from the service, or enter its ID manually.")
+                        }
                     }
                 }
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
@@ -409,18 +502,8 @@ struct KeyEntry: View {
                         .accessibilityIdentifier("keyEntry.test")
                     } footer: {
                         if let result, !testing {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label {
-                                    Text(result.words)
-                                } icon: {
-                                    Image(systemName: result.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                }
-                                .foregroundStyle(result.passed ? Color(.systemGreen) : Color(.systemOrange))
-                                if let detail = result.detail { Text(verbatim: detail) }
-                                if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
-                            }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityIdentifier("keyEntry.result")
+                            ConnectionCheckFeedback(result: result, saved: saved)
+                                .accessibilityIdentifier("keyEntry.result")
                         }
                     }
                 }
@@ -430,6 +513,12 @@ struct KeyEntry: View {
             }
             .navigationTitle(Text(verbatim: provider.name))
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: url) { _, _ in discovery.reset() }
+            .onChange(of: key) { _, _ in discovery.reset() }
+            .onDisappear { discovery.cancel() }
+            .sheet(isPresented: $discovery.presenting) {
+                CustomModelPicker(models: discovery.models, selection: $modelID)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
@@ -437,13 +526,21 @@ struct KeyEntry: View {
         }
     }
 
+    private var validCustomAddress: Bool {
+        (try? ModelCatalog.customRequest(address: url, key: nil)) != nil
+    }
+
+    private func fetchModels() {
+        discovery.fetch(address: url, key: ModelKeys.customDraftKey(address: url, typedKey: key))
+    }
+
     /// The key a test sends: the one typed, else the saved one. A custom endpoint may have none, but
     /// needs an address and a model.
     private var testKey: String? {
         let typed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if provider == .custom {
-            let ready = URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty
-            return ready ? (typed.isEmpty ? ModelKeys.key(provider) ?? "" : typed) : nil
+            let ready = validCustomAddress && !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return ready ? (ModelKeys.customDraftKey(address: url, typedKey: key) ?? "") : nil
         }
         return typed.isEmpty ? ModelKeys.key(provider) : typed
     }
@@ -456,7 +553,8 @@ struct KeyEntry: View {
     private func check(_ key: String, closeIfPassed: Bool) {
         testing = true
         result = nil
-        let (url, modelID) = (url, modelID)
+        let url = provider == .custom ? ModelCatalog.normalizedAddress(url) : url
+        let modelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
             result = outcome
@@ -469,24 +567,22 @@ struct KeyEntry: View {
     }
 
     private var canSave: Bool {
-        provider == .custom ? URL(string: url.trimmingCharacters(in: .whitespaces))?.scheme?.hasPrefix("http") == true && !modelID.trimmingCharacters(in: .whitespaces).isEmpty : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        provider == .custom ? validCustomAddress && !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save() {
         let tested = testKey
         do {
             if provider == .custom {
-                ModelKeys.customURL = url.trimmingCharacters(in: .whitespaces)
-                ModelKeys.customModel = modelID.trimmingCharacters(in: .whitespaces)
-                if key.isEmpty { ModelKeys.selectedProvider = .custom }
-            }
-            if !key.isEmpty { try ModelKeys.save(key, for: provider) }
+                try ModelKeys.saveCustom(address: url, model: modelID, typedKey: key)
+                discovery.reset()
+            } else if !key.isEmpty { try ModelKeys.save(key, for: provider) }
             // A new key picks its provider; the model page's picker switches between providers with keys.
-            if provider.wired, !key.isEmpty {
+            if provider.wired, !key.isEmpty, provider != .custom {
                 // Ready at once: chat on this account's first fast model, live voice on where it can.
                 ModelKeys.selectedProvider = provider
                 if let first = ModelCatalog.available(provider).first { ModelKeys.selectedModel = first.id }
-                if provider == .openai { VoiceDirect.enabled = true }
+                if provider == .openai, VoiceDirect.account == nil { VoiceDirect.set(.openai, on: true) }
                 Task { _ = try? await ModelCatalog.refresh(provider) }
             }
             key = ""
@@ -495,6 +591,49 @@ struct KeyEntry: View {
             if provider.wired, let tested { check(tested, closeIfPassed: true) } else { dismiss() }
         } catch {
             failed = true
+        }
+    }
+}
+
+
+struct CustomModelPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let models: [String]
+    @Binding var selection: String
+    @State private var query = ""
+
+    private var matches: [String] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? models : models.filter { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if models.isEmpty {
+                    Text("No chat models were returned. You can enter a model ID manually.")
+                        .foregroundStyle(.secondary)
+                } else if matches.isEmpty {
+                    Text("No matching models.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(matches, id: \.self) { model in
+                        Button {
+                            selection = model
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(verbatim: model).foregroundStyle(.primary)
+                                Spacer()
+                                if model == selection { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search models")
+            .navigationTitle(AppLocalization.text("Choose a Model"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
 }

@@ -725,7 +725,7 @@ struct SetupStepRow: View {
     var body: some View {
         let done = model.stepReadyForUse(step)
         LabeledContent {
-            if step == .loopback && !model.loopback.isWorking && (model.hasOpenInProcessSession || model.canStartTasks) {
+            if step == .loopback && !model.loopback.isWorking && (model.hasOpenInProcessSession || model.canStartTasks || model.mountedImageStandsIn) {
                 Text("Local automation ready").foregroundStyle(.secondary)
             } else if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
                 Text("Checking…").foregroundStyle(.secondary)

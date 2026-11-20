@@ -4,7 +4,7 @@ import WebRTC
 
 /// What VoiceModel talks through: a VoiceLink in the app, a recorded conversation in tests.
 protocol VoiceConnection: AnyObject, Sendable {
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws
     @discardableResult func send(_ event: [String: Any]) -> Bool
     func setRemoteVolume(_ value: Double)
     func diagnose(_ write: @escaping @MainActor (String) -> Void)
@@ -62,7 +62,8 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
     /// `microphone: false` (test runs) sends no audio track and needs no microphone permission; the
     /// model's voice still comes back.
     /// `direct: true` keeps the connection off VPN interfaces (the retry after a try that never opened).
-    func connect(secret: String, microphone: Bool = true, direct: Bool = false) async throws {
+    /// `base`: the Realtime API's address the secret is for, OpenAI's when nil.
+    func connect(secret: String, base: URL? = nil, microphone: Bool = true, direct: Bool = false) async throws {
         #if DEBUG
         let factory = !microphone ? Self.silentFactory : direct ? Self.directFactory : Self.factory
         #else
@@ -114,7 +115,7 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             peer.setLocalDescription(offer) { error in if let error { done.resume(throwing: error) } else { done.resume() } }
         }
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/realtime/calls")!, timeoutInterval: 20)
+        var request = URLRequest(url: (base ?? URL(string: "https://api.openai.com/v1")!).appending(path: "realtime/calls"), timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
@@ -124,6 +125,9 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw VoiceError.realtime(http.statusCode, String(answer.prefix(300)))
         }
+        // The largest event the data channel takes (64 KiB when the answer names none): a screenshot must fit.
+        let size = answer.range(of: #"a=max-message-size:\d+"#, options: .regularExpression).map { answer[$0].dropFirst(19) } ?? "none named"
+        await MainActor.run { AppLog.shared.add("voice", "data channel max-message-size: \(size)") }
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             peer.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: answer)) { error in if let error { done.resume(throwing: error) } else { done.resume() } }
         }

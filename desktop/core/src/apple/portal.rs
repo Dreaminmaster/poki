@@ -5,6 +5,20 @@ use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 const BASE: &str = "https://developerservices2.apple.com/services/QH65B2";
+
+#[cfg(test)]
+thread_local! {
+    /// Where a test's portal calls go instead: its mock server, on the test's own thread.
+    pub(crate) static TEST_BASE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn base() -> String {
+    #[cfg(test)]
+    if let Some(mock) = TEST_BASE.with(|b| b.borrow().clone()) {
+        return mock;
+    }
+    BASE.to_string()
+}
 const CLIENT_ID: &str = "XABBG36SBA";
 /// The App ID feature key for app groups.
 pub const FEATURE_APP_GROUPS: &str = "APG3427HIY";
@@ -97,7 +111,7 @@ impl<'a> Portal<'a> {
         plist::to_writer_xml(&mut body, &plist::Value::Dictionary(req))?;
         let mut rb = self
             .http
-            .post(format!("{BASE}/{action}?clientId={CLIENT_ID}"))
+            .post(format!("{}/{action}?clientId={CLIENT_ID}", base()))
             .header("Content-Type", "text/x-xml-plist")
             .header("Accept", "text/x-xml-plist")
             .header("Accept-Language", "en-us")
@@ -311,14 +325,50 @@ impl<'a> Portal<'a> {
     }
 }
 
+/// The developer portal turned the Xcode token away: code 1100, or its sentence under another code.
+fn is_expired_session(code: i64, text: &str) -> bool {
+    code == 1100 || text.to_ascii_lowercase().contains("session has expired")
+}
+
+/// The portal's answer when it turned away the Xcode token it was sent (see `portal_error`). Only
+/// for errors from a portal call: unlike `gsa::is_session_expired`, it never takes Apple's sign-in
+/// codes (-20101, -22406, -21212), which at sign-in mean the Apple ID or password is wrong.
+pub fn turned_token_away(e: &Error) -> bool {
+    matches!(e, Error::NeedsPerson(m) if m == super::gsa::SESSION_EXPIRED)
+}
+
 fn portal_error(code: i64, text: String) -> Error {
     let t = match code {
         7460 => "This team has registered its limit of devices. Remove one at developer.apple.com, or use another Apple ID.".to_string(),
         3250 | 7250 => "A free Apple ID can only sign three apps at a time, and Apple counts Poki's extensions. Remove another sideloaded app from your developer account and try again.".to_string(),
         9100 | 7460_0 => text,
         35 => "Apple's developer agreement has changed. Open developer.apple.com once, accept it, then try again.".to_string(),
+        // Apple's own words ("Your session has expired. Please log in.") name no way back. Poki's
+        // sentence is the one the apps know, translate and offer Sign In Again for.
+        _ if is_expired_session(code, &text) => return Error::NeedsPerson(super::gsa::SESSION_EXPIRED.into()),
         _ if text.is_empty() => format!("The developer portal refused the request (code {code})."),
         _ => text,
     };
     Error::apple(code, t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_portal_session_reads_as_sign_in_again() {
+        for (code, text) in [(1100, "Your session has expired. Please log in."), (9999, "Your session has expired. Please log in."), (1100, "")] {
+            let e = portal_error(code, text.into());
+            assert!(super::super::gsa::is_session_expired(&e), "{code} {text}");
+            assert!(turned_token_away(&e), "{code} {text}");
+            assert_eq!(e.to_string(), super::super::gsa::SESSION_EXPIRED);
+        }
+        assert!(!super::super::gsa::is_session_expired(&portal_error(35, String::new())));
+        assert!(!turned_token_away(&portal_error(35, String::new())));
+        // At sign-in these mean a wrong Apple ID or password: never a reason to try the portal again.
+        for code in [-20101, -22406, -21212] {
+            assert!(!turned_token_away(&Error::apple(code, "Your Apple ID or password was entered incorrectly.".to_string())), "{code}");
+        }
+    }
 }

@@ -161,7 +161,7 @@ Accessibility can miss changes that affect only pixels, such as Calculator's dis
 | Apps | `list_apps` | List installed applications, excluding system apps unless include_system=true. |
 | Apps | `launch_app` | Launch an application by bundle_id or unambiguous name. |
 | Apps | `terminate_app` | Stop an application identified by bundle_id on the selected device. |
-| Apps | `install_app` | Install an application from a local path. |
+| Apps | `install_app` | Install an application from a local path. When the app is one of Poki's own builds (bundle id starting nz.zheha.poki) on a physical iPhone, a running Poki is ended first, and an install that makes no progress for 90 seconds is retried once before it fails. |
 | Apps | `uninstall_app` | Remove an installed application identified by bundle_id. |
 | Apps | `open_settings` | Open a supported Settings page or an application settings page. |
 | Apps | `open_url` | Ask the selected device to open a URL. |

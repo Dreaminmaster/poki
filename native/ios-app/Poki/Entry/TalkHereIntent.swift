@@ -3,14 +3,15 @@ import AVFAudio
 
 /// Talk with Poki without leaving the app you're in: from the Action Button, Shortcuts or Siri, Poki
 /// stays in the background, so the app in front stays in front, and Poki looks at it and works in it
-/// while you talk. The Live Activity shows the talk and carries End; running this again ends it too.
+/// while you talk. The Live Activity shows the talk and carries End; running this again stops the
+/// talk and what Poki is doing, as End does.
 ///
 /// iOS opens the microphone for an app in the background only from an AudioRecordingIntent, and only
 /// with a Live Activity up: LiveActivityIntent lets this intent start one from the background. When
 /// Poki cannot talk yet (no voice set up, the first run, pairing, a task under way, no microphone
 /// permission) or the Live Activity does not start, Poki opens and Talk to Poki goes on from there.
 struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
-    static let title = LocalizedStringResource("Talk to Poki Here", table: "Entry")
+    static let title = LocalizedStringResource("Poki Anytime", table: "Entry")
     static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk.", table: "Entry"))
     static let openAppWhenRun = false
     @available(iOS 26.0, *)
@@ -26,8 +27,8 @@ struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundConti
             return try await openPoki(LocalizedStringResource("Poki wasn’t ready. Try again in a moment.", table: "Entry"))
         }
         if app.voice.isOn {
-            AppLog.shared.add("voice", "Talk Here ended the talk")
-            app.voice.stop()
+            AppLog.shared.add("voice", "Poki Anytime ended the talk")
+            app.stopFromOutside("Poki Anytime ended the talk")
             return .result()
         }
         if let why = Self.whyPokiOpens(app, chat) { return try await openPoki(why) }

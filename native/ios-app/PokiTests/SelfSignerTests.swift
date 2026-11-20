@@ -7,6 +7,10 @@ private final class FakeSignerTransport {
     var latestValue: [String: Any]
     var prepareError: SignerError?
     var finishError: SignerError?
+    var teamsError: SignerError?
+    /// The next teams answer fails with teamsError, the ones after it go through.
+    var teamsFailsOnce = false
+    var signInError: SignerError?
     var finishClearsPendingAndRequiresReauth = false
     var holdTeams = false
     private var heldTeams: [CheckedContinuation<Void, Never>] = []
@@ -57,6 +61,10 @@ private final class FakeSignerTransport {
             if holdTeams {
                 await withCheckedContinuation { heldTeams.append($0) }
             }
+            if let teamsError {
+                if teamsFailsOnce { self.teamsError = nil }
+                throw teamsError
+            }
             return try JSONSerialization.data(withJSONObject: [
                 "v": [["team_id": "TEAMID1234", "name": "Tester", "kind": "Individual", "is_free": true]],
             ])
@@ -77,6 +85,7 @@ private final class FakeSignerTransport {
                 ],
             ])
         case "sign_in":
+            if let signInError { throw signInError }
             statusValue["needs_code"] = false
             statusValue["needs_reauth"] = false
             statusValue["signed_in"] = true
@@ -186,6 +195,84 @@ final class SelfSignerTests: XCTestCase {
         await second.value
 
         XCTAssertEqual(fake.ops.filter { $0 == "teams" }.count, 1)
+    }
+
+    func testExpiredAppleSessionOffersSignInAgainUntilSignedIn() async {
+        let fake = FakeSignerTransport(signedIn: true)
+        fake.teamsError = SignerError(message: SelfSigner.sessionExpiredMessage, code: SelfSigner.sessionExpiredCode)
+        let signer = SelfSigner(transport: { req, prog in try await fake.send(req, prog) })
+        await signer.reload()
+
+        await signer.loadTeams()
+        XCTAssertTrue(signer.sessionExpired, "an expired Apple session must surface Sign In Again even while an account is stored")
+        XCTAssertTrue(signer.signedIn)
+
+        fake.teamsError = nil
+        await signer.signIn(appleID: "tester@example.com", password: "pw", keepPassword: true)
+        XCTAssertFalse(signer.sessionExpired)
+        XCTAssertNil(signer.lastError)
+    }
+
+    func testOtherSignerFailuresDoNotAskToSignInAgain() async {
+        let fake = FakeSignerTransport(signedIn: true)
+        fake.teamsError = SignerError(message: "This Apple ID has no developer team.", code: "message")
+        let signer = SelfSigner(transport: { req, prog in try await fake.send(req, prog) })
+        await signer.reload()
+        await signer.loadTeams()
+        XCTAssertFalse(signer.sessionExpired)
+        XCTAssertNotNil(signer.lastError)
+    }
+
+    private func expiredSigner(_ fake: FakeSignerTransport) async -> SelfSigner {
+        fake.teamsError = SignerError(message: SelfSigner.sessionExpiredMessage, code: SelfSigner.sessionExpiredCode)
+        let signer = SelfSigner(transport: { req, prog in try await fake.send(req, prog) })
+        signer.phone = { ["host": "10.7.0.1"] }
+        await signer.reload()
+        await signer.loadTeams()
+        XCTAssertTrue(signer.sessionExpired)
+        return signer
+    }
+
+    func testAFailedSignInAgainStillShowsItsError() async {
+        let fake = FakeSignerTransport(signedIn: true)
+        let signer = await expiredSigner(fake)
+        XCTAssertEqual(signer.lastError, SelfSigner.sessionExpiredMessage)
+        XCTAssertNil(signer.shownError, "the Sign In Again row says it, so Apple's sentence is not repeated under it")
+
+        fake.signInError = SignerError(message: "Your Apple ID or password was entered incorrectly.", code: "apple")
+        await signer.signIn(appleID: "tester@example.com", password: "wrong", keepPassword: false)
+        XCTAssertTrue(signer.sessionExpired, "the sign-in did not go through, so Sign In Again stays")
+        XCTAssertEqual(signer.shownError, "Your Apple ID or password was entered incorrectly.", "a failed Sign In Again must say why")
+        XCTAssertEqual(fake.ops.filter { $0 == "teams" }.count, 1, "a sign-in that failed asks Apple for no teams")
+    }
+
+    func testATeamsCheckStillOutCannotMarkANewSignInExpired() async {
+        let fake = FakeSignerTransport(signedIn: true)
+        let signer = await expiredSigner(fake)
+
+        // The Apple Account page checks again when it opens, and the person signs in before Apple answers.
+        fake.teamsFailsOnce = true
+        fake.holdTeams = true
+        let check = Task { await signer.loadTeams() }
+        await settle()
+        let signIn = Task { await signer.signIn(appleID: "tester@example.com", password: "pw", keepPassword: false) }
+        await settle()
+        XCTAssertFalse(fake.ops.contains("sign_in"), "the sign-in waits for the check still out")
+
+        fake.holdTeams = false
+        fake.releaseTeams()
+        await check.value
+        await signIn.value
+        XCTAssertFalse(signer.sessionExpired, "the old session's answer must not outlast the new sign-in")
+        XCTAssertNil(signer.shownError)
+    }
+
+    func testAGoodRenewalClearsSignInAgain() async {
+        let fake = FakeSignerTransport(signedIn: true)
+        let signer = await expiredSigner(fake)
+        await signer.prepare(kind: "refresh")
+        XCTAssertFalse(signer.sessionExpired, "a renewal went through Apple's developer service, so its sign-in works again")
+        XCTAssertNil(signer.lastError)
     }
 
     func testCancelSignInClearsPendingAndAllowsSwitchingAppleAccount() async {

@@ -8,18 +8,23 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../scripts/release/publish-r2.mjs', import.meta.url));
+const mac = 'PokiSetup-0.2.8-1913-macos.dmg';
+const windows = 'PokiSetup-0.2.8-1913-windows-x64-setup.exe';
+const desktopSums = 'SHA256SUMS-desktop.txt';
 
-async function fixture(t) {
+async function fixture(t, tag = 'app-0.4.1-beta.1') {
   const root = await mkdtemp(join(tmpdir(), 'poki-publish-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const keys = generateKeyPairSync('ed25519');
   const config = { url: 'https://releases.example.com/catalog.json', public_key: keys.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex') };
-  const tag = 'app-0.4.1-beta.1';
   const release = { tag_name: tag, name: 'Poki Beta', html_url: `https://github.com/JosssphZhou/poki/releases/tag/${tag}`, published_at: '2026-01-01T00:00:00Z', draft: false, prerelease: true, assets: [] };
   await mkdir(join(root, 'assets'));
   await mkdir(join(root, 'output'));
-  for (const name of ['Poki-external-0.4.1-1300.ipa', 'Poki-signing.zip', 'SHA256SUMS', 'poki-relay-worker.js']) {
-    const body = Buffer.from(`synthetic publication fixture: ${name}`);
+  const files = tag.startsWith('desktop-') ? [mac, windows, desktopSums] : ['Poki-external-0.4.1-1300.ipa', 'Poki-signing.zip', 'SHA256SUMS', 'poki-relay-worker.js'];
+  for (const name of files) {
+    const body = Buffer.from(name === desktopSums
+      ? release.assets.map(asset => `${asset.digest.slice(7)}  ${asset.name}\n`).join('')
+      : `synthetic publication fixture: ${name}`);
     await writeFile(join(root, 'assets', name), body);
     release.assets.push({ name, size: body.length, state: 'uploaded', digest: `sha256:${createHash('sha256').update(body).digest('hex')}`, browser_download_url: `https://github.com/JosssphZhou/poki/releases/download/${tag}/${name}` });
   }
@@ -33,6 +38,82 @@ async function fixture(t) {
     },
   };
 }
+
+test('a standalone Setup prerelease adds only the installers and checksum list to the signed catalog', async t => {
+  const phone = await fixture(t);
+  const baseline = phone.run();
+  assert.equal(baseline.status, 0, baseline.stderr);
+  const previous = join(phone.root, 'output/catalog.json');
+  const f = await fixture(t, 'desktop-v0.2.8');
+  await writeFile(join(f.root, 'source.json'), await readFile(join(phone.root, 'source.json')));
+
+  const result = f.run(['--previous', previous], phone.keys.privateKey);
+  assert.equal(result.status, 0, result.stderr);
+  const envelope = JSON.parse(await readFile(join(f.root, 'output/catalog.json'), 'utf8'));
+  const payload = Buffer.from(envelope.payload, 'base64');
+  assert.ok(verify(null, payload, phone.keys.publicKey, Buffer.from(envelope.signature, 'base64')));
+  const { releases } = JSON.parse(payload);
+  assert.equal(releases[0].tag_name, 'desktop-v0.2.8');
+  assert.deepEqual(releases[0].assets.map(a => a.name), [mac, windows, desktopSums]);
+  assert.deepEqual(releases[1], JSON.parse(await readFile(join(phone.root, 'output/release.json'), 'utf8')));
+});
+
+test('ineligible or incomplete Setup releases leave the catalog intact', async t => {
+  const cases = {
+    draft: /Only published/,
+    stable: /Only published/,
+    unpublished: /Only published/,
+    'moving tag': /Only published/,
+    'missing Windows installer': /Setup needs/,
+    'different build': /Setup needs/,
+    'wrong version': /Setup needs/,
+    'extra asset': /Setup needs/,
+    'incomplete checksum list': /must list.*installer/,
+    'mismatched checksum': /does not match SHA256SUMS-desktop/,
+  };
+  for (const [failure, reason] of Object.entries(cases)) {
+    await t.test(failure, async t => {
+      const f = await fixture(t, 'desktop-v0.2.8');
+      const target = join(f.root, 'output/catalog.json');
+      await writeFile(target, 'existing catalog');
+      if (failure === 'draft') f.release.draft = true;
+      if (failure === 'stable') f.release.prerelease = false;
+      if (failure === 'unpublished') f.release.published_at = null;
+      if (failure === 'moving tag') {
+        f.release.tag_name = 'desktop-latest';
+        f.release.html_url = f.release.html_url.replace('desktop-v0.2.8', 'desktop-latest');
+      }
+      if (failure === 'missing Windows installer') f.release.assets = f.release.assets.filter(asset => asset.name !== windows);
+      if (failure === 'different build' || failure === 'wrong version') {
+        const asset = f.release.assets.find(asset => asset.name === windows);
+        const name = failure === 'different build' ? windows.replace('1913', '1914') : windows.replace('0.2.8', '0.2.9');
+        await writeFile(join(f.root, 'assets', name), await readFile(join(f.root, 'assets', windows)));
+        asset.browser_download_url = asset.browser_download_url.replace(windows, name);
+        asset.name = name;
+      }
+      if (failure === 'extra asset') {
+        const name = 'Poki-signing.zip';
+        const body = 'unexpected asset';
+        await writeFile(join(f.root, 'assets', name), body);
+        f.release.assets.push({ name, size: body.length, state: 'uploaded', digest: `sha256:${createHash('sha256').update(body).digest('hex')}`, browser_download_url: `https://github.com/JosssphZhou/poki/releases/download/desktop-v0.2.8/${name}` });
+      }
+      if (failure === 'incomplete checksum list' || failure === 'mismatched checksum') {
+        const path = join(f.root, 'assets', desktopSums);
+        const lines = (await readFile(path, 'utf8')).trimEnd().split('\n');
+        const body = failure === 'incomplete checksum list' ? `${lines[0]}\n` : `${'0'.repeat(64)}  ${mac}\n${lines[1]}\n`;
+        await writeFile(path, body);
+        const asset = f.release.assets.find(asset => asset.name === desktopSums);
+        asset.size = body.length;
+        asset.digest = `sha256:${createHash('sha256').update(body).digest('hex')}`;
+      }
+      await writeFile(join(f.root, 'release.json'), JSON.stringify(f.release));
+      const result = f.run();
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, reason);
+      assert.equal(await readFile(target, 'utf8'), 'existing catalog');
+    });
+  }
+});
 
 test('the release CLI produces a verifiable catalog and retains historical releases', async t => {
   const f = await fixture(t);

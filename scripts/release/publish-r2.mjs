@@ -27,6 +27,24 @@ async function digest(file) {
   return { sha256: hash.digest('hex'), size };
 }
 
+async function verifySetupAssets(version, assets, directory) {
+  const manifest = 'SHA256SUMS-desktop.txt';
+  const mac = assets.find(({ name }) =>
+    name.startsWith(`PokiSetup-${version}-`) && /^PokiSetup-\d+\.\d+\.\d+-\d+-macos\.dmg$/.test(name));
+  const windows = mac && assets.find(({ name }) => name === mac.name.replace(/-macos\.dmg$/, '-windows-x64-setup.exe'));
+  if (assets.length !== 3 || !mac || !windows || !assets.some(({ name }) => name === manifest)) {
+    throw new Error(`Poki Setup needs only the ${version} Mac DMG, Windows x64 installer of the same build, and ${manifest}`);
+  }
+
+  const lines = (await readFile(join(directory, manifest), 'utf8')).trimEnd().split(/\r?\n/);
+  const sums = lines.map(line => /^([a-f0-9]{64}) [ *](\S+)$/i.exec(line));
+  for (const asset of [mac, windows]) {
+    const entry = sums.find(sum => sum?.[2] === asset.name);
+    if (lines.length !== 2 || !entry) throw new Error(`${manifest} must list both installers exactly once`);
+    if (entry[1].toLowerCase() !== asset.sha256) throw new Error(`${asset.name} does not match ${manifest}`);
+  }
+}
+
 function decode(bytes, key) {
   const envelope = JSON.parse(bytes);
   const payload = Buffer.from(envelope.payload, 'base64');
@@ -134,7 +152,12 @@ async function main() {
 
   const release = JSON.parse(await readFile(values.release, 'utf8'));
   const tag = release.tag_name;
-  if (!/^(app-\d+\.\d+\.\d+-beta\.\d+|ios-beta-\d+\.\d+\.\d+-\d+)$/.test(tag) || release.draft || !release.prerelease) throw new Error('Only published, numbered Beta releases may enter the catalog');
+  const setupVersion = /^desktop-v(\d+\.\d+\.\d+)$/.exec(tag)?.[1];
+  if (setupVersion) {
+    if (release.draft !== false || release.prerelease !== true || !release.published_at) throw new Error('Only published Poki Setup prereleases may enter the catalog');
+  } else if (!/^(app-\d+\.\d+\.\d+-beta\.\d+|ios-beta-\d+\.\d+\.\d+-\d+)$/.test(tag) || release.draft || !release.prerelease) {
+    throw new Error('Only published, numbered Beta or desktop-vX.Y.Z prereleases may enter the catalog');
+  }
   if (release.html_url !== `https://github.com/JosssphZhou/poki/releases/tag/${tag}`) throw new Error('Release must belong to the Poki repository');
   if (!Array.isArray(release.assets) || !release.assets.length) throw new Error('Release has no assets');
   const names = new Set();
@@ -150,8 +173,12 @@ async function main() {
     if (actual.size !== asset.size || asset.digest !== `sha256:${actual.sha256}`) throw new Error(`${name} does not match the published GitHub asset`);
     assets.push({ name, ...actual, browser_download_url: `${address.origin}/releases/${tag}/${name}` });
   }
-  if (!assets.some(a => /^Poki-external-\d+\.\d+\.\d+-\d+\.ipa$/.test(a.name)) || !names.has('Poki-signing.zip') || !names.has('SHA256SUMS') || !names.has('poki-relay-worker.js')) throw new Error('Beta needs a numeric-build IPA, signing archive, checksums and relay');
-  if (assets.some(a => a.name.startsWith('PokiSetup-')) && !names.has('SHA256SUMS-desktop.txt')) throw new Error('Poki Setup needs desktop checksums');
+  if (setupVersion) {
+    await verifySetupAssets(setupVersion, assets, values.assets);
+  } else {
+    if (!assets.some(a => /^Poki-external-\d+\.\d+\.\d+-\d+\.ipa$/.test(a.name)) || !names.has('Poki-signing.zip') || !names.has('SHA256SUMS') || !names.has('poki-relay-worker.js')) throw new Error('Beta needs a numeric-build IPA, signing archive, checksums and relay');
+    if (assets.some(a => a.name.startsWith('PokiSetup-')) && !names.has('SHA256SUMS-desktop.txt')) throw new Error('Poki Setup needs desktop checksums');
+  }
 
   let previousBytes;
   if (values.publish) {
