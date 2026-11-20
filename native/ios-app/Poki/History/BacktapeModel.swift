@@ -163,11 +163,15 @@ final class BacktapeModel {
                 let url = URL(string: "https://huggingface.co/\(picked.repo)/resolve/\(picked.revision)/\(file.name)")!
                 let watch = BacktapeDownloadWatch()
                 let before = done
+                // The meter wakes from its sleep when it is cancelled and only runs again after the
+                // download has gone on, sometimes past its end: it then writes nothing, or it would
+                // put the bar back at 99 % over Ready, where it stayed until the app was opened again.
                 let meter = Task { [weak self] in
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .milliseconds(400))
+                    while true {
+                        do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+                        guard !Task.isCancelled, let self, self.choice == picked,
+                              case .downloading = self.state else { return }
                         let now = before + watch.received
-                        guard let self, self.choice == picked else { return }
                         self.state = .downloading(min(0.999, Double(now) / Double(total)))
                     }
                 }
