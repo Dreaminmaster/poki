@@ -215,7 +215,9 @@ final class HistoryCapture: ObservableObject {
     func tidy() async {
         let apps = await HistoryStore.shared.everyApp()
         let web = apps.filter(Self.isWeb)
-        let processes = apps.filter { !Self.isWeb($0) && HistoryAppNames.isProcess($0) }
+        // Only ids known to be no app are cleaned up. Whether an Apple id has an icon here is a
+        // guess (icons may be missing or turned off), so it never deletes history already kept.
+        let processes = apps.filter { !Self.isWeb($0) && Self.isNoise($0) }
         guard !web.isEmpty || !processes.isEmpty else { return }
         HistoryStore.shared.tidy(processes: processes, web: web, browser: Self.safari)
         BacktapeNotes.shared.reset()
