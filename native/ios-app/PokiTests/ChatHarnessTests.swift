@@ -48,19 +48,24 @@ final class ChatHarnessTests: XCTestCase {
     func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
         for target in [4, 100] {
             let transport = MessageListTransport()
-            let scroll = FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true])
             let screens = [[1, 2, 3], [4, 5, 1], [6, 7, 4]]
+            func scroll() -> String {
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true])
+            }
             func count(_ refs: [Int]) -> String {
                 FakeCompletions.tool("count_messages", ["target": target, "refs": refs])
             }
             var turns = [
                 FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
                 FakeCompletions.tool("look", ["full": true]), count(screens[0]),
-                scroll, count(screens[1]), scroll, count(screens[2]),
+                scroll(), count(screens[1]), scroll(), count(screens[2]),
             ]
-            if target == 100 { turns += [scroll, count(screens[2])] }
+            if target == 100 {
+                turns += [scroll(), count(screens[2]),
+                          FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                              "details": [], "answer": ["kind": "action"]])]
+            }
             turns += [
-                FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling."]),
                 FakeCompletions.text("I finished scrolling."),
             ]
             let server = try FakeCompletions(replies: turns)
@@ -71,11 +76,12 @@ final class ChatHarnessTests: XCTestCase {
                 return nil
             }.last)
             XCTAssertEqual(plan.map(\.state), target == 4 ? [.done] : [.failed], result.text)
+            XCTAssertEqual(result.success, target == 4, result.text)
             let reply = try XCTUnwrap(chat.entries.compactMap { entry -> String? in
                 if case .poki(let text) = entry.kind { return text }
                 return nil
             }.last)
-            XCTAssertTrue(reply.contains("4") && reply.contains("Message 01"), reply)
+            XCTAssertTrue(reply.contains("4 of \(target)") && reply.contains("Message 01"), reply)
             if target == 100 {
                 XCTAssertTrue(reply.contains("100") && reply.contains("stopped moving"), reply)
             }
