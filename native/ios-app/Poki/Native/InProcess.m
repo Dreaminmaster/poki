@@ -2447,6 +2447,11 @@ static const int PKFrontKey = -1;
     id root = element ? PKRequestSnapshotWithin(1, ax, element, 2, 24, NULL) : nil;
     BOOL hasWindows = NO, conflict = NO, fixedExtent = NO;
     CGRect window = PKDuoWindowObservation(root, &hasWindows, &conflict);
+    if (CGSizeEqualToSize(window.size, CGSizeMake(386, 678))) {
+        // The cover's compatibility window starts at the display origin and leaves
+        // 80 points on the right for the system status area.
+        window.size.width = 466;
+    }
     if (CGRectIsNull(window) && root && !conflict && [PKTypeName([root elementType]) isEqualToString:@"Application"] &&
         PKDuoFullExtent([root frame])) {
         // SpringBoard's home screen and system prompts need not expose a full-size
