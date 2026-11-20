@@ -21,6 +21,8 @@ struct PokiDetailsView: View {
     @Binding var path: NavigationPath
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
+    /// The Senses or Memory panel, open over Settings.
+    @State private var panel: PokiPanel.Kind?
 
     private var isSample: Bool { UserDefaults.standard.bool(forKey: "pokiDetailsSample") }
     private static let lastRow = "details.lastRow"
@@ -32,9 +34,9 @@ struct PokiDetailsView: View {
             ScrollViewReader { scroll in
             List {
                 Section {
-                    // The first two rows only show: Connection's Automation switch turns Poki on and pauses it.
-                    PokiNameRow(mood: status.mood)
-                    SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: PokiStatusCopy.word(status), dot: status.mood.dot)
+                    // Poki's row only shows, its status right after its name (the owner, Nov 20 2026: no
+                    // Status row of its own). Connection's Automation switch turns Poki on and pauses it.
+                    PokiNameRow(mood: status.mood, status: PokiStatusCopy.word(status))
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("details.status")
                     // Senses: what Poki and agents did, and with Screen History on what the owner did
@@ -59,6 +61,27 @@ struct PokiDetailsView: View {
                         }
                         .accessibilityIdentifier("details.issues")
                     }
+                }
+
+                // Senses and Memory: what Poki takes in and what it keeps, two cards that open as panels
+                // over Settings (the owner, Nov 20 2026).
+                Section {
+                    HStack(spacing: 12) {
+                        Button { panel = .senses } label: {
+                            PokiSpaceCard(title: "Senses", detail: Text(verbatim: screenHistoryValue), date: nil,
+                                          symbol: "eye", tint: Color(.systemPurple))
+                        }
+                        .buttonStyle(PressedDimStyle())
+                        .accessibilityIdentifier("details.senses")
+                        Button { panel = .memory } label: {
+                            PokiSpaceCard(title: "Memory", detail: Text(memoryDetail), date: isSample ? nil : MemoryLibrary.shared.changes.first?.at,
+                                          symbol: "bookmark", tint: Tint.blue)
+                        }
+                        .buttonStyle(PressedDimStyle())
+                        .accessibilityIdentifier("moreSettings.memory")
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
 
                 // What Poki works with.
@@ -199,6 +222,11 @@ struct PokiDetailsView: View {
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+            .sheet(item: $panel) { panel in
+                PokiPanel(kind: panel, openSession: { id in self.panel = nil; dismiss(); openSession(id) })
+                    .environment(model)
+                    .environment(chat)
+            }
             .sheet(isPresented: Bindable(model.signer).needsCodeSheet) { VerificationCodeSheet() }
         }
     }
@@ -230,6 +258,17 @@ struct PokiDetailsView: View {
     private var archivedValue: String? {
         let count = SessionStore.shared.archivedSessions.count
         return count == 0 ? nil : "\(count)"
+    }
+
+    /// "About You and 6 apps".
+    private var memoryDetail: LocalizedStringKey {
+        let apps = isSample ? 6 : MemoryLibrary.shared.apps.count
+        return apps == 0 ? "About You" : "About You and \(apps) apps"
+    }
+
+    private var screenHistoryValue: String {
+        let on = !isSample && HistoryCapture.isEnabled
+        return AppLocalization.text(LocalizedStringResource(on ? "On" : "Off"))
     }
 
     private var updateWaits: Bool { !isSample && (model.signer.sessionExpired || model.signer.updateNotReady || model.signer.next?.kind == "update") }
@@ -323,6 +362,8 @@ private struct ConversationsSettingsView: View {
 /// The first row of Settings: the bear's face where the rows under it have their icon, and Poki's name.
 private struct PokiNameRow: View {
     var mood: PokiMood
+    /// Where Poki stands, beside its name: the dot and its word.
+    var status: String
     @ScaledMetric(relativeTo: .body) private var face = SettingsRowMetrics.iconSize
     @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
 
@@ -341,6 +382,11 @@ private struct PokiNameRow: View {
             .accessibilityHidden(true)
             Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 6) {
+                Circle().fill(mood.dot).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(verbatim: status).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+            }
+            .padding(.leading, 2)
             Spacer(minLength: 8)
         }
         .animation(.easeInOut(duration: 0.3), value: mood)

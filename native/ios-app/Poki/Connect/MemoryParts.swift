@@ -10,10 +10,21 @@ import SwiftUI
 @MainActor @Observable
 final class MemoryPageState {
     var open: String?
+    /// The item the editor sheet is open on; "" is a new memory.
     var editing: String?
-    /// "": a new memory is being written.
     var draft = ""
     var draftApp: String?
+    /// Whether Poki may change the item after it is saved. On by default: the words are now the owner's.
+    var draftLocked = true
+
+    /// Opens the editor on `item`, or on a new memory used in `app`.
+    func start(_ item: MemoryItem?, app: String? = nil) {
+        draft = item?.text ?? ""
+        draftApp = item?.app ?? app
+        draftLocked = true
+        if item == nil { open = nil }
+        editing = item?.id ?? ""
+    }
 }
 
 // MARK: Rows
@@ -33,24 +44,16 @@ struct MemoryItemRow: View {
     private var isOpen: Bool { page.open == item.id }
 
     var body: some View {
-        if page.editing == item.id {
-            MemoryEditor(page: page, picksApp: item.kind == .memory, onSave: { library.edit(item.id, text: page.draft, app: page.draftApp); close() }, onCancel: close)
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                summary
-                    .contentShape(.rect)
-                    .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = isOpen ? nil : item.id } }
-                if isOpen {
-                    MemoryItemDetail(item: item, page: page)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            summary
+                .contentShape(.rect)
+                .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = isOpen ? nil : item.id } }
+            if isOpen {
+                MemoryItemDetail(item: item, page: page)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .accessibilityIdentifier("memory.item.\(item.id)")
         }
-    }
-
-    private func close() {
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = nil; page.open = nil }
+        .accessibilityIdentifier("memory.item.\(item.id)")
     }
 
     private var summary: some View {
@@ -118,7 +121,8 @@ struct MemoryItemRow: View {
     }
 }
 
-/// What opens under an item: its facts on a grey ground, then Edit, Lock and Forget.
+/// What opens under an item: its facts as plain lines in the row itself (no card inside the card), then
+/// Edit, Lock and Forget.
 struct MemoryItemDetail: View {
     var item: MemoryItem
     var page: MemoryPageState
@@ -126,24 +130,18 @@ struct MemoryItemDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 0) {
+            // The labels' column is as wide as its widest label, and a label never breaks ("Used in" did at 44 pt).
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 8) {
                 ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 64, alignment: .leading)
+                    GridRow {
+                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).fixedSize()
                         fact.1.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 9)
                 }
             }
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 16, style: .continuous))
+            .padding(.vertical, 2)
             HStack(spacing: 8) {
-                MemoryPill(title: "Edit", symbol: "pencil") {
-                    page.draft = item.text
-                    page.draftApp = item.app
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = item.id }
-                }
+                MemoryPill(title: "Edit", symbol: "pencil") { page.start(item) }
                 .accessibilityIdentifier("memory.edit")
                 MemoryPill(title: item.locked ? "Unlock" : "Lock", symbol: item.locked ? "lock.open" : "lock.fill") {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { library.setLocked(item.id, !item.locked) }
@@ -262,78 +260,179 @@ struct MemoryPill: View {
     }
 }
 
-/// Writing or changing a memory: the text with its count, where it is used, Cancel and Save.
+/// Writing or changing a memory (or renaming a skill), in a sheet: one Form, its own sections, nothing
+/// boxed inside another box. The words, where they are used, and whether Poki may change them later:
+/// the three things that make a memory useful to Poki (what it knows, when it applies, who owns it).
 struct MemoryEditor: View {
     var page: MemoryPageState
-    var placeholder: LocalizedStringKey? = nil
-    var picksApp = true
-    var onSave: () -> Void
-    var onCancel: () -> Void
     @Environment(MemoryLibrary.self) private var library
     @FocusState private var focused: Bool
+
+    private var item: MemoryItem? { page.editing.flatMap { $0.isEmpty ? nil : library.item($0) } }
+    /// A skill's app is where it was recorded, so it is shown, not picked.
+    private var picksApp: Bool { item.map { $0.kind == .memory } ?? true }
 
     var body: some View {
         @Bindable var page = page
         let count = page.draft.count
-        let over = count > MemoryLibrary.noteLimit
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .trailing, spacing: 6) {
-                TextField(placeholder ?? "", text: $page.draft, axis: .vertical)
-                    .font(.body).lineLimit(1...12)
-                    .focused($focused)
-                    .accessibilityIdentifier("memory.editor")
-                Text(verbatim: "\(count)/\(MemoryLibrary.noteLimit)")
-                    .font(.caption.weight(over ? .semibold : .regular)).monospacedDigit()
-                    .foregroundStyle(over ? Tint.red : Color(.secondaryLabel))
-            }
-            .padding(.horizontal, 12).padding(.vertical, 11)
-            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(over ? Tint.red : Tint.blueText, lineWidth: 1.5))
-            scope
-            HStack(spacing: 8) {
-                MemoryPill(title: "Cancel", action: onCancel)
-                MemoryPill(title: "Save", solid: true, action: onSave)
-                    .disabled(over || page.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("memory.save")
-            }
-            Group {
-                if over {
-                    Text("Up to \(MemoryLibrary.noteLimit) characters. Remove \(count - MemoryLibrary.noteLimit) to save.").foregroundStyle(Tint.red)
-                } else {
-                    Text("Saving locks it: Poki won’t change this memory again.").foregroundStyle(Color(.secondaryLabel))
+        let limit = MemoryLibrary.noteLimit
+        let over = count > limit
+        let empty = page.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(item == nil ? LocalizedStringKey("e.g., Mom is “Mama” in Contacts") : LocalizedStringKey(""), text: $page.draft, axis: .vertical)
+                        .lineLimit(3...12)
+                        .focused($focused)
+                        .accessibilityIdentifier("memory.editor")
+                } footer: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if over {
+                            Text("Up to \(limit) characters. Remove \(count - limit) to save.").foregroundStyle(Tint.red)
+                        }
+                        Spacer(minLength: 0)
+                        Text(verbatim: "\(count)/\(limit)").monospacedDigit().foregroundStyle(over ? Tint.red : Color(.secondaryLabel))
+                    }
+                }
+                Section {
+                    if picksApp {
+                        NavigationLink {
+                            MemoryAppPicker(selection: $page.draftApp)
+                        } label: {
+                            LabeledContent { UsedIn(app: page.draftApp) } label: { Text("Used in").lineLimit(1) }
+                        }
+                        .accessibilityIdentifier("memory.usedIn")
+                    } else {
+                        LabeledContent { UsedIn(app: page.draftApp) } label: { Text("Used in").lineLimit(1) }
+                    }
+                    Toggle("Locked", isOn: $page.draftLocked)
+                        .accessibilityIdentifier("memory.editor.lock")
+                } footer: {
+                    // Two Texts, not one with a ternary: a ternary's words are a String and skip the catalog.
+                    if page.draftLocked {
+                        Text("Poki won’t change or forget it while it is locked.")
+                    } else {
+                        Text("Poki can update it when it learns something new.")
+                    }
                 }
             }
-            .font(.footnote).padding(.horizontal, 2)
+            .navigationTitle(AppLocalization.text(title))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { page.editing = nil } }
+                // Plain, not the prominent confirmation style: no blue ground under white words.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save", action: save).fontWeight(.semibold).disabled(over || empty)
+                        .accessibilityIdentifier("memory.save")
+                }
+            }
         }
         .onAppear { focused = true }
     }
 
-    /// Where the memory is used: a menu of All Apps and the apps on the page. A skill's app is where it
-    /// was recorded, so it is shown, not picked.
-    @ViewBuilder private var scope: some View {
-        let row = HStack(spacing: 12) {
-            Text("Used in").font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 44, alignment: .leading)
-            UsedIn(app: page.draftApp).frame(maxWidth: .infinity, alignment: .leading)
-            if picksApp {
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(.tertiaryLabel))
+    private var title: LocalizedStringResource {
+        switch item?.kind {
+        case nil: "New Memory"
+        case .skill: "Edit Skill"
+        case .habit: "Edit Habit"
+        case .memory: "Edit Memory"
+        }
+    }
+
+    private func save() {
+        if let id = page.editing, !id.isEmpty {
+            library.edit(id, text: page.draft, app: page.draftApp, locked: page.draftLocked)
+        } else {
+            library.add(page.draft, app: page.draftApp, locked: page.draftLocked)
+        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = nil; page.open = nil }
+    }
+}
+
+extension View {
+    /// The editor's sheet, open while `page.editing` is set.
+    func memoryEditorSheet(_ page: MemoryPageState) -> some View {
+        sheet(isPresented: Binding(get: { page.editing != nil }, set: { if !$0 { page.editing = nil } })) {
+            MemoryEditor(page: page)
+                .environment(MemoryLibrary.shared)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+/// Where a memory is used: All Apps, the apps Poki already keeps something for, then every app on this
+/// iPhone, A to Z, with search. The earlier menu listed only the apps that already had memories, so a
+/// memory could never be put under a new app.
+struct MemoryAppPicker: View {
+    @Binding var selection: String?
+    @Environment(MemoryLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    var body: some View {
+        let known = library.apps
+        let knownIDs = Set(known.map { $0.lowercased() })
+        let rest = Self.everyApp().filter { !knownIDs.contains($0.lowercased()) }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        List {
+            if q.isEmpty {
+                Section {
+                    row(nil)
+                } footer: {
+                    Text("Poki keeps it in mind in every app.")
+                }
+                if !known.isEmpty {
+                    Section("With Memories") { ForEach(known, id: \.self) { row($0) } }
+                }
+                if !rest.isEmpty {
+                    Section("On This iPhone") { ForEach(rest, id: \.self) { row($0) } }
+                }
+            } else {
+                let found = (known + rest).filter { MemoryFormat.appName($0).localizedCaseInsensitiveContains(q) || $0.localizedCaseInsensitiveContains(q) }
+                if found.isEmpty {
+                    Text("No results").foregroundStyle(Color(.secondaryLabel))
+                } else {
+                    ForEach(found, id: \.self) { row($0) }
+                }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 14, style: .continuous))
-        if picksApp {
-            Menu {
-                Picker(selection: Binding(get: { page.draftApp }, set: { page.draftApp = $0 })) {
-                    Text("All Apps").tag(String?.none)
-                    ForEach(library.apps, id: \.self) { app in
-                        Label { Text(verbatim: MemoryFormat.appName(app)) } icon: { Image(uiImage: AppIconStore.shared.icon(app) ?? UIImage()) }
-                            .tag(String?.some(app))
-                    }
-                } label: { EmptyView() }
-            } label: { row }
-            .buttonStyle(.plain)
-        } else {
-            row
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+        .navigationTitle(AppLocalization.text("Used in"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(_ app: String?) -> some View {
+        Button {
+            selection = app
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                if let app { AppIconView(app: app, size: 29) } else { AboutTile(size: 29) }
+                Group {
+                    if let app { Text(verbatim: MemoryFormat.appName(app)) } else { Text("All Apps") }
+                }
+                .foregroundStyle(Color(.label))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if selection?.lowercased() == app?.lowercased() {
+                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                        .accessibilityLabel(Text("Selected"))
+                }
+            }
         }
+        .accessibilityIdentifier("memory.usedIn.\(app ?? "all")")
+    }
+
+    /// The apps installed on this iPhone (the phone's own list) and the Apple apps Poki knows, which
+    /// that list counts as System apps (Contacts, Messages). Before the list has ever been read, every
+    /// app Poki knows by name. Sorted by the name shown.
+    static func everyApp() -> [String] {
+        let installed = DynamicApps.userApps.map(\.id)
+        let known = KnownApps.all.map(\.id).filter { id in
+            installed.isEmpty || id.hasPrefix("com.apple.") || DynamicApps.name(forID: id) != nil
+        }
+        var seen = Set<String>()
+        let apps = (installed + known).filter { seen.insert($0.lowercased()).inserted }
+        return apps.sorted { MemoryFormat.appName($0).localizedStandardCompare(MemoryFormat.appName($1)) == .orderedAscending }
     }
 }
 
@@ -350,6 +449,157 @@ struct MemoryAddRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityIdentifier("memory.add")
+    }
+}
+
+/// An area's memories as one page (the owner, Nov 20 2026: not a list of rows): its summary, then
+/// its lines as the page's text, each line opening where it came from with Edit, Lock and Forget.
+struct MemoryPageCard: View {
+    var app: String?
+    /// Lines shown; the rest are behind All N.
+    var limit: Int? = nil
+    var page: MemoryPageState
+    @Environment(MemoryLibrary.self) private var library
+
+    var body: some View {
+        let lines = library.pageLines(app)
+        VStack(alignment: .leading, spacing: 10) {
+            if let summary = library.pageSummary(app) {
+                Text(verbatim: summary).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            }
+            ForEach(limit.map { Array(lines.prefix($0)) } ?? lines) { item in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(verbatim: item.text).font(.body).foregroundStyle(Color(.label))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if item.locked {
+                            Image(systemName: "lock.fill").font(.caption.weight(.semibold)).foregroundStyle(Color(.secondaryLabel))
+                                .accessibilityLabel(Text("Locked"))
+                        }
+                    }
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = page.open == item.id ? nil : item.id }
+                    }
+                    if page.open == item.id {
+                        MemoryItemDetail(item: item, page: page)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+                .accessibilityIdentifier("memory.item.\(item.id)")
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("memory.page.\(app ?? "about")")
+    }
+}
+
+/// Writing a whole page at once, one fact a line, like opening a memory file: the lines kept keep
+/// where they came from, the new ones are yours, and a line taken out is forgotten.
+struct MemoryPageEditor: View {
+    var app: String?
+    @Environment(MemoryLibrary.self) private var library
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var locked = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("One thing to remember on each line", text: $text, axis: .vertical)
+                        .lineLimit(6...30)
+                        .focused($focused)
+                        .accessibilityIdentifier("memory.pageEditor")
+                } footer: {
+                    Text("Each line is one memory. Remove a line to forget it.")
+                }
+                Section {
+                    Toggle("Locked", isOn: $locked)
+                } footer: {
+                    if locked {
+                        Text("Poki won’t change this page while it is locked.")
+                    } else {
+                        Text("Poki can rewrite this page as it learns, but never a line you locked.")
+                    }
+                }
+            }
+            .navigationTitle(app.map { Text(verbatim: MemoryFormat.appName($0)) } ?? Text("About You"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        library.writePage(app, text: text, locked: locked)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .accessibilityIdentifier("memory.pageEditor.save")
+                }
+            }
+        }
+        .onAppear {
+            text = library.pageLines(app).map(\.text).joined(separator: "\n")
+            locked = library.pageLocked(app)
+            focused = true
+        }
+    }
+}
+
+/// Edit Page at the end of a page.
+struct MemoryPageEditRow: View {
+    var app: String?
+    @State private var editing = false
+    @Environment(MemoryLibrary.self) private var library
+
+    var body: some View {
+        Button { editing = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.text").font(.system(size: 16, weight: .semibold))
+                Text("Edit Page").font(.body)
+            }
+            .foregroundStyle(Tint.blueText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("memory.editPage")
+        .sheet(isPresented: $editing) {
+            MemoryPageEditor(app: app).environment(library).presentationDetents([.large])
+        }
+    }
+}
+
+/// Changing memory by telling Poki: opens the chat with the start of a message ("Remember that"), so
+/// the owner can add, correct or drop a memory in their own words, the way the big assistants take
+/// "remember that" and "forget that". Poki's memory tool keeps or forgets the note, and Recent Updates
+/// shows it with Undo.
+struct MemoryChatRow: View {
+    var app: String?
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button {
+            var link = URLComponents()
+            link.scheme = "poki"
+            link.host = "chat"
+            link.queryItems = [URLQueryItem(name: "text", value: prompt)]
+            if let url = link.url { openURL(url) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bubble.left").font(.system(size: 16, weight: .semibold))
+                Text("Tell Poki in Chat").font(.body)
+            }
+            .foregroundStyle(Tint.blueText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("memory.chat")
+    }
+
+    private var prompt: String {
+        if let app {
+            return AppLocalization.text(LocalizedStringResource("In \(MemoryFormat.appName(app)), remember that ", comment: "The start of a chat message from the Memory page"))
+        }
+        return AppLocalization.text(LocalizedStringResource("Remember that ", comment: "The start of a chat message from the Memory page"))
     }
 }
 

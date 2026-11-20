@@ -411,6 +411,12 @@ struct RootView: View {
             // field's button starts a talk, and says what Talk with Poki is missing when it has no key.
             if !model.voice.isOn, !model.voice.canTalkLive { model.voice.keyAsked = true }
         } else {
+            // poki://chat?text=…: the Memory page's Tell Poki in Chat starts the message for the owner,
+            // who finishes and sends it. Nothing is sent by the link.
+            if url.host() == "chat", let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "text" })?.value,
+               !text.isEmpty {
+                draft = text
+            }
             detailsOpen = false
             show(.chat)
         }
