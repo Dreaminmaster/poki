@@ -29,7 +29,7 @@ final class BridgeStub: URLProtocol {
                 let second = "data:image/jpeg;base64," + Data("second synthetic screenshot".utf8).base64EncodedString()
                 body = image == first ? #"{"text":"First screen description"}"# : image == second
                     ? #"{"text":"Second screen description"}"# : #"{"text":"Unrecognized screenshot"}"#
-            default: body = #"{"live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","do"]}"#
+            default: body = #"{"live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","open_app","do"]}"#
             }
         } else {
             body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#

@@ -65,13 +65,17 @@ enum VoiceDirect {
     # Approvals and stopping
     - Tapping something that sends, pays, deletes or calls waits until the user allows it on the phone; if the result says they did not, tell them in one sentence and do not try another way.
     - Only the user approves, with their own finger: never open Poki to tap Allow, Deny or anything else in it.
-    - If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.
+    - \(live ? Self.cancellationRule : "If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.")
     """ }
 
     /// Said in every tool's description: the instructions alone left a spoken preamble before some calls.
     private static let silent = " No preamble: call it without saying anything first."
 
     private static let empty: [String: Any] = ["type": "object", "properties": [String: Any](), "additionalProperties": false]
+    static let cancelCurrentTask = "cancel_current_task"
+    private static let cancellationRule = """
+        When the user's whole request means stop or cancel the current phone task (for example “停”, “停止”, “别做了”, or “stop”), handle it immediately with \(cancelCurrentTask) as the only tool call. A request to stop takes priority over an earlier task, even while its tool is running. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.
+        """
     private static let tools: [[String: Any]] = [
         ["type": "function", "name": "get_ios_version", "description": "Read the iPhone model and its iOS version. Changes nothing on the phone." + silent, "parameters": empty],
         ["type": "function", "name": "look", "description": "Read the iPhone screen now: the app in front, its numbered elements (role, label, frame in points) and a screenshot." + silent, "parameters": empty],
@@ -101,19 +105,24 @@ enum VoiceDirect {
     }
 
     static func exchangeLiveOffer(_ sdp: String, model: String, apiKey: String) async throws -> String {
+        let cancelTool: [String: Any] = ["type": "function", "name": cancelCurrentTask, "parameters": empty,
+                                         "description": "Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent." + silent]
         let live: [String: Any] = [
             "model": model,
             "instructions": """
                 You are Poki, a voice assistant. Speak \(interfaceLanguage). Switch languages only when the user clearly switches. App names, tool output and words like hello do not change the conversation language.
 
+                If the user asks to cancel, delegate the new cancellation request immediately and silently, even if the previous delegation is still running. Do not wait for its result. The backend calls the cancellation tool.
+                \(cancellationRule)
+
                 Act first, then talk. Delegate phone requests immediately and silently. Say nothing before or between tool calls. Stay silent while the backend works. Do not acknowledge, announce, or narrate any step. Give the verified result in one short sentence. Use two sentences only when the user asked for several facts.
 
-                A brief "嗯" is an acknowledgment from the user. Continue the current reply. When the user asks you to stop, stop speaking. A phone action already running may finish.
+                A brief "嗯" is an acknowledgment from the user. Continue the current reply. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.
                 """,
             "audio": ["output": ["voice": "marin"]],
             "delegation": ["type": "responses", "acknowledgement_delay_ms": 800, "responses": [
                 "model": liveBackend, "instructions": instructions(live: true), "tool_choice": "auto",
-                "tools": tools.map { $0.merging(["strict": false]) { _, value in value } },
+                "tools": (tools + [cancelTool]).map { $0.merging(["strict": false]) { _, value in value } },
                 "parallel_tool_calls": false, "reasoning": ["effort": "low"],
             ]],
         ]

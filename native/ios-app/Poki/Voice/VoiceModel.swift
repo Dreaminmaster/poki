@@ -311,10 +311,9 @@ final class VoiceModel {
     private var link: VoiceConnection?
     private var usesLive = false
     private var liveSpeechStopped = false
-    private var liveStopRequested = false
-    private var liveStopUtterance: (candidate: String?, end: Int, ended: Bool)?
-    private var liveDelegation: String?
-    private var stoppedDelegations: Set<String> = []
+    private enum LiveDelegationState { case active, cancelled }
+    private var liveDelegations: [String: LiveDelegationState] = [:]
+    private var liveHasCancellation = false
     private var liveScreenDescription: ((String) async throws -> String)?
     private var liveResultReceipts: [String: String] = [:]
     private var liveContinuationAfter: String?
@@ -661,14 +660,12 @@ final class VoiceModel {
         livePlayback = nil
         liveCaptions.removeAll()
         liveSpeechStopped = false
-        liveStopRequested = false
-        liveStopUtterance = nil
-        liveDelegation = nil
+        liveDelegations.removeAll()
+        liveHasCancellation = false
         liveScreenDescription = nil
         liveResultReceipts.removeAll()
         liveContinuationAfter = nil
         liveAwaitingPlayback = false
-        stoppedDelegations.removeAll()
         interruptedLapse?.cancel()
         interrupted = false
         stallWatch?.cancel()
@@ -964,7 +961,8 @@ final class VoiceModel {
             appendLiveCaption(text, role: role, start: start, end: end)
             if role == .you {
                 resumeLiveAudio(link)
-                if updateLiveStop(text, start: start, end: end) {
+                let words = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
+                if !["", "嗯", "哦", "uh-huh", "mm-hmm"].contains(words) {
                     if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
                     else if clock.call == nil { clock.said = time.now() }
                 }
@@ -973,8 +971,9 @@ final class VoiceModel {
             }
             endIfDone()
         case "session.delegation.created":
-            liveDelegation = (event["delegation"] as? [String: Any])?["id"] as? String
-            if liveStopRequested, let liveDelegation { stoppedDelegations.insert(liveDelegation) }
+            if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
+                liveDelegations[id] = .active
+            }
             link.send(["type": "session.thinking.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": ""])
         case "session.commentary.appended":
             guard let id = event["client_event_id"] as? String,
@@ -1086,40 +1085,28 @@ final class VoiceModel {
         }
     }
 
-    /// An ASR fragment can finish a dictation instead of starting a stop command.
-    private func updateLiveStop(_ fragment: String, start: Int, end: Int) -> Bool {
-        let trim = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
-        let command = fragment.trimmingCharacters(in: trim).lowercased()
-        let ended = fragment.trimmingCharacters(in: .whitespacesAndNewlines).last.map { ".?!。？！".contains($0) } ?? false
-        let previous = liveStopUtterance
-        guard !command.isEmpty else {
-            if ended, let previous { liveStopUtterance = (previous.candidate, max(end, previous.end), true) }
-            return false
-        }
-        let stops = ["停", "停止", "停一下", "别说了", "stop", "stoptalking"]
-        let compact = command.filter { !$0.isWhitespace }
-        let candidate: String?
-        if let previous, !previous.ended, start - previous.end < 200 {
-            candidate = previous.candidate.map { $0 + compact }
-        } else {
-            candidate = compact
-        }
-        let prefix = candidate.flatMap { part in stops.contains { $0.hasPrefix(part) } ? part : nil }
-        liveStopUtterance = (prefix, max(end, previous?.end ?? end), ended)
-        if let prefix, stops.contains(prefix) {
-            liveStopRequested = true
-            wantsResponse = false
-            if let liveDelegation { stoppedDelegations.insert(liveDelegation) }
-            return false
-        }
-        guard !["嗯", "哦", "uh-huh", "mm-hmm"].contains(command) else { return false }
-        liveStopRequested = false
-        return true
+    private func stopped(_ call: VoiceCall) -> Bool {
+        guard usesLive, call.session == session else { return false }
+        // After cancellation, only a tool tied to a new delegation can start.
+        guard let id = call.delegation, let state = liveDelegations[id] else { return liveHasCancellation }
+        return state == .cancelled
     }
 
-    private func stopped(_ call: VoiceCall) -> Bool {
-        usesLive && (liveStopRequested || call.delegation.map(stoppedDelegations.contains) == true)
+    private func completeLiveControl(_ call: VoiceCall, state: VoiceCall.State, output: String) {
+        var result = call
+        result.state = state
+        result.output = output
+        result.finished = Date()
+        result.delivered = link?.send(["type": "response.item.create", "item": [
+            "type": "function_call_output", "call_id": call.id, "output": output,
+        ]]) == true
+        if let index = calls.firstIndex(where: { $0.id == call.id }) { calls[index] = result }
+        else { calls.append(result) }
+        if phase == .thinking, !answerDue { phase = .listening }
+        endIfDone()
     }
+
+    private static let stoppedStep = "The user cancelled the task. This step did not run."
 
     private func resumeLiveAudio(_ link: VoiceConnection) {
         guard liveSpeechStopped else { return }
@@ -1130,14 +1117,19 @@ final class VoiceModel {
     /// Runs a call once. The same call_id again (a repeated event) is ignored.
     private func run(_ call: VoiceCall) {
         guard !calls.contains(where: { $0.id == call.id }) else { return }
+        if usesLive, call.name == VoiceDirect.cancelCurrentTask {
+            liveDelegations = liveDelegations.mapValues { _ in .cancelled }
+            liveHasCancellation = true
+            wantsResponse = false
+            awaitingAnswer = false
+            requestedAnswer = nil
+            liveContinuationAfter = nil
+            liveAwaitingPlayback = false
+            completeLiveControl(call, state: .done, output: "Cancelled further steps. A phone action already running may finish.")
+            return
+        }
         if stopped(call) {
-            var skipped = call
-            skipped.state = .failed
-            skipped.output = "The user said stop. This step did not run."
-            skipped.delivered = link?.send(["type": "response.item.create", "item": [
-                "type": "function_call_output", "call_id": skipped.id, "output": skipped.output,
-            ]]) == true
-            calls.append(skipped)
+            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
             return
         }
         calls.append(call)
@@ -1151,6 +1143,10 @@ final class VoiceModel {
         let live = usesLive
         let describeScreen = liveScreenDescription
         Task {
+            if stopped(call) {
+                completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                return
+            }
             var state = VoiceCall.State.done
             var output: String
             var screen: Data?
@@ -1166,9 +1162,17 @@ final class VoiceModel {
                     var result = try await bridge.run(callID: call.id, name: call.name, arguments: call.arguments)
                     var note = ""
                     if result.state == "check", let target = result.target {
+                        if stopped(call) {
+                            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                            return
+                        }
                         // A tap: Poki's approval rules first, and the owner's OK on the phone when they ask for it.
                         let app = result.app
                         let clearance = await clearTap(target.says, app?.bundle_id, app?.name)
+                        if stopped(call) {
+                            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                            return
+                        }
                         if clearance.mayTap {
                             if case .approved(let why) = clearance { note = "The user allowed it on the phone (\(why)). "; log.add("voice", "tap approved: \(why)") }
                             var checked = ["text": target.text]

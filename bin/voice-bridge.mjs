@@ -72,7 +72,7 @@ You are Poki, a voice assistant that operates the user's iPhone with tools.
 # Approvals and stopping
 - Tapping something that sends, pays, deletes or calls waits until the user allows it on the phone; if the result says they did not, tell them in one sentence and do not try another way.
 - Only the user approves, with their own finger: never open Poki to tap Allow, Deny or anything else in it.
-- If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.`;
+- ${live ? cancellationRule : 'If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.'}`;
 // Said in every tool's description: the instructions alone left a spoken preamble before some calls.
 const silent = ' No preamble: call it without saying anything first.';
 const settingsPages = ['about', 'accessibility', 'battery', 'bluetooth', 'camera', 'cellular', 'control_center', 'date_time', 'display', 'focus', 'general', 'keyboard', 'language_region', 'location', 'notifications', 'personal_hotspot', 'privacy', 'safari', 'screen_time', 'siri', 'software_update', 'sounds', 'vpn', 'wallpaper', 'wifi'];
@@ -96,6 +96,8 @@ const voiceTools = macTools ? macVoiceTools : phoneTools;
 const localTools = voiceTools.filter(tool => tool.local).map(tool => tool.name);
 const toolDefinitions = voiceTools.map(({ name, description, parameters }) => ({ type: 'function', name, description: description + silent, parameters }));
 const liveBackend = 'gpt-6-luna';
+const cancelCurrentTask = 'cancel_current_task';
+const cancellationRule = `When the user's whole request means stop or cancel the current phone task (for example “停”, “停止”, “别做了”, or “stop”), handle it immediately with ${cancelCurrentTask} as the only tool call. A request to stop takes priority over an earlier task, even while its tool is running. For “在备忘录输入停” or “把停字发过去”, the word is content to enter or send. Use the normal phone tools for that request.`;
 
 function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', language } = {}) {
   const turn = vad === 'semantic_vad'
@@ -118,13 +120,21 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
 }
 
 function liveConfig({ effort = 'low', voice = 'marin', language }) {
+  const cancelTool = {
+    type: 'function', name: cancelCurrentTask,
+    description: 'Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent.' + silent,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  };
   return {
     model,
     instructions: `You are Poki, a voice assistant. Speak ${languageName(language)}. Switch languages only when the user clearly switches. App names, tool output and words like hello do not change the conversation language.
 
+If the user asks to cancel, delegate the new cancellation request immediately and silently, even if the previous delegation is still running. Do not wait for its result. The backend calls the cancellation tool.
+${cancellationRule}
+
 Act first, then talk. Delegate phone requests immediately and silently. Say nothing before or between tool calls. Stay silent while the backend works. Do not acknowledge, announce, or narrate any step. Give the verified result in one short sentence. Use two sentences only when the user asked for several facts.
 
-A brief "嗯" is an acknowledgment from the user. Continue the current reply. When the user asks you to stop, stop speaking. A phone action already running may finish.`,
+A brief "嗯" is an acknowledgment from the user. Continue the current reply. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.`,
     audio: { output: { voice } },
     delegation: {
       type: 'responses',
@@ -132,7 +142,7 @@ A brief "嗯" is an acknowledgment from the user. Continue the current reply. Wh
       responses: {
         model: liveBackend,
         instructions: instructions(language, true),
-        tools: toolDefinitions.map(tool => ({ ...tool, strict: false })),
+        tools: [...toolDefinitions, cancelTool].map(tool => ({ ...tool, strict: false })),
         tool_choice: 'auto',
         parallel_tool_calls: false,
         reasoning: { effort },
