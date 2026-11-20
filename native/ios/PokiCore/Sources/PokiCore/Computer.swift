@@ -1057,7 +1057,10 @@ final class Computer: @unchecked Sendable {
         var approvalWaited = 0.0
         var until: Double
         let revision: UInt64?
-        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? .action : .none) {
+        // Actions that find their own targets on the screen they land on (a path or a skill by text)
+        // need no read of the screen the owner left after authorizing automation.
+        let blind = !actions.isEmpty && actions.allSatisfy { canActAfterAuthorization($0, evidence: []) }
+        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? (blind ? .read : .action) : .none) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }

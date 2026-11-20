@@ -997,7 +997,7 @@ final class ApprovalTests: XCTestCase {
 
     /// An approval says whether turning asking off (Never Ask) would stop every step it covers from asking,
     /// which is when the owner is offered Don't Ask Again: not where a payment, a deletion, Wallet or a
-    /// tap on a screen not read yet would still ask. A message, a call, a batch of them, and a tap in a chat
+    /// tap pressed blind would still ask. A message, a call, a batch of them, and a tap in a chat
     /// app after an earlier tap changed the screen (judged as sending until the screen is read) all stop.
     func testAnApprovalSaysWhetherNeverAskWouldStopIt() async {
         let send = ("Button", "Send"), pay = ("Button", "Pay"), mom = ("Cell", "Mom"), work = ("Cell", "Work")
@@ -1015,7 +1015,8 @@ final class ApprovalTests: XCTestCase {
             ("a deletion", shop, [["tap": 1]], false),
             ("a message and a payment in one batch", messages(rows: [send, pay]), [["tap": 1], ["tap": 2]], false),
             ("a tap in Wallet", wallet(), [["tap": 1]], false),
-            ("a tap in a chat app on a screen not read yet after a launch", messages(rows: [mom]), [["launch": "com.apple.MobileSMS"], ["tap": [350, 790]]], false),
+            // Under Never Ask the tap is judged on the launched screen when it is sent, so nothing else asks.
+            ("a tap in a chat app on a screen not read yet after a launch", messages(rows: [mom]), [["launch": "com.apple.MobileSMS"], ["tap": [350, 790]]], true),
         ]
         for (label, wda, actions, stops) in cases {
             let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
@@ -1046,8 +1047,13 @@ final class ApprovalTests: XCTestCase {
                 return (200, ["value": .null])
             }
             let result = await core.call("do", ["actions": [["tap": 1], ["tap": [100, 120]]]])
-            XCTAssertNil(core.pendingApproval, label)
             XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "\(label): \(result.text)")
+            // In a chat app a tap on a screen not read yet still asks up front: Send sits where the list had nothing.
+            if bundle == "com.apple.MobileSMS" {
+                XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("sending a message") == true, result.text)
+                continue
+            }
+            XCTAssertNil(core.pendingApproval, label)
             XCTAssertTrue(result.text.contains("action 2 was not sent"), result.text)
             XCTAssertTrue(result.text.contains(asks ? "needs the owner's approval" : "it was aimed at Button \"popClose\""), result.text)
             XCTAssertTrue(result.text.contains(label), result.text)
@@ -1152,15 +1158,18 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
-    /// After a launch the screen is the launched app's and not read yet: a tap there is not judged by
-    /// the last read's labels (a point on Photos' Delete read as nothing), so it asks in any app.
-    func testATapAfterALaunchAsksInAnAppOnNoList() async {
+    /// After a launch the screen is the launched app's: a tap there is judged on a read of that screen
+    /// once it settles, not asked up front. Here the launched screen holds nothing where the tap goes,
+    /// as the read before did, so it is sent with no approval (a Delete there is held:
+    /// `testATapAfterALaunchIsJudgedOnTheLaunchedScreen`).
+    func testATapAfterALaunchIsNotAskedUpFront() async {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"], ["wait": 300], ["tap": [200, 790]]]])
-        XCTAssertTrue(result.text.contains("approval_required"), result.text)
+        XCTAssertFalse(result.text.contains("approval_required"), result.text)
+        XCTAssertNil(core.pendingApproval)
         XCTAssertEqual(wda.bodies("POST /wda/apps/activate").count, 1, "the launch before it goes first")
-        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, "the tap was sent")
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
     }
 
     func testPasswordsNeedApproval() async {
