@@ -5,6 +5,8 @@ import SwiftUI
 struct PokiApp: App {
     @State private var model: AppModel
     @State private var chat: ChatModel
+    @State private var inDuoSplitView = false
+    @Environment(\.scenePhase) private var scenePhase
 
     @discardableResult
     static func scheduleStartupWork(routines: RoutineStore = .shared) -> Task<String?, Never> {
@@ -57,6 +59,7 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                .environment(\.inDuoSplitView, inDuoSplitView)
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
                 .background(LanguageNavigationFonts())
@@ -64,8 +67,23 @@ struct PokiApp: App {
                     model.languageChanged()
                     chat.languageChanged()
                 }
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { _ in
+                    updateDuoSplitView()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { updateDuoSplitView() }
+                }
         }
     }
+
+    private func updateDuoSplitView() {
+        let placement = PKInProcess.shared().duoPlacement()
+        inDuoSplitView = placement != nil && placement != "fullscreen"
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var inDuoSplitView = false
 }
 
 /// The chat is the app (ESP-326): it opens on Poki's conversation. The conversations slide in from the
