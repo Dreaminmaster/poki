@@ -30,6 +30,10 @@ final class BasicsTests: XCTestCase {
         XCTAssertEqual(SensitivityRules.matches("Delete Photo", ["delete"]), "delete")
         XCTAssertNil(SensitivityRules.matches("Display & Brightness", ["pay"]))
         XCTAssertEqual(SensitivityRules.matches("确认支付", ["支付"]), "支付")
+        XCTAssertEqual(SensitivityRules.matches("使用零钱支付 ¥128.50", ["支付"]), "支付")
+        XCTAssertNil(SensitivityRules.matches("截屏，11月20日 09:41，文字：允许付款吗？请批准这次付款", ["付款"]))
+        XCTAssertEqual(SensitivityRules.matches("截屏，11月20日 09:41，文字：允许付款吗？请批准这次付款", ["付款"], elementType: "Button"), "付款")
+        XCTAssertEqual(SensitivityRules.matches("删除这张照片后将无法恢复，请确认是否继续操作", ["删除"]), "删除")
     }
 }
 
@@ -93,6 +97,19 @@ final class AutomationAuthorizationTests: XCTestCase {
         XCTAssertTrue(step.text.contains("Call look to read the current screen"), step.text)
         XCTAssertTrue(step.text.contains("Nothing was sent"), step.text)
         XCTAssertTrue(wda.sent.isEmpty)
+    }
+
+    /// A path names its targets by text and waits for each on the screen it lands on, so it goes
+    /// right after authorization without a look first; a point in it still needs one.
+    func testAPathByTextNeedsNoLookAfterAuthorization() async {
+        for (steps, sends) in [([["tap": "General"]] as [JSON], true), ([["tap": [20, 100]]], false)] {
+            let (core, wda, host) = makeCore { $0.runnerWait = 0 }
+            host.state.value = .awaitingAutomationAuthorization("the owner is entering the passcode")
+            host.readRunnerState.value = { .running }
+            let step = await core.callTool("do", arguments: JSON.object(["actions": [["path": ["goal": "open General", "steps": .array(steps)]]]]).serialized())
+            XCTAssertEqual(wda.sent.contains { $0.hasSuffix("/wda/tap") }, sends, step.text)
+            if !sends { XCTAssertTrue(step.text.contains("Call look"), step.text) }
+        }
     }
 
     func testNewAutomationSessionRequiresAFreshLookBeforeAnyCoordinateCanBeSent() async {
@@ -980,7 +997,7 @@ final class ApprovalTests: XCTestCase {
 
     /// An approval says whether turning asking off (Never Ask) would stop every step it covers from asking,
     /// which is when the owner is offered Don't Ask Again: not where a payment, a deletion, Wallet or a
-    /// tap on a screen not read yet would still ask. A message, a call, a batch of them, and a tap in a chat
+    /// tap pressed blind would still ask. A message, a call, a batch of them, and a tap in a chat
     /// app after an earlier tap changed the screen (judged as sending until the screen is read) all stop.
     func testAnApprovalSaysWhetherNeverAskWouldStopIt() async {
         let send = ("Button", "Send"), pay = ("Button", "Pay"), mom = ("Cell", "Mom"), work = ("Cell", "Work")
@@ -998,7 +1015,8 @@ final class ApprovalTests: XCTestCase {
             ("a deletion", shop, [["tap": 1]], false),
             ("a message and a payment in one batch", messages(rows: [send, pay]), [["tap": 1], ["tap": 2]], false),
             ("a tap in Wallet", wallet(), [["tap": 1]], false),
-            ("a tap in a chat app on a screen not read yet after a launch", messages(rows: [mom]), [["launch": "com.apple.MobileSMS"], ["tap": [350, 790]]], false),
+            // Under Never Ask the tap is judged on the launched screen when it is sent, so nothing else asks.
+            ("a tap in a chat app on a screen not read yet after a launch", messages(rows: [mom]), [["launch": "com.apple.MobileSMS"], ["tap": [350, 790]]], true),
         ]
         for (label, wda, actions, stops) in cases {
             let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
@@ -1010,7 +1028,11 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
-    func testAPointAfterATapReturnsAFreshScreenBeforeChoosingWhetherToAsk() async {
+    /// A point after a tap that changed the screen is not refused up front: the screen it lands on is
+    /// read again. Something that needs the owner there holds it with that reason; another element
+    /// than the one the point was aimed at holds it as a changed screen. Either way nothing is tapped
+    /// blind, nothing asks for approval, and the same point sent again on its own goes or asks.
+    func testAPointAfterATapIsJudgedOnTheScreenItLandsOn() async {
         for (label, bundle, asks) in [
             ("查询", "test.travel", false), ("搜索", "test.travel", false),
             ("筛选", "test.travel", false), ("选日期", "test.travel", false),
@@ -1025,14 +1047,69 @@ final class ApprovalTests: XCTestCase {
                 return (200, ["value": .null])
             }
             let result = await core.call("do", ["actions": [["tap": 1], ["tap": [100, 120]]]])
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "\(label): \(result.text)")
+            // In a chat app a tap on a screen not read yet still asks up front: Send sits where the list had nothing.
+            if bundle == "com.apple.MobileSMS" {
+                XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("sending a message") == true, result.text)
+                continue
+            }
             XCTAssertNil(core.pendingApproval, label)
-            XCTAssertTrue(result.text.contains("not_sent from action 2"), result.text)
+            XCTAssertTrue(result.text.contains("action 2 was not sent"), result.text)
+            XCTAssertTrue(result.text.contains(asks ? "needs the owner's approval" : "it was aimed at Button \"popClose\""), result.text)
             XCTAssertTrue(result.text.contains(label), result.text)
-            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "the stale point must not be sent")
             let retry = await core.call("do", ["actions": [["tap": [100, 120]]]])
             XCTAssertEqual(core.pendingApproval != nil, asks, "\(label): \(retry.text)")
             XCTAssertEqual(wda.bodies("POST /wda/tap").count, asks ? 1 : 2, label)
         }
+    }
+
+    /// A press after a launch waits for the launched screen and is judged there. It never asks "Allow
+    /// this step?" for a screen not read yet: a point aimed at the screen before is held as such, and
+    /// a Delete under it as needing the owner.
+    func testATapAfterALaunchIsJudgedOnTheLaunchedScreen() async {
+        for (label, why) in [("General", "it was aimed at"), ("Delete All", "needs the owner's approval")] {
+            let wda = FakeWDA()
+            wda.source([("Button", "Home")], app: "Settings")
+            wda.set("POST /wda/apps/activate") { _ in
+                wda.source([("Button", label)], app: "Photos")
+                return (200, ["value": .null])
+            }
+            let (core, _, _) = makeCore(wda)
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"], ["tap": [100, 120]]]])
+            XCTAssertNil(core.pendingApproval, "\(label): \(core.pendingApproval?.reason ?? "")")
+            XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, "\(label): \(result.text)")
+            XCTAssertTrue(result.text.contains(why), result.text)
+        }
+    }
+
+    /// Seen on the phone (Nov 20 2026): in Photos, dragging the AssistiveTouch button out of the way
+    /// and tapping Back asked "Allow payment?", because the photo on screen had 付款 in its description.
+    /// A drag presses only what holds both its ends, a photo that fills the screen is content, and a
+    /// long description that mentions 付款 is not a Pay button.
+    func testADragAndABackInPhotosAskNothing() async {
+        let wda = FakeWDA()
+        let photo: JSON = ["type": "XCUIElementTypeImage", "label": "截屏，11月20日 09:41，文字：允许付款吗？请在 Poki 中批准这次付款，剩余 0:58",
+                           "rect": ["x": 0, "y": 90, "width": 390, "height": 660]]
+        let back: JSON = ["type": "XCUIElementTypeButton", "label": "返回", "rect": ["x": 8, "y": 50, "width": 60, "height": 40]]
+        let delete: JSON = ["type": "XCUIElementTypeButton", "label": "删除", "rect": ["x": 330, "y": 780, "width": 44, "height": 44]]
+        let root: JSON = ["type": "XCUIElementTypeApplication", "label": "照片", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [back, photo, delete]]
+        wda.set("GET /source") { _ in (200, ["value": root]) }
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "照片"]]) }
+        let (core, _, _) = makeCore(wda)
+        let look = await core.call("look", [:])
+        let backRef = look.text.split(separator: "\n").first { $0.contains("返回") }.flatMap { Int($0.trimmingCharacters(in: .whitespaces).prefix { $0.isNumber }) }
+        XCTAssertNotNil(backRef, look.text)
+        let result = await core.call("do", ["actions": [["drag": ["from": [350, 800], "to": [24, 450], "ms": 400]], ["wait": 300], ["tap": .number(Double(backRef ?? 1))]]])
+        XCTAssertNil(core.pendingApproval, core.pendingApproval?.reason ?? "")
+        XCTAssertFalse(result.text.contains("approval"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
+        let swipe = await core.call("do", ["actions": [["swipe": "left"], ["swipe": "right"]]])
+        XCTAssertNil(core.pendingApproval, swipe.text)
+        // A drag that picks something up and drops it on Delete is a deletion.
+        _ = await core.call("look", [:])
+        let drop = await core.call("do", ["actions": [["drag": ["from": [200, 400], "to": [352, 802], "hold_ms": 500]]]])
+        XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("deleting") == true, drop.text)
     }
 
     /// Return sends in a messaging app: typed text is not sent by a return key, or a newline in the
@@ -1081,15 +1158,18 @@ final class ApprovalTests: XCTestCase {
         }
     }
 
-    /// After a launch the screen is the launched app's and not read yet: a tap there is not judged by
-    /// the last read's labels (a point on Photos' Delete read as nothing), so it asks in any app.
-    func testATapAfterALaunchAsksInAnAppOnNoList() async {
+    /// After a launch the screen is the launched app's: a tap there is judged on a read of that screen
+    /// once it settles, not asked up front. Here the launched screen holds nothing where the tap goes,
+    /// as the read before did, so it is sent with no approval (a Delete there is held:
+    /// `testATapAfterALaunchIsJudgedOnTheLaunchedScreen`).
+    func testATapAfterALaunchIsNotAskedUpFront() async {
         let (core, wda, _) = makeCore()
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"], ["wait": 300], ["tap": [200, 790]]]])
-        XCTAssertTrue(result.text.contains("approval_required"), result.text)
+        XCTAssertFalse(result.text.contains("approval_required"), result.text)
+        XCTAssertNil(core.pendingApproval)
         XCTAssertEqual(wda.bodies("POST /wda/apps/activate").count, 1, "the launch before it goes first")
-        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, "the tap was sent")
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
     }
 
     func testPasswordsNeedApproval() async {

@@ -29,6 +29,18 @@ final class SensitivityTests: XCTestCase {
         }
     }
 
+    func testChineseDescriptionsAreNotActions() {
+        for (type, label) in [("Image", "截屏，11月20日 09:41，文字：允许付款吗？请在手机上批准这次付款"),
+                              ("Cell", "淘宝，您的订单已付款，商家正在备货，昨天"),
+                              ("StaticText", "内容会在每月一号自动更新，订阅后通知你")] {
+            XCTAssertNil(reason(label, type: type), label)
+        }
+        for (type, label) in [("Other", "确认支付"), ("Cell", "立即购买"), ("StaticText", "付款 ¥12.00"),
+                              ("Image", "删除"), ("Button", "这张照片会从所有设备上删除，确认继续操作吗")] {
+            XCTAssertNotNil(reason(label, type: type), label)
+        }
+    }
+
     func testDescriptiveRowsKeepTheirFalsePositiveGuards() {
         for (type, label) in [("Image", "Contact photo for Best Buy"),
                               ("Cell", "Best Buy, Your order has shipped, Yesterday")] {

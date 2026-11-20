@@ -916,18 +916,37 @@ final class Computer: @unchecked Sendable {
         case .type:
             return action["ref"] == nil && action["into"] == nil ? !evidence.isEmpty : evidence.contains(.references)
         case .scrollTo:
-            return evidence.contains(.references)
+            // Scrolling to a text reads the screen as it goes; a number is the latest read's.
+            return target?.string != nil || (target?["ref"] == nil && target?["in"] == nil && target?["text"] != nil) || evidence.contains(.references)
         case .swipe:
             return (target?["in"] ?? action["in"]) == nil ? !evidence.isEmpty : evidence.contains(.references)
         case .path:
+            // A path's steps name their targets by text and each waits for its target on the screen it
+            // lands on, so no earlier read is needed for them; only a point in one is the screenshot's.
             let steps = target?["steps"]?.array ?? target?.array ?? []
-            return !evidence.isEmpty && steps.allSatisfy {
-                ActionKind($0) != .path && canActAfterAuthorization($0, evidence: evidence)
-            }
+            return steps.allSatisfy { canActInPathAfterAuthorization($0, evidence: evidence) }
         case .back:
             return currentBackTarget.button == nil ? !evidence.isEmpty : evidence.contains(.references)
-        case .run, .key:
+        case .run:
+            // A saved skill waits for each target and acts on a single match, as a path does.
+            return true
+        case .key:
             return !evidence.isEmpty
+        }
+    }
+
+    private func canActInPathAfterAuthorization(_ step: JSON, evidence: ScreenEvidence) -> Bool {
+        guard let kind = ActionKind(step), kind != .path else { return false }
+        let target = step[kind.rawValue]
+        switch kind {
+        case .tap, .longPress:
+            return target?.array == nil && target?["x"] == nil ? true : evidence.contains(.screenshot)
+        case .type:
+            return step["into"] != nil || !evidence.isEmpty
+        case .swipe:
+            return true
+        default:
+            return canActAfterAuthorization(step, evidence: evidence)
         }
     }
 
@@ -1075,7 +1094,10 @@ final class Computer: @unchecked Sendable {
         var approvalWaited = 0.0
         var until: Double
         let revision: UInt64?
-        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? .action : .none) {
+        // Actions that find their own targets on the screen they land on (a path or a skill by text)
+        // need no read of the screen the owner left after authorizing automation.
+        let blind = !actions.isEmpty && actions.allSatisfy { canActAfterAuthorization($0, evidence: []) }
+        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? (blind ? .read : .action) : .none) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }
@@ -1139,17 +1161,10 @@ final class Computer: @unchecked Sendable {
             return await readAndReply(until: until, full: true, error: "element \(stale.map(String.init).joined(separator: ", ")) is not in the latest read; nothing was sent. The current elements are below.")
         }
 
-        if config.sensitive.enabled {
-            var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
-            for (at, action) in actions.enumerated() {
-                if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
-                    result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
-                    return result
-                }
-                if sensitive(action, &scan) != nil { break }
-            }
-        }
+        // A point or a number after an action that may have changed the screen is not refused up front:
+        // the screen is read again once it settles before that press (`run`'s `pressNow`), and the press
+        // waits for the owner only if what lies there now needs them. The model chains what it can
+        // foresee, and a press that landed somewhere else shows in the read after the actions.
 
         // The runner's start and the checks above are not the actions' time (seen on the phone: a
         // launch sent while the runner was starting had its 9 s used up before it went). The call's
@@ -1606,7 +1621,32 @@ final class Computer: @unchecked Sendable {
             guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
             return ("the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
+        if let moved = movedUnder(kind, action, fresh: elements.all) {
+            return ("the action before it changed the screen where it touches: \(moved). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
+        }
         return (nil, backTarget)
+    }
+
+    /// A tap by number or point aimed at what the latest read had there. On the screen it lands on,
+    /// the same element there (by its type and words) means the model's choice still stands, and the
+    /// chain goes on; another element there means the earlier action opened another screen, and the
+    /// tap is not sent blind. Steps named by their text (a path, a skill) find their own target.
+    func movedUnder(_ kind: ActionKind, _ action: JSON, fresh: [Element]) -> String? {
+        let specs: [JSON?] = switch kind {
+        case .tap, .longPress, .pinch: [action[kind.rawValue]]
+        case .type: [action["ref"]]
+        case .drag where action["drag"]?["to_pane"] == nil:
+            if let a = action["drag"]?.array, a.count == 4 { [[a[0], a[1]]] } else { [action["drag"]?["from"]] }
+        default: []
+        }
+        for case let spec? in specs {
+            guard let p = try? point(spec) else { continue }
+            let meant = target(spec), now = element(at: p, in: fresh)
+            guard meant?.key != now?.key else { continue }
+            func name(_ e: Element?) -> String { e.map { "\($0.type) \"\($0.text.prefix(40))\"" } ?? "nothing" }
+            return "it was aimed at \(name(meant)), and \(name(now)) is there now"
+        }
+        return nil
     }
 
     /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
@@ -1783,6 +1823,9 @@ final class Computer: @unchecked Sendable {
         return false
     }
 
+    /// More of the screen than this, and an element is content rather than a control (`presses`).
+    static let contentShare = 0.5
+
     func element(at point: (x: Double, y: Double), in elements: [Element]? = nil) -> Element? {
         (elements ?? lastElements).filter { f in f.frame.x <= point.x && point.x <= f.frame.x + f.frame.width && f.frame.y <= point.y && point.y <= f.frame.y + f.frame.height }
             .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
@@ -1858,12 +1901,24 @@ final class Computer: @unchecked Sendable {
             guard let spec else { return nil }
             let atPoint = spec.array != nil || spec["x"] != nil
             let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
-            return (e, atPoint, .tap)
+            return (control(e), atPoint, .tap)
         }
         func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
-            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
-                  let down = element(at: (path.0, path.1), in: scan.elements), down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
-            return [(down, false, .stroke)]
+            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance) else { return [] }
+            return strokeBetween((path.0, path.1), (path.2, path.3))
+        }
+        /// A finger that goes down at one point and lifts at another presses only what holds both ends
+        /// (a control takes a touch that began outside it as no press), and only a control: a photo
+        /// or a page under the whole stroke is content.
+        func strokeBetween(_ from: (x: Double, y: Double), _ to: (x: Double, y: Double)) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+            guard !unread, let down = element(at: from, in: scan.elements), down == element(at: to, in: scan.elements), let pressed = control(down) else { return [] }
+            return [(pressed, false, .stroke)]
+        }
+        /// An element that covers most of the screen is a photo, a page or a list, not a control: its
+        /// words (a photo's description, a page's text) say nothing about what a touch on it does.
+        func control(_ e: Element?) -> Element? {
+            guard let e, let screen = size, screen.width > 0, screen.height > 0 else { return e }
+            return e.frame.width * e.frame.height > Self.contentShare * screen.width * screen.height ? nil : e
         }
         let spec = action[kind.rawValue]
         switch kind {
@@ -1872,8 +1927,14 @@ final class Computer: @unchecked Sendable {
         case .type: return [at(action["ref"])].compactMap { $0 }
         case .drag:
             if spec?["to_pane"] != nil { return [at(spec?["from"])].compactMap { $0 } }
-            if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
-            return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
+            // A drag is a stroke: moving a floating button or a slider presses nothing on the way. One
+            // that picks something up first (hold_ms) drops it on what lies at its end, judged by that
+            // element's words (a drop on Delete).
+            let ends: (from: JSON?, to: JSON?) = if let a = spec?.array, a.count == 4 { ([a[0], a[1]], [a[2], a[3]]) } else { (spec?["from"], spec?["to"]) }
+            guard let from = at(ends.from), let to = at(ends.to) else { return [] }
+            if (spec?["hold_ms"]?.double ?? 0) > 0 { return to.element == nil ? [] : [(to.element, to.atPoint, .stroke)] }
+            guard let a = try? point(ends.from ?? .null), let b = try? point(ends.to ?? .null) else { return from.element != nil && from.element == to.element ? [(from.element, false, .stroke)] : [] }
+            return strokeBetween(a, b)
         case .back:
             guard let button = (backTarget ?? currentBackTarget).button else { return [] }
             return [(scan.elements == nil ? button : under(button.frame.centre), false, .button)]
@@ -1903,10 +1964,10 @@ final class Computer: @unchecked Sendable {
             if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen) { return r }
             guard press.judged == .tap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
-            // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
-            // The home screen after Home opens apps, which ask for themselves.
-            if !scan.read, scan.front != nil { return "a tap on a screen not read yet (in \(app))" }
-            if scan.moved, press.atPoint { return "a tap at a point on a screen that may have changed since it was read (in \(app))" }
+            // Elsewhere a press on a screen not read yet (after a launch, a run or a tap that opened
+            // another screen) is judged when it is sent: `pressNow` reads the screen it lands on and
+            // holds it there if a Delete or a Pay lies under it. Asking up front for every such press
+            // made the owner approve a Back after a drag, and kept agents from chaining steps.
         }
         switch kind {
         case .launch:
