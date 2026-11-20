@@ -49,10 +49,10 @@ enum Harness {
             if placement == "fullscreen" {
                 parts.append("Poki is full screen on Duo. Use the normal app task flow without selecting a pane.")
             } else if placement == "split-unknown" {
-                parts.append("Poki is in Duo Split View and its side is not confirmed. Start with look without a pane argument. Wait for the read to give Poki's side and the other app before sending input or opening an app. Keep Poki visible and ask the owner for help if the side stays unconfirmed.")
+                parts.append("Poki is in Duo Split View and the task's side is not confirmed yet. Start with look without a pane argument. Wait for the read to confirm the task's app and pane before sending input. Ask the owner for help if the side stays unconfirmed.")
             } else {
                 let target = placement == "left" ? "right" : "left"
-                parts.append("Poki starts in the \(placement) pane of Duo Split View. The task's app belongs in the \(target) pane. Use look with no pane argument for that app, or do {launch: bundle id} to confirm a named app is already there. If the app needs to be opened by the owner, ask them to open it in the \(target) pane. Keep Poki visible. Do not go Home, start a fresh launch, or drag across panes.")
+                parts.append("Poki starts in the \(placement) pane of Duo Split View. This task uses the app in the \(target) pane, even when the owner replaces Poki with another app. Use look with no pane argument for that app, or do {launch: bundle id} to confirm it is already there. If the intended app is missing, ask the owner to open it in the \(target) pane and retry the task. Do not go Home, start a fresh launch, or drag across panes.")
             }
         }
         // A model decides approvals from what the owner said. A refused step goes through once the

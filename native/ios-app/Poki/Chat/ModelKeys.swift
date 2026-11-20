@@ -112,9 +112,10 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
             ChatModelChoice(id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol (OpenRouter)"),
             ChatModelChoice(id: "google/gemini-3.8-flash", name: "Gemini 3.8 Flash (OpenRouter)"),
         ]
-        // Whatever model the owner's endpoint serves (a local server, a company gateway).
+        // Whatever model each of the owner's services serves (a local server, a company gateway), named
+        // with its service once there is more than one.
         case .custom:
-            ModelKeys.customModel.isEmpty ? [] : [ChatModelChoice(id: ModelKeys.customModel, name: ModelKeys.customModel)]
+            Self.customChoices(CustomProviders.all)
         }
     }
 
@@ -127,8 +128,18 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         case .deepseek: AppLocalization.text(LocalizedStringResource("Create a key at platform.deepseek.com, then paste it here."))
         case .gemini: AppLocalization.text(LocalizedStringResource("Create a key at aistudio.google.com, then paste it here."))
         case .openrouter: AppLocalization.text(LocalizedStringResource("Create a key at openrouter.ai/keys, then paste it here."))
-        case .custom: AppLocalization.text(LocalizedStringResource("Any server that speaks the OpenAI chat completions API. Poki sends the key, if any, only to this address."))
+        case .custom: AppLocalization.text(LocalizedStringResource("Any server that speaks the OpenAI Responses API or chat completions API. Poki sends the key, if any, only to this service’s addresses."))
         default: ""
+        }
+    }
+
+    /// Each custom provider's own model, as the chat names it.
+    static func customChoices(_ providers: [CustomProvider]) -> [ChatModelChoice] {
+        providers.compactMap { provider in
+            let model = provider.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !model.isEmpty, provider.primary != nil else { return nil }
+            return ChatModelChoice(id: CustomProviders.choiceID(provider.id, model),
+                                   name: CustomProviders.choiceName(provider, model, among: providers.count))
         }
     }
 
@@ -144,14 +155,63 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
               thinkingLevelMap: reasoning ? [.off: nil] : nil)
     }
 
-    /// pi's model for one of `models`. `customURL` is an address not saved yet (the connection test on the
-    /// key page); without it a custom endpoint uses the saved one.
-    func piModel(_ id: String, customURL: String? = nil) -> Model? {
+    /// A custom address's model, set up like the official provider's where Poki can tell: the address's
+    /// API (Responses or chat completions), and for a model id pi's catalog knows (`gpt-6.1-sol`, or
+    /// `openai/gpt-6.1-sol` behind a gateway) that model's reasoning, inputs, window and output size, so
+    /// a third party serving an official model gets what the official account gets. `reasoning` is the
+    /// owner's choice and wins over the catalog; without either the model does not reason. The
+    /// catalog's prices and provider quirks are not taken: they are the original provider's.
+    static func customModel(_ id: String, baseUrl: String, api: Api, reasoning: Bool?, piProvider: String = "poki-custom") -> Model {
+        let known = catalogMatch(id)
+        let thinks = reasoning ?? known?.reasoning ?? false
+        let map: ThinkingLevelMap? = thinks ? ((known?.reasoning == true ? known?.thinkingLevelMap : nil) ?? [.off: nil]) : nil
+        return Model(id: id, name: id, api: api, provider: piProvider, baseUrl: baseUrl,
+                     reasoning: thinks, input: known?.input ?? [.text, .image],
+                     cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
+                     contextWindow: known?.contextWindow ?? unlistedContextWindow,
+                     maxTokens: known?.maxTokens ?? (thinks ? unlistedReasoningMaxTokens : unlistedMaxTokens),
+                     thinkingLevelMap: map)
+    }
+
+    /// Room for a reasoning model's thinking and its answer when the catalog does not say.
+    private static let unlistedReasoningMaxTokens = 32_768
+
+    /// Prefer a named model vendor's catalog over a gateway entry for the qualified model ID.
+    static func catalogMatch(_ id: String) -> Model? {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let providers = ["openai", "anthropic", "google", "deepseek"] + getProviders().map(\.rawValue).sorted()
+        let parts = trimmed.split(separator: "/").map(String.init)
+        let unqualified = parts.last ?? trimmed
+        // GPT-6.1 Terra is missing from PiSwift's catalog; it has Sol's setup (see `piModel`).
+        func lookupID(_ id: String) -> String { id == "gpt-6.1-terra" ? "gpt-6.1-sol" : id }
+        if let vendor = parts.dropLast().last,
+           let model = getModel(provider: vendor.lowercased(), modelId: lookupID(unqualified)) { return model }
+        let ids = unqualified == trimmed ? [trimmed] : [trimmed, unqualified]
+        for candidate in ids {
+            for provider in providers {
+                if let model = getModel(provider: provider, modelId: lookupID(candidate)) { return model }
+            }
+        }
+        return nil
+    }
+
+    /// pi's model for one of `models`. For a custom provider `id` is the chat's id (provider and model,
+    /// `CustomProviders.choiceID`) and the model goes to the provider's first address in its API. With
+    /// `customURL`, an address not saved yet (the connection test on the editing page), `id` is the bare
+    /// model id and `customAPI` and `customReasoning` are the page's choices.
+    func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil) -> Model? {
         guard let piProvider else { return nil }
         if self == .custom {
-            let base = (customURL ?? ModelKeys.customURL).trimmingCharacters(in: .whitespaces)
-            guard !base.isEmpty, !id.isEmpty else { return nil }
-            return unlistedModel(id, provider: piProvider, baseUrl: base)
+            if let customURL {
+                let base = customURL.trimmingCharacters(in: .whitespaces)
+                guard !base.isEmpty, !id.isEmpty else { return nil }
+                return Self.customModel(id, baseUrl: base, api: customAPI.piAPI, reasoning: customReasoning, piProvider: piProvider)
+            }
+            guard let chosen = CustomProviders.parse(id), let provider = CustomProviders.provider(chosen.provider),
+                  let endpoint = provider.primary else { return nil }
+            return Self.customModel(chosen.model, baseUrl: endpoint.normalized, api: endpoint.sent.piAPI,
+                                    reasoning: provider.reasoning, piProvider: provider.piProvider)
         }
         if let model = getModel(provider: piProvider, modelId: id) { return model }
         // OpenRouter serves thousands of models its catalog lacks, and a built-in model's setup (Anthropic
@@ -185,7 +245,9 @@ struct ChatModelChoice: Hashable, Identifiable, Sendable {
 enum ModelKeys {
     private static func account(_ provider: ModelProvider) -> String { "model-key.\(provider.rawValue)" }
 
+    /// For a custom provider, the key of the one the chat uses now (`CustomProviders.current`).
     static func key(_ provider: ModelProvider) -> String? {
+        if provider == .custom { return CustomProviders.current.flatMap { CustomProviders.key($0.id) } }
         guard let data = try? Keychain.read(account(provider)), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
         return key
     }
@@ -193,34 +255,45 @@ enum ModelKeys {
     static func hasKey(_ provider: ModelProvider) -> Bool { key(provider) != nil }
 
     static func save(_ key: String, for provider: ModelProvider) throws {
+        if provider == .custom {
+            let current = CustomProviders.current ?? CustomProviders.upsert(CustomProvider())
+            return try CustomProviders.saveKey(key, for: current.id)
+        }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let changed = Self.key(provider) != trimmed
         try Keychain.write(Data(trimmed.utf8), account: account(provider))
-        if provider == .custom, changed { ModelCatalog.invalidateCustom() }
         saved += 1
     }
 
     static func remove(_ provider: ModelProvider) {
+        if provider == .custom {
+            if let current = CustomProviders.current { CustomProviders.removeKey(current.id) }
+            return
+        }
         Keychain.delete(account(provider))
-        if provider == .custom { ModelCatalog.invalidateCustom() }
         saved += 1
     }
 
-    /// The custom endpoint's address (not a secret: kept in the app's settings).
+    /// The first address of the custom provider the chat uses now (not a secret: kept in the app's
+    /// settings). Setting it changes that address, or adds a provider when there is none.
     static var customURL: String {
-        get { UserDefaults.standard.string(forKey: "chat.customURL") ?? "" }
-        set {
-            if ModelCatalog.normalizedAddress(newValue) != ModelCatalog.normalizedAddress(customURL) {
-                ModelCatalog.invalidateCustom()
-            }
-            UserDefaults.standard.set(newValue, forKey: "chat.customURL")
-        }
+        get { CustomProviders.current?.primary?.url ?? "" }
+        set { editCurrentCustom { provider in
+            if provider.endpoints.isEmpty { provider.endpoints = [CustomEndpoint(url: newValue)] }
+            else { provider.endpoints[0].url = newValue }
+        } }
     }
 
-    /// The custom endpoint's model id.
+    /// The model id of the custom provider the chat uses now.
     static var customModel: String {
-        get { UserDefaults.standard.string(forKey: "chat.customModel") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "chat.customModel") }
+        get { CustomProviders.current?.model ?? "" }
+        set { editCurrentCustom { $0.model = newValue } }
+    }
+
+    private static func editCurrentCustom(_ change: (inout CustomProvider) -> Void) {
+        var provider = CustomProviders.current ?? CustomProvider()
+        change(&provider)
+        CustomProviders.upsert(provider)
+        UserDefaults.standard.set(provider.id.uuidString, forKey: CustomProviders.selectedKey)
     }
 
     /// A different address never inherits the previous service's secret.
@@ -230,25 +303,40 @@ enum ModelKeys {
         return ModelCatalog.normalizedAddress(address) == ModelCatalog.normalizedAddress(customURL) ? key(.custom) : nil
     }
 
+    /// Saves the custom provider the chat uses now with one address and model (a new one when there is
+    /// none) and makes its model the chat's.
     @MainActor
     static func saveCustom(address: String, model: String, typedKey: String) throws {
         let address = ModelCatalog.normalizedAddress(address)
         let credential = customDraftKey(address: address, typedKey: typedKey)
-        // Save the secret first: a keychain failure must not change the address/model.
-        if let credential { try save(credential, for: .custom) }
-        else if hasKey(.custom) { remove(.custom) }
-        customURL = address
-        customModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        ModelCatalog.set(customModel, on: true, for: .custom)
+        var provider = CustomProviders.current ?? CustomProvider()
+        provider.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider.endpoints.isEmpty { provider.endpoints = [CustomEndpoint(url: address)] } else { provider.endpoints[0].url = address }
+        try saveCustom(provider, typedKey: credential ?? "", keepKey: false)
+    }
+
+    /// Saves a custom provider from its editing page: the key typed (else, with `keepKey`, the saved
+    /// one stays; without it none), its addresses and model, and makes its model the chat's.
+    @MainActor
+    static func saveCustom(_ provider: CustomProvider, typedKey: String, keepKey: Bool) throws {
+        let typed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Save the secret first: a keychain failure must not change the addresses or the model.
+        if !typed.isEmpty { try CustomProviders.saveKey(typed, for: provider.id) }
+        else if !keepKey, CustomProviders.key(provider.id) != nil { CustomProviders.removeKey(provider.id) }
+        let saved = CustomProviders.upsert(provider)
+        UserDefaults.standard.set(saved.id.uuidString, forKey: CustomProviders.selectedKey)
+        guard !saved.model.isEmpty, saved.primary != nil else { return }
         selectedProvider = .custom
-        selectedModel = customModel
-        saved += 1
+        selectedModel = CustomProviders.choiceID(saved.id, saved.model)
     }
 
     /// The chat can run: the chosen provider is wired and has a key (a custom endpoint: an address and a
     /// model; its key is optional).
     static var hasUsableKey: Bool {
-        if selectedProvider == .custom { return !customURL.isEmpty && !customModel.isEmpty }
+        if selectedProvider == .custom {
+            guard let chosen = CustomProviders.parse(selectedModel), let provider = CustomProviders.provider(chosen.provider) else { return false }
+            return provider.primary != nil
+        }
         if selectedProvider == .chatgpt { return ChatGPTAccount.signedIn }
         return selectedProvider.wired && hasKey(selectedProvider)
     }
@@ -260,14 +348,24 @@ enum ModelKeys {
 
     /// Each provider's model: its first (Claude Sonnet 5.5, GPT-6.1 Terra) unless the owner picks another.
     static func model(for provider: ModelProvider) -> String {
-        let saved = UserDefaults.standard.string(forKey: "chat.model.\(provider.rawValue)")
         let available = ModelCatalog.available(provider)
+        let saved = UserDefaults.standard.string(forKey: "chat.model.\(provider.rawValue)")
         return saved.flatMap { id in available.contains { $0.id == id } ? id : nil } ?? available.first?.id ?? provider.models.first?.id ?? ""
     }
 
     static var selectedModel: String {
         get { model(for: selectedProvider) }
-        set { UserDefaults.standard.set(newValue, forKey: "chat.model.\(selectedProvider.rawValue)") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "chat.model.\(selectedProvider.rawValue)")
+            if selectedProvider == .custom, let chosen = CustomProviders.parse(newValue) {
+                UserDefaults.standard.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
+            }
+        }
+    }
+
+    /// The account the chat uses, as the owner reads it: the provider's name, or the custom service's.
+    static var selectedAccountName: String {
+        selectedProvider == .custom ? (CustomProviders.current?.displayName ?? selectedProvider.name) : selectedProvider.name
     }
 
     static var selectedModelName: String {
@@ -283,9 +381,14 @@ enum ModelKeys {
 /// The credential pi sends for a provider: the key, or for ChatGPT the signed-in access token, refreshed
 /// a minute before it runs out (pi's rule; `expires` is in milliseconds).
 enum ModelCredential {
-    static func apiKey(for provider: ModelProvider) async -> String? {
+    /// `piProvider` is pi's provider name of the model sent: for a custom provider it names which one.
+    static func apiKey(for provider: ModelProvider, piProvider: String? = nil) async -> String? {
         // A custom endpoint may need no key; the request still carries one.
-        guard let stored = ModelKeys.key(provider) else { return provider == .custom ? "none" : nil }
+        if provider == .custom {
+            let custom = piProvider.flatMap { CustomProviders.provider(piProvider: $0) } ?? CustomProviders.current
+            return custom.flatMap { CustomProviders.key($0.id) } ?? "none"
+        }
+        guard let stored = ModelKeys.key(provider) else { return nil }
         guard provider.signsIn else { return stored }
         // A sign-in from OpenAI's open-source flow carries its issued client id; an older Codex-client
         // sign-in does not, and has to be done again.

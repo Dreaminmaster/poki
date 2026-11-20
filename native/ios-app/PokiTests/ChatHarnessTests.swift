@@ -15,7 +15,7 @@ final class ChatHarnessTests: XCTestCase {
     private var saved: [String: Any?] = [:]
     private var app: AppModel?
     private var notes: [String] = []
-    private static let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+    private static let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
 
     override func setUp() async throws {
         for key in Self.settings { saved[key] = UserDefaults.standard.object(forKey: key) }

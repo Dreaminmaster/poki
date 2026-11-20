@@ -6,7 +6,7 @@ import UserNotifications
 final class LanguageTests: XCTestCase {
     private var preference = "system"
     private var defaults: [String: Any] = [:]
-    private let routingKeys = ["chat.provider", "chat.customURL", "chat.customModel"]
+    private let routingKeys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
 
     override func setUp() async throws {
         preference = AppLocalization.shared.preference

@@ -38,7 +38,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
-    func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
+    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) {}
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}

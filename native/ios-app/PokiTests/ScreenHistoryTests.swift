@@ -9,7 +9,7 @@ import XCTest
 /// them, through the same call a run makes.
 @MainActor
 final class ScreenHistoryTests: XCTestCase {
-    private let keys = ["history.enabled", "history.listMode", "history.excluded", "history.included"]
+    private let keys = ["history.enabled", HistoryCapture.enabledKey, "history.listMode", "history.excluded", "history.included"]
     private var saved: [String: Any] = [:]
     private var savedLanguage = AppLocalization.system
     private var savedCaptureMode: HistoryCapture.ListMode = .exclude
@@ -189,6 +189,38 @@ final class ScreenHistoryTests: XCTestCase {
             XCTAssertNil(entry["bundleID"], file: file, line: line)
         }
         return try JSONDecoder().decode(DecodedHistoryResponse.self, from: data)
+    }
+
+    func testUpgradePersistsTheScreenHistorySwitchAndKeepsExistingHistoryQueryable() async throws {
+        let defaults = UserDefaults.standard
+        let legacyKey = "history.enabled"
+        let recordingKey = HistoryCapture.enabledKey
+        let savedText = "Screen text recorded before upgrading"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: savedText)
+        defaults.set(true, forKey: legacyKey)
+
+        let capture = HistoryCapture()
+        XCTAssertTrue(capture.enabled)
+        XCTAssertEqual(defaults.object(forKey: recordingKey) as? Bool, true)
+        XCTAssertFalse(HistoryCapture.agentQueryAllowed)
+        try unlockHistoryForFixture()
+        let core = PokiCore(config: CoreConfig(screenHistory: HistoryStore.agentSource), host: AppCoreHost())
+        let result = await core.callTool("screen_history", arguments: #"{"period":"last_hour"}"#)
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains(savedText))
+
+        capture.enabled = false
+        XCTAssertFalse(HistoryCapture().enabled, "A later choice to turn recording off survives relaunch")
+        XCTAssertEqual(defaults.object(forKey: recordingKey) as? Bool, false)
+
+        defaults.set(false, forKey: legacyKey)
+        defaults.removeObject(forKey: recordingKey)
+        XCTAssertFalse(HistoryCapture().enabled, "An upgrade with Screen History off stays off")
+        XCTAssertEqual(defaults.object(forKey: recordingKey) as? Bool, false)
+
+        defaults.removeObject(forKey: legacyKey)
+        defaults.removeObject(forKey: recordingKey)
+        XCTAssertFalse(HistoryCapture().enabled, "Screen History starts off on a fresh install")
     }
 
     func testScreenHistoryToolIsUnavailableWhenTheSwitchIsOff() async throws {
@@ -465,7 +497,7 @@ final class ScreenHistoryTests: XCTestCase {
         capture.enabled = true
         let canary = "SYNTHETIC_MODEL_REQUEST_CANARY"
         HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
-        let settings = ["chat.provider", "chat.customURL", "chat.customModel"]
+        let settings = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom"]
         let saved = settings.map { UserDefaults.standard.object(forKey: $0) }
         defer {
             for (key, value) in zip(settings, saved) { UserDefaults.standard.set(value, forKey: key) }
@@ -521,9 +553,10 @@ final class ScreenHistoryTests: XCTestCase {
 
     private func assertRevokedPendingQuery(change: PendingPrivacyChange) async throws {
         try unlockHistoryForFixture()
-        let capture = HistoryCapture.shared
+        let capture = change == .deviceLock ? HistoryCapture() : HistoryCapture.shared
         let lock = HistoryLock.shared
         capture.enabled = true
+        defer { if change == .deviceLock { capture.enabled = false } }
         let savedBiometrics = lock.biometricsOn
         defer {
             if lock.unlocked, lock.biometricsOn != savedBiometrics { _ = lock.setBiometrics(savedBiometrics) }
