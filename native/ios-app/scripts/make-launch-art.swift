@@ -1,5 +1,7 @@
-// Draws the launch screen's word at 3x and its bear at 2x (see Poki/LaunchArt/README.md) and writes two PNGs.
-//   swift make-launch-art.swift <Geist-SemiBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png>
+// Draws the launch screen's word at 3x and its bear at 2x (see Poki/LaunchArt/README.md), each for the light
+// and the dark appearance, and writes four PNGs.
+//   swift make-launch-art.swift <Geist-SemiBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> \
+//     <dark wordmark out.png> <dark bear out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Geist or a shadow itself: both are
 // drawn here, at build time, from the design's values.
 import CoreGraphics
@@ -12,6 +14,8 @@ import UniformTypeIdentifiers
 enum Word {
   static let text = "Poki"
   static let colour: UInt32 = 0x3A3C41
+  /// Over the dark light: a soft white, as the system's own text is white in dark.
+  static let darkColour: UInt32 = 0xF2F4F7
   static let weight = "SemiBold"
   static let size: CGFloat = 60
   static let lineHeight: CGFloat = 64
@@ -19,7 +23,9 @@ enum Word {
 }
 
 /// The bear along the bottom edge: 418 points wide on a 402-point screen, under a soft blue light
-/// thrown up from it (the design's drop shadow: 22 % of 0x073AA2, 8 points up, 30 points of blur).
+/// thrown up from it (the design's drop shadow: 22 % of 0x073AA2, 8 points up, 30 points of blur). In
+/// dark there is no shadow, as nowhere else in the app (`Tint.blueShadow`): on the dark blue it reads
+/// as a glow. The picture keeps its margin, so both appearances lay out the same.
 enum Bear {
   static let width: CGFloat = 418
   static let shadowColour: UInt32 = 0x073AA2
@@ -34,8 +40,8 @@ enum Bear {
 
 let wordScale: CGFloat = 3
 let args = CommandLine.arguments
-guard args.count == 5 else {
-  FileHandle.standardError.write("usage: make-launch-art.swift Geist-SemiBold.ttf LaunchBear.png wordmark.png bear.png\n".data(using: .utf8)!); exit(2)
+guard args.count == 7 else {
+  FileHandle.standardError.write("usage: make-launch-art.swift Geist-SemiBold.ttf LaunchBear.png wordmark.png bear.png dark-wordmark.png dark-bear.png\n".data(using: .utf8)!); exit(2)
 }
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 
@@ -58,7 +64,7 @@ func write(_ context: CGContext, _ path: String) {
 // The word, in its line box as the design lays it out: the font's ascent and descent centred in the
 // line height, letter spacing after every letter, the last included, and a few points either side
 // for letters that reach past their advance.
-do {
+func drawWord(_ hex: UInt32, _ path: String) {
   guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(URL(fileURLWithPath: args[1]) as CFURL) as? [CTFontDescriptor],
         let descriptor = descriptors.first else { FileHandle.standardError.write("cannot read \(args[1])\n".data(using: .utf8)!); exit(1) }
   let font = CTFontCreateWithFontDescriptor(descriptor, Word.size, nil)
@@ -68,7 +74,7 @@ do {
   let line = CTLineCreateWithAttributedString(NSAttributedString(string: Word.text, attributes: [
     kCTFontAttributeName as NSAttributedString.Key: font,
     kCTKernAttributeName as NSAttributedString.Key: kern,
-    kCTForegroundColorAttributeName as NSAttributedString.Key: colour(Word.colour),
+    kCTForegroundColorAttributeName as NSAttributedString.Key: colour(hex),
   ]))
   let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
   let side: CGFloat = 8
@@ -77,11 +83,13 @@ do {
   let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
   context.textPosition = CGPoint(x: side, y: (Word.lineHeight - ascent - descent) / 2 + descent)
   CTLineDraw(line, context)
-  write(context, args[3])
+  write(context, path)
 }
+drawWord(Word.colour, args[3])
+drawWord(Word.darkColour, args[5])
 
-// The bear with its shadow baked in, the bear's bottom on the picture's bottom.
-do {
+// The bear, with its shadow baked in for light, the bear's bottom on the picture's bottom.
+func drawBear(shadow: Bool, _ path: String) {
   guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[2]) as CFURL, nil),
         let bear = CGImageSourceCreateImageAtIndex(source, 0, nil) else { FileHandle.standardError.write("cannot read \(args[2])\n".data(using: .utf8)!); exit(1) }
   let height = Bear.width * CGFloat(bear.height) / CGFloat(bear.width)
@@ -89,8 +97,12 @@ do {
   let context = canvas(Bear.width + 2 * Bear.margin, height + Bear.margin, scale: scale)
   context.interpolationQuality = .high
   // Shadow offsets and blur are in pixels, not in the scaled points; y grows upwards here.
-  context.setShadow(offset: CGSize(width: 0, height: Bear.shadowRise * scale), blur: Bear.shadowBlur * scale,
-                    color: colour(Bear.shadowColour, Bear.shadowAlpha))
+  if shadow {
+    context.setShadow(offset: CGSize(width: 0, height: Bear.shadowRise * scale), blur: Bear.shadowBlur * scale,
+                      color: colour(Bear.shadowColour, Bear.shadowAlpha))
+  }
   context.draw(bear, in: CGRect(x: Bear.margin * scale, y: 0, width: Bear.width * scale, height: height * scale))
-  write(context, args[4])
+  write(context, path)
 }
+drawBear(shadow: true, args[4])
+drawBear(shadow: false, args[6])

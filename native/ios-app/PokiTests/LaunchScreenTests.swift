@@ -6,7 +6,8 @@ import XCTest
 @MainActor
 final class LaunchScreenTests: XCTestCase {
     func testLaunchPicturesLoadWithoutTheAssetCatalog() throws {
-        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@2x"] {
+        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@2x",
+                     "LaunchBackdropDark", "LaunchWordmarkDark@3x", "LaunchBearDark@2x"] {
             let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "png"))
             XCTAssertNotNil(UIImage(contentsOfFile: file.path), "\(name) must decode without Assets.car")
         }
@@ -72,15 +73,18 @@ final class LaunchScreenTests: XCTestCase {
     /// takes over from it without a jump. A change to the light's table without a new picture
     /// (scripts/make-launch-backdrop.sh) fails here.
     func testLaunchBackdropIsTheHomePagesLightAtRest() throws {
-        let launch = try XCTUnwrap(UIImage(named: "LaunchBackdrop")?.cgImage)
-        let renderer = ImageRenderer(content: HomeBackdrop(home: true, working: false, frozen: true)
-            .environment(\.colorScheme, .light).frame(width: 402, height: 874))
-        renderer.scale = 1
-        let home = try XCTUnwrap(renderer.cgImage)
-        let (a, b) = (try samples(launch), try samples(home))
-        var worst = 0
-        for i in a.indices { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
-        XCTAssertLessThanOrEqual(worst, 6, "launch picture and home light differ by \(worst) of 255 somewhere")
+        for (scheme, name) in [(ColorScheme.light, "LaunchBackdrop"), (.dark, "LaunchBackdropDark")] {
+            let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "png"))
+            let launch = try XCTUnwrap(UIImage(contentsOfFile: file.path)?.cgImage)
+            let renderer = ImageRenderer(content: HomeBackdrop(home: true, working: false, frozen: true)
+                .environment(\.colorScheme, scheme).frame(width: 402, height: 874))
+            renderer.scale = 1
+            let home = try XCTUnwrap(renderer.cgImage)
+            let (a, b) = (try samples(launch), try samples(home))
+            var worst = 0
+            for i in a.indices { worst = max(worst, abs(Int(a[i]) - Int(b[i]))) }
+            XCTAssertLessThanOrEqual(worst, 6, "\(name) and the home light differ by \(worst) of 255")
+        }
         // In both appearances the launch screen's ground is the home page's paper, never white or black.
         let (controller, view) = try launchView()
         for style: UIUserInterfaceStyle in [.light, .dark] {
