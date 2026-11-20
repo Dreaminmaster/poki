@@ -961,12 +961,11 @@ final class Computer: @unchecked Sendable {
         var actions = actions
         var bound: String?
         if config.appNames() {
-            // A name nothing knows, anywhere in the batch or in a path's steps, is refused before the
-            // first action is sent, not when its turn comes.
-            if let unknown = actions.lazy.compactMap(unknownAppName).first {
-                return ToolResult(text: "do: no app named \"\(unknown)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+            do {
+                actions = try actions.map(resolvingLaunchNames)
+            } catch {
+                return ToolResult(text: "\(error)", jpeg: nil, isError: true)
             }
-            actions = actions.map(withAppNames)
             // The session's app: named once, kept until it is let go, a task ends or a new one begins.
             if beginsTask() { sessionApp = nil }
             if let app {
@@ -1010,18 +1009,6 @@ final class Computer: @unchecked Sendable {
         return front == bundle
     }
 
-    /// The app name of a launch (or of a launch in a path's steps) that neither the host knows nor is a
-    /// bundle id: nil when every launch in it has an app to open.
-    func unknownAppName(_ action: JSON) -> String? {
-        if let spec = action["launch"] {
-            guard let given = (spec.string ?? spec["bundle"]?.string ?? spec["name"]?.string ?? spec["app"]?.string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !given.isEmpty else { return nil }
-            return config.resolveApp(given) == nil && !Self.looksLikeBundleID(given) ? given : nil
-        }
-        if let steps = action["path"]?["steps"]?.array ?? action["path"]?.array { return steps.lazy.compactMap(unknownAppName).first }
-        return nil
-    }
-
     /// The web suffixes an app's name can end in ("Booking.com", "Twitch.tv", "Mail.ru"), where a
     /// bundle id of two parts has its maker's domain the other way round ("tv.twitch").
     static let webSuffixes: Set<String> = ["com", "net", "org", "io", "co", "ai", "app", "me", "tv", "fm", "gg", "so", "ly", "ru", "cn", "jp", "de", "fr", "uk", "us", "info", "xyz"]
@@ -1036,26 +1023,37 @@ final class Computer: @unchecked Sendable {
         return !(parts.count == 2 && webSuffixes.contains(parts[1].lowercased()))
     }
 
-    /// A launch by name as a launch by bundle id, also inside a path's steps. A name the host does not
-    /// know is left as it is, and the launch says so.
-    func withAppNames(_ action: JSON) -> JSON {
-        guard case .object(var o) = action else { return action }
-        if let spec = o["launch"] {
-            if let given = spec.string { if let bundle = config.resolveApp(given) { o["launch"] = .string(bundle) } }
-            else if case .object(var inner) = spec, let given = inner["bundle"]?.string ?? inner["name"]?.string ?? inner["app"]?.string {
-                inner["bundle"] = .string(config.resolveApp(given) ?? given)
-                inner["name"] = nil
-                inner["app"] = nil
-                o["launch"] = .object(inner)
+    private func launchBundle(_ given: String, inferBundleID: Bool) throws -> String {
+        let name = given.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let bundle = config.resolveApp(name) { return bundle }
+        if inferBundleID, name.isEmpty || Self.looksLikeBundleID(name) { return given }
+        throw ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+    }
+
+    private func resolvingLaunchNames(_ action: JSON) throws -> JSON {
+        guard case .object(var fields) = action else { return action }
+        if let spec = fields["launch"] {
+            if let given = spec.string {
+                fields["launch"] = .string(try launchBundle(given, inferBundleID: true))
+            } else if case .object(var launch) = spec, launch["bundle"]?.string == nil {
+                let name = launch["name"]?.string
+                guard let given = name ?? launch["app"]?.string else { return action }
+                launch["bundle"] = .string(try launchBundle(given, inferBundleID: name == nil))
+                launch["name"] = nil
+                launch["app"] = nil
+                fields["launch"] = .object(launch)
             }
-            return .object(o)
+            return .object(fields)
         }
-        if case .object(var path)? = o["path"], let steps = path["steps"]?.array {
-            path["steps"] = .array(steps.map(withAppNames))
-            o["path"] = .object(path)
-            return .object(o)
+        if case .object(var path)? = fields["path"], let steps = path["steps"]?.array {
+            path["steps"] = .array(try steps.map(resolvingLaunchNames))
+            fields["path"] = .object(path)
+            return .object(fields)
         }
-        if let steps = o["path"]?.array { o["path"] = .array(steps.map(withAppNames)); return .object(o) }
+        if let steps = fields["path"]?.array {
+            fields["path"] = .array(try steps.map(resolvingLaunchNames))
+            return .object(fields)
+        }
         return action
     }
 
