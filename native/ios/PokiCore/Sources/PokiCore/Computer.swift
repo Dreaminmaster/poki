@@ -14,6 +14,7 @@ public struct ToolResult: Sendable {
     var screen: String?
     var waitingForOwner = false
     var replayedSkills: [String] = []
+    var offeredMemories: [MemoryNote] = []
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
 }

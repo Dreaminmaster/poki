@@ -1530,6 +1530,7 @@ extension PokiCore {
             "text": ["type": "string"], "data": ["type": "string"],
             "expect": ["type": "array", "items": ["type": "string"]], "read": ["type": "array", "items": ["type": "string"]],
             "steps": ["type": "string"],
+            "optional": ["type": "boolean", "description": "In Poki chat, true for an automatic save the owner did not request."],
         ], "required": ["action"], "additionalProperties": false],
     ]
 
@@ -1552,7 +1553,7 @@ extension PokiCore {
             lines.append(notes.isEmpty ? "notes: none" : "notes (\(notes.count)):")
             lines += notes.map { "- [\($0.id)] \($0.text) (by \($0.by)\($0.isLocked ? ", locked" : ""))" }
             if !computer.trace.isEmpty { lines.append("this task has \(computer.trace.count) recorded steps so far (save keeps them)") }
-            return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil)
+            return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, offeredMemories: notes)
         case "show":
             guard let r = store.skill(named: name), !r.stale else { return fail("no skill named \"\(name)\"") }
             var lines = [r.summary]
@@ -1617,7 +1618,8 @@ extension PokiCore {
             return ToolResult(text: "skills: note forgotten", jpeg: nil)
         case "export":
             guard let data = try? store.exportData() else { return fail("could not be made") }
-            return ToolResult(text: String(decoding: data, as: UTF8.self), jpeg: nil)
+            let notes = (try? SkillStore.decoder.decode(MemoryFile.self, from: data))?.notes ?? []
+            return ToolResult(text: String(decoding: data, as: UTF8.self), jpeg: nil, offeredMemories: notes)
         case "import":
             guard let text = args["data"]?.string else { return fail("give data: the JSON export gives") }
             do {

@@ -30,10 +30,6 @@ enum Harness {
     """
 
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
-    @MainActor static func instructions(for task: String, inSplitView: Bool = false) -> String {
-        taskInstructions(for: task, inSplitView: inSplitView).text
-    }
-
     @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
             var parts = [splitViewInstructions]
@@ -65,7 +61,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
+        parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
         return (parts.joined(separator: "\n\n"), brief.notes)
