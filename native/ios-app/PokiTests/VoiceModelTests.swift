@@ -285,7 +285,7 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    func testLiveDeduplicatesByItemOrIdenticalTextWithinTheSameSpeechSegment() async {
+    func testLiveDeduplicatesByItemOrOverlappingAudio() async {
         var operations: [String] = []
         let h = Harness(phoneTool: { _, arguments in
             operations.append(arguments)
@@ -301,7 +301,7 @@ final class VoiceModelTests: XCTestCase {
         }
         h.link.play(["type": "input_audio_buffer.speech_started"])
         await turn("original", text: "打开微信", end: 500)
-        await turn("duplicate", text: " 打开微信！ ", end: 750)
+        await turn("duplicate", text: " 打开微信！ ", end: 550)
         h.link.play(["type": "input_audio_buffer.speech_started"],
                     ["type": "session.input_transcript.delta", "delta": "好的。", "start_ms": 780, "end_ms": 950],
                     ["type": "input_audio_buffer.speech_started"])
@@ -318,12 +318,14 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
-    func testLiveDeduplicatesWithoutItemIDByOverlapOrThreeSecondsWithoutNewAudio() async {
-        let scenarios: [(name: String, start: Int, end: Int, sinceTranscript: Double, newAudio: Bool, expected: [String])] = [
-            ("overlap after three seconds", 350, 550, 4, false, ["first"]),
-            ("disjoint at three seconds", 600, 900, 3, false, ["first"]),
-            ("disjoint after three seconds", 600, 900, 3.1, false, ["first", "second"]),
-            ("disjoint with new audio", 600, 900, 1, true, ["first", "second"]),
+    func testLiveDeduplicatesWithoutItemIDByAudioIntervalWhenAvailable() async {
+        let scenarios: [(name: String, audio: Range<Int>?, delay: Double, intervening: String?, expected: [String])] = [
+            ("disjoint within three seconds", 600..<900, 1, nil, ["first", "second"]),
+            ("overlap after three seconds", 350..<550, 4, nil, ["first"]),
+            ("untimed within three seconds", nil, 3, nil, ["first"]),
+            ("untimed after three seconds", nil, 3.1, nil, ["first", "second"]),
+            ("untimed after an audio commit", nil, 1, "input_audio_buffer.committed", ["first", "second"]),
+            ("untimed after speech starts", nil, 1, "input_audio_buffer.speech_started", ["first", "second"]),
         ]
         for scenario in scenarios {
             var operations: [String] = []
@@ -339,15 +341,16 @@ final class VoiceModelTests: XCTestCase {
             await h.time.settle()
             XCTAssertEqual(operations, ["first"])
 
-            if scenario.newAudio {
-                await h.time.advance(scenario.sinceTranscript - 0.7)
-                h.link.microphoneActive = true
-                await h.time.advance(0.2)
-            } else {
-                await h.time.advance(scenario.sinceTranscript - 0.5)
+            await h.time.advance(scenario.delay - 0.5)
+            if let intervening = scenario.intervening {
+                h.link.play(["type": intervening, "event_id": "next-input"])
             }
-            h.link.play(["type": "session.input_transcript.delta", "delta": " 向下滚动！ ",
-                         "start_ms": scenario.start, "end_ms": scenario.end],
+            var caption: [String: Any] = ["type": "session.input_transcript.delta", "delta": " 向下滚动！ "]
+            if let audio = scenario.audio {
+                caption["start_ms"] = audio.lowerBound
+                caption["end_ms"] = audio.upperBound
+            }
+            h.link.play(caption,
                         ["type": "session.delegation.created", "delegation": ["id": "second"]])
             h.link.call("second", "do", arguments: "second", delegation: "second")
             await h.time.settle()
