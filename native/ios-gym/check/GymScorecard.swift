@@ -26,6 +26,7 @@ public struct GymEnvironment {
     public var canRestartRunner = false
     /// WDA's raw XML tree, for diagnostics, or nil.
     public var rawTree: () async -> String? = { nil }
+    public var foregroundBundle: () async -> String? = { nil }
     /// Whether the simulator has an app (the CI runtime ships without Notes, Mail and Messages).
     public var installed: (_ bundle: String) async -> Bool = { _ in false }
     /// Allows (or, with a negative delay, denies) the next approval PokiCore asks for, after that
@@ -692,7 +693,9 @@ public final class GymScorecard {
         let first = await call("look (the task begins here)", "look")
         let originApp = frontApp(first)
         let away = await call("launch Settings by its localized name", "do", ["actions": [["launch": "设置"], ["wait_until": ["settled": true, "ms": 2000]]]], budget: 25)
-        check(away.contains("app: Settings"), "Settings is in front before finish (the task began in \(originApp))")
+        let settingsIsInFront = await env.foregroundBundle().map { $0 == "com.apple.Preferences" }
+            ?? ["Settings", "设置", "設定", "系统设置", "系統設定"].contains(frontApp(away))
+        check(settingsIsInFront, "Settings is in front before finish (the task began in \(originApp))")
         let finished = await call("do with finish: true", "do", ["actions": [], "finish": true], budget: 20)
         check(finished.contains("finish: back in \(originApp)"), "the finish line says the phone went back to \(originApp)")
         var origin = finished

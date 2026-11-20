@@ -150,6 +150,11 @@ var session: String?
         guard let raw = try? await URLSession.shared.data(from: url.appendingPathComponent("source").appending(queryItems: [URLQueryItem(name: "format", value: "xml")])).0 else { return nil }
         return (try? JSON.parse(raw))?["value"]?.string
     }
+    env.foregroundBundle = {
+        let request = URLRequest(url: url.appendingPathComponent("wda/activeAppInfo"), timeoutInterval: 2)
+        guard let (raw, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return (try? JSON.parse(raw))?["value"]?["bundleId"]?.string
+    }
     env.installed = { simulatorApps.bundleIDs.contains($0) }
     env.approveNext = { approver.next($0) }
     env.path = "runner"
