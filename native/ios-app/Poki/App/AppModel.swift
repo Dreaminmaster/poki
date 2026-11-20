@@ -848,14 +848,13 @@ final class AppModel {
         }
     }
 
-    /// In the background the loopback is still watched while Poki is on (the agent's runner depends on
-    /// it): every 6 s, light enough for the location-kept background time.
+    /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
-        sessionOn ? loopback.resume(every: 6) : loopback.pause()
+        sessionOn || HistoryCapture.isEnabled ? loopback.resume(every: 6) : loopback.pause()
         if pairingUnderWay { log.add("pairing", "Poki in the background while pairing; keep-alive \(pairingKeepAlive.isOn ? "playing" : "off")") }
     }
     private var inFront = true
@@ -1253,7 +1252,7 @@ final class AppModel {
             if setup.loopback == .builtIn { tunnel.disconnect() }
             return
         }
-        if !inFront { loopback.pause() }
+        if !inFront, !HistoryCapture.isEnabled { loopback.pause() }
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }

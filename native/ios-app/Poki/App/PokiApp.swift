@@ -47,6 +47,7 @@ struct PokiApp: App {
         // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
         BearModel.shared.load()
         let model = AppModel()
+        HistoryCapture.shared.monitor(model: model)
         _model = State(initialValue: model)
         let chat = ChatModel(app: model)
         _chat = State(initialValue: chat)
@@ -298,7 +299,16 @@ struct RootView: View {
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
         .onChange(of: scenePhase, initial: true) { _, phase in
-            if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
+            if phase == .active {
+                model.becameActive()
+                HistoryCapture.shared.appDidBecomeActive()
+                AskPoki.refresh()
+                model.startSigner()
+                model.signer.maintain()
+                Task { await model.verifyPairing() }
+            } else if phase == .background {
+                model.wentToBackground()
+            }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` brings the chat to the front.
