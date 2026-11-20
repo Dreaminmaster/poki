@@ -76,6 +76,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     var sessionStore: SessionStore = .shared
     var shortcutStore: HomeShortcutStore = .shared
+    var memoryLibrary: MemoryLibrary? = nil
     @State private var sidebarWidth: CGFloat?
     private var showsSidebar: Bool { sidebarWidth != nil }
     // Both navigation layouts share the composer while the window changes size.
@@ -203,7 +204,8 @@ struct RootView: View {
         case .session(let id):
             SessionView(id: id, back: { show(.chat) },
                         searchJump: searchJump?.sessionID == id ? searchJump : nil,
-                        onSearchJumpApplied: consumeSearchJump)
+                        onSearchJumpApplied: consumeSearchJump,
+                        sessionStore: sessionStore)
         case .setup:
             SetupChecklist().toolbar(.visible, for: .navigationBar)
         }
@@ -265,11 +267,20 @@ struct RootView: View {
             openSession: { id, entryID in openRun(id, entryID: entryID) },
             searchJump: searchJump,
             onSearchJumpApplied: consumeSearchJump,
+            sessionStore: sessionStore,
+            memoryLibrary: memoryLibrary,
             path: $detailsPath
         )
         // Presented on its own, so it says the edge's style itself rather than counting on the
         // presenting page's.
         .softTopEdge()
+        // A Memory source is an internal navigation action, not an external app launch.
+        // Use the same handler as onOpenURL while keeping the presented Settings stack.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme == "poki", url.host() == "session" else { return .systemAction }
+            open(link: url)
+            return .handled
+        })
         .modifier(AutomationNotices())
     }
 

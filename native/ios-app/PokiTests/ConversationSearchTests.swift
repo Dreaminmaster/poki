@@ -27,8 +27,9 @@ final class ConversationSearchTests: XCTestCase {
 
     func testGreetingRemainsInTranscriptAfterScrollRequestIsConsumed() {
         let greeting = ChatEntry(.poki("Welcome to Poki"))
+        let otherGreeting = ChatEntry(.poki("Previous approval setting"))
         let user = ChatEntry(.you("First request", delivered: true))
-        let entries = [greeting, user]
+        let entries = [greeting, otherGreeting, user]
         let hit = find(in: [sample(entries: entries)], query: "Welcome").first
         XCTAssertEqual(hit?.entryID, greeting.id)
         let jump = ConversationSearchJump(sessionID: "first", entryID: greeting.id)
@@ -40,7 +41,7 @@ final class ConversationSearchTests: XCTestCase {
         navigation.consume(jump.requestID)
         XCTAssertNil(navigation.pending)
         let selected = navigation.revealedEntry(in: "first")
-        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: selected).map(\.id), entries.map(\.id))
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: selected).map(\.id), [greeting.id, user.id])
         XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: selected).first?.id, greeting.id)
         XCTAssertNil(navigation.revealedEntry(in: "different"))
         let preview = ConversationSearchJump(sessionID: "saved", entryID: user.id)
@@ -50,6 +51,8 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: nil).map(\.id), [user.id])
         XCTAssertEqual(ChatView.transcriptEntries([greeting], revealed: selected).map(\.id), [greeting.id])
         XCTAssertTrue(ChatView.transcriptEntries([user], revealed: greeting.id).contains(user))
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: user.id).map(\.id), [user.id])
+        XCTAssertEqual(ChatView.transcriptEntries([greeting, otherGreeting], revealed: greeting.id).map(\.id), [greeting.id])
     }
 
     func testFindsOlderMessageEvenWhenLastLineDoesNotMatch() {

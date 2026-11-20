@@ -20,6 +20,8 @@ struct PokiDetailsView: View {
     var openSession: (String, UUID?) -> Void = { _, _ in }
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
+    var sessionStore: SessionStore = .shared
+    var memoryLibrary: MemoryLibrary? = nil
     @Binding var path: NavigationPath
     @ObservedObject private var historyCapture = HistoryCapture.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
@@ -90,7 +92,7 @@ struct PokiDetailsView: View {
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                     NavigationLink(value: SettingsRoute.memory) {
-                        SettingsRow(title: "Memory", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
+                        SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.routines.count)")
                     }
                     .accessibilityIdentifier("moreSettings.memory")
                     NavigationLink(value: DetailsRoute.screenHistory) {
@@ -189,7 +191,8 @@ struct PokiDetailsView: View {
                     SessionView(id: id,
                                 back: { if !path.isEmpty { path.removeLast() } },
                                 searchJump: searchJump?.sessionID == id ? searchJump : nil,
-                                onSearchJumpApplied: onSearchJumpApplied)
+                                onSearchJumpApplied: onSearchJumpApplied,
+                                sessionStore: sessionStore)
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .language:
@@ -199,7 +202,7 @@ struct PokiDetailsView: View {
             }
             .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).settingsPage() }
             .navigationDestination(for: SettingsRoute.self) { route in
-                SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } })
+                SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } }, memoryLibrary: memoryLibrary)
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }

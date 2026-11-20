@@ -496,13 +496,14 @@ struct SessionView: View {
     var back: () -> Void
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
+    var sessionStore: SessionStore = .shared
 
     @State private var renaming = false
     @State private var newName = ""
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let session = SessionStore.shared.session(id)
+        let session = sessionStore.session(id)
         let running = AskPoki.live(id)
         let sample = GuestSample.isOn && id == "sample-1"
         let live = sample || (running?.running ?? (session?.live ?? false))
@@ -549,7 +550,7 @@ struct SessionView: View {
         .alert("Rename Session", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
-            Button("Save") { SessionStore.shared.rename(id, to: newName) }
+            Button("Save") { sessionStore.rename(id, to: newName) }
         }
     }
 

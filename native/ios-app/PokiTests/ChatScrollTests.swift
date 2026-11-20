@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PokiCore
 import XCTest
 @testable import Poki
 
@@ -90,6 +91,176 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(afterCancel.plainText, "Draft that must remain unsent")
         XCTAssertEqual(chat.entries, originalEntries)
         XCTAssertEqual(chat.sessionID, originalID)
+    }
+
+    func testOnlySelectedOpeningLineStaysVisibleAfterActualSearchScroll() throws {
+        let oldSample = UserDefaults.standard.object(forKey: "pokiChat")
+        UserDefaults.standard.removeObject(forKey: "pokiChat")
+        defer { UserDefaults.standard.set(oldSample, forKey: "pokiChat") }
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let greeting = ChatEntry(.poki("Synthetic greeting match"))
+        let unrelated = ChatEntry(.poki("Synthetic previous approval setting"))
+        let user = ChatEntry(.you("Synthetic ordinary hit", delivered: true))
+        let saved = SavedSession(id: UUID().uuidString, kind: .poki, title: "Synthetic saved chat",
+                                 started: .now, updated: .now, live: false, outcome: .done,
+                                 entries: [greeting, unrelated, user], calls: [])
+        chat.restore(saved)
+        let feed = SelectionFeed()
+        let window = try show(NavigationStack {
+            SelectedSearchChatHost(feed: feed)
+        }.environment(app).environment(chat))
+        func visible(_ entry: ChatEntry) -> Bool {
+            Self.accessible(in: window, matching: { $0 == "chat.entry.\(entry.id)" }) != nil
+        }
+        func select(_ entry: ChatEntry, query: String) {
+            let snapshot = ConversationSearchIndex.snapshot(in: [saved])
+            let hits = ConversationSearchIndex.resolve(ConversationSearchIndex.search(snapshot, query: query), in: [saved])
+            XCTAssertEqual(hits.first?.entryID, entry.id)
+            feed.navigation.open(ConversationSearchJump(sessionID: saved.id, entryID: entry.id), preview: false)
+            settle { feed.navigation.pending == nil && visible(entry) }
+            XCTAssertNil(feed.navigation.pending, "The transcript must acknowledge the one-shot scroll")
+            XCTAssertTrue(visible(entry), "Selected row vanished after scroll acknowledgement")
+            XCTAssertFalse(visible(unrelated))
+        }
+        select(user, query: "ordinary hit")
+        XCTAssertFalse(visible(greeting))
+        select(greeting, query: "greeting match")
+        XCTAssertTrue(visible(user))
+        XCTAssertFalse(visible(unrelated))
+    }
+
+    private final class SelectionFeed: ObservableObject {
+        @Published var navigation = ConversationSearchNavigation()
+    }
+
+    private struct SelectedSearchChatHost: View {
+        @ObservedObject var feed: SelectionFeed
+        @Environment(ChatModel.self) private var chat
+        var body: some View {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {},
+                     searchJump: feed.navigation.pending,
+                     revealedSearchEntryID: feed.navigation.revealedEntry(in: chat.sessionID),
+                     onSearchJumpApplied: { feed.navigation.consume($0) }, openThreads: {})
+        }
+    }
+
+    func testMemorySourceOpensOtherTranscriptOnWideLayoutWithoutReplacingComposer() throws {
+        try assertMemorySourceNavigation(wide: true, running: false)
+    }
+
+    func testMemorySourceOpensOtherTranscriptDuringNarrowLiveTask() throws {
+        try assertMemorySourceNavigation(wide: false, running: true)
+    }
+
+    /// Mount the actual RootView and Settings navigation, open a real Memory item from
+    /// Recent Updates, and activate its Source button (not the routing predicate).
+    /// All history and memory records are synthetic and stored in a disposable directory.
+    private func assertMemorySourceNavigation(wide: Bool, running: Bool) throws {
+        let keys = ["pokiScreen", "pokiChat", "pokiDraft", "memory.recentSeen",
+                    "chat.provider", "chat.customURL", "chat.customModel"]
+        let original = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let chats = folder.appendingPathComponent("chats", isDirectory: true)
+        let suite = "MemorySourceNavigation-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        try FileManager.default.createDirectory(at: chats, withIntermediateDirectories: true)
+        defer {
+            for (key, value) in original { UserDefaults.standard.set(value, forKey: key) }
+            try? FileManager.default.removeItem(at: folder)
+            defaults.removePersistentDomain(forName: suite)
+        }
+        UserDefaults.standard.removeObject(forKey: "pokiChat")
+        UserDefaults.standard.set("memoryRecent", forKey: "pokiScreen")
+        let draft = "Synthetic unsent composer draft"
+        UserDefaults.standard.set(draft, forKey: "pokiDraft")
+        let marker = "Synthetic saved source transcript"
+        func saved(_ id: String, _ text: String) -> SavedSession {
+            SavedSession(id: id, kind: .poki, client: nil, title: text, started: .now, updated: .now,
+                         live: false, outcome: .done, entries: [ChatEntry(.you(text, delivered: true))], calls: [])
+        }
+        let active = saved("active-" + UUID().uuidString, "Active synthetic chat")
+        var source = saved("source-" + UUID().uuidString, marker)
+        source.title = "Saved synthetic conversation"
+        let targetID = "chat.entry.\(try XCTUnwrap(source.entries.first?.id))"
+        for record in [active, source] {
+            try JSONEncoder().encode(record).write(to: chats.appendingPathComponent(record.id + ".json"))
+        }
+        let store = SessionStore(folder: chats, defaults: defaults)
+        let notes = RoutineStore(url: folder.appendingPathComponent("memory.json"))
+        let note = try XCTUnwrap(notes.remember("Synthetic source memory", by: RoutineStore.owner,
+                                               heard: NoteOrigin(session: source.id, app: nil)))
+        let library = MemoryLibrary(store: notes)
+        let change = try XCTUnwrap(library.changes.first { $0.item.id == note.id })
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        app.inProcessReadyForProbe()
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Held synthetic answer")], holdFirstReply: {})
+        ModelKeys.selectedProvider = .custom
+        ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
+        ModelKeys.customModel = "fixture"
+        let chat = ChatModel(app: app, store: store)
+        chat.restore(active)
+        defer { chat.stop() }
+        if running {
+            chat.send("A synthetic task in progress")
+            settle(for: 5) { !server.requests.isEmpty }
+            XCTAssertTrue(chat.running, "The narrow path must really have a running chat")
+            XCTAssertFalse(server.requests.isEmpty)
+        }
+        let originalEntries = chat.entries
+        let size = wide ? CGSize(width: 951, height: 669) : CGSize(width: 476, height: 669)
+        let container = UIViewController()
+        let root = UIHostingController(rootView: RootView(sessionStore: store, memoryLibrary: library)
+            .environment(app).environment(chat))
+        container.addChild(root)
+        root.view.frame = CGRect(origin: .zero, size: size)
+        container.view.addSubview(root.view)
+        root.didMove(toParent: container)
+        let window = try show(Color.clear)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = container
+        defer { container.dismiss(animated: false) }
+        let changeID = "memory.openChange.\(change.id)"
+        settle(for: 5) { Self.accessible(in: window, matching: { $0 == changeID }) != nil }
+        let memory = try XCTUnwrap(Self.accessible(in: window, matching: { $0 == changeID }))
+        XCTAssertTrue(memory.accessibilityActivate(), "Open actual Memory Recent Updates row")
+        settle(for: 5) { Self.accessible(in: window, matching: { $0 == "memory.source.conversation" }) != nil }
+        let link = try XCTUnwrap(Self.accessible(in: window, matching: { $0 == "memory.source.conversation" }))
+        XCTAssertTrue(link.accessibilityActivate(), "Activate actual Memory Source button")
+        settle(for: 5) { Self.accessible(in: window, matching: { $0 == targetID }) != nil }
+        XCTAssertNotNil(Self.accessible(in: window, matching: { $0 == targetID }), "The actual source message, not merely its page title, must be visible")
+        XCTAssertEqual(chat.sessionID, active.id)
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.running, running)
+        // Dismissing Settings must return to the original composer, including its draft.
+        container.dismiss(animated: false)
+        window.makeKeyAndVisible()
+        settle(for: 5) { Self.find(CapsuleTextView.self, in: root.view)?.plainText == draft }
+        XCTAssertEqual(Self.find(CapsuleTextView.self, in: root.view)?.plainText, draft)
+        XCTAssertEqual(chat.sessionID, active.id)
+    }
+
+    private static func accessible(in root: UIView, matching matches: (String) -> Bool) -> NSObject? {
+        var pending: [NSObject] = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let id = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if id.map(matches) == true || item.accessibilityLabel.map(matches) == true {
+                let frame = item.accessibilityFrame
+                if !frame.isEmpty, root.convert(root.bounds, to: nil).intersects(frame) { return item }
+            }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for index in 0..<count {
+                    if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
     }
 
     func testResizingTheRootKeepsAnUnsentDraftInTheSameConversation() throws {
