@@ -178,8 +178,9 @@ struct MessageScroll {
         let candidates = (2...maximum).filter { length in
             let olderPageTail = current.suffix(length)
             let shift = current[current.count - length].frame.centre.y - previous[0].frame.centre.y
-            // The touch may cross the list's pan threshold before moving its content.
-            let panAllowance = 16.0
+            // The list starts moving only after recognizing the pan. In the simulator,
+            // a 420-point resting drag moved the visible rows 399 points.
+            let panAllowance = 32.0
             guard shift > tolerance, shift <= travel + tolerance, travel - shift <= panAllowance,
                   Set(olderPageTail.map(\.key)).count > 1 else { return false }
             return zip(previous.prefix(length), olderPageTail).allSatisfy { old, new in
