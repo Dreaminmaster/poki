@@ -2556,7 +2556,7 @@ dependencies = [
 
 [[package]]
 name = "poki-setup-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "aes",
  "aes-gcm",
