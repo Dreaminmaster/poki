@@ -302,7 +302,7 @@ private struct LoopbackPage: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(localReady ? "Local automation ready" : headline(monitor))
                         Text(localReady && monitor.state != .checking ? "The network loopback is unavailable." : detail)
-                            .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                            .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     }
                 } icon: {
                     if localReady {
@@ -384,7 +384,7 @@ private struct LoopbackPage: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: name)
-                    if let sub { Text(sub).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                    if let sub { Text(sub).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                 }
             }
         }
@@ -532,7 +532,7 @@ private struct PairingPage: View {
         case .pin(let pin)?:
             Section {
                 Text(verbatim: pin.count == 6 ? "\(pin.prefix(3)) \(pin.suffix(3))" : pin)
-                    .font(.system(.largeTitle, design: .rounded).weight(.bold)).monospacedDigit()
+                    .font(.alloRounded(.largeTitle, .bold)).monospacedDigit()
                     .frame(maxWidth: .infinity).padding(.vertical, 8)
                     .accessibilityLabel(Text(verbatim: pin.map(String.init).joined(separator: " ")))
             } header: {
@@ -588,7 +588,7 @@ private struct PairingPage: View {
             Section { Button(action.title) { action.run(model) }.bold() }
         }
         if let note = model.pairingNote {
-            Section { Text(note).font(.footnote) }
+            Section { Text(note).font(.allo(.footnote)) }
         }
         Section {
             diskImage
@@ -623,7 +623,7 @@ private struct PairingPage: View {
             LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Ready")))
         case .downloaded:
             LabeledContent("Status", value: AppLocalization.text(LocalizedStringResource("Downloaded, not available")))
-            Text(DiskImageStore.unavailableMessage).font(.footnote).foregroundStyle(.orange)
+            Text(DiskImageStore.unavailableMessage).font(.allo(.footnote)).foregroundStyle(.orange)
         case .downloading(let step):
             LabeledContent("Downloading") { HStack { Text(verbatim: "\(step)"); ProgressView() } }
         case .missing:
@@ -914,7 +914,7 @@ struct SetupGuide: View {
                     ToolbarItemGroup(placement: .bottomBar) {
                         Button("Back", systemImage: "chevron.left") { index -= 1 }.disabled(index == 0)
                         Spacer()
-                        Text("\(index + 1) of \(steps.count)").font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        Text("\(index + 1) of \(steps.count)").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                         Spacer()
                         if index + 1 < steps.count {
                             Button("Next", systemImage: "chevron.right") { index += 1 }

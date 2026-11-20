@@ -81,7 +81,7 @@ struct MemoryView: View {
                     }
                 }
                 if let message = library.message {
-                    Section { Text(verbatim: message).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                    Section { Text(verbatim: message).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                 }
             }
         }
@@ -96,7 +96,7 @@ struct MemoryView: View {
                     // In English the page's whole name is too wide for that too, so the pill is "Recent".
                     HStack(spacing: 5) {
                         Text("Recent Updates button", comment: "The Memory page's button to Recent Updates: short, so the title stays centred")
-                            .font(.subheadline.weight(.semibold)).fixedSize()
+                            .font(.allo(.subheadline, .semibold)).fixedSize()
                         if library.unread { Circle().fill(Tint.blueText).frame(width: 7, height: 7) }
                     }
                 }
@@ -169,9 +169,9 @@ struct MemoryHeader: View {
     init(verbatim title: String) { self.title = Text(verbatim: title) }
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            title.font(.body.weight(.semibold))
+            title.font(.allo(.body, .semibold))
             Spacer()
-            trailing?.font(.footnote)
+            trailing?.font(.allo(.footnote))
         }
         .foregroundStyle(Color(.secondaryLabel))
         .textCase(nil)
@@ -188,11 +188,11 @@ struct MemoryAppRow: View {
             if let app { AppIconView(app: app, size: 38) } else { OtherTile(size: 38) }
             VStack(alignment: .leading, spacing: 2) {
                 if let app {
-                    Text(verbatim: MemoryFormat.appName(app)).font(.body).foregroundStyle(Color(.label))
+                    Text(verbatim: MemoryFormat.appName(app)).font(.allo(.body)).foregroundStyle(Color(.label))
                 } else {
-                    Text("Other").font(.body).foregroundStyle(Color(.label))
+                    Text("Other").font(.allo(.body)).foregroundStyle(Color(.label))
                 }
-                Text(counts).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(counts).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             }
         }
     }
@@ -308,14 +308,14 @@ struct MemoryScopeView: View {
     @ViewBuilder private var title: some View {
         switch scope {
         case .about:
-            Text("About You").font(.headline)
+            Text("About You").font(.allo(.headline))
         case .app(let app), .all(let app, _):
             HStack(spacing: 7) {
                 if let app {
                     AppIconView(app: app, size: 24)
-                    Text(verbatim: MemoryFormat.appName(app)).font(.headline).lineLimit(1)
+                    Text(verbatim: MemoryFormat.appName(app)).font(.allo(.headline)).lineLimit(1)
                 } else {
-                    Text("Other").font(.headline)
+                    Text("Other").font(.allo(.headline))
                 }
             }
             .accessibilityElement(children: .combine)

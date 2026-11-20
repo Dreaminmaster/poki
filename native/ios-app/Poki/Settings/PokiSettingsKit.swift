@@ -75,10 +75,10 @@ struct SettingsRow: View {
             SettingsIcon(symbol: symbol)
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body).foregroundStyle(Color(.label))
-                if let caption { Text(caption).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                Text(title).font(.allo(.body)).foregroundStyle(Color(.label))
+                if let caption { Text(caption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                 if let dataCaption {
-                    Text(verbatim: dataCaption).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                    Text(verbatim: dataCaption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                         .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
                 }
                 // At the accessibility sizes the value goes under the caption, as in Settings.
@@ -91,7 +91,7 @@ struct SettingsRow: View {
             case .done:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Tint.green).accessibilityLabel(Text("Done"))
             case .leaves:
-                Image(systemName: "arrow.up.forward").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
+                Image(systemName: "arrow.up.forward").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
                     .accessibilityHidden(true)
             case nil: EmptyView()
             }
@@ -100,13 +100,13 @@ struct SettingsRow: View {
 
     @ViewBuilder private func valueView(_ value: String) -> some View {
         if warns {
-            Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Tint.amberInk)
+            Text(verbatim: value).font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Tint.amberSoft, in: .capsule)
         } else {
             HStack(spacing: 6) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
-                Text(verbatim: value).font(.subheadline)
+                Text(verbatim: value).font(.allo(.subheadline))
                     .foregroundStyle(valueIsAction ? Tint.blueText : Color(.secondaryLabel))
             }
         }
@@ -205,13 +205,13 @@ struct SettingsPill: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if let symbol {
-                    Image(systemName: symbol).font(.footnote.weight(.bold))
+                    Image(systemName: symbol).font(.allo(.footnote, .bold))
                         .foregroundStyle(prominent ? Tint.onSolid : Tint.blueText)
                 }
-                Text(title).font(.subheadline.weight(.semibold))
+                Text(title).font(.allo(.subheadline, .semibold))
                     .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
                 if chevron {
-                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                    Image(systemName: "chevron.right").font(.allo(.caption, .bold)).foregroundStyle(Color(.tertiaryLabel))
                 }
             }
             .foregroundStyle(prominent ? Tint.onSolid : Color(.label))
@@ -237,15 +237,15 @@ struct SettingsChoiceCard: View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: title).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    Text(verbatim: title).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
                     if let detail {
-                        Text(verbatim: detail).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        Text(verbatim: detail).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(.alloRounded(.title3))
                     .foregroundStyle(selected ? Tint.blue : Color(.tertiaryLabel))
                     .accessibilityHidden(true)
             }

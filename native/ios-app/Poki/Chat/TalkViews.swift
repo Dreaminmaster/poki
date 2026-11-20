@@ -20,14 +20,14 @@ struct VoiceKeyNotice: View {
         let off = ModelKeys.hasKey(.openai) && VoiceDirect.account == nil
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "key.fill").font(.body.weight(.semibold)).foregroundStyle(.white)
+                Image(systemName: "key.fill").font(.allo(.body, .semibold)).foregroundStyle(.white)
                     .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(off ? LocalizedStringKey("Live Voice Is Off") : LocalizedStringKey("No Voice Key Set Up")).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    Text(off ? LocalizedStringKey("Live Voice Is Off") : LocalizedStringKey("No Voice Key Set Up")).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
                     Text(off ? LocalizedStringKey("Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it.")
                              : LocalizedStringKey("Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it."))
-                        .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                        .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .accessibilityElement(children: .combine)
@@ -45,7 +45,7 @@ struct VoiceKeyNotice: View {
 
     private var later: some View {
         Button(action: close) {
-            Text("Not Now").font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
+            Text("Not Now").font(.allo(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
                 .padding(.horizontal, 18).frame(minHeight: 44)
                 .background(Color(.label).opacity(0.1), in: .capsule)
         }
@@ -55,7 +55,7 @@ struct VoiceKeyNotice: View {
 
     private func add(_ off: Bool) -> some View {
         Button(action: addKey) {
-            Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.body.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
+            Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.allo(.body, .semibold)).foregroundStyle(.white).lineLimit(1)
                 .padding(.horizontal, 18).frame(minHeight: 44)
                 .background(Tint.blue, in: .capsule)
         }
@@ -87,7 +87,7 @@ struct TalkBar: View {
             row
             // What went wrong, in full, under the row: a system's reason can run to several lines.
             if let reason = state.reason {
-                Text(verbatim: reason).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: reason).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6).padding(.bottom, 4)
@@ -114,10 +114,10 @@ struct TalkBar: View {
             HStack(spacing: 10) {
                 TalkOrb(state: state).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: state.word).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    Text(verbatim: state.word).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
                         .fixedSize(horizontal: false, vertical: true).contentTransition(.interpolate)
                     if let since, !state.isFailed {
-                        Text(since, style: .timer).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                        Text(since, style: .timer).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
                     }
                 }
                 .accessibilityElement(children: .combine)
@@ -151,7 +151,7 @@ struct TalkBar: View {
     private func round(_ symbol: String, label: LocalizedStringKey, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.body.weight(.medium)).foregroundStyle(Color(.label))
+                .font(.allo(.body, .medium)).foregroundStyle(Color(.label))
                 .contentTransition(.symbolEffect(.replace))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(width: controlSize.side, height: controlSize.side)
@@ -168,7 +168,7 @@ struct TalkBar: View {
 
     private func capsule(_ title: LocalizedStringKey, fill: Color, ink: Color, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.body.weight(.semibold)).foregroundStyle(ink)
+            Text(title).font(.allo(.body, .semibold)).foregroundStyle(ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 20).padding(.vertical, 10).frame(minHeight: 48)
                 .background(fill, in: .capsule)
@@ -189,11 +189,11 @@ struct TalkOrb: View {
         ZStack {
             switch state {
             case .acting:
-                Image(systemName: "iphone").font(.title3.weight(.semibold))
+                Image(systemName: "iphone").font(.alloRounded(.title3, .semibold))
                     .symbolEffect(.pulse, options: .repeating)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             case .failed:
-                Image(systemName: "exclamationmark").font(.title3.weight(.bold))
+                Image(systemName: "exclamationmark").font(.alloRounded(.title3, .bold))
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             default:
                 TalkBars(mode: bars, barColor: .white, barSpacingFactor: 0.09, barMinOpacity: 0.4, loudness: state == .hearing ? 0.7 : 1)

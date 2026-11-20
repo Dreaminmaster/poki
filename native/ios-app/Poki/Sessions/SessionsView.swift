@@ -99,7 +99,7 @@ struct SessionsView: View {
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .frame(width: controlSize.side, height: controlSize.side)
                 }
-                .font(.body.weight(.semibold))
+                .font(.allo(.body, .semibold))
                 .foregroundStyle(.white)
                 .contentShape(.capsule)
             }
@@ -126,7 +126,7 @@ struct SessionsView: View {
     }
 
     private func heading(_ day: Day) -> some View {
-        Text(day.title).font(.footnote.weight(.medium)).foregroundStyle(Tint.sidebarHeading)
+        Text(day.title).font(.allo(.footnote, .medium)).foregroundStyle(Tint.sidebarHeading)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
             .listRowSeparator(.hidden)
@@ -174,7 +174,7 @@ struct SessionsView: View {
                 if needs { Circle().fill(Tint.amber).frame(width: 8, height: 8).accessibilityHidden(true) }
                 else if let trouble {
                     Image(systemName: trouble == .failed ? "exclamationmark.circle.fill" : "pause.circle.fill")
-                        .font(.subheadline).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                        .font(.allo(.subheadline)).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .foregroundStyle(trouble == .failed ? Tint.red : Color.secondary)
                         .accessibilityHidden(true)
                 }
@@ -525,7 +525,7 @@ struct SessionView: View {
                     if running != nil || sample {
                         // Said where Stop is, and only there: the words promise what the button does.
                         Text("A guest is borrowing Poki’s hands. You can tap Stop anytime.")
-                            .font(.footnote).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
+                            .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
                         Button("Stop Poki", systemImage: "stop.fill") { AskPoki.live(id)?.stop() }
                             .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(Tint.red)
                     }

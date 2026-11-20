@@ -51,7 +51,7 @@ struct ChatTextDocumentChip: View {
             Label {
                 VStack(alignment: .leading) {
                     Text(verbatim: document.name).lineLimit(1)
-                    Text(verbatim: document.sizeLabel).font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: document.sizeLabel).font(.allo(.caption)).foregroundStyle(.secondary)
                 }
             } icon: {
                 Image(systemName: "doc.text")
@@ -179,10 +179,10 @@ struct AttachmentStrip: View {
                         if case .text = item.kind {
                             VStack(spacing: 4) {
                                 Image(systemName: "doc.text")
-                                Text(verbatim: item.label).font(.caption2).lineLimit(1)
+                                Text(verbatim: item.label).font(.allo(.caption2)).lineLimit(1)
                                 if let content = item.textContent {
                                     Text(verbatim: ChatTextDocument(name: item.label, content: content).sizeLabel)
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .font(.allo(.caption2)).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(4)

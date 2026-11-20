@@ -148,7 +148,7 @@ struct CapsuleButton: View {
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(title).font(.body.weight(.semibold)).frame(maxWidth: .infinity).frame(minHeight: 34)
+            Text(title).font(.allo(.body, .semibold)).frame(maxWidth: .infinity).frame(minHeight: 34)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)

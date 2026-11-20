@@ -88,7 +88,7 @@ struct InterfaceSizeSettingsView: View {
 
                     VStack(alignment: .leading, spacing: 8) {
                         SettingsHeader("Preview")
-                            .font(.subheadline)
+                            .font(.allo(.subheadline))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 20)
                         GeometryReader { preview in

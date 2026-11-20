@@ -172,7 +172,7 @@ struct ChatView: View {
                 asks
                 if chat.waitingForSplitView {
                     Label(ActivityWords.local("Waiting for Split View"), systemImage: "rectangle.split.2x1")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.allo(.footnote)).foregroundStyle(.secondary)
                 }
                 ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
@@ -248,7 +248,7 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if model.passcodeHint {
             Label(Self.local(AppModel.handoffWording(.automationPasscode)), systemImage: "lock")
-                .font(.callout).padding(12)
+                .font(.allo(.callout)).padding(12)
                 .frame(maxWidth: .infinity)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                 .accessibilityIdentifier("session.passcode")
@@ -257,7 +257,7 @@ struct ChatView: View {
                 ProgressView()
                 Text("Preparing")
             }
-            .font(.callout).padding(8)
+            .font(.allo(.callout)).padding(8)
             .accessibilityIdentifier("session.preparing")
         } else if let text = model.handoffText {
             TurnCard(text: Self.local(text), done: model.handoffDoneInApp)
@@ -546,7 +546,7 @@ struct SetupHintLine: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(verbatim: hint.message)
-                .font(.footnote)
+                .font(.allo(.footnote))
                 .foregroundStyle(Color(.secondaryLabel))
                 .multilineTextAlignment(.center)
             Button {
@@ -559,7 +559,7 @@ struct SetupHintLine: View {
                 }
             } label: {
                 Text(verbatim: hint.link)
-                    .font(.footnote.weight(.semibold))
+                    .font(.allo(.footnote, .semibold))
                     .foregroundStyle(Tint.blueText)
             }
             .buttonStyle(.plain)
@@ -715,7 +715,7 @@ struct ChatTranscript<Footer: View>: View {
         switch entry.kind {
         case .time(let date):
             Text(ChatTime.header(date))
-                .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
                 .padding(.bottom, 6).frame(maxWidth: .infinity)
         case .you(let text, let delivered):
             let last = isLast(i, poki: false)
@@ -734,7 +734,7 @@ struct ChatTranscript<Footer: View>: View {
                 }
                 if !text.isEmpty { MessageBubble(direction: .outgoing, text: text, tail: last) }
                 if last, delivered {
-                    Text("Delivered").font(.caption2.weight(.medium)).foregroundStyle(Color(.secondaryLabel))
+                    Text("Delivered").font(.allo(.caption2, .medium)).foregroundStyle(Color(.secondaryLabel))
                         .padding(.horizontal, 4).padding(.bottom, 8)
                         .transition(.opacity)
                 }
@@ -750,7 +750,7 @@ struct ChatTranscript<Footer: View>: View {
             // your grey one. Every request comes through ask_poki, an MCP tool.
             VStack(alignment: .trailing, spacing: 5) {
                 if startsRun(i) || i == 0 {
-                    Text("\(from) asked over MCP").font(.caption2.weight(.medium)).foregroundStyle(Color(.secondaryLabel)).padding(.trailing, 4)
+                    Text("\(from) asked over MCP").font(.allo(.caption2, .medium)).foregroundStyle(Color(.secondaryLabel)).padding(.trailing, 4)
                 }
                 MessageBubble(direction: .guest, text: text, tail: isLast(i, poki: false))
             }
@@ -893,7 +893,7 @@ private struct NewestButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "arrow.down")
-                .font(.body.weight(.semibold))
+                .font(.allo(.body, .semibold))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(Color(.label))
                 .frame(width: controlSize.side, height: controlSize.side)
@@ -976,10 +976,10 @@ enum StatusGlyph: Equatable {
 
     @ViewBuilder var view: some View {
         switch self {
-        case .ok: Image(systemName: "checkmark").font(.caption2.weight(.bold)).foregroundStyle(Tint.green)
-        case .failed: Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(Tint.red)
+        case .ok: Image(systemName: "checkmark").font(.allo(.caption2, .bold)).foregroundStyle(Tint.green)
+        case .failed: Image(systemName: "xmark").font(.allo(.caption2, .bold)).foregroundStyle(Tint.red)
         case .working: ProgressView().controlSize(.mini)
-        case .warning: Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(Tint.amber)
+        case .warning: Image(systemName: "exclamationmark.triangle.fill").font(.allo(.caption2)).foregroundStyle(Tint.amber)
         // The Dynamic Island, small.
         case .island: Capsule().fill(Color(hex: 0x1C1C1E)).frame(width: 22, height: 8)
         case .none: EmptyView()
@@ -1000,7 +1000,7 @@ struct StatusLine: View {
                 if glyph != .none { glyph.view.frame(minWidth: 14) }
                 Text(text).fixedSize(horizontal: false, vertical: true)
             }
-            .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+            .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             .multilineTextAlignment(.leading)
             .padding(.vertical, card ? 8 : 2).padding(.horizontal, card ? 12 : 2)
             .background { if card { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemBackground)) } }
@@ -1066,7 +1066,7 @@ struct MessageListHeader: View {
             if let back, UserDefaults.standard.string(forKey: "pokiChat") == nil, UserDefaults.standard.string(forKey: "pokiVoiceSample") == nil {
                 Button(action: back) {
                     Image(systemName: "chevron.backward")
-                        .font(.title3.weight(.semibold))
+                        .font(.alloRounded(.title3, .semibold))
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .foregroundStyle(dark ? .white : Site.blue)
                         .frame(width: backSize.side, height: backSize.side).contentShape(.rect)
@@ -1168,26 +1168,26 @@ struct ApprovalNoteCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(tint)
-                Text(verbatim: title).font(.footnote.weight(.semibold)).foregroundStyle(tint)
+                Image(systemName: symbol).font(.allo(.subheadline, .semibold)).foregroundStyle(tint)
+                Text(verbatim: title).font(.allo(.footnote, .semibold)).foregroundStyle(tint)
                 Spacer(minLength: 4)
                 if note.state == .asking, note.byModel {
                     ProgressView().controlSize(.mini)
                 } else if let at = note.answered {
-                    Text(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                    Text(at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
                 }
             }
-            Text(verbatim: ActivityWords.label(note.summary)).font(.subheadline).foregroundStyle(Color(.label))
+            Text(verbatim: ActivityWords.label(note.summary)).font(.allo(.subheadline)).foregroundStyle(Color(.label))
                 .fixedSize(horizontal: false, vertical: true)
             if !context.isEmpty {
-                Text(verbatim: context).font(.caption).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: context).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
             if !note.reason.isEmpty {
-                Text(verbatim: AppLocalization.bundle.localizedString(forKey: note.reason, value: note.reason, table: nil)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: AppLocalization.bundle.localizedString(forKey: note.reason, value: note.reason, table: nil)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if note.state == .refused, note.reply {
-                Text("Say yes in the chat to allow it.").font(.caption).foregroundStyle(Color(.secondaryLabel))
+                Text("Say yes in the chat to allow it.").font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
         }
         .padding(.vertical, 10).padding(.horizontal, 12)
@@ -1316,7 +1316,7 @@ struct ComposerInputView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let problem = problem ?? (dictation.on ? nil : dictation.problem) {
-                Text(problem).font(.footnote).foregroundStyle(Tint.red)
+                Text(problem).font(.allo(.footnote)).foregroundStyle(Tint.red)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
                     .transition(.opacity)
             }
@@ -1496,7 +1496,7 @@ struct ComposerInputView: View {
     private var dictating: some View {
         Button { dictation.stop(model) } label: {
             Image(systemName: "mic.fill")
-                .font(.body.weight(.medium)).foregroundStyle(Tint.red)
+                .font(.allo(.body, .medium)).foregroundStyle(Tint.red)
                 .symbolEffect(.pulse, isActive: true)
                 .frame(width: buttonHitSide, height: buttonHitSide).contentShape(.rect)
         }
@@ -1512,7 +1512,7 @@ struct ComposerInputView: View {
     private var microphone: some View {
         Button { dictation.start(model, after: input) } label: {
             Image(systemName: "mic")
-                .font(.body.weight(.medium)).foregroundStyle(Color(.label))
+                .font(.allo(.body, .medium)).foregroundStyle(Color(.label))
                 .frame(width: buttonHitSide, height: buttonHitSide).contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -1535,7 +1535,7 @@ struct ComposerInputView: View {
     private var plus: some View {
         Button { adding.toggle() } label: {
             Image(systemName: "plus")
-                .font(.title3.weight(.medium)).dynamicTypeSize(...DynamicTypeSize.xxxLarge).foregroundStyle(Color(.label))
+                .font(.alloRounded(.title3, .medium)).dynamicTypeSize(...DynamicTypeSize.xxxLarge).foregroundStyle(Color(.label))
                 .frame(width: buttonDiameter, height: buttonDiameter)
                 .background(Color(.label).opacity(scheme == .dark ? 0.16 : 0.12), in: .circle)
                 .frame(width: buttonHitSide, height: buttonHitSide)
@@ -1580,7 +1580,7 @@ struct ComposerInputView: View {
                 Image(systemName: symbol).frame(width: wayIconWidth)
                 Text(title)
             }
-            .font(.body).foregroundStyle(enabled ? Color(.label) : Color(.tertiaryLabel))
+            .font(.allo(.body)).foregroundStyle(enabled ? Color(.label) : Color(.tertiaryLabel))
             .padding(.horizontal, 20).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .contentShape(.rect)
         }
@@ -1626,7 +1626,7 @@ struct ComposerInputView: View {
             if running { stop() } else if canSend { submit() } else { dictation.stop(model); openVoice() }
         } label: {
             Image(systemName: running ? "stop.fill" : canSend ? "arrow.up" : "waveform")
-                .font(.body.weight(.semibold))
+                .font(.allo(.body, .semibold))
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(running ? Tint.onSolid : .white)
                 .frame(width: buttonDiameter, height: buttonDiameter)
@@ -1777,7 +1777,7 @@ struct LiveVoiceTranscript: View {
             let lines = voice.lines
             VStack(spacing: 4) {
                 Label(voice.isOn ? LocalizedStringKey("Talk with Poki") : LocalizedStringKey("Voice conversation"), systemImage: "waveform")
-                    .font(.caption.weight(.medium)).foregroundStyle(ChatColor.secondary)
+                    .font(.allo(.caption, .medium)).foregroundStyle(ChatColor.secondary)
                     .padding(.top, 12).padding(.bottom, 4).frame(maxWidth: .infinity)
                 ForEach(Array(lines.enumerated()), id: \.element.id) { i, line in
                     let pending = i == lines.count - 1 && line.role == .you && voice.phase == .hearing

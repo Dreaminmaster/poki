@@ -172,7 +172,7 @@ struct AgentsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("MCP Relay")
                                 Text(relayLine)
-                                    .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                                    .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                             }
                         } icon: {
                             Image(systemName: "antenna.radiowaves.left.and.right")

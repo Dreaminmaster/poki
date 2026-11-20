@@ -93,7 +93,7 @@ struct SessionExpiredLabel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Apple Sign-In Expired").font(Prominent.font(.headline, .semibold))
                 Text("Poki signs itself with your Apple Account to renew and update without a Mac. Sign in again to keep that working.")
-                    .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
             }
         } icon: {
             Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
@@ -297,10 +297,10 @@ private struct SignedUntilRow: View {
             SettingsIcon(symbol: "signature")
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Signed Until").font(.body).foregroundStyle(Color(.label))
+                Text("Signed Until").font(.allo(.body)).foregroundStyle(Color(.label))
                 if let expiry {
                     Text(expiry, format: .dateTime.month(.abbreviated).day().year())
-                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                 }
                 if typeSize.isAccessibilitySize { left }
             }
@@ -312,9 +312,9 @@ private struct SignedUntilRow: View {
 
     @ViewBuilder private var left: some View {
         if let expiry {
-            Text(expiry, style: .relative).font(.subheadline).monospacedDigit().foregroundStyle(countdownColor)
+            Text(expiry, style: .relative).font(.allo(.subheadline)).monospacedDigit().foregroundStyle(countdownColor)
         } else {
-            Text("Unknown").font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            Text("Unknown").font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
         }
     }
 }
@@ -453,7 +453,7 @@ private struct ChoiceRow: View {
                 title.foregroundStyle(Color(.label))
                 Spacer()
                 if selected {
-                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                    Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blueText)
                         .accessibilityHidden(true)
                 }
             }

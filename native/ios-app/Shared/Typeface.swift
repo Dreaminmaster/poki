@@ -119,7 +119,7 @@ extension Font {
 
     /// Allo Rounded at a text style, for titles and prominent text.
     static func alloRounded(_ style: Font.TextStyle, _ weight: Font.Weight? = nil) -> Font {
-        Typeface.font(style, weight ?? .semibold, face: .rounded)
+        Typeface.font(style, weight, face: .rounded)
     }
 
     /// Allo Text at a size of its own, growing with `style` under Dynamic Type.

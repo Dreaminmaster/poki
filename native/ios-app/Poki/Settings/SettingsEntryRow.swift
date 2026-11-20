@@ -28,7 +28,7 @@ struct SettingsEntryButton: View {
                 // The dot inside the label, so the glass draws it rather than covering it.
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "gearshape")
-                        .font(.body.weight(.semibold))
+                        .font(.allo(.body, .semibold))
                         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .foregroundStyle(Tint.sidebarInk)
                         .frame(width: controlSize.side, height: controlSize.side)

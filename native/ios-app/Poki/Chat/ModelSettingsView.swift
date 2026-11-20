@@ -92,8 +92,8 @@ private struct InUseCard: View {
                 if has { ProviderTile(provider: provider, size: 44) } else { SettingsIcon(symbol: "sparkles", warns: true, size: 44) }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(verbatim: has ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("No Account")))
-                        .font(.title3.weight(.semibold)).foregroundStyle(Color(.label))
-                    if has { Text(verbatim: ModelKeys.selectedAccountName).font(.subheadline).foregroundStyle(Color(.secondaryLabel)) }
+                        .font(.alloRounded(.title3, .semibold)).foregroundStyle(Color(.label))
+                    if has { Text(verbatim: ModelKeys.selectedAccountName).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)) }
                 }
             }
             .accessibilityElement(children: .combine)
@@ -117,8 +117,8 @@ private struct InUseCard: View {
 
     private func chip(_ title: LocalizedStringKey, _ value: String, singleLine: Bool) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(title).font(.caption).foregroundStyle(Color(.secondaryLabel))
-            Text(verbatim: value).font(.footnote.weight(.semibold)).foregroundStyle(Color(.label))
+            Text(title).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
+            Text(verbatim: value).font(.allo(.footnote, .semibold)).foregroundStyle(Color(.label))
         }
         .lineLimit(singleLine ? 1 : nil)
         // Measure the row at its natural width. The stacked fallback can wrap long values.
@@ -181,7 +181,7 @@ private struct AccountRow: View {
             ProviderTile(provider: provider)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: name)
-                Text(verbatim: usage).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: usage).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
@@ -207,7 +207,7 @@ struct ConnectionCheckFeedback: View {
             if let detail = result.detail { Text(verbatim: detail) }
             if saved, !result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
         }
-        .font(.footnote)
+        .font(.allo(.footnote))
         .accessibilityElement(children: .combine)
     }
 }
@@ -293,7 +293,7 @@ struct TextChatFeature: View {
                     Toggle(isOn: Binding(get: { ModelCatalog.enabled(provider).contains(choice.id) }, set: { ModelCatalog.set(choice.id, on: $0, for: provider) })) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(choice.name)
-                            if ModelCatalog.fast(choice.id) { Text("Fast").font(.caption).foregroundStyle(Color(.secondaryLabel)) }
+                            if ModelCatalog.fast(choice.id) { Text("Fast").font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)) }
                         }
                     }
                 }
@@ -397,7 +397,7 @@ struct AddAccount: View {
                                 ProviderTile(provider: provider)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(verbatim: provider.name).foregroundStyle(Color(.label))
-                                    Text(capabilities(provider)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                                    Text(capabilities(provider)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                                 }
                                 Spacer()
                                 // Custom endpoints can be added again and again.

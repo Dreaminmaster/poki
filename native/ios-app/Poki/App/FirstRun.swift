@@ -125,7 +125,7 @@ struct FirstRunGuide: View {
                                 .foregroundStyle(Color(.label))
                                 .accessibilityAddTraits(.isHeader)
                             Text(verbatim: words)
-                                .font(.body)
+                                .font(.allo(.body))
                                 .foregroundStyle(Tint.homeSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             detail.padding(.top, 14)
@@ -206,10 +206,10 @@ struct FirstRunGuide: View {
                 Button { addingAccount = true } label: {
                     HStack(spacing: 14) {
                         SettingsIcon(symbol: "ellipsis", size: 30)
-                        Text("More Providers").font(.body).foregroundStyle(Color(.label))
+                        Text("More Providers").font(.allo(.body)).foregroundStyle(Color(.label))
                         Spacer(minLength: 8)
                         Text(verbatim: "\(ModelProvider.allCases.count - Self.namedProviders.count)").foregroundStyle(Color(.secondaryLabel))
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
+                        Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
                     }
                     .padding(.horizontal, 14).frame(minHeight: 56).contentShape(.rect)
                 }
@@ -231,21 +231,21 @@ struct FirstRunGuide: View {
         return HStack(spacing: 14) {
             if !stacked { SettingsIcon(symbol: ticked ? "checkmark" : step.symbol, size: 30) }
             VStack(alignment: .leading, spacing: 4) {
-                Text(step.pageTitle).font(.body).foregroundStyle(Color(.label)).multilineTextAlignment(.leading)
+                Text(step.pageTitle).font(.allo(.body)).foregroundStyle(Color(.label)).multilineTextAlignment(.leading)
                 if stacked { stepState(step, ticked: ticked) }
             }
             Spacer(minLength: 8)
             if !stacked { stepState(step, ticked: ticked) }
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
+            Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
         }
         .padding(.horizontal, 14).padding(.vertical, stacked ? 10 : 0).frame(minHeight: 56).contentShape(.rect)
     }
 
     @ViewBuilder private func stepState(_ step: SetupStep, ticked: Bool) -> some View {
         if ticked {
-            Text("Done").font(.subheadline).foregroundStyle(Tint.greenInk)
+            Text("Done").font(.allo(.subheadline)).foregroundStyle(Tint.greenInk)
         } else if nextStep?.step == step {
-            Text("Next").font(.footnote.weight(.semibold)).foregroundStyle(Tint.amberInk)
+            Text("Next").font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Tint.amberSoft, in: .capsule)
         }
@@ -255,15 +255,15 @@ struct FirstRunGuide: View {
         HStack(spacing: 14) {
             ProviderTile(provider: provider, size: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: provider.name).font(.body).foregroundStyle(Color(.label))
-                Text(ModelAccounts.method(provider)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: provider.name).font(.allo(.body)).foregroundStyle(Color(.label))
+                Text(ModelAccounts.method(provider)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
             Spacer(minLength: 8)
             if ModelAccounts.isSetUp(provider) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(Tint.green)
                     .accessibilityLabel(Text("Account Added"))
             } else {
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
+                Image(systemName: "chevron.right").font(.allo(.footnote, .semibold)).foregroundStyle(Color(.tertiaryLabel))
             }
         }
         .padding(.horizontal, 14).frame(minHeight: 56).contentShape(.rect)
@@ -276,7 +276,7 @@ struct FirstRunGuide: View {
                 .accessibilityIdentifier("firstRun.primary")
             if showsLater {
                 Button { go(next) } label: {
-                    Text("Not Now").font(.subheadline.weight(.medium)).foregroundStyle(Color(.label).opacity(0.72))
+                    Text("Not Now").font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label).opacity(0.72))
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(.rect)
                 }
                 .accessibilityIdentifier("firstRun.later")

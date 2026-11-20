@@ -66,7 +66,7 @@ struct MemoryItemRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Group {
                 if item.locked {
-                    Image(systemName: "lock.fill").font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                    Image(systemName: "lock.fill").font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label))
                         .accessibilityLabel(Text("Locked"))
                 }
             }
@@ -77,14 +77,14 @@ struct MemoryItemRow: View {
     @ViewBuilder private var main: some View {
         switch item.kind {
         case .memory:
-            Text(verbatim: item.text).font(.body).foregroundStyle(Color(.label)).lineLimit(isOpen ? nil : lines)
+            Text(verbatim: item.text).font(.allo(.body)).foregroundStyle(Color(.label)).lineLimit(isOpen ? nil : lines)
         case .habit:
-            Text(verbatim: item.text).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-            Text(verbatim: item.detail).font(.subheadline).foregroundStyle(Color(.label)).lineLimit(1)
+            Text(verbatim: item.text).font(.allo(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
+            Text(verbatim: item.detail).font(.allo(.subheadline)).foregroundStyle(Color(.label)).lineLimit(1)
         case .skill:
-            Text(verbatim: item.text).font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
+            Text(verbatim: item.text).font(.allo(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
             if !item.detail.isEmpty {
-                Text(verbatim: item.detail).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(verbatim: item.detail).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             }
         }
     }
@@ -93,21 +93,21 @@ struct MemoryItemRow: View {
         switch item.kind {
         case .skill:
             if item.stale {
-                Text("Needs redoing: stopped twice in a row, \(item.steps) steps").font(.footnote).foregroundStyle(Tint.red)
+                Text("Needs redoing: stopped twice in a row, \(item.steps) steps").font(.allo(.footnote)).foregroundStyle(Tint.red)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             } else {
-                Text(MemoryFormat.record(item)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(MemoryFormat.record(item)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
         case .memory, .habit:
             // caption2 is the 11 points of the design at the default size, and grows with the text.
             let source = HStack(spacing: 4) {
-                Image(systemName: item.source.symbol).font(.caption2.weight(.semibold))
+                Image(systemName: item.source.symbol).font(.allo(.caption2, .semibold))
                     .foregroundStyle(item.source.isOwners ? Color(.label) : item.source == .unknown ? Color(.secondaryLabel) : Tint.blueText)
-                Text(item.source.label).font(.footnote.weight(.semibold)).foregroundStyle(Color(.secondaryLabel)).fixedSize()
+                Text(item.source.label).font(.allo(.footnote, .semibold)).foregroundStyle(Color(.secondaryLabel)).fixedSize()
             }
             let when = Text(verbatim: item.kind == .habit ? item.reason ?? "" : MemoryFormat.day(item.updated))
-                .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             // At the largest text sizes the date goes under the source instead of being cut.
             if typeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 2) { source; when }
@@ -129,7 +129,7 @@ struct MemoryItemDetail: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(facts.enumerated()), id: \.offset) { _, fact in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(fact.0).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 64, alignment: .leading)
+                        Text(fact.0).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).frame(width: 64, alignment: .leading)
                         fact.1.frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -157,9 +157,9 @@ struct MemoryItemDetail: View {
 
     /// The rows of facts. A memory shows where it came from, never a reason (decided 2026-11-18).
     private var facts: [(LocalizedStringKey, AnyView)] {
-        let value = { (text: String) in AnyView(Text(verbatim: text).font(.subheadline).foregroundStyle(Color(.label))) }
+        let value = { (text: String) in AnyView(Text(verbatim: text).font(.allo(.subheadline)).foregroundStyle(Color(.label))) }
         let source = AnyView(MemorySourceValue(item: item))
-        let link = { (text: String) in AnyView(Text(verbatim: text).font(.subheadline).foregroundStyle(Tint.blueText)) }
+        let link = { (text: String) in AnyView(Text(verbatim: text).font(.allo(.subheadline)).foregroundStyle(Tint.blueText)) }
         switch item.kind {
         case .memory:
             return [("Source", source), ("Updated", value(MemoryFormat.moment(item.updated))), ("Used in", AnyView(UsedIn(app: item.app)))]
@@ -176,15 +176,15 @@ struct MemoryItemDetail: View {
                 rows.append(("Also uses", value(item.otherApps.map(MemoryFormat.appName).joined(separator: AppLocalization.text("List separator")))))
             }
             if item.stale, let stop = item.stop { rows.append(("Stopped at", value(stop))) }
-            rows.append(("Steps", AnyView(Text("\(item.steps) steps").font(.subheadline).foregroundStyle(Color(.label)))))
+            rows.append(("Steps", AnyView(Text("\(item.steps) steps").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             if item.runs > 0 {
-                rows.append(("Worked", AnyView(Text("\(item.ok) of \(item.runs) times").font(.subheadline).foregroundStyle(Color(.label)))))
+                rows.append(("Worked", AnyView(Text("\(item.ok) of \(item.runs) times").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             }
             if let ms = item.lastMs {
-                rows.append(("Last", AnyView(Text("\(Int((Double(ms) / 1000).rounded())) s").font(.subheadline).foregroundStyle(Color(.label)))))
+                rows.append(("Last", AnyView(Text("\(Int((Double(ms) / 1000).rounded())) s").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             }
             if !item.params.isEmpty { rows.append(("Changes", value(item.params.joined(separator: AppLocalization.text("List separator"))))) }
-            rows.append(("Source", AnyView(Text("\(Text(item.source.label)), \(MemoryFormat.day(item.updated))").font(.subheadline).foregroundStyle(Color(.label)))))
+            rows.append(("Source", AnyView(Text("\(Text(item.source.label)), \(MemoryFormat.day(item.updated))").font(.allo(.subheadline)).foregroundStyle(Color(.label)))))
             return rows
         }
     }
@@ -197,7 +197,7 @@ struct MemorySourceValue: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(item.source.label).font(.subheadline).foregroundStyle(Color(.label))
+            Text(item.source.label).font(.allo(.subheadline)).foregroundStyle(Color(.label))
             if let heard = item.heard {
                 Button {
                     if let session = heard.session, let url = URL(string: "poki://session/\(session)") { openURL(url) }
@@ -206,7 +206,7 @@ struct MemorySourceValue: View {
                         Text("\(heard.app.map(MemoryFormat.appName) ?? "Poki"), \(MemoryFormat.moment(heard.at))")
                         Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                     }
-                    .font(.subheadline)
+                    .font(.allo(.subheadline))
                     .foregroundStyle(Tint.blueText)
                 }
                 .buttonStyle(.plain)
@@ -224,9 +224,9 @@ struct UsedIn: View {
         HStack(spacing: 6) {
             if let app {
                 AppIconView(app: app, size: 20)
-                Text(verbatim: MemoryFormat.appName(app)).font(.subheadline).foregroundStyle(Color(.label))
+                Text(verbatim: MemoryFormat.appName(app)).font(.allo(.subheadline)).foregroundStyle(Color(.label))
             } else {
-                Text("All Apps").font(.subheadline).foregroundStyle(Color(.label))
+                Text("All Apps").font(.allo(.subheadline)).foregroundStyle(Color(.label))
             }
         }
     }
@@ -245,7 +245,7 @@ struct MemoryPill: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .semibold)) }
-                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(title).font(.allo(.subheadline, .semibold)).lineLimit(1)
             }
             .foregroundStyle(solid ? Color.white : tint)
             .frame(maxWidth: .infinity, minHeight: 42)
@@ -276,7 +276,7 @@ struct MemoryEditor: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .trailing, spacing: 6) {
                 TextField(placeholder ?? "", text: $page.draft, axis: .vertical)
-                    .font(.body).lineLimit(1...12)
+                    .font(.allo(.body)).lineLimit(1...12)
                     .focused($focused)
                     .accessibilityIdentifier("memory.editor")
                 Text(verbatim: "\(count)/\(MemoryLibrary.noteLimit)")
@@ -300,7 +300,7 @@ struct MemoryEditor: View {
                     Text("Saving locks it: Poki won’t change this memory again.").foregroundStyle(Color(.secondaryLabel))
                 }
             }
-            .font(.footnote).padding(.horizontal, 2)
+            .font(.allo(.footnote)).padding(.horizontal, 2)
         }
         .onAppear { focused = true }
     }
@@ -309,7 +309,7 @@ struct MemoryEditor: View {
     /// was recorded, so it is shown, not picked.
     @ViewBuilder private var scope: some View {
         let row = HStack(spacing: 12) {
-            Text("Used in").font(.subheadline).foregroundStyle(Color(.secondaryLabel)).frame(width: 44, alignment: .leading)
+            Text("Used in").font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).frame(width: 44, alignment: .leading)
             UsedIn(app: page.draftApp).frame(maxWidth: .infinity, alignment: .leading)
             if picksApp {
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(.tertiaryLabel))
@@ -341,7 +341,7 @@ struct MemoryAddRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: "plus").font(.system(size: 16, weight: .semibold))
-                Text("Add Memory").font(.body)
+                Text("Add Memory").font(.allo(.body))
             }
             .foregroundStyle(Tint.blueText)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -379,7 +379,7 @@ struct MemoryChip: View {
     var ink: Color
     var body: some View {
         // Its own size: at the largest text sizes a row's line was cutting the ground under the words.
-        Text(title).font(.caption.weight(.semibold)).foregroundStyle(ink).lineLimit(1)
+        Text(title).font(.allo(.caption, .semibold)).foregroundStyle(ink).lineLimit(1)
             .padding(.horizontal, 7).padding(.vertical, 1).frame(minHeight: 20).fixedSize()
             .background(ground, in: .rect(cornerRadius: 6, style: .continuous))
     }
@@ -438,8 +438,8 @@ struct MemoryChangeRow: View {
     /// What happened, to which kind, by whom and when: one line, or the chip above the rest when they
     /// do not fit.
     private var meta: some View {
-        let kind = Text(kindName).font(.footnote.weight(.semibold)).foregroundStyle(Color(.secondaryLabel))
-        let who = Text("\(Text(actor)) \(MemoryFormat.time(change.at))").font(.footnote).foregroundStyle(Color(.secondaryLabel))
+        let kind = Text(kindName).font(.allo(.footnote, .semibold)).foregroundStyle(Color(.secondaryLabel))
+        let who = Text("\(Text(actor)) \(MemoryFormat.time(change.at))").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
         return ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) { chip; kind; who.padding(.leading, 2) }.lineLimit(1)
             VStack(alignment: .leading, spacing: 4) { chip; Text("\(kind) \(who)") }
@@ -448,20 +448,20 @@ struct MemoryChangeRow: View {
 
     @ViewBuilder private var words: some View {
         let full = typeSize.isAccessibilitySize
-        Text(verbatim: text).font(.body)
+        Text(verbatim: text).font(.allo(.body))
             .foregroundStyle(change.action == .forgot && !change.undone ? Color(.secondaryLabel) : Color(.label))
             .lineLimit(full ? nil : 2)
         if let previous = change.previous {
-            Text("Before: \(previous)").font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(full ? nil : 1)
+            Text("Before: \(previous)").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(full ? nil : 1)
         }
     }
 
     @ViewBuilder private var undo: some View {
         if change.undone {
-            Text("Undone").font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            Text("Undone").font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
         } else if change.canUndo {
             Button("Undo") { withAnimation { library.undo(change) } }
-                .font(.subheadline.weight(.semibold)).foregroundStyle(Tint.blueText).buttonStyle(.borderless)
+                .font(.allo(.subheadline, .semibold)).foregroundStyle(Tint.blueText).buttonStyle(.borderless)
                 .accessibilityIdentifier("memory.change.undo")
         }
     }
@@ -516,7 +516,7 @@ struct MemoryUndoToast: View {
         Group {
             if let change = library.lastForgotten {
                 HStack(spacing: 10) {
-                    Text("Forgot “\(change.item.text)”").font(.subheadline).foregroundStyle(Color(.label)).lineLimit(1)
+                    Text("Forgot “\(change.item.text)”").font(.allo(.subheadline)).foregroundStyle(Color(.label)).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { library.undo(change) }
@@ -528,7 +528,7 @@ struct MemoryUndoToast: View {
                                     .rotationEffect(.degrees(-90))
                             }
                             .frame(width: 17, height: 17)
-                            Text("Undo").font(.subheadline.weight(.semibold)).foregroundStyle(Tint.blueText)
+                            Text("Undo").font(.allo(.subheadline, .semibold)).foregroundStyle(Tint.blueText)
                         }
                         .padding(.leading, 9).padding(.trailing, 12).frame(minHeight: 38)
                         .background(Color(.tertiarySystemFill), in: .capsule)
@@ -574,13 +574,13 @@ struct MemoryEmptyCard: View {
                     .padding(.bottom, 8)
                     .accessibilityHidden(true)
             }
-            Text(title).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-            Text(message).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
+            Text(title).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
+            Text(message).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).multilineTextAlignment(.center)
             if let add {
                 Button(action: add) {
                     HStack(spacing: 6) {
                         Image(systemName: "plus").font(.system(size: 14, weight: .bold))
-                        Text("Add Memory").font(.subheadline.weight(.semibold))
+                        Text("Add Memory").font(.allo(.subheadline, .semibold))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 22).frame(minHeight: 44)
                     .background(Tint.blue, in: .capsule)

@@ -630,9 +630,9 @@ struct BacktapeLockScreen: View {
                         .padding(.top, 36)
                         .accessibilityHidden(true)
                     VStack(spacing: 6) {
-                        Text("Screen History Is Locked").font(.title2.weight(.semibold))
+                        Text("Screen History Is Locked").font(.alloRounded(.title2, .semibold))
                         Text("Unlock to view what Screen History kept on this iPhone.")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            .font(.allo(.subheadline)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
                     .padding(.horizontal, 32)
                     if lock.usesBiometrics {
@@ -689,7 +689,7 @@ struct BacktapeLockScreen: View {
                     Text(verbatim: " ")
                 }
             }
-            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32)
+            .font(.allo(.footnote)).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32)
             Grid(horizontalSpacing: 22, verticalSpacing: 14) {
                 ForEach(0..<3, id: \.self) { row in
                     GridRow {
@@ -714,7 +714,7 @@ struct BacktapeLockScreen: View {
             guard pin.count < 8 else { return }
             pin += digit
         } label: {
-            Text(verbatim: digit).font(.title.weight(.regular)).frame(width: 72, height: 72).contentShape(.circle)
+            Text(verbatim: digit).font(.alloRounded(.title, .regular)).frame(width: 72, height: 72).contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassSurface(in: Circle(), interactive: true)
@@ -723,7 +723,7 @@ struct BacktapeLockScreen: View {
 
     private func symbolKey(_ symbol: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.title2).frame(width: 72, height: 72).contentShape(.circle)
+            Image(systemName: symbol).font(.alloRounded(.title2)).frame(width: 72, height: 72).contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(label))

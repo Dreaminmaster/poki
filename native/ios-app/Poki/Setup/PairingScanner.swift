@@ -57,7 +57,7 @@ struct PairingScannerSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) {
                 Text("Point the camera at the code Poki Setup shows on your computer.")
-                    .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .multilineTextAlignment(.center).padding()
                     .frame(maxWidth: .infinity).background(.bar)
             }

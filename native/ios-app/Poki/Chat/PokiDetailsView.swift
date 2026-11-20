@@ -305,7 +305,7 @@ private struct ConversationsSettingsView: View {
                             SessionAvatar(session: session, size: 36)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: session.name).foregroundStyle(Color(.label))
-                                Text(verbatim: session.lastLine).font(.subheadline)
+                                Text(verbatim: session.lastLine).font(.allo(.subheadline))
                                     .foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
                             }
                         }
@@ -344,7 +344,7 @@ private struct PokiNameRow: View {
             .overlay(Circle().strokeBorder(Tint.ring, lineWidth: 1))
             .padding(.vertical, SettingsRowMetrics.iconLineInset)
             .accessibilityHidden(true)
-            Text(verbatim: "Poki").font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+            Text(verbatim: "Poki").font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
         }
@@ -381,8 +381,8 @@ struct ConnectionView: View {
                 .accessibilityIdentifier("hands.on")
                 if model.passcodeConfirmationPending {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Enter Your Passcode Next").font(.headline)
-                        Text(AppModel.passcodeHeadsUpMessage).font(.subheadline)
+                        Text("Enter Your Passcode Next").font(.allo(.headline))
+                        Text(AppModel.passcodeHeadsUpMessage).font(.allo(.subheadline))
                     }
                     Button("Continue") { model.continueAfterPasscodeHeadsUp() }
                     Button("Cancel", role: .cancel) { model.cancelPasscodeHeadsUp() }
@@ -631,7 +631,7 @@ struct AppearanceView: View {
                             // Keep the same view and layout when the selection moves. A list row
                             // can animate an inserted symbol independently of the window's fade.
                             Image(systemName: "checkmark")
-                                .font(.body.weight(.semibold))
+                                .font(.allo(.body, .semibold))
                                 .foregroundStyle(option.rawValue == choice ? Tint.blueText : Color.clear)
                                 .transaction {
                                     $0.animation = nil
@@ -675,7 +675,7 @@ private struct LanguageSettingsView: View {
                             Text(verbatim: Self.title(for: language)).foregroundStyle(Color(.label))
                             Spacer()
                             if selected {
-                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                                Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blueText)
                             }
                         }
                         .contentShape(.rect)
@@ -706,7 +706,7 @@ struct ApprovalsSettingsView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "lock.fill").foregroundStyle(Tint.amberInk).accessibilityHidden(true)
                     Text("Payments, deletions and actions in Wallet always need your confirmation.")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(Tint.amberInk)
+                        .font(.allo(.subheadline, .medium)).foregroundStyle(Tint.amberInk)
                 }
                 .padding(.vertical, 4)
                 .listRowBackground(Tint.amberSoft)
@@ -734,7 +734,7 @@ struct ApprovalsSettingsView: View {
                         Text("Changes apply right away, starting from Poki’s next step.")
                     } else {
                         Button("Learn More") { withAnimation(.snappy) { more = true } }
-                            .font(.footnote.weight(.semibold))
+                            .font(.allo(.footnote, .semibold))
                             .foregroundStyle(Tint.blueText)
                             .buttonStyle(.borderless)
                             .padding(.top, 2)
@@ -792,7 +792,7 @@ struct AgentsAndRelayView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("MCP Relay")
                             Text(relayLine)
-                                .font(.footnote.weight(.regular)).foregroundStyle(Color(.secondaryLabel))
+                                .font(.allo(.footnote, .regular)).foregroundStyle(Color(.secondaryLabel))
                         }
                     } icon: {
                         Image(systemName: "antenna.radiowaves.left.and.right")
@@ -898,10 +898,10 @@ struct GroupedSection<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.footnote).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
+            Text(title).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
             VStack(spacing: 0) { content }.groupCard()
             if let footer {
-                Text(footer).font(.footnote).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
+                Text(footer).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).padding(.horizontal, 16)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -909,7 +909,7 @@ struct GroupedSection<Content: View>: View {
 }
 
 struct Chevron: View {
-    var body: some View { Text(verbatim: "›").font(.body.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel)) }
+    var body: some View { Text(verbatim: "›").font(.allo(.body, .semibold)).foregroundStyle(Color(.tertiaryLabel)) }
 }
 
 private struct DetailsIssueRow: View {
@@ -919,14 +919,14 @@ private struct DetailsIssueRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(issue.title, systemImage: "exclamationmark.triangle.fill")
-                .font(.subheadline.weight(.semibold))
+                .font(.allo(.subheadline, .semibold))
                 .symbolRenderingMode(.multicolor)
             Text(issue.text)
-                .font(.subheadline)
+                .font(.allo(.subheadline))
                 .foregroundStyle(Color(.secondaryLabel))
             if let button = issue.button {
                 Button(button) { issue.act(model, openSetup: openSetup) }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.allo(.subheadline, .semibold))
                     .foregroundStyle(Site.blue)
                     .buttonStyle(.borderless)
             }

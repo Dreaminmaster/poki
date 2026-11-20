@@ -31,7 +31,7 @@ struct DiagnosticsView: View {
             Section("Checks") {
                 ForEach(results) { r in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(Self.title(r)).font(.subheadline.weight(.semibold))
+                        Text(Self.title(r)).font(.allo(.subheadline, .semibold))
                         Text(verbatim: "\(r.target)  \(r.milliseconds) ms").font(.caption.monospaced()).foregroundStyle(Color(.secondaryLabel))
                         if !r.detail.isEmpty { Text(verbatim: r.detail).font(.caption.monospaced()) }
                         if !r.firstBytes.isEmpty { Text(verbatim: "first bytes: \(r.firstBytes)").font(.caption.monospaced()) }
