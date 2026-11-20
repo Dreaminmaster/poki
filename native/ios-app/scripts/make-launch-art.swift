@@ -1,5 +1,5 @@
 // Draws the launch screen's word and bear at 3x (see Poki/LaunchArt/README.md) and writes two PNGs.
-//   swift make-launch-art.swift <AlloRounded-ExtraBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png>
+//   swift make-launch-art.swift <AlloRounded-ExtraBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Allo or a shadow itself: both are
 // drawn here, at build time, from the design's values.
 import CoreGraphics
@@ -12,6 +12,9 @@ import UniformTypeIdentifiers
 enum Word {
   static let text = "Poki"
   static let colour: UInt32 = 0x3A3C41
+  /// The same word for Dark Mode: the welcome's hello draws it over the dark home page (LaunchArt.on),
+  /// where the light appearance's ink all but disappears.
+  static let darkColour: UInt32 = 0xF2F4F7
   static let weight = "ExtraBold"
   static let size: CGFloat = 60
   static let lineHeight: CGFloat = 64
@@ -36,8 +39,8 @@ enum Bear {
 
 let scale: CGFloat = 3
 let args = CommandLine.arguments
-guard args.count == 5 else {
-  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-ExtraBold.ttf LaunchBear.png wordmark.png bear.png\n".data(using: .utf8)!); exit(2)
+guard args.count == 6 else {
+  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-ExtraBold.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
 }
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 
@@ -67,19 +70,21 @@ do {
   let style = CTFontCopyPostScriptName(font) as String
   guard style.hasSuffix("-\(Word.weight)") else { FileHandle.standardError.write("\(args[1]) is \(style), not \(Word.weight)\n".data(using: .utf8)!); exit(1) }
   let kern = Word.tracking * Word.size
-  let line = CTLineCreateWithAttributedString(NSAttributedString(string: Word.text, attributes: [
-    kCTFontAttributeName as NSAttributedString.Key: font,
-    kCTKernAttributeName as NSAttributedString.Key: kern,
-    kCTForegroundColorAttributeName as NSAttributedString.Key: colour(Word.colour),
-  ]))
-  let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
-  let side = max(8, (Word.width - advance) / 2)
-  let context = canvas(advance + 2 * side, Word.lineHeight)
-  context.scaleBy(x: scale, y: scale)
-  let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
-  context.textPosition = CGPoint(x: side, y: (Word.lineHeight - ascent - descent) / 2 + descent)
-  CTLineDraw(line, context)
-  write(context, args[3])
+  for (ink, path) in [(Word.colour, args[3]), (Word.darkColour, args[5])] {
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: Word.text, attributes: [
+      kCTFontAttributeName as NSAttributedString.Key: font,
+      kCTKernAttributeName as NSAttributedString.Key: kern,
+      kCTForegroundColorAttributeName as NSAttributedString.Key: colour(ink),
+    ]))
+    let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
+    let side = max(8, (Word.width - advance) / 2)
+    let context = canvas(advance + 2 * side, Word.lineHeight)
+    context.scaleBy(x: scale, y: scale)
+    let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
+    context.textPosition = CGPoint(x: side, y: (Word.lineHeight - ascent - descent) / 2 + descent)
+    CTLineDraw(line, context)
+    write(context, path)
+  }
 }
 
 // The bear with its shadow baked in, the bear's bottom on the picture's bottom.

@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class LaunchScreenTests: XCTestCase {
     func testLaunchPicturesLoadWithoutTheAssetCatalog() throws {
-        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@3x"] {
+        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchWordmarkDark@3x", "LaunchBear@3x"] {
             let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "png"))
             XCTAssertNotNil(UIImage(contentsOfFile: file.path), "\(name) must decode without Assets.car")
         }
