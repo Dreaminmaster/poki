@@ -441,14 +441,14 @@ public final class PokiCore: @unchecked Sendable {
         }
     }
 
-    /// look, do or status for another part of the app (the Voice tab), run here on the phone exactly as a
-    /// relay call: same gate, approvals, Live Activity and deadlines. `arguments` is the call's JSON object.
+    /// look, do or status for live voice on this phone, with the same queue and approval rules as chat.
+    /// The local task identity also lets voice use the owner's automatic unlock setting.
     /// The Voice tab acts for the owner, so a step handed to the owner does not hold its input back.
     public func tool(_ name: String, arguments: String) async -> ToolResult {
         guard let args = try? JSON.parse(arguments.isEmpty ? "{}" : arguments) else {
             return ToolResult(text: "error: the arguments are not JSON; nothing was sent", jpeg: nil, isError: true)
         }
-        return await call(name, args, byOwnersVoice: true)
+        return await call(name, args, byOwnersVoice: true, localTask: "owner-voice")
     }
 
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back

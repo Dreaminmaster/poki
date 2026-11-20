@@ -2748,7 +2748,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             title |= [label caseInsensitiveCompare:@"Enter Passcode"] == NSOrderedSame ||
                 [label isEqualToString:@"输入密码"] || [label isEqualToString:@"輸入密碼"];
         }
-        if (label.length && [type isEqualToString:@"Button"] && [node respondsToSelector:@selector(isEnabled)] && [node isEnabled]) {
+        BOOL key = [type isEqualToString:@"Button"] || [type isEqualToString:@"Key"];
+        if (label.length && key && [node respondsToSelector:@selector(isEnabled)] && [node isEnabled]) {
             unichar digit = [label characterAtIndex:0];
             CGRect frame = [node frame];
             if (digit >= '0' && digit <= '9' && (label.length == 1 || [label characterAtIndex:1] == ',' || [label characterAtIndex:1] == ' ') &&
@@ -2807,14 +2808,14 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             keys = [self passcodeKeysForSession:session generation:generation display:display before:deadline];
         }
         // A keypad that was already visible may contain a passcode the owner started entering.
-        if (!keys || keys.count || !canSend()) return PKUnlockResultUnavailable;
+        if (!keys || keys.count || !canSend()) return PKUnlockResultKeypadUnavailable;
         CGFloat x = CGRectGetMidX(display.bounds);
         NSArray *swipe = @[[PKTouchPoint at:CGPointMake(x, CGRectGetMaxY(display.bounds) - 2) offset:0],
                            [PKTouchPoint at:CGPointMake(x, CGRectGetMidY(display.bounds)) offset:0.3],
                            [PKTouchPoint at:CGPointMake(x, CGRectGetMidY(display.bounds)) offset:0.35]];
         if ([self touch:@[swipe] timeout:MIN(1, remaining()) geometry:display session:session generation:generation
                 lockDisplay:lockDisplay check:canSend].delivery != PKDeliverySent)
-            return PKUnlockResultUnavailable;
+            return PKUnlockResultTouchRejected;
         const double keypadDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + 2.4);
         do {
             keys = [self passcodeKeysForSession:session generation:generation display:display before:keypadDeadline];
@@ -2822,6 +2823,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             if (!canSend()) break;
             [NSThread sleepForTimeInterval:0.15];
         } while (NSProcessInfo.processInfo.systemUptime < keypadDeadline);
+        if (!keys.count) return PKUnlockResultKeypadUnavailable;
+        BOOL touchRejected = NO;
         for (NSUInteger i = 0; keys.count && i < passcode.length; i++) {
             NSValue *key = keys[@([passcode characterAtIndex:i])];
             if (!key || !canSend() || (!duo && !PKSameDisplay(display, self.displayGeometry))) break;
@@ -2830,7 +2833,10 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             PKOutcome *outcome = [self touch:@[finger] timeout:MIN(1, remaining()) geometry:display
                                      session:session generation:generation lockDisplay:lockDisplay check:canSend];
             mayHaveEnteredDigit |= outcome.delivery != PKDeliveryNotSent;
-            if (outcome.delivery != PKDeliverySent) break;
+            if (outcome.delivery != PKDeliverySent) {
+                touchRejected = outcome.delivery == PKDeliveryNotSent;
+                break;
+            }
             if (i + 1 < passcode.length) {
                 keys = [self passcodeKeysForSession:session generation:generation display:display before:deadline];
             }
@@ -2842,6 +2848,7 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             if (!mayHaveEnteredDigit || !canSend()) break;
             [NSThread sleepForTimeInterval:0.15];
         } while (NSProcessInfo.processInfo.systemUptime < resultDeadline);
+        if (touchRejected && !mayHaveEnteredDigit) return PKUnlockResultTouchRejected;
     } @catch (__unused NSException *e) {
         return PKUnlockResultSubmissionUnconfirmed;
     }

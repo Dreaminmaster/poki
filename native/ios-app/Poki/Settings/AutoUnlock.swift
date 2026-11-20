@@ -92,6 +92,15 @@ final class AutoUnlock {
             allowed.withLock { $0 = false }
         }
         attempt = nil
+        let resultMessage: String
+        switch result {
+        case .unlocked: resultMessage = "iOS confirmed the phone is unlocked"
+        case .submissionUnconfirmed: resultMessage = "a keypad touch may have landed, but iOS did not confirm unlock"
+        case .keypadUnavailable: resultMessage = "could not confirm an untouched SpringBoard passcode keypad"
+        case .touchRejected: resultMessage = "iOS automation did not deliver the lock-screen gesture or touch"
+        default: resultMessage = "the lock-screen session or display was unavailable"
+        }
+        AppLog.shared.add("auto-unlock", resultMessage)
         if configurationVersion == version {
             needsPasscode = result == .submissionUnconfirmed
             UserDefaults.standard.set(needsPasscode, forKey: Self.retryKey)

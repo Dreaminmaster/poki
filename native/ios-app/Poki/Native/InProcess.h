@@ -15,6 +15,8 @@ typedef NS_ENUM(NSInteger, PKUnlockResult) {
     PKUnlockResultUnavailable,
     PKUnlockResultUnlocked,
     PKUnlockResultSubmissionUnconfirmed,
+    PKUnlockResultKeypadUnavailable,
+    PKUnlockResultTouchRejected,
 };
 
 /// One point of a finger's path: where it is `offset` seconds after the gesture starts.

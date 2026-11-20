@@ -1152,6 +1152,20 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
     }
 
+    func testOnDeviceVoiceUnlocksAndReadsTheCurrentApp() async {
+        let (core, wda, host) = makeCore()
+        wda.source([("Button", "Timer")], app: "Clock")
+        let locked = LockedBox(true)
+        wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
+        host.unlock.value = { locked.value = false; return true }
+
+        let remote = await core.call("look", [:])
+        XCTAssertTrue(remote.text.contains("screen: locked"), remote.text)
+        let voice = await core.tool("look", arguments: "{}")
+        XCTAssertFalse(voice.text.contains("screen: locked"), voice.text)
+        XCTAssertTrue(voice.text.contains("Timer"), voice.text)
+    }
+
     func testTheVoiceTabStillTapsWhileAStepIsHandedToTheOwner() async throws {
         let wda = FakeWDA()
         wda.source([("Button", "Continue")], app: "Shop")
