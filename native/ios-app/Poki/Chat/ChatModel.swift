@@ -1273,6 +1273,9 @@ final class ChatModel {
         if countedScrollReplyQuestion != nil {
             return PokiCore.ToolAnswer(text: "Waiting for the owner's reply. No action was sent.", jpeg: nil, isError: true)
         }
+        let session = sessionID
+        let taskToken = runToken
+        let localTask = "\(session)#\(taskToken)"
         let args = (call.arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
         if usesSplitView {
             switch call.name {
@@ -1338,7 +1341,13 @@ final class ChatModel {
             }
             recordTaskResult(result)
             // An outside agent reads the reply, not the card: its tasks answer in words.
-            let card = result.success && kind == .poki ? result.card : nil
+            var card = result.success && kind == .poki ? result.card : nil
+            // The pictures are only ever cut from the phone's screen, never taken from the model.
+            card?.pictures = nil
+            if let shown = card {
+                card?.pictures = await app.itemPictures(for: shown, localTask: localTask)
+                if sessionID != session || runToken != taskToken { card = nil }
+            }
             if let card { showCard(card) }
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
         case let name where WebTools.names.contains(name):
@@ -1399,7 +1408,6 @@ final class ChatModel {
             }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
-            let taskToken = runToken
             let phoneArguments: String
             if call.name == "do", let data = try? JSONSerialization.data(withJSONObject: phoneArgs) {
                 phoneArguments = String(decoding: data, as: UTF8.self)
@@ -1407,7 +1415,7 @@ final class ChatModel {
                 phoneArguments = call.arguments
             }
             let response = await app.runTool(call.name, arguments: phoneArguments, localSession: splitViewSession,
-                                             expectedApps: expectedSplitViewApps, localTask: "\(sessionID)#\(taskToken)") { [weak self, notesByAction] index, step, skill in
+                                             expectedApps: expectedSplitViewApps, localTask: localTask) { [weak self, notesByAction] index, step, skill in
                 guard let self, self.runToken == taskToken, !self.stopAsked, notesByAction.indices.contains(index) else { return }
                 let action = notesByAction[index]
                 let ids = step.map { action.steps[$0] ?? [] } ?? action.direct
