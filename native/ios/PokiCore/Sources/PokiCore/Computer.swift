@@ -138,6 +138,8 @@ final class Computer: @unchecked Sendable {
     /// The agent's memory library, and this task's recorded steps (what skills {save} keeps).
     var memory: SkillStore?
     var trace: [RecordedStep] = []
+    /// The foreground a new skill step can use. Home and launch invalidate it until a read.
+    var skillStepApp: String?
     /// A skill ran whole in this task (the finish line does not offer to save it again).
     var skillRanWhole = false
     /// The app a session named with `app`: kept across its calls until it lets go of it.
@@ -219,6 +221,7 @@ final class Computer: @unchecked Sendable {
                     jpeg: nil, isError: true, splitViewNeedsRead: true, screenEvidence: [])
             }
         }
+        skillStepApp = reading.foreground?.bundleID
         if reading.png != nil || !reading.elements.isEmpty {
             await updateReadSize(until: now() + 1.5)
         }
@@ -760,7 +763,7 @@ final class Computer: @unchecked Sendable {
     private func clearPaneRead() {
         confirmedPaneRead = false
         lastPNG = nil; lastPNGAt = nil; lastPicture = nil; lastTree = nil; size = nil
-        refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil
+        refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil; skillStepApp = nil
         typedInto = nil; typedText = nil; swipeUnread = false
     }
 
@@ -1056,6 +1059,7 @@ final class Computer: @unchecked Sendable {
             typedText = nil
             if let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), let bundle = front["bundleId"]?.string {
                 origin = (Foreground(bundleID: bundle, name: front["name"]?.string), session, now())
+                skillStepApp = bundle
             }
         } else {
             origin?.lastCall = now()
@@ -1563,6 +1567,7 @@ final class Computer: @unchecked Sendable {
         guard let screen = size, let elements = await settledRead(until: min(until, now() + Self.settleWindow)) else {
             return ("the action before it may have changed the screen, and it could not be read again to check this one. Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
+        skillStepApp = elements.foreground.bundleID
         let backTarget = kind == .back ? BackTarget(in: elements.all) : nil
         let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen))
         for press in presses(kind, action, scan, unread: false, backTarget: backTarget) {
