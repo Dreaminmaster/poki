@@ -13,9 +13,18 @@ final class BridgeStub: URLProtocol {
     override func startLoading() {
         let body: String
         if request.url?.host() == "voice-live-bridge.test" {
-            body = request.url?.lastPathComponent == "session"
-                ? #"{"sdp":"sdp-answer"}"#
-                : #"{"value":"ek_test","live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","do"]}"#
+            switch request.url?.lastPathComponent {
+            case "session": body = #"{"sdp":"sdp-answer"}"#
+            case "screen":
+                let data = requestBody(request)
+                let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let image = json?["image"] as? String
+                let first = "data:image/jpeg;base64," + Data("first synthetic screenshot".utf8).base64EncodedString()
+                let second = "data:image/jpeg;base64," + Data("second synthetic screenshot".utf8).base64EncodedString()
+                body = image == first ? #"{"text":"First screen description"}"# : image == second
+                    ? #"{"text":"Second screen description"}"# : #"{"text":"Unrecognized screenshot"}"#
+            default: body = #"{"live":true,"model":"gpt-live-1.1","local_tools":["get_ios_version","look","do"]}"#
+            }
         } else {
             body = #"{"value":"ek_test","model":"gpt-realtime","local_tools":["get_ios_version","look","do"]}"#
         }
@@ -24,6 +33,21 @@ final class BridgeStub: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+private func requestBody(_ request: URLRequest) -> Data {
+    if let body = request.httpBody, !body.isEmpty { return body }
+    guard let stream = request.httpBodyStream else { return Data() }
+    stream.open()
+    defer { stream.close() }
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 65_536)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count <= 0 { break }
+        body.append(buffer, count: count)
+    }
+    return body
 }
 
 /// A voice bridge in trouble: one host no longer knows the address, the other never answers in time.
@@ -49,15 +73,23 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
     private(set) var liveAnswer: String?
+    @MainActor var remoteSpeech = false
     func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) {}
+    func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
     func close() { closed = true }
     @MainActor func play(_ events: [String: Any]...) { for event in events { onEvent?(event) } }
+    @MainActor func backend(_ type: String, _ fields: [String: Any] = [:]) {
+        play(["type": "response.event", "delegation_id": "d1", "event": fields.merging(["type": type]) { _, type in type }])
+    }
+    @MainActor func call(_ id: String, _ name: String, arguments: String = "{}") {
+        backend("response.output_item.done", ["item": ["type": "function_call", "call_id": id, "name": name, "arguments": arguments]])
+    }
     /// The text of every system note sent on this connection.
     var notes: [String] {
         sent.compactMap { event in
@@ -109,34 +141,90 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testLiveCaptionsAndStopKeepTheNextDelegatedToolFromRunning() async {
-        var executed: [String] = []
-        let h = Harness(phoneTool: { name, _ in
-            executed.append(name)
-            return ("mock result", false, nil)
-        })
-        _ = h.voice.setBridge(BridgeStub.liveAddress)
-        await h.connect()
-        XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
-        h.link.play(["type": "session.started"],
-                    ["type": "session.input_transcript.delta", "delta": "打开", "start_ms": 0, "end_ms": 200],
-                    ["type": "session.input_transcript.delta", "delta": "微信", "start_ms": 200, "end_ms": 400],
-                    ["type": "session.delegation.created", "delegation": ["id": "d1"]])
-        func call(_ id: String, _ name: String) -> [String: Any] {
-            ["type": "response.event", "delegation_id": "d1", "event": ["type": "response.output_item.done",
-                "item": ["type": "function_call", "call_id": id, "name": name, "arguments": "{}"]]]
+        for gap in [200, 1200] {
+            var executed: [String] = []
+            let h = Harness(phoneTool: { name, _ in
+                executed.append(name)
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            XCTAssertEqual(h.link.liveAnswer, "sdp-answer")
+            h.link.play(["type": "session.input_transcript.delta", "delta": "打开", "start_ms": 0, "end_ms": 200],
+                        ["type": "session.input_transcript.delta", "delta": "微信。", "start_ms": 200, "end_ms": 400],
+                        ["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("c1", "look")
+            h.link.play(["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 400 + gap, "end_ms": 700 + gap])
+            h.link.call("c2", "do")
+            h.link.play(["type": "session.output_transcript.delta", "delta": "收到。", "start_ms": 2100, "end_ms": 2300])
+            await h.time.settle()
+            XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text).joined(), "打开微信。停。")
+            XCTAssertEqual(h.voice.lines.filter { $0.role == .poki }.map(\.text), ["收到。"])
+            XCTAssertEqual(executed, ["look"], "Stop must block the next phone action at \(gap) ms.")
+            let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
+                .compactMap { ($0["item"] as? [String: String])?["call_id"] }
+            XCTAssertEqual(Set(results), ["c1", "c2"])
+            XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
+            h.voice.stop()
         }
-        h.link.play(call("c1", "look"),
-                    ["type": "session.input_transcript.delta", "delta": "停。", "start_ms": 1600, "end_ms": 1900],
-                    call("c2", "do"),
-                    ["type": "session.output_transcript.delta", "delta": "收到。", "start_ms": 2000, "end_ms": 2300])
+    }
+
+    func testLiveReconnectReportsTheCompletedResultUntilAcknowledged() async throws {
+        var executed = 0
+        let result = "操作已完成。草稿已保存。"
+        let h = Harness(phoneTool: { _, _ in
+            executed += 1
+            return (result, false, nil)
+        })
+        await h.liveTalk()
+        let payload = String(repeating: "甲", count: 1400)
+        h.link.call("saved-draft", "do", arguments: #"{"actions":[{"type":"\#(payload)"}]}"#)
+        h.link.onClosed?("connection dropped while the action ran")
         await h.time.settle()
-        XCTAssertEqual(h.voice.lines.filter { $0.role == .you }.map(\.text), ["打开微信", "停。"])
-        XCTAssertEqual(h.voice.lines.filter { $0.role == .poki }.map(\.text), ["收到。"])
-        XCTAssertEqual(executed, ["look"])
-        let results = h.link.sent.filter { $0["type"] as? String == "response.item.create" }
-            .compactMap { $0["item"] as? [String: String] }
-        XCTAssertEqual(Set(results.compactMap { $0["call_id"] }), ["c1", "c2"])
-        XCTAssertFalse(h.link.sent.contains { $0["type"] as? String == "response.create" })
+        await h.liveTalk()
+        func report() -> [String: Any]? { h.link.sent.first { $0["type"] as? String == "session.commentary.append" } }
+        let content = try XCTUnwrap(report()?["content"] as? String)
+        XCTAssertTrue(content.contains(result))
+        XCTAssertLessThanOrEqual(content.utf8.count, 500)
+        h.link.play(["type": "session.commentary.appended", "client_event_id": "unrelated"])
+        h.link.onClosed?("connection dropped before acknowledgment")
+        await h.liveTalk()
+        XCTAssertTrue((report()?["content"] as? String)?.contains(result) == true)
+        if let eventID = report()?["event_id"] as? String {
+            h.link.play(["type": "session.commentary.appended", "client_event_id": eventID])
+            h.link.onClosed?("connection dropped after acknowledgment")
+            await h.liveTalk()
+            XCTAssertNil(report())
+        } else {
+            XCTFail("Reconnect result has no ID to match an acknowledgment.")
+        }
+        XCTAssertEqual(executed, 1)
+        h.voice.stop()
+    }
+
+    func testLiveConsecutiveScreensUseIndependentVisionRequests() async {
+        let h = Harness(phoneTool: { _, arguments in
+            let screenshot = arguments.contains("first") ? "first synthetic screenshot" : "second synthetic screenshot"
+            return ("Screen elements", false, Data(screenshot.utf8))
+        })
+        await h.liveTalk()
+        for name in ["First", "Second"] {
+            let id = name.lowercased()
+            h.link.call(id, "look", arguments: #"{"page":"\#(id)"}"#)
+            if h.link.sent.contains(where: { (($0["item"] as? [String: String])?["call_id"]) == id }) == false {
+                let sent = expectation(for: NSPredicate { _, _ in
+                    h.link.sent.contains { (($0["item"] as? [String: String])?["call_id"]) == id }
+                }, evaluatedWith: nil)
+                await fulfillment(of: [sent], timeout: 2)
+            }
+            let output = h.link.sent.compactMap { $0["item"] as? [String: String] }.first { $0["call_id"] == id }?["output"] ?? ""
+            XCTAssertTrue(output.contains("\(name) screen description"))
+            let other = name == "First" ? "Second" : "First"
+            XCTAssertFalse(output.contains("\(other) screen description"))
+        }
+        XCTAssertFalse(h.link.sent.contains { event in
+            let item = event["item"] as? [String: Any]
+            return (item?["content"] as? [[String: String]])?.contains { $0["type"] == "input_image" } == true
+        }, "No screenshot may stay in the Live backend conversation.")
         h.voice.stop()
     }
 
@@ -182,6 +270,12 @@ final class VoiceModelTests: XCTestCase {
 
         /// Connected, before the server's session.created.
         @MainActor func connect() async { await voice.start() }
+
+        @MainActor func liveTalk() async {
+            _ = voice.setBridge(BridgeStub.liveAddress)
+            await connect()
+            link.play(["type": "session.started"])
+        }
 
         /// Connected and listening.
         @MainActor func talk() async {
@@ -451,22 +545,28 @@ final class OpenAIStub: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "api.openai.com" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        var body = request.httpBody ?? Data()
-        if body.isEmpty, let stream = request.httpBodyStream {
-            stream.open()
-            var buffer = [UInt8](repeating: 0, count: 65_536)
-            while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; body.append(buffer, count: n) }
-            stream.close()
-        }
+        let body = requestBody(request)
         Self.session = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["session"] as? [String: Any]
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"value":"ek_test"}"#.utf8))
+        let reply = request.url?.path() == "/v1/live/sessions" ? #"{"transport":{"sdp":"sdp-answer"}}"# : #"{"value":"ek_test"}"#
+        client?.urlProtocol(self, didLoad: Data(reply.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
 }
 
 final class VoiceLanguageTests: XCTestCase {
+    func testDirectLiveVoiceInstructionsAskForTheResultOnly() async throws {
+        URLProtocol.registerClass(OpenAIStub.self)
+        defer { URLProtocol.unregisterClass(OpenAIStub.self) }
+        let answer = try await VoiceDirect.exchangeLiveOffer("offer", model: "gpt-live-1.1", apiKey: "sk-test")
+        XCTAssertEqual(answer, "sdp-answer")
+        let prompt = try XCTUnwrap(OpenAIStub.session?["instructions"] as? String)
+        for rule in ["Act first, then talk.", "Say nothing before or between tool calls.", "Give the verified result in one short sentence."] {
+            XCTAssertTrue(prompt.contains(rule), rule)
+        }
+    }
+
     func testTheLiveSessionHintsChineseTranscriptionWithoutChangingReplyLanguageRules() async throws {
         URLProtocol.registerClass(OpenAIStub.self)
         defer { URLProtocol.unregisterClass(OpenAIStub.self) }
@@ -487,6 +587,41 @@ extension VoiceModelTests {
     private func following(_ h: Harness) -> (ActivityController, TalkActivity) {
         let activity = ActivityController()
         return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
+    }
+
+    func testLiveActivityWaitsForTheNextResponseAndMeasuresThePlayedAnswer() async {
+        let h = Harness(phoneTool: { _, _ in ("Screen is open", false, nil) })
+        let (activity, watcher) = following(h)
+        activity.finishAfter = .seconds(60)
+        await h.liveTalk()
+        h.link.play(["type": "session.input_transcript.delta", "delta": "打开微信。", "start_ms": 0, "end_ms": 400],
+                    ["type": "session.delegation.created", "delegation": ["id": "d1", "response_id": "r1"]])
+        h.link.backend("response.created", ["response": ["id": "r1"]])
+        h.link.call("open", "do")
+        await h.time.settle()
+        activity.update { $0.phase = .working; $0.headline = "Open WeChat" }
+        activity.record(step: "Open WeChat", ok: true)
+        XCTAssertTrue(h.link.sent.contains { $0["type"] as? String == "response.create" })
+        h.link.backend("response.completed", ["response": ["id": "r1"]])
+        await h.time.settle()
+        XCTAssertEqual(activity.state.phase, .working, "The first response finished, but the continuation is still queued.")
+
+        h.link.backend("response.created", ["response": ["id": "r2"]])
+        h.link.backend("response.completed", ["response": ["id": "r2"]])
+        h.link.play(["type": "session.output_transcript.delta", "delta": "微信已打开。", "start_ms": 1400, "end_ms": 1600])
+        await h.time.settle()
+        XCTAssertNil(h.voice.lastTurnMS, "A transcript is not proof that the answer started playing.")
+        XCTAssertEqual(activity.state.phase, .working)
+        h.link.remoteSpeech = true
+        await h.time.advance(1.5)
+        XCTAssertGreaterThanOrEqual(h.voice.lastTurnMS ?? 0, 1400)
+        h.link.remoteSpeech = false
+        for _ in 0..<3 { await h.time.advance(0.2) }
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertEqual(activity.state.face.content, "微信已打开。")
+        h.voice.stop()
+        withExtendedLifetime(watcher) {}
+        activity.end()
     }
 
     /// ESP-954: a talk's run of steps finishes when the talk's turn is over, not by the quiet wait while

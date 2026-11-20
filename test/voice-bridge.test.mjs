@@ -19,6 +19,9 @@ async function sessionBridge(t) {
       await writeFile(join(process.env.POKI_MCP_STATE_DIR, 'request.json'), JSON.stringify({ url, body: JSON.parse(options.body) }));
       if (url === 'https://api.openai.com/v1/realtime/client_secrets') return Response.json({ value: 'ek_test' });
       if (url === 'https://api.openai.com/v1/live/sessions') return Response.json({ transport: { sdp: 'sdp-answer' } }, { status: 201 });
+      if (url === 'https://api.openai.com/v1/responses') return Response.json({ output: [{
+        type: 'message', content: [{ type: 'output_text', text: 'Screen description' }],
+      }] });
       throw new Error('Unexpected upstream URL');
     };
   `;
@@ -67,6 +70,29 @@ test('the voice bridge exchanges a Live offer and returns only the SDP answer', 
   assert.equal(session.delegation.type, 'responses');
   assert.ok(session.delegation.responses.tools.some(tool => tool.name === 'do'));
   assert.match(session.instructions, /Chinese/i);
+  assert.match(session.instructions, /Act first, then talk\./);
+  assert.match(session.instructions, /Say nothing before or between tool calls\./);
+  assert.match(session.instructions, /Give the verified result in one short sentence\./);
+});
+
+test('each Live screenshot uses its own unsaved vision request', async t => {
+  const { base, request } = await sessionBridge(t);
+  for (const [screen, previous] of [['first', 'second'], ['second', 'first']]) {
+    const url = name => `data:image/jpeg;base64,${Buffer.from(`synthetic ${name} screenshot`).toString('base64')}`;
+    const response = await fetch(`${base}/screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: url(screen) }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { text: 'Screen description' });
+    const upstream = await request();
+    assert.equal(upstream.url, 'https://api.openai.com/v1/responses');
+    assert.equal(upstream.body.store, false);
+    assert.equal(upstream.body.previous_response_id, undefined);
+    assert.equal(upstream.body.conversation, undefined);
+    const images = upstream.body.input.flatMap(item => item.content).filter(part => part.type === 'input_image');
+    assert.deepEqual(images.map(image => image.image_url), [url(screen)]);
+    assert.ok(!JSON.stringify(upstream.body).includes(url(previous)));
+  }
 });
 
 // The voice bridge in front of a fixture daemon and phone, as the Poki app reaches it.
