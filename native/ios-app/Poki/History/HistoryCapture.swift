@@ -4,6 +4,7 @@ import PokiCore
 import SwiftUI
 import UIKit
 import notify
+import UserNotifications
 
 /// A process-local lease for screen text already fetched by asynchronous agent queries.
 /// Revoking a lease does not try to undo an answer already delivered to the caller.
@@ -155,6 +156,8 @@ final class HistoryCapture: ObservableObject {
     private var needsActivation = true
     /// A callback from an earlier native run must never supply text to a new one.
     private var run = 0
+    /// The app last read that was an app, for a web page whose own process names none.
+    private var host: String?
     private var background: UIBackgroundTaskIdentifier = .invalid
     private var lockToken: Int32 = NOTIFY_TOKEN_INVALID
     private var screenToken: Int32 = NOTIFY_TOKEN_INVALID
@@ -188,10 +191,37 @@ final class HistoryCapture: ObservableObject {
 
     /// Screens that sit over the app in front for a moment and say nothing about what the owner did,
     /// or that show a passcode or an Apple Account sign-in. They are never kept, whatever the lists say.
-    static let overlays = [
+    nonisolated static let overlays = [
         "com.apple.ScreenshotServicesService", "com.apple.InCallService", "com.apple.CoreAuthUI",
         "com.apple.SharingViewService", "com.apple.PassbookUIService", "com.apple.AuthKitUIService",
     ]
+
+    /// Not an app the owner was using: the Home Screen's widgets and Apple's sheets that belong to
+    /// no app. Never kept, never listed.
+    nonisolated static func isNoise(_ app: String) -> Bool {
+        let low = app.lowercased()
+        if low.isEmpty || low.hasPrefix("com.apple.chrono") || low.contains("widgetrenderer") { return true }
+        if overlays.contains(where: { $0.lowercased() == low }) { return true }
+        return low.hasPrefix("com.apple.") && (low.hasSuffix("uiservice") || low.hasSuffix("viewservice"))
+    }
+
+    /// A WebKit process that draws a page for some app: one per tab, with no app's name.
+    nonisolated static func isWeb(_ app: String) -> Bool { app.lowercased().hasPrefix("com.apple.webkit") }
+
+    nonisolated static let safari = "com.apple.mobilesafari"
+
+    /// Removes what was kept before system processes were left out, and counts the reads of web
+    /// pages' own processes as Safari's.
+    func tidy() async {
+        let apps = await HistoryStore.shared.everyApp()
+        let web = apps.filter(Self.isWeb)
+        // Only ids known to be no app are cleaned up. Whether an Apple id has an icon here is a
+        // guess (icons may be missing or turned off), so it never deletes history already kept.
+        let processes = apps.filter { !Self.isWeb($0) && Self.isNoise($0) }
+        guard !web.isEmpty || !processes.isEmpty else { return }
+        HistoryStore.shared.tidy(processes: processes, web: web, browser: Self.safari)
+        BacktapeNotes.shared.reset()
+    }
 
     /// Poki's own screens are never kept, whatever the lists say.
     nonisolated static func isPoki(_ app: String) -> Bool {
@@ -369,13 +399,24 @@ final class HistoryCapture: ObservableObject {
     /// Keeps a read of the launcher's when the app lists allow it. Returns whether it was kept.
     @discardableResult
     func keep(_ line: [String: Any]) -> Bool {
-        guard line["ok"] as? Bool == true, let read = line["text"] as? [String], !read.isEmpty else { return false }
-        let app = line["app"] as? String ?? ""
+        guard line["ok"] as? Bool == true else { return false }
+        var app = line["app"] as? String ?? ""
+        let home = app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame
+        if app.isEmpty || Self.isWeb(app) {
+            // A web page's own process. It counts as the app that shows it: the one the launcher
+            // found around the page, else the app read just before, else Safari.
+            app = (line["host"] as? String).flatMap { $0.isEmpty || Self.isWeb($0) ? nil : $0 } ?? host ?? (app.isEmpty ? "" : Self.safari)
+        } else if home {
+            host = nil
+        } else if !HistoryAppNames.isProcess(app) {
+            host = app
+        }
+        guard let read = line["text"] as? [String], !read.isEmpty else { return false }
         // The Home Screen is left out with its notification banners: a banner names the sending app
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
         // no trace, not even a line in the observing record.
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
-        if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return false }
+        if HistoryAppNames.isProcess(app) { return false }
         guard keeps(app) else { return false }
         let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()

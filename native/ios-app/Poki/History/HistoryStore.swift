@@ -10,6 +10,9 @@ struct HistoryEntry: Identifiable, Hashable {
     let app: String
     let title: String
     let text: String
+    /// Who did it. nil: the owner, read off the screen. "": Poki, for its own chat. Otherwise the
+    /// outside agent Poki worked for (BacktapeActivity).
+    var by: String? = nil
 }
 
 /// One line of the observing record: when reading was on, paused, blocked or left an app out.
@@ -209,6 +212,22 @@ final class HistoryStore: @unchecked Sendable {
                 self.run("VACUUM")
                 rounds += 1
             }
+        }
+    }
+
+    /// Every app id that has a read, for `HistoryCapture.tidy`.
+    func everyApp() async -> [String] {
+        await fetch { self.rows("SELECT DISTINCT app FROM entries") { Self.string($0, 0) } }
+    }
+
+    /// Removes the reads of `processes`, kept before they were left out, and gives the reads of a
+    /// web page's own process to `browser`, kept before a page was counted as its app.
+    func tidy(processes: [String], web: [String], browser: String) {
+        guard !processes.isEmpty || !web.isEmpty else { return }
+        queue.async {
+            self.generation = UUID()
+            for app in processes { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
+            for app in web { self.run("UPDATE entries SET app = ? WHERE app = ?", [.text(browser), .text(app)]) }
         }
     }
 

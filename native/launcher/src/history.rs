@@ -211,6 +211,7 @@ async fn run(request: &Value, emit: impl Fn(Value), mut stopped: oneshot::Receiv
         }
         let asked = Instant::now();
         let mut line = json!({"n": stats.reads + stats.failures + 1, "at_s": at.as_secs()});
+        let subscribed = direct.is_some();
         let read = async {
             if device.is_none() {
                 device = Some(target.open().await?);
@@ -250,6 +251,11 @@ async fn run(request: &Value, emit: impl Fn(Value), mut stopped: oneshot::Receiv
                 line["ms"] = took.into();
                 line["elements"] = summary["elements"].clone();
                 line["app"] = front_name(&summary);
+                // The app that shows a web page, when the page's own process was the one read.
+                let host = bundle_name(&tree["host"]["bundle_id"]);
+                if !host.is_null() {
+                    line["host"] = host;
+                }
                 line["changed"] = changed.into();
                 // The capture loop asks for the text itself, and gets it only for a screen that changed.
                 if include_text && changed {
@@ -268,7 +274,13 @@ async fn run(request: &Value, emit: impl Fn(Value), mut stopped: oneshot::Receiv
                     if let Some(mut old) = direct.take() {
                         let _ = tokio::time::timeout(Duration::from_secs(1), old.close()).await;
                     }
-                    device = None;
+                    // A read that failed on a subscription already open ends only the subscription:
+                    // the tunnel may still be alive, and on cellular a new one cannot be opened
+                    // while an open one keeps working. When the next subscribe fails on it too,
+                    // the tunnel goes.
+                    if !subscribed || points.is_none() {
+                        device = None;
+                    }
                 }
                 stats.failures += 1;
                 stats.last_error = Some(failure.detail.clone());
@@ -347,8 +359,12 @@ fn hash_of(value: &Value) -> u64 {
 
 fn front_name(summary: &Value) -> Value {
     let app = if summary["front"].is_object() { &summary["front"] } else { &summary["applications"][0] };
-    app["bundle_id"]
-        .as_str()
+    bundle_name(&app["bundle_id"])
+}
+
+/// A bundle id as the capture takes it, or null for anything that is not one.
+fn bundle_name(id: &Value) -> Value {
+    id.as_str()
         .filter(|id| {
             id.contains('.') && id.split('.').all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
         })
@@ -579,6 +595,11 @@ mod tests {
             }
         }
         assert_eq!(front_name(&json!({"front": {"bundle_id": "com.example.Bank-2"}})), "com.example.Bank-2");
+        assert_eq!(bundle_name(&json!("com.apple.mobilesafari")), "com.apple.mobilesafari");
+        assert!(bundle_name(&json!("WidgetRenderer_Default")).is_null());
+        assert!(bundle_name(&Value::Null).is_null());
+        assert!(crate::ax::direct::is_web("com.apple.WebKit.WebContent"));
+        assert!(!crate::ax::direct::is_web("com.apple.mobilesafari"));
     }
 
     #[test]

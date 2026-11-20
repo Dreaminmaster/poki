@@ -123,6 +123,22 @@
         }
       }
     },
+    "You used %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你使用了%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你使用了%@。"
+          }
+        }
+      }
+    },
     "You wrote" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2563,6 +2579,22 @@
         }
       }
     },
+    "%@ worked on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 操作了这台 iPhone。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 操作了這部 iPhone。"
+          }
+        }
+      }
+    },
     "%@ · Coming in an update" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2919,6 +2951,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "!"
+          }
+        }
+      }
+    },
+    "%1$@ in %2$@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 在 %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 在 %2$@"
+          }
+        }
+      }
+    },
+    "%1$@ worked in %2$@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 在%2$@中进行了操作。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 在%2$@中進行了操作。"
           }
         }
       }
@@ -11842,6 +11906,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 日誌"
+          }
+        }
+      }
+    },
+    "Poki lost its connection to this iPhone. Open Poki to turn Screen History back on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 与这台 iPhone 的连接已断开。打开 Poki 以重新开启屏幕历史。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 與這部 iPhone 的連線已中斷。打開 Poki 以重新開啟螢幕歷史。"
           }
         }
       }
@@ -28024,6 +28104,22 @@
         }
       }
     },
+    "Reading Dropped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取意外中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取意外中斷"
+          }
+        }
+      }
+    },
     "Reading the Model List…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -31464,6 +31560,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose another model. Model %1$lld isn’t available for %2$lld."
+          }
+        }
+      }
+    },
+    "%lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 项"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 項"
           }
         }
       }
@@ -36238,6 +36350,22 @@
         }
       }
     },
+    "Nothing here yet. What Poki and agents do on this iPhone shows up here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里还没有内容。Poki 和智能体在这台 iPhone 上做的事会显示在这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這裡還沒有內容。Poki 和智慧體在這部 iPhone 上做的事會顯示在這裡。"
+          }
+        }
+      }
+    },
     "Nothing is kept yet. Start a read in Testing Options, use another app, then come back." : {
       "localizations" : {
         "zh-Hans" : {
@@ -36474,6 +36602,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分鐘"
+          }
+        }
+      }
+    },
+    "Screen History Stopped Reading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史已停止读取"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史已停止讀取"
           }
         }
       }

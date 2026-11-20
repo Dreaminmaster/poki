@@ -590,10 +590,13 @@ extension HistoryLock.Boundary {
 /// Shows its content only while iPhone History is unlocked.
 struct HistoryGate<Content: View>: View {
     @ObservedObject var lock = HistoryLock.shared
+    @ObservedObject var capture = HistoryCapture.shared
+    /// Open without an unlock while Screen History is off: for the page that turns it on.
+    var whenOff = false
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        if lock.unlocked { content() } else { HistoryLockedPage() }
+        if lock.unlocked || (whenOff && !capture.enabled) { content() } else { HistoryLockedPage() }
     }
 }
 
