@@ -139,7 +139,7 @@ final class ModelSessionMetadataTests: XCTestCase {
 
     private func withRoutingFixture(_ body: (AppModel, SessionStore) async throws -> Void) async throws {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "pokiChat",
-                    CustomProviders.storeKey, CustomProviders.selectedKey, "chat.model.custom", "chat.models.custom"]
+                    CustomProviders.storeKey, CustomProviders.selectedKey, "chat.model.custom", "models.enabled.custom"]
         let original = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let suite = "ModelSessionMetadataTests-" + UUID().uuidString
