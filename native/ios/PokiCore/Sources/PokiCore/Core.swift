@@ -475,14 +475,39 @@ public final class PokiCore: @unchecked Sendable {
             return answer(400, rpcError(nil, -32700, "Parse error"))
         }
         let session = request.headers["mcp-session-id"]
-        if let batch = message.array {
-            var replies: [JSON] = []
-            for item in batch { if let r = await rpc(item, session: session, answerBy: request.answerBy, connector: request.headers[Self.connectorHeader]).reply { replies.append(r) } }
-            return replies.isEmpty ? RelayResponse(id: request.id, status: 202, headers: [:], body: "") : answer(200, .array(replies), session: session)
+        // Capture the original authorization before each history call. A later batch
+        // item may await long enough for an earlier successful result to become private.
+        func isHistory(_ item: JSON) -> Bool {
+            item["method"]?.string == "tools/call" && item["params"]?["name"]?.string == "screen_history"
         }
+        func historyRevision(_ item: JSON) -> UInt64? {
+            guard isHistory(item), let source = config.screenHistory else { return nil }
+            let revision = source.accessRevision()
+            return source.isEnabled() && source.accessRevision() == revision ? revision : nil
+        }
+        func validateDelivery(_ reply: JSON, history: Bool, revision: UInt64?) -> JSON {
+            guard history, reply["result"]?["isError"]?.bool == false else { return reply }
+            if !Task.isCancelled, let source = config.screenHistory, let revision,
+               source.isEnabled(), source.accessRevision() == revision { return reply }
+            return ["jsonrpc": "2.0", "id": reply["id"] ?? .null,
+                    "result": ["content": [["type": "text", "text": .string(Self.screenHistoryRevokedMessage)]],
+                               "isError": true]]
+        }
+        if let batch = message.array {
+            var replies: [(reply: JSON, history: Bool, revision: UInt64?)] = []
+            for item in batch {
+                let revision = historyRevision(item)
+                if let r = await rpc(item, session: session, answerBy: request.answerBy, connector: request.headers[Self.connectorHeader]).reply {
+                    replies.append((r, isHistory(item), revision))
+                }
+            }
+            let safe = replies.map { validateDelivery($0.reply, history: $0.history, revision: $0.revision) }
+            return safe.isEmpty ? RelayResponse(id: request.id, status: 202, headers: [:], body: "") : answer(200, .array(safe), session: session)
+        }
+        let revision = historyRevision(message)
         let (reply, newSession) = await rpc(message, session: session, answerBy: request.answerBy, connector: request.headers[Self.connectorHeader])
         guard let reply else { return RelayResponse(id: request.id, status: 202, headers: [:], body: "") }
-        return answer(200, reply, session: newSession ?? session)
+        return answer(200, validateDelivery(reply, history: isHistory(message), revision: revision), session: newSession ?? session)
     }
 
     func rpcError(_ id: JSON?, _ code: Int, _ message: String) -> JSON {

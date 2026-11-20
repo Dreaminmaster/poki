@@ -76,11 +76,13 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     var sessionStore: SessionStore = .shared
     var shortcutStore: HomeShortcutStore = .shared
-    @State private var showsSidebar = false
+    @State private var sidebarWidth: CGFloat?
+    private var showsSidebar: Bool { sidebarWidth != nil }
     // Both navigation layouts share the composer while the window changes size.
     @State private var draft = UserDefaults.standard.string(forKey: "pokiDraft") ?? ""
 
-    private static let sidebarWidth: CGFloat = 375
+    private static let regularSidebarWidth: CGFloat = 375
+    private static let minimumDuoSidebarWidth: CGFloat = 280
     private static let minimumChatWidth: CGFloat = 375
 
     /// What is pushed over the chat in a narrow window.
@@ -195,12 +197,12 @@ struct RootView: View {
     }
 
     @ViewBuilder private var mainNavigation: some View {
-        if showsSidebar {
+        if let sidebarWidth {
             // Two plain stacks side by side, not a NavigationSplitView: its sidebar is a floating panel
             // on iOS 26, set in from the top edge. The left stack is the iPhone's drawer as it is.
             HStack(spacing: 0) {
                 NavigationStack { sessions }
-                    .frame(width: Self.sidebarWidth)
+                    .frame(width: sidebarWidth)
                 Divider().ignoresSafeArea()
                 NavigationStack {
                     destination(wide, split: true).id(wide)
@@ -227,7 +229,7 @@ struct RootView: View {
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .environment(\.pokiDetailsOpen, detailsOpen)
-            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: showsSidebar ? Self.sidebarWidth + 1 : 0, openModel: { openDetails([DetailsRoute.model]) })
+            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: sidebarWidth.map { $0 + 1 } ?? 0, openModel: { openDetails([DetailsRoute.model]) })
             // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
             // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
             .fullScreenCover(isPresented: Binding(get: { detailsOpen && !showsSidebar }, set: { detailsOpen = $0 })) {
@@ -272,9 +274,13 @@ struct RootView: View {
         .overlay {
             if curtain { LaunchCurtain(done: { curtain = false }).ignoresSafeArea().allowsHitTesting(false) }
         }
-        .onGeometryChange(for: Bool.self) { geometry in
-            geometry.size.width >= Self.sidebarWidth + 1 + Self.minimumChatWidth
-        } action: { showsSidebar = $0 }
+        .onGeometryChange(for: CGFloat?.self) { geometry in
+            let width = geometry.size.width
+            guard width >= Self.regularSidebarWidth + 1 + Self.minimumChatWidth else { return nil }
+            guard PKInProcess.canUseDuoSplitView() else { return Self.regularSidebarWidth }
+            let windowWidth = width + geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing
+            return min(Self.regularSidebarWidth, max(Self.minimumDuoSidebarWidth, windowWidth / 3))
+        } action: { sidebarWidth = $0 }
         .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: $welcomeLink, done: { welcoming = false }) }
         .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",

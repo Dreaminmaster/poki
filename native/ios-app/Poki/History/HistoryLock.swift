@@ -264,7 +264,9 @@ final class HistoryLock: ObservableObject {
         let now = boundary.now()
         var env = readEnvironment()
         let current = Self.reconcile(state, env: env, now: now)
-        apply(current)
+        // Reconciliation may update a cooldown or clear a stale attempt without
+        // changing the credential configuration. Those UI-only changes keep the grant.
+        apply(current, preserveAgentGrant: Self.sameAuthenticationMethods(state, current))
 
         let next: State
         let accepted: Bool
@@ -389,29 +391,41 @@ final class HistoryLock: ObservableObject {
             accepted = true
         }
 
-        // The background event may close an authenticated UI without revoking the
-        // independent timed grant. Reconciliation above still revokes on any auth change.
+        // UI-only events never renew or revoke an existing grant when the same
+        // authentication methods remain configured. Explicit locks and credential
+        // changes above still revoke synchronously, including when the UI was already locked.
         let preserve: Bool
-        if case .enteredBackground = event, case .unlocked(let oldMethods) = current,
-           case .locked(let newMethods, nil, _) = next {
-            preserve = oldMethods == newMethods
-        } else {
+        switch event {
+        case .enteredBackground, .beginBiometrics, .finishBiometrics, .unlockWithPIN,
+             .refresh, .protectedDataAvailable, .readStarting:
+            preserve = Self.sameAuthenticationMethods(current, next)
+        default:
             preserve = false
         }
         apply(next, preserveAgentGrant: preserve)
         if accepted, unlocked {
             switch event {
-            case .finishBiometrics(_, true, let consent), .unlockWithPIN(_, let consent):
-                // Creating a PIN, viewing history and automatic Face ID never authorize an agent.
-                // Only a separately initiated, successful authentication with explicit consent does.
-                publishAgentGrant(consent)
+            case .finishBiometrics(_, true, true), .unlockWithPIN(_, true):
+                // Only explicit consent with successful authentication starts a new grant.
+                publishAgentGrant(true)
             default: break
             }
         }
         return accepted
     }
 
-    /// Revoke at every authorization state change except a normal UI-only background lock.
+    private static func sameAuthenticationMethods(_ lhs: State, _ rhs: State) -> Bool {
+        func methods(_ state: State) -> AuthMethods? {
+            switch state {
+            case .locked(let methods, _, _), .unlocked(let methods): return methods
+            default: return nil
+            }
+        }
+        guard let old = methods(lhs), let new = methods(rhs) else { return false }
+        return old == new
+    }
+
+    /// Revoke on authorization changes, not on ordinary presentation/authentication of the UI.
     private func apply(_ next: State, preserveAgentGrant: Bool = false) {
         guard state != next else { return }
         if !preserveAgentGrant { publishAgentGrant(false) }

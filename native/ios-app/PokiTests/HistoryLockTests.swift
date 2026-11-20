@@ -311,6 +311,43 @@ final class HistoryLockTests: XCTestCase {
         XCTAssertEqual(grants.last, false)
     }
 
+    func testOrdinaryPINViewingPreservesOriginalGrantRevisionAndDeadline() {
+        let phone = Phone()
+        phone.biometrics = .unavailable
+        let clock = GrantTestClock()
+        let lease = HistoryQueryPermissionLease(enabled: true, now: { clock.now })
+        let lock = phone.launch(agentGrantChanged: { lease.setUnlocked($0) })
+        XCTAssertTrue(lock.setPIN("2468"))
+        lock.lock()
+        XCTAssertTrue(lock.unlock(pin: "2468", allowAgentAccess: true))
+        let revision = lease.grant
+        XCTAssertNotNil(revision)
+        clock.advance(.seconds(299))
+        lock.enteredBackground()
+        XCTAssertFalse(lock.unlocked)
+        XCTAssertTrue(lock.unlock(pin: "2468"))
+        XCTAssertEqual(lease.grant, revision)
+        clock.advance(.seconds(1))
+        XCTAssertNil(lease.grant, "Viewing must not extend the original deadline")
+    }
+
+    func testAutomaticFaceIDViewingPreservesOriginalGrantRevisionAndDeadline() async {
+        let phone = Phone()
+        let clock = GrantTestClock()
+        let lease = HistoryQueryPermissionLease(enabled: true, now: { clock.now })
+        let lock = phone.launch(agentGrantChanged: { lease.setUnlocked($0) })
+        await lock.unlockWithBiometrics(allowAgentAccess: true)
+        let revision = lease.grant
+        XCTAssertNotNil(revision)
+        clock.advance(.seconds(299))
+        lock.enteredBackground()
+        await lock.unlockWithBiometrics()
+        XCTAssertTrue(lock.unlocked)
+        XCTAssertEqual(lease.grant, revision)
+        clock.advance(.seconds(1))
+        XCTAssertNil(lease.grant)
+    }
+
     func testTimedGrantExpiresAtDeadlineAndCannotBeRenewedByReads() {
         let clock = GrantTestClock()
         let lease = HistoryQueryPermissionLease(enabled: true, duration: .seconds(300), now: { clock.now })

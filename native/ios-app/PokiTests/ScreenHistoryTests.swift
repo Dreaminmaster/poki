@@ -458,6 +458,8 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(lock.unlocked, "The private UI must lock immediately")
         lock.refresh()
         XCTAssertEqual(HistoryCapture.agentQueryRevision, revision, "Background and foreground refresh must not renew the grant")
+        XCTAssertTrue(lock.unlock(pin: fixturePIN))
+        XCTAssertEqual(HistoryCapture.agentQueryRevision, revision, "Viewing with PIN keeps the original grant")
         let permitted = await app.runTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(permitted.isError, permitted.text)
         XCTAssertTrue(permitted.text.contains(canary))
@@ -494,6 +496,58 @@ final class ScreenHistoryTests: XCTestCase {
         NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
         let stillDenied = await request("still-denied")
         XCTAssertFalse(stillDenied.contains(canary), stillDenied)
+    }
+
+    func testMCPBatchDiscardsBufferedHistoryAtExpiry() async throws {
+        try await assertMCPBatchDiscardsBufferedHistory(regrant: false)
+    }
+
+    func testMCPBatchCannotDeliverBufferedHistoryAfterFreshGrant() async throws {
+        try await assertMCPBatchDiscardsBufferedHistory(regrant: true)
+    }
+
+    private func assertMCPBatchDiscardsBufferedHistory(regrant: Bool) async throws {
+        try unlockHistoryForFixture()
+        let clock = GrantTestClock()
+        let lease = HistoryQueryPermissionLease(enabled: true, now: { clock.now })
+        lease.setUnlocked(true)
+        let canary = "SYNTHETIC_MCP_BATCH_BUFFER_CANARY"
+        HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
+        let delayed = SuspendedScreenHistoryRead()
+        let reads = HistoryFixtureCounter()
+        var source = HistoryStore.agentSource
+        source.isEnabled = { lease.grant != nil }
+        source.accessRevision = { lease.revision }
+        let originalRead = source.entries
+        source.entries = { start, end in
+            let snapshot = await originalRead(start, end)
+            if reads.next() == 2 { return await delayed.hold(snapshot) }
+            return snapshot
+        }
+        let core = PokiCore(config: CoreConfig(screenHistory: source), host: AppCoreHost())
+        let body = #"[{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"screen_history","arguments":{"period":"last_hour"}}},{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"screen_history","arguments":{"period":"last_hour"}}},{"jsonrpc":"2.0","id":13,"method":"ping"}]"#
+        let pending = Task { await core.handle(RelayRequest(id: "batch", method: "POST", headers: [:], body: body)) }
+        guard let snapshot = await delayed.waitForSnapshot() else {
+            await delayed.release()
+            pending.cancel()
+            _ = await pending.value
+            return XCTFail("The second request did not reach the read latch")
+        }
+        XCTAssertTrue(snapshot.contains { $0.text.contains(canary) })
+        clock.advance(.seconds(300))
+        if regrant { lease.setUnlocked(true) }
+        await delayed.release()
+        let reply = await pending.value
+        XCTAssertFalse(reply.body.contains(canary), reply.body)
+        let items = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(reply.body.utf8)) as? [[String: Any]])
+        XCTAssertEqual(items.count, 3)
+        for id in [11, 12] {
+            let item = try XCTUnwrap(items.first { $0["id"] as? Int == id })
+            let result = try XCTUnwrap(item["result"] as? [String: Any])
+            XCTAssertEqual(result["isError"] as? Bool, true)
+        }
+        let ping = try XCTUnwrap(items.first { $0["id"] as? Int == 13 })
+        XCTAssertNotNil(ping["result"], "Non-history batch responses must remain intact")
     }
 
     func testInFlightTimedGrantDiscardsReadAtExpiry() async throws {
