@@ -28,6 +28,14 @@ final class AppLaunchPromptTests: XCTestCase {
         }
     }
 
+    func testAskingAboutThisPhoneDoesNotNameThePhoneApp() {
+        let device = Harness.instructions(for: "What iOS version is this phone running?")
+        XCTAssertFalse(device.contains("com.apple.mobilephone"))
+
+        let app = Harness.instructions(for: "Open the Phone app and show recent calls.")
+        XCTAssertTrue(app.contains("com.apple.mobilephone"))
+    }
+
     func testLaunchFailureRequiresHomeScreenSearchBeforeCallingAnAppMissing() async {
         let prompt = Harness.instructions(for: "打开美团")
         XCTAssertTrue(prompt.contains("swipe down on the Home Screen to search"))
