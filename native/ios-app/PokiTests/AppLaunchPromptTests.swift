@@ -16,10 +16,10 @@ final class AppLaunchPromptTests: XCTestCase {
             ("打开12306查询", "cn.12306.rails12306"),
             ("打开 12306 查询", "cn.12306.rails12306"),
         ] {
-            let prompt = Harness.instructions(for: request)
+            let prompt = Harness.taskInstructions(for: request).text
             XCTAssertTrue(prompt.contains(bundleID), "\(request): missing \(bundleID)")
         }
-        XCTAssertFalse(Harness.instructions(for: "打开美团").contains("com.meituan.itakeaway"))
+        XCTAssertFalse(Harness.taskInstructions(for: "打开美团").text.contains("com.meituan.itakeaway"))
     }
 
     func testNumericAliasDoesNotMatchInsideLongerIdentifiers() async {
@@ -29,15 +29,15 @@ final class AppLaunchPromptTests: XCTestCase {
     }
 
     func testAskingAboutThisPhoneDoesNotNameThePhoneApp() {
-        let device = Harness.instructions(for: "What iOS version is this phone running?")
+        let device = Harness.taskInstructions(for: "What iOS version is this phone running?").text
         XCTAssertFalse(device.contains("com.apple.mobilephone"))
 
-        let app = Harness.instructions(for: "Open the Phone app and show recent calls.")
+        let app = Harness.taskInstructions(for: "Open the Phone app and show recent calls.").text
         XCTAssertTrue(app.contains("com.apple.mobilephone"))
     }
 
     func testLaunchFailureRequiresHomeScreenSearchBeforeCallingAnAppMissing() async {
-        let prompt = Harness.instructions(for: "打开美团")
+        let prompt = Harness.taskInstructions(for: "打开美团").text
         XCTAssertTrue(prompt.contains("swipe down on the Home Screen to search"))
         XCTAssertTrue(prompt.contains("Say an app is not installed only after find_app says so"))
     }
@@ -301,6 +301,6 @@ final class AppLaunchPromptTests: XCTestCase {
 
     func testTheModelIsOfferedFindApp() {
         XCTAssertTrue(Harness.tools.contains { $0.name == "find_app" })
-        XCTAssertTrue(Harness.instructions(for: "打开闲鱼").contains("find_app"))
+        XCTAssertTrue(Harness.taskInstructions(for: "打开闲鱼").text.contains("find_app"))
     }
 }

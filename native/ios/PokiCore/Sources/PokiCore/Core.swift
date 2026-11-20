@@ -598,11 +598,13 @@ public final class PokiCore: @unchecked Sendable {
         public let waitingForOwner: Bool
         public let automationAuthorizationDeclined: Bool
         public let replayedSkills: [String]
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, replayedSkills: [String] = []) {
+        public let offeredMemories: [MemoryNote]
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, replayedSkills: [String] = [], offeredMemories: [MemoryNote] = []) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
             self.replayedSkills = replayedSkills
+            self.offeredMemories = offeredMemories
         }
     }
 
@@ -616,7 +618,8 @@ public final class PokiCore: @unchecked Sendable {
         let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
-                          automationAuthorizationDeclined: output.automationAuthorizationDeclined, replayedSkills: output.replayedSkills)
+                          automationAuthorizationDeclined: output.automationAuthorizationDeclined, replayedSkills: output.replayedSkills,
+                          offeredMemories: output.offeredMemories)
     }
 
     /// The tools as MCP lists them (name, description, inputSchema), as a JSON array, and the

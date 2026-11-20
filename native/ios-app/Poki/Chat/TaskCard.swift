@@ -12,13 +12,13 @@ enum TaskCardState: Equatable {
     case running, needsYou, yourTurn, done, failed, stopped
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false) {
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
         } else if stopped { self = .stopped }
-        else if steps.contains(where: { $0.state == .failed }) { self = .failed }
+        else if saveFailed || steps.contains(where: { $0.state == .failed }) { self = .failed }
         else if steps.allSatisfy({ $0.state == .done }) { self = .done }
         else { self = .stopped }
     }

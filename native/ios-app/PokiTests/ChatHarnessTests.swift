@@ -537,33 +537,93 @@ final class ChatHarnessTests: XCTestCase {
 
     func testRejectedSkillSaveIsVisibleInChatAndDelegatedResult() async throws {
         let name = "Locked workflow \(UUID().uuidString)"
-        let store = SkillStore.shared
-        defer { store.forget(name) }
+        let fixture = SkillStore(url: nil)
         let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
                              steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
                              params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
-                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date(),
-                             locked: true)
-        XCTAssertTrue(store.save(original))
+                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(original))
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let replies = [false, true].flatMap { optional in
+            [
+                FakeCompletions.tool("report_plan", ["steps": ["Check Settings"], "currentStep": 1]),
+                FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+                FakeCompletions.tool("skills", ["action": "save", "name": name, "optional": optional]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Settings is ready."),
+            ]
+        }
+        let chat = chat(on: try FakeCompletions(replies: replies), transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        library.setLocked(item.id, true)
+        defer { library.setLocked(item.id, false); library.forget(item.id) }
+        let listed = await app.runTool("skills", arguments: #"{"action":"list"}"#)
+        XCTAssertTrue(listed.text.split(separator: "\n").contains { $0.contains(name) && $0.hasSuffix("(locked)") }, listed.text)
+        let show = Self.json(["action": "show", "name": name])
+        let before = await app.runTool("skills", arguments: show)
+        XCTAssertFalse(before.isError)
+
+        for optional in [false, true] {
+            let request = optional ? "Check Settings." : "Check Settings and save the procedure over \(name)."
+            let result = await chat.runDelegated(request)
+            let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+            guard case .plan(let steps) = card.kind else { return XCTFail("The task card disappeared") }
+            let state = TaskCardState(steps: steps, live: false, waiting: false, handedOver: false, saveFailed: card.saveFailed == true)
+
+            XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.ok })
+            XCTAssertEqual(steps.map(\.state), [.done])
+            XCTAssertEqual(state, optional ? .done : .failed)
+            let notice = "Couldn’t save the skill “\(name)”."
+            XCTAssertTrue(chat.entries.last.flatMap { if case .poki(let words) = $0.kind { words } else { nil } }?.contains(notice) == true)
+            XCTAssertTrue(result.text.contains(notice), result.text)
+            XCTAssertTrue(result.text.contains(optional ? "result: done: Settings is ready." : "result: not done:"), result.text)
+            XCTAssertEqual(result.success, optional)
+        }
+        let after = await app.runTool("skills", arguments: show)
+        XCTAssertEqual(after.text, before.text)
+    }
+
+    func testTaskCardIncludesMemoryReadFromTheSkillList() async throws {
+        let appID = "com.apple.Preferences"
+        let fixture = SkillStore(url: nil)
+        let text = "Call this test device \(UUID().uuidString)"
+        let old = try XCTUnwrap(fixture.remember(text, by: SkillStore.owner, app: appID))
+        for number in 1...20 {
+            fixture.remember("Settings test preference \(number) \(UUID().uuidString)", by: SkillStore.owner, app: appID)
+        }
         let server = try FakeCompletions(replies: [
-            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
-            FakeCompletions.tool("skills", ["action": "save", "name": name]),
-            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
-            FakeCompletions.text("Settings is ready."),
+            FakeCompletions.tool("report_plan", ["steps": ["Find the device name"], "currentStep": 1]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": text, "used_memory_ids": [old.id, old.id, "unseen-id"]]),
+            FakeCompletions.text(text),
         ])
-        let chat = chat(on: server, transport: transport, automation: automation)
+        let chat = chat(on: server)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.item(old.id))
+        defer { for note in fixture.notes { library.forget(note.id) } }
 
-        let result = await chat.runDelegated("Check Settings and save the procedure over \(name).")
+        let result = await chat.runDelegated("What do I call this test device in Settings?")
 
-        let notice = "Couldn’t save the skill “\(name)”."
-        XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.ok })
-        XCTAssertEqual(store.skill(named: name)?.steps, original.steps)
-        XCTAssertTrue(chat.entries.contains { if case .poki(let words) = $0.kind { return words.contains(notice) }; return false })
-        XCTAssertTrue(result.text.contains(notice), result.text)
-        XCTAssertEqual(result.success, false)
+        let first = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(FakeCompletions.system(first).contains(text))
+        XCTAssertTrue(result.text.contains(text))
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        XCTAssertEqual(card.memoryUse?.notes, [.init(id: old.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))])
     }
 
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task
