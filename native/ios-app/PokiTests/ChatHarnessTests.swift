@@ -59,6 +59,52 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(second.requests.count, 2)
     }
 
+    func testStoppingATaskShowsStoppedInChatAndLiveActivity() async throws {
+        let plan = FakeCompletions.tool("report_plan", ["steps": ["Review the sample checklist"], "currentStep": 1])
+        let server = try FakeCompletions(replies: [plan, FakeCompletions.text("The checklist is ready.")], holdAfter: 1)
+        let chat = chat(on: server, automation: FakeAutomation(), kind: .poki)
+        let app = try XCTUnwrap(app)
+        let savedSetup = SetupState.load()
+        let defaults = UserDefaults.standard
+        let savedWantsOn = defaults.object(forKey: "wantsOn")
+        let savedRelayEnabled = defaults.object(forKey: "relayEnabled")
+        let existingActivities = Set(Activity<PokiActivityAttributes>.activities.map(\.id))
+        defer {
+            server.release()
+            if chat.running { chat.stop() }
+            app.stopSession()
+            savedSetup.save()
+            defaults.set(savedWantsOn, forKey: "wantsOn")
+            defaults.set(savedRelayEnabled, forKey: "relayEnabled")
+        }
+        app.loopback.simulate(.working(ms: 9))
+        app.setup.loopback = .proxy
+        app.setRelayEnabled(false)
+        app.startSession()
+        XCTAssertTrue(app.sessionOn)
+        chat.newConversation()
+        chat.send("Review the sample checklist")
+
+        let runningBy = ContinuousClock.now + .seconds(8)
+        while server.requests.count < 2, ContinuousClock.now < runningBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(server.requests.count, 2, "Stop must interrupt the task after it publishes the plan")
+        XCTAssertTrue(chat.running)
+        let activity = try XCTUnwrap(Activity<PokiActivityAttributes>.activities.first { !existingActivities.contains($0.id) })
+        chat.stop()
+
+        let stoppedBy = ContinuousClock.now + .seconds(4)
+        while activity.content.state.face.content != "Stopped", ContinuousClock.now < stoppedBy {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let entry = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = entry.kind else { return XCTFail("The task card disappeared") }
+        XCTAssertFalse(steps.contains { $0.state == .done }, "Stopping must leave the unfinished step unchecked")
+        XCTAssertTrue(chat.entries.contains { if case .poki("Stopped.") = $0.kind { true } else { false } })
+        XCTAssertEqual(activity.content.state.face.content, "Stopped")
+    }
+
     func testSplitViewTaskWaitsForOriginalPairAndResumesFromFreshReads() async throws {
         let transport = RotatingWorkspace()
         let server = try FakeCompletions(replies: [
@@ -180,12 +226,10 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(server.requests.count, 2, "A cancelled read must never return to the model")
         XCTAssertTrue(transport.restoredSides.isEmpty, "Stop must cancel the recovery polls")
         XCTAssertEqual(transport.taps, 0)
-        while Activity<PokiActivityAttributes>.activities.contains(where: { $0.id == activity.id }),
-              ContinuousClock.now < stoppedBy {
+        while activity.content.state.phase != .stopped, ContinuousClock.now < stoppedBy {
             try await Task.sleep(for: .milliseconds(50))
         }
-        XCTAssertFalse(Activity<PokiActivityAttributes>.activities.contains { $0.id == activity.id },
-                       "Stop must end the Live Activity started by this session")
+        XCTAssertEqual(activity.content.state.phase, .stopped, "Stop must replace the active Split View task with its outcome")
     }
 
     func testSplitViewPreparationStopsWhenActivationReportsAuthorizationCancellation() async throws {

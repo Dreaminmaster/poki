@@ -1316,7 +1316,7 @@ final class AppModel {
 
     /// The owner's Stop from outside Poki: Stop or End on the Live Activity, or Poki Anytime run again.
     /// The talk, the chat's task, a waiting approval and the agent's steps all stop at once, and the
-    /// Live Activity shows Poki standing by. End with nothing under way only ends the talk: the automation
+    /// Live Activity shows Stopped. End with nothing under way only ends the talk: the automation
     /// then closes as after a task (`closeAfterTalk`), so on iOS 18–26 the next talk needs no passcode.
     /// While Poki is on, its Live Activity stays (as when a talk ends, `TalkActivity`): an outside agent
     /// can start again from the background, where iOS starts no Live Activity, and its steps and Stop
@@ -1336,9 +1336,10 @@ final class AppModel {
         }
         log.add("session", "\(reason): the talk and the task stop")
         if let chat, chat.running { chat.stop() }
+        else { activity.stopRun() }
         for approval in approvals { resolve(approval, approved: false) }
         pauseRunner(reason: reason, fromOutside: true)
-        if !sessionOn { activity.end() }
+        if !sessionOn, activity.state.phase != .stopped { activity.end() }
     }
 
     /// `fromOutside`: `stopFromOutside` has stopped the chat's task, checked the Stop is no echo of an
@@ -1356,6 +1357,7 @@ final class AppModel {
             return
         }
         guard approvals.isEmpty || splitChat != nil || fromOutside else { return }
+        if byOwner { activity.stopRun() }
         ownerPaused = byOwner
         if runnerPaused {
             if automationPath == .inProcess { closeInProcess("stopped by the owner") }
@@ -1441,6 +1443,7 @@ final class AppModel {
         activityText = "Idle"
         activity.update { state in
             state.runnerPaused = true
+            if state.phase == .stopped { return }
             // A task that just ended keeps its finished Live Activity, and one waiting on the owner
             // keeps what it asks.
             if keepingDone, state.phase == .done || state.handoff != nil || state.approval != nil { return }
@@ -1947,8 +1950,8 @@ final class AppModel {
         guard activitySplitViewSession == localSession else { return }
         activitySplitViewSession = nil
         lastAgentActivity = Date()
+        if authorizationDeclined || cancelled() { activity.stopRun() }
         activity.setChatOwnsCompletion(false)
-        if authorizationDeclined || cancelled() { activity.endStoppedRun() }
     }
 
     func reserveSplitViewWorkspace(session: String) async -> Bool {
@@ -1967,9 +1970,11 @@ final class AppModel {
 
     // MARK: The chat's task
 
-    /// The chat no longer says when its run ends (stopped, or ended without a word): the Live
+    /// The chat ended without reporting a result: the Live
     /// Activity's quiet wait finishes the run, as it does an outside agent's.
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
+
+    func chatTaskStopped() { activity.stopRun() }
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
@@ -1986,7 +1991,7 @@ final class AppModel {
         if sessionOn {
             activity.update { state in
                 state.plan = nil
-                guard state.approval == nil, state.handoff == nil, state.phase == .idle || state.phase == .done else { return }
+                guard state.approval == nil, state.handoff == nil, state.phase == .idle || state.phase.isRunOutcome else { return }
                 state.phase = .working
                 state.headline = "Thinking"
                 state.since = Date()

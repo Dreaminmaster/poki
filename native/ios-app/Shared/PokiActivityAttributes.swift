@@ -14,10 +14,12 @@ struct PokiActivityAttributes: ActivityAttributes {
         /// until PokiCore has the answer. `handoff`: the agent cannot act on this screen (a passcode, a
         /// verification, a payment) and the person has to; the agent keeps polling meanwhile. See `Handoff`.
         enum Phase: String, Codable, Hashable {
-            case idle, working, approval, deciding, pairing, setup, problem, done, handoff
+            case idle, working, approval, deciding, pairing, setup, problem, done, stopped, handoff
 
             /// The phases a person has to answer: a step from the agent never replaces them.
             var holdsApproval: Bool { self == .approval || self == .deciding }
+
+            var isRunOutcome: Bool { self == .done || self == .stopped }
         }
         /// Live voice session state when Poki's voice mode is active.
         enum Voice: String, Codable, Hashable {

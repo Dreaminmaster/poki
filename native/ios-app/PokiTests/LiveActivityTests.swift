@@ -24,11 +24,17 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(activity.state.phase, .done)
     }
 
-    func testStoppingARunReturnsItsActivityStateToIdle() {
+    func testStoppedRunShowsItsOutcomeBeforeReturningToIdle() async throws {
         let activity = ActivityController()
+        activity.foldAfter = .milliseconds(20)
         activity.update { $0.phase = .working; $0.headline = "Read Notes" }
         XCTAssertEqual(activity.state.phase, .working)
-        activity.endStoppedRun()
+        activity.stopRun()
+        XCTAssertEqual(activity.state.face.content, "Stopped")
+        let foldedBy = ContinuousClock.now + .seconds(1)
+        while activity.state.phase != .idle, ContinuousClock.now < foldedBy {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertEqual(activity.state.phase, .idle)
     }
 
