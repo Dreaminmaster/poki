@@ -32,9 +32,6 @@ final class PokiEntry {
 /// Opens Poki's chat and starts voice there. A task Poki is already doing is shown, not interrupted.
 /// A tool for Siri AI in the app only (POKI_SIRI_TOOLS is never set for the widget extension, which
 /// carries this intent for its control): see SendTaskToPokiIntent.
-#if POKI_SIRI_TOOLS
-@AppIntent(.tool)
-#endif
 struct TalkToPokiIntent: AppIntent {
     static let title = LocalizedStringResource("Talk to Poki", table: "Entry")
     static let description = IntentDescription(LocalizedStringResource("Opens Poki and starts talking. If Poki is doing a task, it shows that task and leaves it running.", table: "Entry"))
@@ -50,3 +47,11 @@ struct TalkToPokiIntent: AppIntent {
         return .result()
     }
 }
+
+#if POKI_SIRI_TOOLS
+// A tool for Siri AI. This is what @AppIntent(.tool) adds, written out: the macro needs iOS 27.3,
+// and Poki runs from iOS 18, so only the conformance is limited to 27.3 and the intent stays
+// available (with its App Shortcut and control) on earlier versions.
+@available(iOS 27.3, *)
+extension TalkToPokiIntent: ToolIntent {}
+#endif

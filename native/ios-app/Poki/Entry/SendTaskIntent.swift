@@ -9,9 +9,6 @@ import AppIntents
 /// are written for someone who has never seen Poki. A tool makes Poki's App Shortcuts unavailable
 /// to Siri (they stay in Spotlight, Shortcuts and the Action Button), so every action Siri used to
 /// reach through them is a tool too: Talk to Poki and Poki Anytime.
-#if POKI_SIRI_TOOLS
-@AppIntent(.tool)
-#endif
 struct SendTaskToPokiIntent: ForegroundContinuableIntent {
     private struct SplitViewStartError: LocalizedError {
         let words: LocalizedStringResource
@@ -100,3 +97,11 @@ struct PokiShortcuts: AppShortcutsProvider {
 
     static let shortcutTileColor: ShortcutTileColor = .blue
 }
+
+#if POKI_SIRI_TOOLS
+// A tool for Siri AI. This is what @AppIntent(.tool) adds, written out: the macro needs iOS 27.3,
+// and Poki runs from iOS 18, so only the conformance is limited to 27.3 and the intent stays
+// available (with its App Shortcut and control) on earlier versions.
+@available(iOS 27.3, *)
+extension SendTaskToPokiIntent: ToolIntent {}
+#endif
