@@ -131,7 +131,7 @@ struct CellularTrickSection: View {
             } else {
                 Button("Start Cellular Connection Test") { test.start(model: model) }
             }
-            if !test.verdict.isEmpty { Text(test.verdict).font(.callout.weight(.semibold)) }
+            if !test.verdict.isEmpty { Text(test.verdict).font(.allo(.callout, .semibold)) }
             ForEach(Array(test.lines.suffix(12).enumerated()), id: \.offset) { _, line in
                 Text(line).font(.caption.monospaced()).textSelection(.enabled)
             }
