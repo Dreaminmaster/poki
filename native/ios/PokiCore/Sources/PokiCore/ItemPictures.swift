@@ -68,13 +68,15 @@ enum ItemPictureFit {
     /// (a picture half under a bar or off the screen reads as one: a model gives the part it sees).
     static func frame(for box: Rect, images: [Rect], screen: ScreenSize) -> Rect? {
         guard box.width >= 32, box.height >= 32 else { return nil }
-        let match = images.map { ($0, overlap($0, box)) }.filter { $0.1 >= 0.6 }.max { $0.1 < $1.1 }?.0
-        if let match {
-            let inside = match.x >= -1 && match.y >= -1 && match.maxX <= screen.width + 1 && match.maxY <= screen.height + 1
-            return inside ? match : nil
+        let bounds = Rect(x: 0, y: 0, width: screen.width, height: screen.height)
+        func isInside(_ frame: Rect) -> Bool {
+            bounds.contains((frame.x, frame.y)) && bounds.contains((frame.maxX, frame.maxY))
         }
-        let shown = box.intersection(Rect(x: 0, y: 0, width: screen.width, height: screen.height))
-        guard shown.area >= box.area * 0.95 else { return nil }
+        let match = images.map { image in
+            (image, max(overlap(image, box), overlap(image.intersection(bounds), box)))
+        }.filter { $0.1 >= 0.6 }.max { $0.1 < $1.1 }?.0
+        if let match { return isInside(match) ? match : nil }
+        guard isInside(box) else { return nil }
         let ratio = box.width / box.height
         return ratio >= 0.6 && ratio <= 1.7 ? box : nil
     }

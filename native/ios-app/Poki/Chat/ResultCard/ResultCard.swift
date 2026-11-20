@@ -70,7 +70,12 @@ struct ResultCard: Codable, Equatable {
     /// The selected item: the one you chose, or Poki's suggestion.
     func selected(_ chosen: String?) -> Item {
         var item = items.first { $0.id == chosen } ?? items.first { $0.id == recommended } ?? items[0]
-        if let roomHotelName { item.fields["hotel"] = .string(roomHotelName) }
+        if let roomHotelName {
+            item.fields["hotel"] = .string(roomHotelName)
+        } else if kind == RailwayTransfers.kind, let legs = ResultCardLeg.legs(of: item), let ends = RailwayTransfers.Ends(item, legs) {
+            item.fields["from"] = .string(ends.from)
+            item.fields["depart"] = .string(ends.depart)
+        }
         return item
     }
 

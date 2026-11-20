@@ -3,17 +3,14 @@ import PokiCore
 import XCTest
 @testable import Poki
 
-/// The result card looks past 12306's, from the real screens read on the test phone (Nov 18, 2026):
-/// each kind decodes and draws with the fields its app shows, says which field is missing otherwise,
-/// is offered to the model in finish_task, and keeps the item pictures cut from the screen.
 final class ResultCardLookTests: XCTestCase {
-    private func make(_ kind: String, _ app: String, _ items: [[String: Any]]) throws -> ResultCard {
+    private func make(_ kind: String, _ app: String, _ items: [[String: Any]], decoder: JSONDecoder = JSONDecoder()) throws -> ResultCard {
         let json: [String: Any] = ["app": app, "kind": kind, "items": items, "recommended": items[0]["id"]!,
                                    "primary": ["label": "查看", "say": "打开 {title}"]]
-        return try JSONDecoder().decode(ResultCard.self, from: JSONSerialization.data(withJSONObject: json))
+        return try decoder.decode(ResultCard.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
-    func testEachNewKindDrawsWithItsAppsFieldsAndNamesAMissingOne() throws {
+    func testAppSpecificCardsAcceptRequiredFieldsAndNameAMissingField() throws {
         let cases: [(String, String, [String: Any], String)] = [
             (Ctrip.flights, Ctrip.app, ["depart": "17:30", "arrive": "13:00", "arrive_day": "+2", "price": "¥19,852"], "price"),
             (Ctrip.hotels, Ctrip.app, ["price": "¥1799", "rating": "4.4", "stars": "4钻"], "price"),
@@ -62,9 +59,27 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertNotNil(try make(RailwayTransfers.kind, "cn.12306.rails12306", [journey("G84", g84), journey("G26", unnamed)]).problem)
     }
 
-    func testAnyAppGetsTheListLookWithOnlyTitles() throws {
-        let card = try make(AnyAppList.kind, "com.sankuai.meituan", [["id": "a", "title": "A", "value": "¥58"], ["id": "b", "title": "B"]])
+    func testGenericCardAcceptsRowsContainingOnlyIDsAndTitles() throws {
+        let card = try make(AnyAppList.kind, "com.sankuai.meituan", [["id": "a", "title": "A"], ["id": "b", "title": "B"]])
         XCTAssertNil(card.problem)
+    }
+
+    func testTransferPrimaryActionUsesTheSelectedJourneysDeparture() throws {
+        var card = try make(RailwayTransfers.kind, "cn.12306.rails12306", [
+            ["id": "a", "title": "G84 → G7", "date": "11.19", "legs": [
+                ["number": "G84", "from": "上海虹桥", "depart": "19:05", "to": "常州北"],
+                ["number": "G7", "from": "常州北", "to": "南京南", "arrive": "20:12"],
+            ]],
+            ["id": "b", "title": "G26 → G8", "date": "11.19", "from": "上海站", "legs": [
+                ["number": "G26", "from": "上海", "depart": "17:00", "to": "苏州北"],
+                ["number": "G8", "from": "苏州北", "to": "南京南", "arrive": "18:07"],
+            ]],
+        ])
+        card.primary.say = "在 12306 打开 {date} {title}（{from} {depart} 开）"
+
+        XCTAssertNil(card.problem)
+        XCTAssertEqual(card.selected(nil).fill(card.primary.say), "在 12306 打开 11.19 G84 → G7（上海虹桥 19:05 开）")
+        XCTAssertEqual(card.selected("b").fill(card.primary.say), "在 12306 打开 11.19 G26 → G8（上海站 17:00 开）")
     }
 
     func testRoomActionsKeepTheHotelAcrossSelections() throws {
@@ -79,23 +94,43 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertEqual(card.selected("king").fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
     }
 
-    func testFinishTaskOffersEveryLookAndTheItemsPictureBox() throws {
+    func testFinishTaskAdvertisesCardKindsAndPictureSourceFields() throws {
         let finish = try XCTUnwrap(Harness.tools.first { $0.name == "finish_task" })
-        let schema = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: finish.schema), encoding: .utf8))
-        for kind in ResultCardLooks.all.keys { XCTAssertTrue(schema.contains("\"\(kind)\""), kind) }
-        XCTAssertTrue(schema.contains("\"image\""))
+        let properties = try XCTUnwrap(finish.schema["properties"] as? [String: Any])
+        let card = try XCTUnwrap(properties["card"] as? [String: Any])
+        let cardFields = try XCTUnwrap(card["properties"] as? [String: Any])
+        let kind = try XCTUnwrap(cardFields["kind"] as? [String: Any])
+        let kinds = try XCTUnwrap(kind["enum"] as? [String])
+        XCTAssertEqual(Set(kinds), ["12306.trains", "12306.transfers", "ctrip.flights", "ctrip.hotels", "ctrip.rooms",
+                                    "ctrip.fares", "taobao.products", "dianping.places", "ubereats.items", "list"])
+        let items = try XCTUnwrap(cardFields["items"] as? [String: Any])
+        let item = try XCTUnwrap(items["items"] as? [String: Any])
+        let itemFields = try XCTUnwrap(item["properties"] as? [String: Any])
+        let box = try XCTUnwrap(itemFields["image"] as? [String: Any])
+        XCTAssertEqual(box["type"] as? String, "array")
+        XCTAssertEqual((box["items"] as? [String: String])?["type"], "number")
+        XCTAssertEqual(box["minItems"] as? Int, 4)
+        XCTAssertEqual(box["maxItems"] as? Int, 4)
+        XCTAssertEqual((itemFields["image_screenshot"] as? [String: Any])?["type"] as? String, "string")
     }
 
-    func testAnItemsImageBoxIsReadAndOnlyWhenItIsFourPositiveNumbers() throws {
+    func testImageBoxRequiresFourFiniteNumbersWithPositiveDimensions() throws {
         let items: [[String: Any]] = [
-            ["id": "a", "title": "A", "price": "¥27.8", "image": [9, 198, 140, 140]],
+            ["id": "a", "title": "A", "price": "¥27.8", "image": [-9.5, 198, 140, 140]],
             ["id": "b", "title": "B", "price": "¥83.9", "image": [9, 362, 0, 140]],
-            ["id": "c", "title": "C", "price": "¥99", "image": "9,520,140,140"],
+            ["id": "c", "title": "C", "price": "¥99", "image": [9, 520, 140, -1]],
+            ["id": "d", "title": "D", "price": "¥99", "image": [9, 520, 140]],
+            ["id": "e", "title": "E", "price": "¥99", "image": [9, 520, 140, 140, 1]],
+            ["id": "f", "title": "F", "price": "¥99", "image": [9, 520, 140, "140"]],
+            ["id": "g", "title": "G", "price": "¥99", "image": "9,520,140,140"],
+            ["id": "h", "title": "H", "price": "¥99", "image": ["NaN", 520, 140, 140]],
+            ["id": "i", "title": "I", "price": "¥99", "image": [9, 520, "Infinity", 140]],
         ]
-        let card = try make(Taobao.kind, Taobao.app, items)
-        XCTAssertEqual(card.items[0].box("image"), Rect(x: 9, y: 198, width: 140, height: 140))
-        XCTAssertNil(card.items[1].box("image"))
-        XCTAssertNil(card.items[2].box("image"))
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
+        let card = try make(Taobao.kind, Taobao.app, items, decoder: decoder)
+        XCTAssertEqual(card.items[0].box("image"), Rect(x: -9.5, y: 198, width: 140, height: 140))
+        for item in card.items.dropFirst() { XCTAssertNil(item.box("image"), item.id) }
         // The box is the model's pointer to the screen, not a fact to read back with the conversation.
         XCTAssertFalse(card.context(chosen: nil).contains("198"))
     }

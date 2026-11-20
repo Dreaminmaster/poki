@@ -54,11 +54,15 @@ final class ItemPictureTests: XCTestCase {
         XCTAssertEqual(ItemPictureFit.frame(for: box, images: [Rect(x: 8, y: 360, width: 142, height: 142), photo], screen: screen), photo)
     }
 
-    func testAPictureTheScreensEdgeCutsIsLeftOut() {
-        // Uber Eats' third "Order again" tile runs off the right edge: the model boxed its visible half.
+    func testABoxFollowingAnImageOffScreenIsLeftOut() {
         let tile = Rect(x: 328, y: 193, width: 148, height: 149)
-        XCTAssertNil(ItemPictureFit.frame(for: Rect(x: 328, y: 193, width: 74, height: 149), images: [tile], screen: screen))
         XCTAssertNil(ItemPictureFit.frame(for: Rect(x: 330, y: 193, width: 140, height: 149), images: [tile], screen: screen))
+    }
+
+    func testABoxAroundOnlyTheVisiblePartOfAnImageIsLeftOut() {
+        let tile = Rect(x: 345, y: 193, width: 100, height: 80)
+        let visible = Rect(x: 345, y: 193, width: 57, height: 80)
+        XCTAssertNil(ItemPictureFit.frame(for: visible, images: [tile], screen: screen))
     }
 
     func testWithoutAnImageElementABoxIsUsedWhenItIsAWholePicture() {
