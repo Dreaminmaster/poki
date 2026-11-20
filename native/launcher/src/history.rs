@@ -79,6 +79,18 @@ fn hurrying() -> bool {
     now_ms() < HURRY_UNTIL.load(Ordering::SeqCst)
 }
 
+/// The longest wait between reads of a screen that shows nothing new (the same text, or no app),
+/// and after reads that failed. Each such round doubles the wait from the run's interval. A deep
+/// snapshot makes the app in front walk its whole accessibility tree, so reading an unchanged
+/// screen every few seconds slowed the owner's iPhone down (2026-11-19).
+const IDLE_MAX: Duration = Duration::from_secs(60);
+const FAILING_MAX: Duration = Duration::from_secs(30);
+
+/// The wait after `slow` rounds in a row that brought nothing new.
+fn paced(interval: Duration, slow: u32, max: Duration) -> Duration {
+    interval.saturating_mul(1u32 << slow.min(5)).min(max.max(interval))
+}
+
 /// How long a round waits before the next: short while there is no tunnel and one may come.
 fn wait_for(no_tunnel: bool, eager: bool, interval: Duration) -> Duration {
     if no_tunnel && hurrying() {
@@ -306,6 +318,11 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
     let mut ended = "finished";
     // Reads in a row whose hit tests failed outright.
     let mut unanswered = 0u32;
+    // Rounds in a row that brought nothing new, and the cap their wait grows to.
+    let mut slow = 0u32;
+    let mut slow_max: Duration;
+    // What the first point showed at the last read: while it shows the same, a long wait goes on.
+    let mut first_hit: Option<Option<u64>> = None;
     loop {
         if RUN.load(Ordering::SeqCst) != me {
             ended = "stopped";
@@ -341,6 +358,7 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         let mut line = json!({"n": stats.reads + stats.failures + 1, "at_s": at.as_secs()});
         let subscribed = direct.is_some();
+        let mut trace = ax::direct::Trace::default();
         let result = async {
             if device.is_none() {
                 device = Some(target.open().await?);
@@ -351,7 +369,6 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
             // the service's own dump can name the wrong app.
             if let Some(points) = &points {
                 // One subscription serves every read of the run; a read that fails ends it.
-                let mut trace = ax::direct::Trace::default();
                 if direct.is_none() {
                     trace.stage = "subscribe";
                     direct = Some(ax::direct::Direct::connect(&mut open.adapter, &open.rsd).await.map_err(|error| Failure::new(format!("no tree at subscribe: {error}")).code("read"))?);
@@ -363,6 +380,8 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         .await;
         let took = milliseconds(asked.elapsed());
+        let pid_before = first_hit.flatten();
+        first_hit = trace.hits.first().map(|hit| hit["pid"].as_u64());
         match result {
             Ok(tree) => {
                 unanswered = 0;
@@ -383,6 +402,10 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                     line["host"] = host;
                 }
                 line["changed"] = changed.into();
+                // A new app is read again soon (it is still drawing), a new screen in the same app
+                // a little later, and a screen that stays the same less and less often.
+                slow_max = IDLE_MAX;
+                slow = if !changed { slow + 1 } else if trace.pid != pid_before { 0 } else { 1 };
                 // The capture loop asks for the text itself, and gets it only for a screen that changed.
                 if include_text && changed {
                     line["text"] = summary["text"].clone();
@@ -420,6 +443,15 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
                         device = None;
                     }
                 }
+                // No app on the screen (locked, dark) is an idle screen; any other failure backs off
+                // to a shorter cap, so a connection that comes back is found again soon.
+                if failure.detail.contains("no point of the screen") && !failure.detail.contains(ax::direct::HITS_FAILED) {
+                    slow_max = IDLE_MAX;
+                } else {
+                    slow_max = FAILING_MAX;
+                    first_hit = None;
+                }
+                slow += 1;
                 stats.failures += 1;
                 stats.last_error = Some(failure.detail.clone());
                 line["ok"] = false.into();
@@ -430,8 +462,29 @@ async fn run(request: &Value, emit: impl Fn(Value)) -> Result<Value, Failure> {
         }
         emit(line);
         let none = device.is_none();
+        let wait = if none { wait_for(true, since_start() < EAGER, interval) } else { paced(interval, slow, slow_max) };
+        let mut probed = Instant::now();
         // Waits in short pieces, so Stop is answered at once and a hurry cuts a long wait short.
-        while asked.elapsed() < wait_for(none, since_start() < EAGER, interval) && RUN.load(Ordering::SeqCst) == me {
+        // A long wait looks at the first point once an interval (one hit test, no snapshot), and
+        // ends when another app, or an app where there was none, shows there.
+        while asked.elapsed() < wait && RUN.load(Ordering::SeqCst) == me {
+            if device.is_none() && hurrying() {
+                break;
+            }
+            if let (Some(seen), Some(open), Some(&(x, y))) = (first_hit, direct.as_mut(), points.as_ref().and_then(|p| p.first())) {
+                if probed.elapsed() >= interval && asked.elapsed() + interval < wait {
+                    probed = Instant::now();
+                    match tokio::time::timeout(Duration::from_secs(4), open.hit(x, y)).await {
+                        Ok(Ok(now)) if now != seen && now.is_some() => {
+                            slow = 0;
+                            break;
+                        }
+                        Ok(Ok(_)) => {}
+                        // A probe that fails says nothing; the next read will tell.
+                        _ => break,
+                    }
+                }
+            }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
@@ -794,6 +847,16 @@ mod tests {
     fn the_title_is_the_first_heading() {
         assert_eq!(title_of(&tree()), "Shopping list");
         assert_eq!(title_of(&json!({"elements": [{"label": "Plain"}]})), Value::Null);
+    }
+
+    #[test]
+    fn a_screen_that_shows_nothing_new_is_read_less_and_less_often() {
+        let five = Duration::from_secs(5);
+        let waits: Vec<u64> = (0..8).map(|slow| paced(five, slow, IDLE_MAX).as_secs()).collect();
+        assert_eq!(waits, [5, 10, 20, 40, 60, 60, 60, 60]);
+        assert_eq!(paced(five, 9, FAILING_MAX).as_secs(), 30);
+        // A run asked to read more slowly than the cap keeps its own interval.
+        assert_eq!(paced(Duration::from_secs(90), 3, IDLE_MAX).as_secs(), 90);
     }
 
     #[test]
