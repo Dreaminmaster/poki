@@ -79,13 +79,14 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var closed = false
     private(set) var sent: [[String: Any]] = []
     private(set) var liveAnswer: String?
+    private(set) var remoteVolume = 1.0
     @MainActor var remoteSpeech = false
     func connect(secret: String, microphone: Bool, direct: Bool) async throws {}
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
-    func setRemoteVolume(_ value: Double) {}
+    func setRemoteVolume(_ value: Double) { remoteVolume = value }
     func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
     func close() { closed = true }
@@ -205,7 +206,7 @@ final class VoiceModelTests: XCTestCase {
         h.voice.stop()
     }
 
-    func testLiveShortStopBlocksFollowOnToolsBeforeModelCancellation() async {
+    func testLiveShortStopQuietsPlaybackWithoutCancellingPhoneWork() async {
         for stop in [["停"], ["停止"], ["别动"], [" stop. "], [" 停", ",别", "做了"], ["停，别做了"]] {
             var executed: [String] = []
             let h = Harness(phoneTool: { name, _ in
@@ -217,20 +218,44 @@ final class VoiceModelTests: XCTestCase {
                         ["type": "session.delegation.created", "offset_ms": 400, "delegation": ["id": "d1"]])
             h.link.call("started", "open_app")
             await h.time.settle()
+            h.link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.link.remoteVolume, 1)
             for (index, text) in stop.enumerated() {
                 let start = 500 + index * 200
                 h.link.play(["type": "session.input_transcript.delta", "delta": text, "start_ms": start, "end_ms": start + 200])
             }
-            h.link.call("old-step", "do")
-            h.link.play(["type": "session.delegation.created", "delegation": ["id": "late"]])
-            h.link.call("late-step", "do", delegation: "late")
+            XCTAssertEqual(h.link.remoteVolume, 0, "\(stop.joined()) must immediately mute the current reply.")
+            h.link.play(["type": "session.input_transcript.delta", "delta": "好的。", "start_ms": 1200, "end_ms": 1400])
+            XCTAssertEqual(h.link.remoteVolume, 0, "An acknowledgment must not bring the stopped reply back.")
+            h.link.call("next-step", "do")
             await h.time.settle()
-            XCTAssertEqual(executed, ["open_app"], "No further work may start after \(stop.joined()).")
-            h.link.play(["type": "session.input_transcript.delta", "delta": "打开设置", "start_ms": 1400, "end_ms": 1900],
-                        ["type": "session.delegation.created", "delegation": ["id": "fresh"]])
-            h.link.call("new-step", "open_app", delegation: "fresh")
+            XCTAssertEqual(executed, ["open_app", "do"], "Playback control alone must leave the delegated work intact.")
+            h.voice.stop()
+        }
+    }
+
+    func testLiveBackchannelsKeepPlaybackAndDoNotStartOrCancelPhoneWork() async {
+        for acknowledgment in ["嗯。", "好的。"] {
+            var executed: [String] = []
+            let h = Harness(phoneTool: { name, _ in
+                executed.append(name)
+                return ("mock result", false, nil)
+            })
+            await h.liveTalk()
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("already-started", "look")
             await h.time.settle()
-            XCTAssertEqual(executed, ["open_app", "open_app"])
+            h.link.remoteSpeech = true
+            await h.time.advance(0.2)
+            h.link.play(["type": "session.input_transcript.delta", "delta": acknowledgment, "start_ms": 500, "end_ms": 750],
+                        ["type": "session.delegation.created", "delegation": ["id": "ack"]])
+            h.link.call("unrequested", "open_app", delegation: "ack")
+            h.link.call("unrequested-cancel", "cancel_current_task", delegation: "ack")
+            h.link.call("continue", "do")
+            await h.time.settle()
+            XCTAssertEqual(h.link.remoteVolume, 1)
+            XCTAssertEqual(executed, ["look", "do"], "An acknowledgment must leave the existing task intact.")
             h.voice.stop()
         }
     }
@@ -255,7 +280,9 @@ final class VoiceModelTests: XCTestCase {
         h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
         h.link.call("batch", "do")
         await fulfillment(of: [firstStarted], timeout: 2)
-        h.link.play(["type": "session.input_transcript.delta", "delta": "停", "start_ms": 100, "end_ms": 300])
+        h.link.play(["type": "session.input_transcript.delta", "delta": "请先别把这条消息发出去", "start_ms": 100, "end_ms": 300],
+                    ["type": "session.delegation.created", "delegation": ["id": "cancel"]])
+        h.link.call("cancel-batch", "cancel_current_task", delegation: "cancel")
         releaseFirst.finish()
         await fulfillment(of: [batchFinished], timeout: 2)
         let operations = await transport.operations
@@ -276,14 +303,21 @@ final class VoiceModelTests: XCTestCase {
                 return ("mock result", false, nil)
             })
             await h.liveTalk()
+            var muteAfterStopCaption: Double?
             for event in events {
                 h.link.play(event)
+                if event["type"] as? String == "session.input_transcript.delta",
+                   (event["delta"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == "停" {
+                    muteAfterStopCaption = h.link.remoteVolume
+                }
                 await h.time.settle()
             }
             if scenario == "literal" {
                 XCTAssertTrue(executed.contains { $0.name == "do" && $0.arguments.contains("停") })
+                XCTAssertEqual(muteAfterStopCaption, 1)
             } else {
-                XCTAssertEqual(executed.map(\.name), ["open_app"], "The recorded \(scenario) must stop all subsequent steps.")
+                XCTAssertEqual(muteAfterStopCaption, 0, "Playback must stop on the recorded \(scenario).")
+                XCTAssertTrue(executed.contains { $0.name == "do" }, "Phone work can continue until the semantic cancellation is received.")
             }
             h.voice.stop()
         }
