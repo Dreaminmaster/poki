@@ -139,6 +139,7 @@ FOUNDATION_EXPORT CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSAr
 - (nullable NSString *)app:(NSString *)bundle action:(NSString *)action;
 - (BOOL)screenLocked;
 /// Uses an already authorized session. The passcode stays in the app; the daemon receives touch events.
+- (BOOL)prepareForUnlock;
 - (PKUnlockResult)unlockPhoneWithPasscode:(NSString *)passcode timeout:(double)timeout allowed:(BOOL (^)(void))allowed
     NS_SWIFT_NAME(unlockPhone(withPasscode:timeout:allowed:));
 /// The current session's generation: it goes up when the daemon session is replaced.

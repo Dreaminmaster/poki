@@ -65,6 +65,7 @@ struct PokiStatusCard: View {
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
     @State private var open: Row?
+    @State private var showsAutoUnlockPasscode = false
     private enum Row { case model, approvals }
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -86,6 +87,13 @@ struct PokiStatusCard: View {
                 rule
                 approvalRow
                 if open == .approvals { approvalChoices }
+                if model.supportsAutoUnlock || model.autoUnlock.enabled {
+                    rule
+                    AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                      showsPasscode: $showsAutoUnlockPasscode)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
             }
             .padding(.vertical, 6)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
@@ -99,6 +107,9 @@ struct PokiStatusCard: View {
         .shadow(color: .black.opacity(dark ? 0.4 : 0.16), radius: 24, y: 16)
         .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
+        }
         .animation(.snappy(duration: 0.28), value: open)
         // A container, so each row keeps its own identifier.
         .accessibilityElement(children: .contain)

@@ -61,7 +61,7 @@ final class AutoUnlock {
         UserDefaults.standard.removeObject(forKey: Self.retryKey)
     }
 
-    func unlock(timeout: TimeInterval) async -> Bool {
+    func unlock(using automation: InProcessAutomation, opensSession: Bool, timeout: TimeInterval) async -> Bool {
         guard enabled, !needsPasscode, attempt == nil, !Task.isCancelled, timeout > 0,
               let data = try? Keychain.read(Self.account),
               let passcode = String(data: data, encoding: .utf8), Self.accepts(passcode) else { return false }
@@ -73,9 +73,19 @@ final class AutoUnlock {
         let result: PKUnlockResult = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    continuation.resume(returning: PKInProcess.shared().unlockPhone(withPasscode: passcode, timeout: timeout) {
-                        allowed.withLock { $0 }
-                    })
+                    let start = ProcessInfo.processInfo.systemUptime
+                    let result: PKUnlockResult = {
+                        guard allowed.withLock({ $0 }) else { return .unavailable }
+                        defer { if opensSession { _ = automation.close() } }
+                        if opensSession {
+                            let ready = InProcessWDA.openThroughGate { ["ok": automation.prepareForUnlock()] }
+                            guard ready["ok"] as? Bool == true else { return .unavailable }
+                        }
+                        let remaining = timeout - (ProcessInfo.processInfo.systemUptime - start)
+                        guard remaining > 0 else { return .unavailable }
+                        return automation.submitUnlockPasscode(passcode, timeout: remaining) { allowed.withLock { $0 } }
+                    }()
+                    continuation.resume(returning: result)
                 }
             }
         } onCancel: {

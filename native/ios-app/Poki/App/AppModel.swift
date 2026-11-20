@@ -221,9 +221,7 @@ final class AppModel {
 
     let host = AppCoreHost()
     let autoUnlock = AutoUnlock()
-    var supportsAutoUnlock: Bool {
-        automationPath == .inProcess && UIDevice.current.userInterfaceIdiom == .phone && !PKInProcess.canUseDuoSplitView()
-    }
+    var supportsAutoUnlock: Bool { UIDevice.current.userInterfaceIdiom == .phone }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
@@ -389,10 +387,10 @@ final class AppModel {
         host.onConsent { [weak self] client, callback, connector in
             await self?.askToConnect(client: client, callback: callback, connector: connector) ?? false
         }
-        if transport == nil, supportsAutoUnlock, !Self.onSimulator {
+        if transport == nil, supportsAutoUnlock {
             host.onAutoUnlock { [weak self] timeout in
                 guard let self, await self.canAutoUnlock else { return false }
-                return await self.autoUnlock.unlock(timeout: timeout)
+                return await self.unlockForLocalTask(timeout: timeout)
             }
         }
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
@@ -497,7 +495,12 @@ final class AppModel {
     }
 
     private var canAutoUnlock: Bool {
-        sessionOn && !ownerPaused && inProcessSession == .open && ChatModel.delegatedBusy == nil
+        sessionOn && !ownerPaused && ChatModel.delegatedBusy == nil &&
+            (automationPath == .runner || inProcessSession == .open)
+    }
+
+    private func unlockForLocalTask(timeout: Double) async -> Bool {
+        await autoUnlock.unlock(using: automation, opensSession: automationPath == .runner, timeout: timeout)
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).

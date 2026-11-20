@@ -6,6 +6,31 @@ import XCTest
 
 @MainActor
 final class AutoUnlockTests: XCTestCase {
+    func testRunnerOffersAutomaticUnlockAndLeavesThePhoneUnlocked() async throws {
+        let native = UnlockSession()
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: native)
+        try XCTSkipUnless(model.automationPath == .runner, "Launch the test host with -automationPath runner")
+        try XCTSkipUnless(!model.autoUnlock.enabled, "This simulator already has an automatic unlock configuration")
+        defer {
+            try? model.autoUnlock.disable()
+            model.stopSession()
+            UserDefaults.standard.removeObject(forKey: "relayAddress")
+            UserDefaults.standard.removeObject(forKey: "relayEnabled")
+            UserDefaults.standard.removeObject(forKey: "wantsOn")
+        }
+        model.setup.loopback = .proxy
+        model.loopback.simulate(.working(ms: 9))
+        _ = model.setRelay("https://relay.invalid")
+        model.startSession()
+        XCTAssertTrue(model.sessionOn)
+        XCTAssertTrue(model.supportsAutoUnlock, "The automatic unlock switch must be available on this iPhone")
+        try model.autoUnlock.save("046215")
+
+        let unlocked = await model.host.unlockForLocalTask(timeout: 8)
+        XCTAssertTrue(unlocked, "A local task running through Poki Runner can unlock the phone")
+        XCTAssertFalse(native.isOpen, "The unlock-only session must be stopped afterwards")
+    }
+
     func testFailedPasscodeDeletionKeepsAutomaticUnlockOnUntilRetrySucceeds() throws {
         let process = dlopen(nil, RTLD_LAZY)
         let symbol = dlsym(process, "poki_test_fail_next_auto_unlock_delete")
@@ -75,6 +100,17 @@ final class AutoUnlockTests: XCTestCase {
         try setting.disable()
         XCTAssertFalse(AutoUnlock().enabled)
         XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
+    }
+}
+
+private final class UnlockSession: InProcessAutomation, @unchecked Sendable {
+    private let session = FakeAutomation()
+    var isOpen: Bool { session.isOpen }
+    func prepare() -> [String: Any] { session.prepare() }
+    func close() -> [String: Any] { session.close() }
+    func pauseAutomation() -> [String: Any] { session.pauseAutomation() }
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult {
+        isOpen && passcode == "046215" && allowed() ? .unlocked : .unavailable
     }
 }
 #endif

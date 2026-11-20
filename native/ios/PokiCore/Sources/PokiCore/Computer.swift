@@ -557,7 +557,12 @@ final class Computer: @unchecked Sendable {
         case .blocked(let result): return result
         }
         if let selectedPane, selectedPane.session != session, (hasLocalWorkspace || !beginsTask() || pane == nil) { return workspaceInUse() }
-        if let pane {
+        async let locked = isLocked()
+        var unlocked = false
+        if localTask != nil, await locked {
+            unlocked = await unlockForLocalTask(until: until)
+        }
+        if let pane, !(await locked) || unlocked {
             if let failure = await selectPane(pane, session: session, until: until) { return failure }
             workspaceOwner.value = local && pane != "auto" ? session : nil
         }
@@ -567,11 +572,6 @@ final class Computer: @unchecked Sendable {
                               jpeg: nil, isError: true, splitViewNeedsRead: true)
         }
         let begins = beginsTask() || (pane != nil && origin?.session != session)
-        async let locked = isLocked()
-        var unlocked = false
-        if localTask != nil, pane == nil, await locked {
-            unlocked = await unlockForLocalTask(until: until)
-        }
         if begins { beginRecording(); typedText = nil }
         var result = restartNote(await readAndReply(until: until, full: full))
         if let selectedPane {
@@ -834,9 +834,15 @@ final class Computer: @unchecked Sendable {
     }
 
     private func unlockForLocalTask(until: Double) async -> Bool {
-        guard selectedPane == nil, approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
+        guard approvals.pending == nil, !handoffWaiting, !Task.isCancelled,
               await host.unlockForLocalTask(timeout: min(8, until - now() - config.readTimeout)) else { return false }
-        clearPaneRead()
+        if selectedPane != nil {
+            invalidateWorkspaceRead()
+            selectedPane = nil
+            paneOffset = nil
+        } else {
+            clearPaneRead()
+        }
         authorizationRead = nil
         lastForeground = nil
         return true
@@ -1079,10 +1085,6 @@ final class Computer: @unchecked Sendable {
         // While a step is handed to the owner, nothing is sent (they may be typing a password):
         // the model sees the screen, waits, or takes the step back.
         let harmless = actions.allSatisfy { $0["wait"] != nil || $0["wait_until"] != nil || $0["handoff"] != nil }
-        if selectedPane != nil, !harmless, !confirmedPaneRead {
-            return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
-                              jpeg: nil, isError: true, splitViewNeedsRead: true)
-        }
         if let action = actions.first, let drag = action["drag"], drag["to_pane"] != nil,
            let from = try? point(drag["from"]), let attempted = workspaceDrag(from: from),
            workspaceDrags.contains(where: { $0.matches(attempted) }) {
@@ -1101,6 +1103,10 @@ final class Computer: @unchecked Sendable {
                                   jpeg: nil, isError: true)
             }
             return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
+        }
+        if selectedPane != nil, !harmless, !confirmedPaneRead {
+            return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
+                              jpeg: nil, isError: true, splitViewNeedsRead: true)
         }
 
         // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.

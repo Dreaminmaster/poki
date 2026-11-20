@@ -24,14 +24,26 @@ protocol InProcessAutomation: AnyObject, Sendable {
     func pauseAutomation() -> [String: Any]
     /// Seconds iOS has been asked to allow automation in the open under way; 0 while no open is there.
     func authorizationWaitSeconds() -> Double
+    func prepareForUnlock() -> Bool
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult
 }
 
 extension InProcessAutomation {
     func authorizationWaitSeconds() -> Double { 0 }
+    func prepareForUnlock() -> Bool { prepare()["ok"] as? Bool == true }
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult { .unavailable }
 }
 
 /// Thread-safe: its session state is behind locks, and every call blocks on its own.
-extension PKInProcess: InProcessAutomation, @unchecked Sendable {}
+extension PKInProcess: InProcessAutomation, @unchecked Sendable {
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult {
+        #if targetEnvironment(simulator)
+        return .unavailable
+        #else
+        return unlockPhone(withPasscode: passcode, timeout: timeout, allowed: allowed)
+        #endif
+    }
+}
 
 /// Poki's own automation session, once the launcher has mounted the disk image (ESP-152).
 enum InProcessSession: Equatable {
