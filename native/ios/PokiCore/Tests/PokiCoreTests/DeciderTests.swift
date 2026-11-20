@@ -705,3 +705,44 @@ final class DeciderTests: XCTestCase {
         XCTAssertNotNil(DeciderSettings(provider: .custom, address: "https://clef.example.com/v1/systemone").url)
     }
 }
+
+/// Chained presses whose target changed under them: with the owner's decision model on, a press
+/// after a screen change goes on when the model says it is still the step meant, and is held when it
+/// says no or is unsure. Without one, a point after a screen change is held as before.
+final class ChainedStepTests: XCTestCase {
+    private func run(decider: ScriptedDecider?) async -> (taps: Int, text: String) {
+        let wda = FakeWDA()
+        wda.source([("Button", "Next")])
+        wda.set("POST /wda/tap") { _ in
+            wda.source([("Button", "Continue")])
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) { config in if let decider { config.decider = { decider } } }
+        _ = await core.call("look", [:])
+        let result = await core.call("do", ["actions": [["tap": 1], ["tap": [100, 120]]]])
+        return (wda.bodies("POST /wda/tap").count, result.text)
+    }
+
+    func testADecisionModelKeepsAChainedStepItSaysStillFits() async {
+        let yes = ScriptedDecider { _, _ in ["meant": DecisionAnswer(choice: nil, confidence: 0.9)] }
+        let kept = await run(decider: yes)
+        XCTAssertEqual(kept.taps, 2, kept.text)
+        XCTAssertEqual(yes.asked.value.count, 1)
+        XCTAssertTrue(yes.asked.value.first?.state["there_now"]?.string?.contains("Continue") == true)
+        XCTAssertTrue(yes.asked.value.first?.state.serialized().contains("Next") == true)
+    }
+
+    func testAChainedStepIsHeldWhenTheModelSaysNoOrIsUnsure() async {
+        for p in [0.1, 0.5] {
+            let model = ScriptedDecider { _, _ in ["meant": DecisionAnswer(choice: nil, confidence: p)] }
+            let held = await run(decider: model)
+            XCTAssertEqual(held.taps, 1, held.text)
+            XCTAssertTrue(held.text.contains("it was aimed at Button \"Next\""), held.text)
+        }
+    }
+
+    func testWithoutADecisionModelAPointAfterAScreenChangeIsHeld() async {
+        let held = await run(decider: nil)
+        XCTAssertEqual(held.taps, 1, held.text)
+    }
+}

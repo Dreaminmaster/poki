@@ -1646,7 +1646,48 @@ final class Computer: @unchecked Sendable {
             func name(_ e: Element?) -> String { e.map { "\($0.type) \"\($0.text.prefix(40))\"" } ?? "nothing" }
             return "it was aimed at \(name(meant)), and \(name(now)) is there now"
         }
+        if let moved = movedUnder(kind, action, fresh: elements.all), await !stillMeant(action, moved: moved, fresh: listable(elements.all, screen), front: elements.foreground, until: until) {
+            return "the action before it changed the screen where it touches: it was aimed at \(moved.meant), and \(moved.now) is there now. Choose the remaining actions from the fresh screen below and send them in a new do"
+        }
         return nil
+    }
+
+    /// A tap by number or point aimed at what the latest read had there, and what lies there on the
+    /// screen it lands on, when the two differ (by type and words); nil when the same element is
+    /// there, so the model's choice stands. Steps named by their text find their own target.
+    func movedUnder(_ kind: ActionKind, _ action: JSON, fresh: [Element]) -> (meant: String, now: String)? {
+        let specs: [JSON?] = switch kind {
+        case .tap, .longPress, .pinch: [action[kind.rawValue]]
+        case .type: [action["ref"]]
+        case .drag where action["drag"]?["to_pane"] == nil:
+            if let a = action["drag"]?.array, a.count == 4 { [[a[0], a[1]]] } else { [action["drag"]?["from"]] }
+        default: []
+        }
+        func name(_ e: Element?) -> String { e.map { "\($0.type) \"\($0.text.prefix(40))\"" } ?? "nothing" }
+        for case let spec? in specs {
+            guard let p = try? point(spec) else { continue }
+            let meant = target(spec), now = element(at: p, in: fresh)
+            if meant?.key != now?.key { return (name(meant), name(now)) }
+        }
+        return nil
+    }
+
+    static let stillMeantQuestion = "An agent driving an iPhone sent several steps at once. It chose `step` on the screen it read before; an earlier step in the same batch changed the screen. On `screen` as it is now, `there_now` lies where the step will touch. Is touching it still the step the agent meant (the same control, moved or renamed, or the obvious next control for that step)? Answer no when unsure."
+
+    /// With the owner's decision model on, whether a press whose target changed under it still fits:
+    /// asked once, with the screen as text and no picture, and trusted only at the policy's confidence.
+    /// Without a decision model, or with no clear yes, the press is held for the agent to choose again.
+    func stillMeant(_ action: JSON, moved: (meant: String, now: String), fresh: [Element], front: Foreground, until: Double) async -> Bool {
+        guard let decider = config.decider() else { return false }
+        let policy = config.deciderPolicy
+        let lines = fresh.filter { !$0.fromPicture && !$0.isSecure && !$0.text.isEmpty && !["Key", "Keyboard", "StatusBar", "ScrollBar"].contains($0.type) }
+            .prefix(policy.maxCandidates + 20).map { JSON.string("\($0.type) \"\($0.text.prefix(70))\"") }
+        let state: JSON = ["app": .string(front.describe), "step": .string("\(labels([action])) (aimed at \(moved.meant))"),
+                           "there_now": .string(moved.now), "screen": .array(Array(lines))]
+        guard let answers = try? await decider.decide(state: state, questions: [DecisionQuestion(id: "meant", instructions: Self.stillMeantQuestion, kind: .yesNo)],
+                                                      timeout: max(0.3, min(decider.patience ?? policy.timeout, until - now() - 0.3))),
+              let p = answers["meant"]?.confidence else { return false }
+        return p >= policy.minConfidence
     }
 
     /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
