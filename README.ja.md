@@ -60,7 +60,7 @@ Poki は、あなたの代わりに iPhone 全体を操作するオープンソ�
    Install Poki on my iPhone from https://github.com/JosssphZhou/poki
    ```
 
-   あるいは [GitHub Releases](https://github.com/JosssphZhou/poki/releases) から macOS 版（`.dmg`）または Windows 版（`.exe`）の Poki Setup をダウンロードして案内どおりに進めます。
+   あるいは [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) から macOS 版（`.dmg`）または Windows 版（`.exe`）の Poki Setup をダウンロードして案内どおりに進めます。
 2. **接続設定とモデルアカウントを追加する。** iOS の指示に従って「信頼」、デベロッパモード、オートメーションモードを有効にし、`10.7.0.1` を iPhone にルーティングする外部接続（無料の LocalDevVPN など）を設定します。続けて ChatGPT Plus/Pro でサインインするか、Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、OpenCode Go の API キー、または OpenAI 互換サーバーを登録します。
 3. **最初のタスクを実行する。** Poki を開いて以下を送信します。
 

@@ -60,7 +60,7 @@ Poki es un agente de código abierto para iPhone que opera todo tu iPhone por ti
    Install Poki on my iPhone from https://github.com/JosssphZhou/poki
    ```
 
-   También puedes descargar [Poki Setup](https://github.com/JosssphZhou/poki/releases) para macOS (`.dmg`) o Windows (`.exe`) y seguir la ventana.
+   También puedes descargar [Poki Setup](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) para macOS (`.dmg`) o Windows (`.exe`) y seguir la ventana.
 2. **Conecta y añade tu cuenta de modelo.** Acepta **Confiar**, activa el Modo desarrollador y el Modo de automatización cuando iOS lo pida, configura una conexión externa que enrute `10.7.0.1` al propio iPhone (como LocalDevVPN, gratuita) e inicia sesión con ChatGPT Plus o Pro, o pega una clave API (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go o un servidor compatible con OpenAI).
 3. **Ejecuta tu primera tarea.** Abre Poki y envía:
 

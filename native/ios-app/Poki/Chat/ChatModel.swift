@@ -36,6 +36,7 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var app: String?
     var ended: Date?
     var total: Int?
+    var stopped: Bool?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
@@ -428,7 +429,7 @@ final class ChatModel {
             && (ChatContinuation.isRequest(text) || entries.last?.continuationChoices != nil)
         if kind == .poki, !store.isInitialReady || (isContinuation && !store.isLoaded) {
             running = true
-            awaitingModel = true
+            awaitingModel = !app.hasVisibleDuoCompanion
             stopAsked = false
             runToken += 1
             let token = runToken
@@ -463,7 +464,7 @@ final class ChatModel {
         guard let prepared = prepareSend(text, again: again, thumbnails: thumbnails, documents: documents,
                                          inSplitView: inSplitView, chooseWorkspace: chooseWorkspace) else { return }
         running = true
-        awaitingModel = true
+        awaitingModel = !app.hasVisibleDuoCompanion
         stopAsked = false
         runToken += 1
         let token = runToken
@@ -571,12 +572,14 @@ final class ChatModel {
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
         switch prepared.engine {
         case .direct(let client, let instructions):
+            await began("direct", prepared.provider, prepared.model, task: prepared.text)
+            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
+            awaitingModel = true
             client.say(prepared.message)
-            began("direct", prepared.provider, prepared.model, task: prepared.text)
             await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
             // The direct engine does not say when its task ends: the quiet wait finishes the run.
-            if !current { app.finishTask() } else { app.chatReleasesRun() }
+            if !current || app.drivesDuoCompanion { app.finishTask() } else { app.chatReleasesRun() }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
             if current { running = false; awaitingModel = false }
         case .pi(let piModel):
@@ -605,7 +608,9 @@ final class ChatModel {
                 }
             }
             let splitSession = splitViewSession
-            began("pi", prepared.provider, prepared.model, task: prepared.text, splitViewSession: splitSession)
+            await began("pi", prepared.provider, prepared.model, task: prepared.text, splitViewSession: splitSession)
+            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
+            awaitingModel = true
             if let splitSession, pair.count == 2 {
                 phoneStepUnderWay = true
                 let preparation = await openSplitViewPair(pair, session: splitSession, token: token)
@@ -764,7 +769,8 @@ final class ChatModel {
     private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
         let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
         if let loop, loop.provider == provider, loop.model.id == model.id,
-           loop.model.baseUrl == model.baseUrl, !changedWorkspace { return loop }
+           loop.model.baseUrl == model.baseUrl, loop.model.provider == model.provider, loop.model.api == model.api,
+           loop.model.reasoning == model.reasoning, loop.hasCurrentCustomBackups, !changedWorkspace { return loop }
         // A different workspace starts without old screen evidence.
         let next = PiLoop(provider: provider, model: model,
                           tools: Harness.toolSpecs(inSplitView: inSplitView, includeScreenHistory: true),
@@ -780,12 +786,12 @@ final class ChatModel {
     /// instead; that code goes once the phone acceptance with the owner's OpenAI key has passed on pi.
     private static var direct: Bool { UserDefaults.standard.string(forKey: "chatEngine") == "direct" }
 
-    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) {
+    private func began(_ engine: String, _ provider: ModelProvider, _ model: String, task: String, splitViewSession: String? = nil) async {
         taskStart = Date(); toolCalls = 0; taskResult = nil; taskText = task
         taskCalls.removeAll()
         // Split View needs both apps before the first model tool runs.
         if splitViewSession != nil { app.prepareForTask() }
-        app.chatTaskBegan(splitViewSession: splitViewSession)
+        await app.chatTaskBegan(splitViewSession: splitViewSession)
         // find_app and the task's icons see the phone's current apps.
         InstalledApps.shared.refreshSoon()
         AppLog.shared.add("chat", "task started: \(engine), \(provider.rawValue)/\(model)")
@@ -852,7 +858,8 @@ final class ChatModel {
     static var delegatedBusy: String?
 
     private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
-        finishPlan()
+        let stopped = outcome == .stopped || outcome == .authorizationDeclined
+        finishPlan(stopped: stopped)
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
         // there (Advanced › When a Task Ends).
@@ -872,7 +879,8 @@ final class ChatModel {
             reply = words
             add(.note(.problem(words)))
         }
-        if outcome == .stopped || outcome == .authorizationDeclined {
+        if stopped {
+            app.chatTaskStopped()
             if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined) }
         } else {
             // A finished run on the Live Activity says what it came to: finish_task's summary when the
@@ -905,7 +913,8 @@ final class ChatModel {
         PokiBrowser.shared.taskStopped()
         // A step waiting for an approval would hold the task until the approval ran out.
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
-        finishPlan()
+        finishPlan(stopped: true)
+        app.chatTaskStopped()
         runToken += 1
         running = false
         awaitingModel = false
@@ -1324,14 +1333,18 @@ final class ChatModel {
         entries[i].kind = .browser(BrowserVisit(host: browser.host, title: browser.title))
     }
 
-    /// The task ended: a step still marked current was the last one done.
-    private func finishPlan() {
+    private func finishPlan(stopped: Bool = false) {
         keepBrowserVisit()
-        updatePlan { steps in for i in steps.indices where steps[i].state == .current { steps[i].state = .done } }
+        if !stopped {
+            updatePlan { steps in
+                for i in steps.indices where steps[i].state == .current { steps[i].state = .done }
+            }
+        }
         guard let id = planID, let i = entries.firstIndex(where: { $0.id == id }), entries[i].ended == nil else { return }
         entries[i].ended = Date()
         entries[i].app = taskApp
         entries[i].total = modelPlan?.count
+        if stopped { entries[i].stopped = true }
     }
 
     /// The approval the chat is showing as asked, until its answer comes.
@@ -1520,7 +1533,7 @@ final class ChatModel {
         demoAsk = nil
         awaitingModel = false
         guard running else { return }
-        finishPlan()
+        finishPlan(stopped: true)
         running = false
         entries.append(ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Stopped.")))))
     }

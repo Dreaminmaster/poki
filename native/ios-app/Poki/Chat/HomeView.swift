@@ -150,8 +150,7 @@ extension View {
 /// under it on the same animation (`HomeMotion.flight`), and a new conversation brings both back;
 /// with Reduce Motion it is just there. While the message field takes the home page up, the picture
 /// moves with the greeting on the page's own animation. It is one view all the way, and the bear in it
-/// is drawn at one size, so nothing is made again on the way. A tap says hi and opens Poki's
-/// card. In the chat VoiceOver reads the top bar's Poki instead, which is the same button.
+/// is drawn at one size, so nothing is made again on the way. A tap opens the wardrobe.
 struct PokiFlight: View {
     var sizes = HomeSizes()
     var status: PokiStatus
@@ -160,6 +159,7 @@ struct PokiFlight: View {
     var places: [PicturePlace: CGRect]
     var pokes: Int
     var tap: () -> Void
+    var statusCard: (() -> Void)? = nil
     /// The bottom of the picture over the greeting, in global points, for Poki's card to open under it.
     var landed: (CGFloat) -> Void = { _ in }
     /// How far the picture rises from over the greeting to the top bar, for the greeting to rise with it.
@@ -173,9 +173,11 @@ struct PokiFlight: View {
                 PokiPicture(mood: status.mood, side: side, pokes: pokes).contentShape(.circle)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-            .accessibilityIdentifier("home.poki")
-            .accessibilityHidden(!home)
+            .contextMenu {
+                if let statusCard { Button("Status", systemImage: "info.circle", action: statusCard) }
+            }
+            .accessibilityLabel(Text("Outfits"))
+            .accessibilityIdentifier(home ? "home.poki" : "chat.header.outfits")
             .onGeometryChange(for: CGFloat?.self) { home ? $0.frame(in: .global).maxY : nil } action: {
                 if let bottom = $0 { landed(bottom) }
             }
@@ -246,7 +248,7 @@ struct ChatTopBar: View {
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
     var openThreads: (() -> Void)?
     var newConversation: () -> Void
-    /// A tap on Poki: the bear says hi while its card opens.
+    /// A tap on Poki's name opens the status card.
     var openDetails: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Taps on New Conversation on the home page, for a light tap in the hand.

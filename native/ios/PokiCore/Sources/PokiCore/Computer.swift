@@ -902,6 +902,12 @@ final class Computer: @unchecked Sendable {
         return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false, waitingForOwner: true))
     }
 
+    func bindCompanionTarget() async -> Bool {
+        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .read),
+              !Task.isCancelled else { return false }
+        return (try? await runner.call("POST", "/poki/companion-target", timeout: 4, countsAsMiss: false))?.bool == true
+    }
+
     private func readRequiredAfterAuthorization() -> ToolResult {
         ToolResult(text: "Automation is ready. Nothing was sent. Call look to read the current screen before choosing the next action. Coordinates need a current screenshot; element numbers need current references.",
                    jpeg: nil, isError: true)

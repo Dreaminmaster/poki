@@ -58,7 +58,7 @@ Poki 是开源的 iPhone agent，能替你操作整台 iPhone。Poki 应用直�
    从 https://github.com/JosssphZhou/poki 把 Poki 安装到我的 iPhone 上
    ```
 
-   也可以从 [GitHub Releases](https://github.com/JosssphZhou/poki/releases) 下载 macOS 版（`.dmg`）或 Windows 版（`.exe`）Poki Setup，按窗口提示操作。
+   也可以从 [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) 下载 macOS 版（`.dmg`）或 Windows 版（`.exe`）Poki Setup，按窗口提示操作。
 2. **完成连接并配置模型账户。** 按 iOS 提示点「信任」、开启开发者模式和自动化模式，配置将 `10.7.0.1` 路由回本机的外部代理通道（如免费的 LocalDevVPN），再用 ChatGPT Plus 或 Pro 登录，或填入 Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、OpenCode Go 的 API 密钥，或接入 OpenAI 兼容服务。
 3. **试跑第一个任务。** 打开 Poki 并发送：
 

@@ -152,27 +152,43 @@ struct PokiStatusCard: View {
     private var modelChoices: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(providers) { provider in
-                Text(verbatim: provider.name).font(.footnote).foregroundStyle(soft)
-                    .padding(.horizontal, 36).padding(.top, 8).padding(.bottom, 2)
-                ForEach(ModelCatalog.available(provider)) { choice in
-                    let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
-                    Button {
-                        ModelKeys.selectedProvider = provider
-                        ModelKeys.selectedModel = choice.id
-                        ModelKeys.saved += 1
-                        modelVersion += 1
-                        open = nil
-                    } label: {
-                        tickRow(choice.name, ticked: chosen, inset: 36)
+                if provider == .custom {
+                    // Each custom service under its own name, its models by their ids.
+                    ForEach(CustomProviders.all) { custom in
+                        let choices = ModelCatalog.available(.custom).filter { CustomProviders.parse($0.id)?.provider == custom.id }
+                        if !choices.isEmpty {
+                            choiceGroup(custom.displayName, provider: .custom, choices: choices.map {
+                                ChatModelChoice(id: $0.id, name: CustomProviders.parse($0.id)?.model ?? $0.name)
+                            })
+                        }
                     }
-                    .buttonStyle(CardRowStyle())
-                    .accessibilityAddTraits(chosen ? .isSelected : [])
+                } else {
+                    choiceGroup(provider.name, provider: provider, choices: ModelCatalog.available(provider))
                 }
             }
         }
         .padding(.bottom, 4)
         .id(modelVersion)
         .transition(.opacity)
+    }
+
+    @ViewBuilder private func choiceGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
+        Text(verbatim: title).font(.footnote).foregroundStyle(soft)
+            .padding(.horizontal, 36).padding(.top, 8).padding(.bottom, 2)
+        ForEach(choices) { choice in
+            let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
+            Button {
+                ModelKeys.selectedProvider = provider
+                ModelKeys.selectedModel = choice.id
+                ModelKeys.saved += 1
+                modelVersion += 1
+                open = nil
+            } label: {
+                tickRow(choice.name, ticked: chosen, inset: 36)
+            }
+            .buttonStyle(CardRowStyle())
+            .accessibilityAddTraits(chosen ? .isSelected : [])
+        }
     }
 
     // MARK: Approvals

@@ -87,7 +87,7 @@
 "Device not connected" = "设备未连接";
 "Device" = "设备";
 "Devices" = "设备";
-"Diagnostics" = "诊断";
+"Diagnostics" = "连接检查";
 "Dismiss" = "关闭提示";
 "Done" = "完成";
 "Download New Builds" = "下载新构建";

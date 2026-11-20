@@ -181,7 +181,7 @@ final class ActivityController {
         self.activity = nil
         // A finished run or a problem stays on the Lock Screen with its final content for a while (HIG:
         // end at once, keep the outcome readable); anything else goes at once.
-        let final: ActivityContent<PokiState>? = state.phase == .done || state.phase == .problem
+        let final: ActivityContent<PokiState>? = state.phase.isRunOutcome || state.phase == .problem
             ? ActivityContent(state: state, staleDate: nil, relevanceScore: 0) : nil
         let policy = dismissalPolicy ?? (final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60)))
         state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
@@ -281,11 +281,11 @@ final class ActivityController {
                 setEvent(.started, "Started")
             }
         }
-        if state.phase == .done || state.phase == .idle && state.runnerPaused || state.phase == .pairing || state.phase == .setup {
+        if state.phase.isRunOutcome || state.phase == .idle && state.runnerPaused || state.phase == .pairing || state.phase == .setup {
             runAnnounced = false
         }
         if runPhases.contains(old.phase), !runPhases.contains(state.phase) { logRun("left for \(state.phase.rawValue)") }
-        if state.phase != .done { foldTimer?.cancel() }
+        if !state.phase.isRunOutcome { foldTimer?.cancel() }
         // Into another app mid-run.
         if runPhases.contains(state.phase), let app = state.app, let before = old.app, app != before {
             setEvent(.app, app)
@@ -306,7 +306,7 @@ final class ActivityController {
             alert = critical(approval.question, "")
             remindHalfway(approval)
         }
-        if state.approval == nil, let was = old.approval {
+        if state.approval == nil, let was = old.approval, state.phase != .stopped {
             state.decision = nil
             let approved = state.headline == "Continuing"
             let expired = !approved && was.expires <= now.addingTimeInterval(0.5)
@@ -382,14 +382,24 @@ final class ActivityController {
         if quietEnds { armFinish() } else { finishTimer?.cancel() }
     }
 
-    func endStoppedRun() {
+    func stopRun() {
+        guard chatOwnsCompletion || Self.runPhases.contains(state.phase) else { return }
+        chatOwnsCompletion = false
+        inStep = false
+        planFinished = true
+        approvalReminder?.cancel()
+        eventTimer?.cancel()
         update { state in
-            state.phase = .idle
-            state.headline = "Waiting for agent"
-            state.plan = nil
+            state.phase = .stopped
+            state.headline = "Stopped"
+            state.approval = nil
+            state.decision = nil
+            state.handoff = nil
+            state.event = nil
+            state.previous = nil
             state.since = nil
         }
-        end(dismissalPolicy: .immediate)
+        armFold()
     }
 
     /// The chat's task ended: the run is finished now, not after the quiet wait. `alert` false when
@@ -456,7 +466,7 @@ final class ActivityController {
         foldTimer?.cancel()
         foldTimer = Task { [weak self, foldAfter] in
             try? await Task.sleep(for: foldAfter)
-            guard !Task.isCancelled, let self, self.state.phase == .done else { return }
+            guard !Task.isCancelled, let self, self.state.phase.isRunOutcome else { return }
             self.update { state in
                 state.phase = .idle
                 state.headline = "Waiting for agent"

@@ -663,6 +663,13 @@ public final class PokiCore: @unchecked Sendable {
         return await computer.clearWorkspacePaneForSetup(session: session)
     }
 
+    public func bindCompanionTarget() async -> Bool {
+        guard runner.transport.supportsPaneSelection, await gate.enter(waiting: config.busyWait) else { return false }
+        defer { gate.leave() }
+        guard !computer.hasLocalWorkspace else { return false }
+        return await computer.bindCompanionTarget()
+    }
+
     public func workspaceLauncherStep(session: String, request: JSON) async throws -> JSON {
         guard runner.transport.supportsPaneSelection, await gate.enter(waiting: config.busyWait) else { throw CancellationError() }
         defer { gate.leave() }

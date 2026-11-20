@@ -5,6 +5,8 @@ import SwiftUI
 struct PokiApp: App {
     @State private var model: AppModel
     @State private var chat: ChatModel
+    @State private var inDuoSplitView = false
+    @Environment(\.scenePhase) private var scenePhase
 
     @discardableResult
     static func scheduleStartupWork(routines: RoutineStore = .shared) -> Task<String?, Never> {
@@ -47,6 +49,7 @@ struct PokiApp: App {
         // The three-dimensional bear loads while the app starts, to be there when Poki's picture first shows.
         BearModel.shared.load()
         let model = AppModel()
+        HistoryCapture.shared.monitor(model: model)
         _model = State(initialValue: model)
         let chat = ChatModel(app: model)
         _chat = State(initialValue: chat)
@@ -56,6 +59,7 @@ struct PokiApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model).environment(chat)
+                .environment(\.inDuoSplitView, inDuoSplitView)
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.layoutDirection, AppLocalization.locale.language.characterDirection == .rightToLeft ? .rightToLeft : .leftToRight)
                 .background(LanguageNavigationFonts())
@@ -63,8 +67,23 @@ struct PokiApp: App {
                     model.languageChanged()
                     chat.languageChanged()
                 }
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { _ in
+                    updateDuoSplitView()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { updateDuoSplitView() }
+                }
         }
     }
+
+    private func updateDuoSplitView() {
+        let placement = PKInProcess.shared().duoPlacement()
+        inDuoSplitView = placement != nil && placement != "fullscreen"
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var inDuoSplitView = false
 }
 
 /// The chat is the app (ESP-326): it opens on Poki's conversation. The conversations slide in from the
@@ -298,7 +317,16 @@ struct RootView: View {
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
         .onChange(of: scenePhase, initial: true) { _, phase in
-            if phase == .active { model.becameActive(); AskPoki.refresh(); model.startSigner(); model.signer.maintain(); Task { await model.verifyPairing() } } else if phase == .background { model.wentToBackground() }
+            if phase == .active {
+                model.becameActive()
+                HistoryCapture.shared.appDidBecomeActive()
+                AskPoki.refresh()
+                model.startSigner()
+                model.signer.maintain()
+                Task { await model.verifyPairing() }
+            } else if phase == .background {
+                model.wentToBackground()
+            }
         }
         // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
         // the setup step, or the Activity Log for a problem; `poki://voice` brings the chat to the front.
