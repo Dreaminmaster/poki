@@ -233,6 +233,97 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(result.summary, "Scrolled the conversation.")
     }
 
+    func testCountedScrollCountsTheLastVisibleMessageWhenTheListHitsTheTop() async throws {
+        let messages = (1...7).map { "Message 0\($0)" }
+        let transport = MessageListTransport(messages: messages, visibleCount: 6, step: 3, spacing: 60)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 460]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [7, 1, 2, 3, 4, 5]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 1)
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Message 01"), result.text)
+    }
+
+    func testExplicitCountWordingRequiresVerification() async throws {
+        let requests: [(String, Int?)] = [
+            ("往上翻一百条消息", 100),
+            ("往上翻最近的 100 条消息", 100),
+            ("向上滑两百条", 200),
+            ("翻前 50 条记录", 50),
+            ("帮我翻到 30 条消息之前", 30),
+            ("翻最近二十五条聊天记录", 25),
+            ("向上滾動兩百條訊息", 200),
+            ("去 40 条消息前", 40),
+            ("Scroll up 100 messages.", 100),
+            ("Scroll back by 15 older messages.", 15),
+            ("Go back two hundred messages.", 200),
+            ("Scroll up through the last 50 messages.", 50),
+            ("Scroll 30 messages up.", 30),
+            ("Go to the message 12 messages earlier.", 12),
+            ("去聊天记录最早的地方", nil),
+            ("Scroll to the chat from 100 days ago.", nil),
+            ("Scroll through the 100 Club chat.", nil),
+        ]
+        for (request, target) in requests {
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll the chat"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the chat.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Scrolled the chat."),
+            ])
+            let result = await chat(on: server, transport: MessageListTransport()).runDelegated(request)
+            if let target {
+                XCTAssertEqual(result.success, false, "\(request): \(result.text)")
+                XCTAssertTrue(result.text.contains("0 of \(target) older messages"), "\(request): \(result.text)")
+            } else {
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+            }
+        }
+    }
+
+    func testQuestionsAfterReadingKeepTheCountedScrollReplyOpen() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.text("我找到了两个群。你说的是哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group after looking")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(chat.entries.contains { if case .poki("我找到了两个群。你说的是哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The reply continues the counted scroll")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
     private func sendAfterCountedScrollQuestion(_ text: String, replying: Bool) async throws -> TaskResult {
         let transport = MessageListTransport()
         let server = try FakeCompletions(replies: [
