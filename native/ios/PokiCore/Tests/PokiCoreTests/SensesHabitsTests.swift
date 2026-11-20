@@ -78,3 +78,37 @@ final class SensesHabitsTests: XCTestCase {
         XCTAssertNil(SensesHabits.usualApp(for: "set a timer", habits: [habit], names: names))
     }
 }
+
+final class ScreenHistoryCheckTests: XCTestCase {
+    private func core(_ verdict: ScreenHistoryVerdict, wait: Double = 0.3) -> PokiCore {
+        let source = ScreenHistorySource(
+            isEnabled: { true },
+            entries: { _, _ in [ScreenHistoryEntry(at: Date().addingTimeInterval(-60), app: "Notes", bundleID: "com.apple.mobilenotes", title: "Trip", text: "Pack the passport")] },
+            check: { _, _ in verdict })
+        return makeCore { $0.approvalWait = wait; $0.screenHistory = source }.0
+    }
+
+    func testSharedAnswerPassesAndRefusedDoesNot() async {
+        let shared = await core(.share).call("screen_history", [:])
+        XCTAssertFalse(shared.isError)
+        XCTAssertTrue(shared.text.contains("passport"))
+        let refused = await core(.refuse("no")).call("screen_history", [:])
+        XCTAssertTrue(refused.isError)
+        XCTAssertFalse(refused.text.contains("passport"))
+    }
+
+    func testAskWaitsForTheOwner() async {
+        let unanswered = await core(.ask(reason: "private")).call("screen_history", [:])
+        XCTAssertTrue(unanswered.isError)
+        XCTAssertFalse(unanswered.text.contains("passport"))
+
+        let c = core(.ask(reason: "private"), wait: 5)
+        Task {
+            while c.pendingApproval == nil { try? await Task.sleep(nanoseconds: 20_000_000) }
+            c.resolveApproval(id: c.pendingApproval!.id, approved: true)
+        }
+        let approved = await c.call("screen_history", [:])
+        XCTAssertFalse(approved.isError)
+        XCTAssertTrue(approved.text.contains("passport"))
+    }
+}

@@ -28,6 +28,15 @@ public struct ScreenHistoryEntry: Sendable, Equatable {
     }
 }
 
+/// What the check on the iPhone decided about one screen_history answer before it leaves Poki
+/// (the owner, 2026-11-20: outside agents' screen_history goes through the same on-device check as
+/// Poki's chat). `ask` puts an approval in front of the owner, as a sensitive step does.
+public enum ScreenHistoryVerdict: Sendable, Equatable {
+    case share
+    case ask(reason: String)
+    case refuse(String)
+}
+
 public struct ScreenHistorySource: Sendable {
     public var isEnabled: @Sendable () -> Bool
     public var unavailableMessage: @Sendable () -> String
@@ -36,19 +45,24 @@ public struct ScreenHistorySource: Sendable {
     public var accessRevision: @Sendable () -> UInt64
     public var now: @Sendable () -> Date
     public var entries: @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
+    /// Reads the answer (the JSON about to be returned) and the call's arguments, and decides. Nil
+    /// lets every answer through, as before.
+    public var check: (@Sendable (_ answer: String, _ arguments: String) async -> ScreenHistoryVerdict)?
 
     public init(
         isEnabled: @escaping @Sendable () -> Bool,
         accessRevision: @escaping @Sendable () -> UInt64,
         unavailableMessage: @escaping @Sendable () -> String = { "Screen History is not turned on." },
         now: @escaping @Sendable () -> Date = { Date() },
-        entries: @escaping @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry]
+        entries: @escaping @Sendable (_ from: Date, _ to: Date) async -> [ScreenHistoryEntry],
+        check: (@Sendable (_ answer: String, _ arguments: String) async -> ScreenHistoryVerdict)? = nil
     ) {
         self.isEnabled = isEnabled
         self.unavailableMessage = unavailableMessage
         self.accessRevision = accessRevision
         self.now = now
         self.entries = entries
+        self.check = check
     }
 }
 
@@ -438,8 +452,10 @@ extension PokiCore {
         "annotations": ["readOnlyHint": true],
     ]
 
-    func screenHistoryCall(_ args: JSON) async -> ToolResult {
-        guard let source = config.screenHistory else {
+    public static let screenHistoryNotShared = "The owner did not allow sharing this Screen History. Do not ask for it again in this task. Go on without it, or ask the owner in plain words for what you need."
+
+    func screenHistoryCall(_ args: JSON, answerBy: Double? = nil) async -> ToolResult {
+        guard let source = config.screenHistory, source.isEnabled() else {
             return ToolResult(text: Self.screenHistoryOffMessage, jpeg: nil, isError: true)
         }
         // Capture a lease before the first await. Checking only isEnabled after an await
@@ -473,7 +489,30 @@ extension PokiCore {
         guard accessStillValid() else {
             return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
         }
-        return ToolResult(text: text, jpeg: nil, isError: false)
+        guard !matched.isEmpty, let check = source.check else { return ToolResult(text: text, jpeg: nil, isError: false) }
+        switch await check(text, args.serialized()) {
+        case .share:
+            return ToolResult(text: text, jpeg: nil, isError: false)
+        case .refuse(let why):
+            return ToolResult(text: why, jpeg: nil, isError: true)
+        case .ask(let reason):
+            // The owner decides, on the same card as a sensitive step. A relay stops waiting for its
+            // caller at its deadline, so the hold ends a little before it.
+            let hold = answerBy.map { max(0, min(config.approvalWait, $0 - monotonicNow() - config.readTimeout - 3)) } ?? config.approvalWait
+            if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
+            let approval = approvals.request(app: "Screen History", summary: "Share Screen History", reason: reason.isEmpty ? "reading Screen History" : reason,
+                                             fingerprint: "history:\(UUID().uuidString)")
+            switch await approvals.wait(id: approval.id, seconds: hold) {
+            case .approved?:
+                _ = approvals.consumeGrant(fingerprint: approval.fingerprint)
+                return ToolResult(text: text, jpeg: nil, isError: false)
+            case .declined?, .expired?:
+                return ToolResult(text: Self.screenHistoryNotShared, jpeg: nil, isError: true)
+            case nil:
+                approvals.withdraw(id: approval.id)
+                return ToolResult(text: Self.screenHistoryNotShared, jpeg: nil, isError: true)
+            }
+        }
     }
 
     private static let screenHistoryEncoder: JSONEncoder = {
@@ -592,3 +631,6 @@ extension PokiCore {
         return (prefix + String(text[sliceStart..<sliceEnd]) + suffix, true)
     }
 }
+
+/// The relay's clock (`now()` in Deadline.swift), under a name screenHistoryCall's own `now` does not hide.
+private func monotonicNow() -> Double { now() }

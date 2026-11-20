@@ -114,9 +114,28 @@ enum SensesContext {
         return .summary(answer, share: verdict.share, reason: verdict.reason)
     }
 
+    /// Tests of the query itself turn the check off; nothing else does.
+    @MainActor static var checksOutside = true
+
+    /// The same check for an outside agent's screen_history query (the owner, 2026-11-20): the answer
+    /// is raw screen text, so the model on this iPhone reads it and says SHARE or ASK, and anything
+    /// private by the pills' rule, Ask All, or no model on this iPhone puts it in front of the owner.
+    @MainActor static func checkOutside(_ answer: String, arguments: String) async -> ScreenHistoryVerdict {
+        if !checksOutside { return .share }
+        if HomeShortcuts.isPrivate(answer) { return .ask(reason: "the screen text may hold something private") }
+        if ApprovalLevel.saved == .everything { return .ask(reason: "") }
+        guard BacktapeWriter.available else { return .ask(reason: "no model on this iPhone can check it") }
+        let verdict = await judge(String(answer.prefix(3000)), question: arguments, task: "An outside AI agent connected to Poki asked for Screen History")
+        if verdict.share {
+            record(shared: true, question: "screen_history \(arguments.prefix(100))")
+            return .share
+        }
+        return .ask(reason: verdict.reason)
+    }
+
     /// The model on this iPhone decides whether its answer may go to the remote model without the
     /// owner. Only a clear SHARE passes; no answer, or any other, is the owner's.
-    @MainActor private static func judge(_ answer: String, question: String, task: String) async -> (share: Bool, reason: String) {
+    @MainActor static func judge(_ answer: String, question: String, task: String) async -> (share: Bool, reason: String) {
         let instructions = """
         You guard a person's privacy. A summary of what they did on their iPhone is about to be sent \
         to an online AI service, to help with a task they asked for. Reply on one line: SHARE or ASK, \

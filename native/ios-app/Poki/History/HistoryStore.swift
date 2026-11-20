@@ -401,7 +401,9 @@ final class HistoryStore: @unchecked Sendable {
                     )
                 }
             }
-        }
+        },
+        // Every answer goes through the check on this iPhone first (SensesContext.checkOutside).
+        check: { answer, arguments in await SensesContext.checkOutside(answer, arguments: arguments) }
     )
 
     @MainActor

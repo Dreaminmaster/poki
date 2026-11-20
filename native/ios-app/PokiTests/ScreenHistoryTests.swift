@@ -21,6 +21,8 @@ final class ScreenHistoryTests: XCTestCase {
     override func setUp() async throws {
         savedLanguage = AppLocalization.shared.preference
         AppLocalization.shared.preference = "en"
+        // These test the query; the check before an answer leaves is SensesContext's.
+        SensesContext.checksOutside = false
         for key in keys {
             saved[key] = UserDefaults.standard.object(forKey: key)
             UserDefaults.standard.removeObject(forKey: key)
@@ -39,6 +41,7 @@ final class ScreenHistoryTests: XCTestCase {
 
     override func tearDown() async throws {
         HistoryLock.shared.lock()
+        SensesContext.checksOutside = true
         await HistoryStore.shared.deleteEverything()
         HistoryCapture.shared.enabled = false
         HistoryCapture.shared.listMode = savedCaptureMode
