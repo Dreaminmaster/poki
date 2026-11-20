@@ -759,7 +759,7 @@ private struct LanguageSettingsView: View {
 /// Approvals (ESP-469 board "03 审批"): what always needs you, how Poki asks before a sensitive step, and
 /// how much your chat model may approve by itself. The way of asking is chosen here and on Poki's card (the
 /// same setting); the chat's Approvals are off line links here to turn them back on. The sensitivity's
-/// four levels are segments in their own order, least asking first.
+/// four levels are the stops of a slider, least asking on the left.
 struct SecurityApprovalSections: View {
     @Environment(AppModel.self) private var model
     /// The way of asking says itself in one line; Learn More opens the whole of it.
@@ -812,13 +812,7 @@ struct SecurityApprovalSections: View {
 
             if model.approvalMode != .off {
                 Section {
-                    Picker("Sensitivity", selection: $model.classifierLevel) {
-                        ForEach(ApprovalClassifier.Level.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                    .accessibilityIdentifier("approvals.sensitivity")
+                    SensitivitySlider(level: $model.classifierLevel)
                 } header: {
                     Text("Sensitivity").textCase(nil)
                 } footer: {
@@ -840,6 +834,60 @@ struct ApprovalsSettingsView: View {
         List { SecurityApprovalSections() }
             .navigationTitle(AppLocalization.text("Approvals"))
             .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// The sensitivity as a slider with one stop per level, least asking on the left (the owner's ask, Nov 20
+/// 2026, in place of four segments). Each level's name sits under its stop, and tapping a name moves there.
+struct SensitivitySlider: View {
+    @Binding var level: ApprovalClassifier.Level
+
+    private var levels: [ApprovalClassifier.Level] { ApprovalClassifier.Level.allCases }
+
+    var body: some View {
+        let stop = Binding<Double>(
+            get: { Double(levels.firstIndex(of: level) ?? 1) },
+            set: { level = levels[min(levels.count - 1, max(0, Int($0.rounded())))] })
+        VStack(spacing: 6) {
+            Slider(value: stop, in: 0...Double(levels.count - 1), step: 1) {
+                Text("Sensitivity")
+            }
+            .sensoryFeedback(.selection, trigger: level)
+            .accessibilityValue(Text(level.title))
+            .accessibilityIdentifier("approvals.sensitivity")
+
+            // The names under the stops: the first and last flush with the track's ends, the middle
+            // ones centred on their stop.
+            GeometryReader { geo in
+                let inset: CGFloat = 14
+                let track = max(0, geo.size.width - inset * 2)
+                let last = levels.count - 1
+                ZStack(alignment: .leading) {
+                    ForEach(Array(levels.enumerated()), id: \.element) { index, each in
+                        let x = inset + track * CGFloat(index) / CGFloat(max(1, last))
+                        Button {
+                            withAnimation(.snappy) { level = each }
+                        } label: {
+                            Text(each.title)
+                                .font(each == level ? Font.footnote.weight(.semibold) : Font.footnote)
+                                .foregroundStyle(each == level ? Color.primary : Color.secondary)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                        .buttonStyle(.borderless)
+                        .alignmentGuide(.leading) { d -> CGFloat in
+                            if index == 0 { return 0 }
+                            if index == last { return d.width - geo.size.width }
+                            return d[HorizontalAlignment.center] - x
+                        }
+                        .accessibilityHidden(true)
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+            }
+            .frame(height: 20)
+        }
+        .padding(.vertical, 6)
     }
 }
 
