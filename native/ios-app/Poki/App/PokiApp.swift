@@ -110,10 +110,6 @@ struct RootView: View {
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
-    /// Poki's card under its picture: the model, the way of asking, Pause or Resume.
-    @State private var statusOpen = false
-    /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
-    @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
@@ -171,10 +167,6 @@ struct RootView: View {
     private func chatPage(split: Bool) -> some View {
         ChatView(
             sharedDraft: $draft,
-            openDetails: { under in
-                cardUnder = under
-                statusOpen = true
-            },
             openVoice: openLiveVoice,
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
@@ -187,7 +179,7 @@ struct RootView: View {
             shortcutStore: shortcutStore
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
-        // chat. Poki's card opens beside the picture and leaves it in sight.
+        // chat.
         .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && !showsSidebar))
     }
 
@@ -199,10 +191,6 @@ struct RootView: View {
             // The voice page keeps its own header and blue ground (not redrawn in ESP-340's first batch).
             VoicePage(
                 back: split ? nil : { show(.chat) },
-                openDetails: {
-                    cardUnder = nil
-                    statusOpen = true
-                },
                 openModel: { openDetails([DetailsRoute.model]) },
                 select: { target in if target == .chat { show(.chat) } }
             )
@@ -248,7 +236,6 @@ struct RootView: View {
             // Settings opens from the bottom of the conversations.
             .environment(\.openPokiSettings, { openDetails() })
             .environment(\.pokiDetailsOpen, detailsOpen)
-            .pokiStatusCard(isPresented: $statusOpen, under: cardUnder, leading: sidebarWidth.map { $0 + 1 } ?? 0, openModel: { openDetails([DetailsRoute.model]) })
             // Settings covers the whole screen on iPhone (ESP-469: nothing of the chat shows around it), with
             // its Close button; beside the list on iPad it stays a sheet at a page's width (ESP-376).
             .fullScreenCover(isPresented: Binding(get: { detailsOpen && !showsSidebar }, set: { detailsOpen = $0 })) {
@@ -438,7 +425,6 @@ struct RootView: View {
     private func takeEntry() {
         guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay, !FirstRun.isDue() else { return }
         detailsOpen = false
-        statusOpen = false
         if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }
         show(.chat)
         guard request == .talk, !chat.running, !model.voice.isOn else { return }
@@ -497,9 +483,6 @@ struct RootView: View {
         case "moreSettings", "details", "status":
             // More Settings is gone: its rows are on Poki's profile, by what they are about.
             openDetails()
-        case "statusCard":
-            cardUnder = nil
-            statusOpen = true
         case "hands", "connection":
             openDetails([DetailsRoute.connection])
         case "rules", "approvals":

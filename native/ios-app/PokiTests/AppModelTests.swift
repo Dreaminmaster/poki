@@ -723,7 +723,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         UIAccessibility.post(notification: .screenChanged, argument: window.rootViewController?.view)
@@ -1505,7 +1505,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
@@ -1558,7 +1558,7 @@ final class InProcessPasscodeTests: XCTestCase {
         window.frame = scene.screen.bounds
         let chat = chat ?? ChatModel(app: model)
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.locale, AppLocalization.locale))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
@@ -1876,7 +1876,7 @@ final class FrontendSubtractionTests: XCTestCase {
                        "Settings must clear waiting_network loopback issues once 10.7.0.1 answers")
 
         let chatLabels = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chatLabels.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") },
@@ -1967,7 +1967,7 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")
         XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
         let chat = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chat.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") }, "Chat after the task: \(chat)")
