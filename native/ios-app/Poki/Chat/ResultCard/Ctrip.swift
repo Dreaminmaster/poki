@@ -138,7 +138,7 @@ struct CtripRoomList: View {
     var body: some View {
         let first = card.items.first
         ResultCardList(card: card, selected: selected, choose: choose, tint: Ctrip.blue, carried: Ctrip.carried,
-                       heading: first?.text("hotel"), subheading: first?.text("dates"), picture: 64) { item in
+                       heading: card.roomHotelName, subheading: first?.text("dates"), picture: 64) { item in
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: item.title).font(.body.weight(.semibold)).lineLimit(2)

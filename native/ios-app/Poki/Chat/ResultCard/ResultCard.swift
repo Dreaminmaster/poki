@@ -25,7 +25,7 @@ struct ResultCard: Codable, Equatable {
     struct Item: Codable, Equatable, Identifiable {
         let id: String
         let title: String
-        let fields: [String: JSON]
+        fileprivate(set) var fields: [String: JSON]
 
         init(from decoder: Decoder) throws {
             fields = try [String: JSON](from: decoder)
@@ -62,9 +62,16 @@ struct ResultCard: Codable, Equatable {
         var say: String
     }
 
+    var roomHotelName: String? {
+        guard kind == Ctrip.rooms else { return nil }
+        return items.lazy.compactMap { $0.text("hotel") }.first
+    }
+
     /// The selected item: the one you chose, or Poki's suggestion.
     func selected(_ chosen: String?) -> Item {
-        items.first { $0.id == chosen } ?? items.first { $0.id == recommended } ?? items[0]
+        var item = items.first { $0.id == chosen } ?? items.first { $0.id == recommended } ?? items[0]
+        if let roomHotelName { item.fields["hotel"] = .string(roomHotelName) }
+        return item
     }
 
     /// A `{field}` in a button's words.
