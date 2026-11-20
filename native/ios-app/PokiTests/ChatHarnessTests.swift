@@ -333,44 +333,84 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     func testExplicitCountWordingRequiresVerification() async throws {
-        let requests: [(String, Int?)] = [
-            ("往上翻一百条消息", 100),
-            ("往上翻最近的 100 条消息", 100),
-            ("向上滑两百条", 200),
-            ("翻前 50 条记录", 50),
-            ("帮我翻到 30 条消息之前", 30),
-            ("翻最近二十五条聊天记录", 25),
-            ("向上滾動兩百條訊息", 200),
-            ("去 40 条消息前", 40),
-            ("往上翻100条聊天消息", 100),
-            ("往上翻100条群聊消息", 100),
-            ("上述群聊里，九十九条", 99),
-            ("这次只翻 １５０ 条私聊记录", 150),
-            ("Scroll up 100 messages.", 100),
-            ("Scroll back by 15 older messages.", 15),
-            ("Go back two hundred messages.", 200),
-            ("Scroll up through the last 50 messages.", 50),
-            ("Scroll 30 messages up.", 30),
-            ("Go to the message 12 messages earlier.", 12),
-            ("Scroll up 100 chat messages.", 100),
-            ("Go back 45 msgs.", 45),
-            ("去聊天记录最早的地方", nil),
-            ("Scroll to the chat from 100 days ago.", nil),
-            ("Scroll through the 100 Club chat.", nil),
+        enum Expected {
+            case messages(Int), screens(Int), ordinary
+        }
+        let requests: [(String, Expected)] = [
+            ("往上翻一百条消息", .messages(100)),
+            ("往上翻最近的 100 条消息", .messages(100)),
+            ("向上滑两百条", .messages(200)),
+            ("翻前 50 条记录", .messages(50)),
+            ("帮我翻到 30 条消息之前", .messages(30)),
+            ("翻最近二十五条聊天记录", .messages(25)),
+            ("向上滾動兩百條訊息", .messages(200)),
+            ("去 40 条消息前", .messages(40)),
+            ("往上翻100条聊天消息", .messages(100)),
+            ("往上翻100条群聊消息", .messages(100)),
+            ("上述群聊里，九十九条", .messages(99)),
+            ("这次只翻 １５０ 条私聊记录", .messages(150)),
+            ("翻一条消息", .messages(1)),
+            ("向上翻十二条", .messages(12)),
+            ("往上翻一百二十条", .messages(120)),
+            ("往上翻三千零五条", .messages(3005)),
+            ("往上翻一零零条", .messages(100)),
+            ("往上翻一〇〇条消息", .messages(100)),
+            ("往上翻一0〇条", .messages(100)),
+            ("往上翻1百2十条", .messages(120)),
+            ("往上翻3千零5条", .messages(3005)),
+            ("往上翻一百20条", .messages(120)),
+            ("往上翻九千九百九十九条", .messages(9999)),
+            ("往上翻一万条", .messages(10000)),
+            ("Scroll up 100 messages.", .messages(100)),
+            ("Scroll back by 15 older messages.", .messages(15)),
+            ("Go back two hundred messages.", .messages(200)),
+            ("Scroll up through the last 50 messages.", .messages(50)),
+            ("Scroll 30 messages up.", .messages(30)),
+            ("Go to the message 12 messages earlier.", .messages(12)),
+            ("Scroll up 100 chat messages.", .messages(100)),
+            ("Go back 45 msgs.", .messages(45)),
+            ("往上翻两页消息", .screens(2)),
+            ("向上翻３屏聊天记录", .screens(3)),
+            ("請往前翻一頁訊息", .screens(1)),
+            ("Scroll up 2 pages of messages.", .screens(2)),
+            ("Scroll up 2 pages in Messages.", .screens(2)),
+            ("Scroll back three full screens of chat messages.", .screens(3)),
+            ("Scroll up one screen in Messages.", .screens(1)),
+            ("去聊天记录最早的地方", .ordinary),
+            ("Scroll to the chat from 100 days ago.", .ordinary),
+            ("Scroll through the 100 Club chat.", .ordinary),
         ]
-        for (request, target) in requests {
-            let server = try FakeCompletions(replies: [
+        for (request, expected) in requests {
+            var replies = [
                 FakeCompletions.tool("report_plan", ["steps": ["Scroll the chat"], "currentStep": 1]),
                 FakeCompletions.tool("look", ["full": true]),
+            ]
+            let transport: MessageListTransport
+            if case .screens(let screens) = expected {
+                let messages = (1...((screens + 1) * 4)).map { "Message \($0)" }
+                transport = MessageListTransport(messages: messages, step: 4)
+                replies += Array(repeating: FakeCompletions.tool("do", [
+                    "actions": [["drag": [200, 172, 200, 703]]], "full": true,
+                ]), count: screens)
+            } else {
+                transport = MessageListTransport()
+            }
+            replies += [
                 FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the chat.",
                                                     "details": [], "answer": ["kind": "action"]]),
                 FakeCompletions.text("Scrolled the chat."),
-            ])
-            let result = await chat(on: server, transport: MessageListTransport()).runDelegated(request)
-            if let target {
+            ]
+            let server = try FakeCompletions(replies: replies)
+            let result = await chat(on: server, transport: transport).runDelegated(request)
+            switch expected {
+            case .messages(let target):
                 XCTAssertEqual(result.success, false, "\(request): \(result.text)")
                 XCTAssertTrue(result.text.contains("0 of \(target) older messages"), "\(request): \(result.text)")
-            } else {
+            case .screens:
+                XCTAssertEqual(transport.topMessage, 1, request)
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+                XCTAssertTrue(result.text.contains("result: done: Scrolled the chat."), "\(request): \(result.text)")
+            case .ordinary:
                 XCTAssertEqual(result.success, true, "\(request): \(result.text)")
             }
         }
