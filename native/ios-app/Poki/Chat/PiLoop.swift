@@ -57,12 +57,16 @@ final class PiLoop {
                 // `signal`: cancelling the call stops a `do` before its next action.
                 let revision = spec.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
                 if spec.name == "screen_history" { grants.record(id, revision: revision) }
+                let trace = ChatStepTiming.current
+                let action = trace.map { "action=\($0.nextAction()) tool=\(spec.name)" } ?? ""
+                trace?.record("action_start", action)
                 let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
                 let forget = signal?.onCancel { call.cancel() }
                 defer { forget?() }
                 let rawAnswer = await call.value
                 let answer = spec.name == "screen_history"
                     ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
+                trace?.record("action_end", "\(action) ok=\(!answer.isError)")
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
                 if spec.name == Harness.countedScrollReplyTool, !answer.isError {
@@ -102,6 +106,18 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if let trace = ChatStepTiming.current {
+                    if model.api == .openAIResponses {
+                        let onPayload = options.onPayload
+                        options.onPayload = { payload in
+                            let updated = try await onPayload?(payload)
+                            trace.record("model_request", "boundary=payload_ready bytes=\((updated ?? payload).json.utf8.count)")
+                            return updated
+                        }
+                    } else {
+                        trace.record("model_request", "boundary=provider_handoff")
+                    }
+                }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
             getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
@@ -140,7 +156,8 @@ final class PiLoop {
     /// pi's loop until the model answers without tools, `stop()`, a repeated call or pair on the same
     /// screen, or `maxTurns` model turns (a ceiling for a model that runs away). Owner waits reset the
     /// stall history. `onText` gets each finished text block.
-    func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
+    func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int,
+             timing: ChatStepTiming? = nil, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
         agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed)
@@ -152,8 +169,16 @@ final class PiLoop {
         let unsubscribe = agent.subscribe { event, _ in
             switch event {
             case .turnStart:
+                timing?.beginTurn()
                 if turns.increment() > maxTurns { gate.end(.overTurns) }
                 if gate.stopped { agent.abort() }
+            case .messageUpdate(_, let event):
+                switch event {
+                case .textDelta(_, let delta, _) where !delta.isEmpty: timing?.firstOutput(.text)
+                case .thinkingDelta(_, let delta, _) where !delta.isEmpty: timing?.firstOutput(.reasoning)
+                case .toolCallStart: timing?.firstOutput(.tool)
+                default: break
+                }
             case .messageEnd(.assistant(let reply)):
                 if reply.stopReason == .error { failure.set(reply.errorMessage ?? "") }
                 let texts = reply.content.compactMap { block -> String? in
@@ -161,13 +186,17 @@ final class PiLoop {
                     let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     return text.isEmpty ? nil : text
                 }
+                if !texts.isEmpty { timing?.firstOutput(.text, boundary: "message_end") }
+                timing?.record("model_complete", "stop=\(reply.stopReason.rawValue)")
                 if !texts.isEmpty { await MainActor.run { texts.forEach(onText) } }
             default: break
             }
         }
         defer { unsubscribe() }
         do {
-            try await agent.prompt(text, images: images.map { ImageContent(data: $0.base64EncodedString(), mimeType: "image/jpeg") })
+            try await ChatStepTiming.$current.withValue(timing) {
+                try await agent.prompt(text, images: images.map { ImageContent(data: $0.base64EncodedString(), mimeType: "image/jpeg") })
+            }
         } catch {
             failure.set(error.localizedDescription)
         }

@@ -664,10 +664,14 @@ final class ChatModel {
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
             if current { running = false; awaitingModel = false }
         case .pi(let piModel):
+            let timing = ChatStepTiming(session: prepared.runSession, task: prepared.you.id)
+            timing.record("task_start", "engine=pi")
             var pair: [String] = []
             if !prepared.inSplitView, prepared.namedApps.count >= 2 {
                 let plannedAt = ContinuousClock.now
-                let choice = await chooseSplitView(text: prepared.text, apps: prepared.namedApps, provider: prepared.provider, model: piModel)
+                let plannerTiming = ChatStepTiming(session: prepared.runSession, task: prepared.you.id, flow: "workspace")
+                let choice = await chooseSplitView(text: prepared.text, apps: prepared.namedApps, provider: prepared.provider, model: piModel,
+                                                   timing: plannerTiming)
                 guard runToken == token else { return }
                 AppLog.shared.add("chat", "workspace planning took \(plannedAt.duration(to: .now))")
                 switch choice {
@@ -721,7 +725,9 @@ final class ChatModel {
                                                    inSplitView: splitSession != nil)
             offeredMemories = context.notes
             let instructions = [context.text, restoredContext, prepared.continuation].compactMap { $0 }.joined(separator: "\n\n")
-            let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message, images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
+            let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message,
+                                         images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns,
+                                         timing: timing) { [weak self] text in
                 guard let self, self.runToken == token else { return }
                 self.markDelivered(prepared.you.id)
                 self.awaitingModel = false
@@ -821,7 +827,8 @@ final class ChatModel {
         return Task.isCancelled || runToken != token ? .stopped : .unavailable
     }
 
-    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model) async -> WorkspaceChoice {
+    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model,
+                                 timing: ChatStepTiming) async -> WorkspaceChoice {
         let names = apps.enumerated().map { "\($0.offset + 1). \(AppIconStore.name($0.element) ?? $0.element)" }.joined(separator: "\n")
         let instructions = "Choose whether two candidate iPhone apps should work side by side for the owner's request. A word may describe an item and just happen to match an app name (for example 写一封邮件 can describe a message, or 照片 can mean an image in Safari). Select only the two apps actually requested. For a side-by-side task such as dragging, comparing, or transferring between two apps, output SPLIT followed by their two numbers separated by spaces, source first if there is a source. Otherwise output NORMAL. Output only that line."
         let planner = PiLoop(provider: provider, model: model, tools: []) { _ in
@@ -829,7 +836,7 @@ final class ChatModel {
         }
         var answer = ""
         let outcome = await withTaskCancellationHandler {
-            await planner.run("Apps: \(names)\nRequest: \(text)", instructions: instructions, maxTurns: 1) { answer += $0 }
+            await planner.run("Apps: \(names)\nRequest: \(text)", instructions: instructions, maxTurns: 1, timing: timing) { answer += $0 }
         } onCancel: {
             Task { @MainActor in planner.stop() }
         }
