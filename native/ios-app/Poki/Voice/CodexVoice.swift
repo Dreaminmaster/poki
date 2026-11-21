@@ -1,9 +1,15 @@
 import Foundation
 import Observation
 
+@MainActor protocol SubscriptionVoice {
+    func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws
+    func start(offer: String) async throws -> String
+    func stop()
+}
+
 @MainActor
 @Observable
-final class CodexVoice {
+final class CodexVoice: SubscriptionVoice {
     static let shared = CodexVoice()
     static let model = "gpt-live-1-codex"
 
@@ -13,13 +19,13 @@ final class CodexVoice {
         let code: String
     }
 
-    enum Failure: LocalizedError {
+    enum Failure: LocalizedError, Equatable {
         case unavailable, signIn, ended, timedOut
 
         var errorDescription: String? {
             switch self {
             case .unavailable: AppLocalization.text("ChatGPT voice could not start. Try again.")
-            case .signIn: AppLocalization.text("Sign in to ChatGPT to start a voice conversation.")
+            case .signIn: AppLocalization.text("Sign in to ChatGPT again to start a voice conversation.")
             case .ended: AppLocalization.text("The ChatGPT voice conversation ended.")
             case .timedOut: AppLocalization.text("ChatGPT voice took too long to connect. Try again.")
             }
@@ -42,11 +48,7 @@ final class CodexVoice {
     @ObservationIgnored private var onEvent: ((String, JSON) -> Void)?
     @ObservationIgnored private var onTool: ((String, String) async -> PhoneAnswer)?
 
-    private var home: URL {
-        URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
-    }
-
-    private var homePath: String { home.path(percentEncoded: false) }
+    private var homePath: String { CodexAccount.home.path(percentEncoded: false) }
 
     func prepare(onEvent: @escaping (String, JSON) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
         let generation = UUID()
@@ -105,7 +107,17 @@ final class CodexVoice {
     private func requireAccount(_ generation: UUID) async throws {
         let state = try await request("account/read", ["refreshToken": false])
         try check(generation)
-        if (state["account"] as? JSON)?["type"] as? String == "chatgpt" { return }
+        guard (state["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+    }
+
+    func refreshAccount() async throws {
+        let account = try await request("account/read", ["refreshToken": true])
+        guard (account["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+    }
+
+    func authorize() async throws {
+        let generation = UUID()
+        active = generation
 
         let code = try await request("account/login/start", ["type": "chatgptDeviceCode"])
         guard let id = code["loginId"] as? String, let userCode = code["userCode"] as? String,
@@ -199,7 +211,7 @@ final class CodexVoice {
                 if pending["rpc:\(id)"] != nil, let code = (message["error"] as? JSON)?["code"] as? Int {
                     AppLog.shared.add("voice", "Codex request \(id) returned error \(code)")
                 }
-                finish("rpc:\(id)", .failure(Failure.unavailable))
+                finish("rpc:\(id)", .failure(Self.failure(in: message["error"] as? JSON, fallback: .unavailable)))
             }
             return
         }
@@ -237,10 +249,14 @@ final class CodexVoice {
         case "thread/realtime/sdp":
             finish("sdp:\(thread)", .success(params), retain: true)
         case "thread/realtime/error", "thread/realtime/closed":
-            finish("sdp:\(thread)", .failure(Failure.ended), retain: true)
+            finish("sdp:\(thread)", .failure(Self.failure(in: params, fallback: .ended)), retain: true)
             onEvent?(method, params)
         default:
             onEvent?(method, params)
         }
+    }
+
+    static func failure(in params: JSON?, fallback: Failure) -> Failure {
+        params?["kind"] as? String == "signInRequired" ? .signIn : fallback
     }
 }

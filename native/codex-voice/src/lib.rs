@@ -94,6 +94,10 @@ async fn serve(
         ),
         ("features.shell_tool".into(), toml::Value::Boolean(false)),
         ("features.plugins".into(), toml::Value::Boolean(false)),
+        (
+            "features.secret_auth_storage".into(),
+            toml::Value::Boolean(false),
+        ),
     ];
     let loader = LoaderOverrides::default();
     let mut config = ConfigBuilder::default()
@@ -167,7 +171,10 @@ async fn serve(
                 tokio::spawn(async move {
                     let response = match sender.request(request).await {
                         Ok(Ok(result)) => json!({"id": id, "result": result}),
-                        Ok(Err(error)) => json!({"id": id, "error": {"code": error.code}}),
+                        Ok(Err(error)) => json!({"id": id, "error": {
+                            "code": error.code,
+                            "kind": auth_failure_kind(&error.message),
+                        }}),
                         Err(_) => json!({"id": id, "error": {"code": -32000}}),
                     };
                     publish(emit, response);
@@ -179,6 +186,9 @@ async fn serve(
                     let method = value.get("method").and_then(Value::as_str).unwrap_or_default();
                     if method.starts_with("thread/realtime/") || matches!(method, "account/login/completed" | "account/updated") {
                         if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) {
+                            if let Some(kind) = params.get("message").and_then(Value::as_str).and_then(auth_failure_kind) {
+                                params.insert("kind".into(), json!(kind));
+                            }
                             params.remove("error");
                             params.remove("message");
                         }
@@ -201,6 +211,25 @@ async fn serve(
     }
     client.shutdown().await.context("app server shutdown")?;
     Ok(())
+}
+
+fn auth_failure_kind(message: &str) -> Option<&'static str> {
+    let message = message.to_ascii_lowercase();
+    [
+        "401 unauthorized",
+        "status code 401",
+        "status: 401",
+        "(401)",
+        "invalid_grant",
+        "invalid_token",
+        "token expired",
+        "token has expired",
+        "access token could not be refreshed",
+        "sign in again",
+    ]
+    .iter()
+    .any(|marker| message.contains(marker))
+    .then_some("signInRequired")
 }
 
 fn publish(emit: Event, value: Value) {

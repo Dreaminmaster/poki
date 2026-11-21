@@ -12,6 +12,7 @@ struct ChatView: View {
     @Environment(ChatModel.self) private var chat
     var sharedDraft: Binding<String>? = nil
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
@@ -197,7 +198,7 @@ struct ChatView: View {
                                       let reply = scrollReplyQuestion == chat.countedScrollQuestion ? scrollReplyQuestion : nil
                                       scrollReplyQuestion = nil
                                       chat.send(text, attachments: attachments, replyingTo: reply)
-                                  }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
+                                  }, stop: chat.stop, openVoice: openVoice, openChatGPTSignIn: openChatGPTSignIn, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
                     .logStartupAppearance(.composer)
             }
@@ -1289,6 +1290,7 @@ struct ComposerInputView: View {
     var stop: () -> Void
     /// Starts the live voice conversation.
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     /// Settings, where the OpenAI key that Talk with Poki needs is added (or Live Voice turned on).
     var openVoiceKey: () -> Void = {}
     /// Leave conversation context above a long voice notice; its content remains scrollable.
@@ -1360,7 +1362,11 @@ struct ComposerInputView: View {
                             if let talk = voice.talkState {
                                 TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
                                         interrupt: voice.stopTalking, end: voice.stop,
-                                        retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
+                                        retry: {
+                                            let needsSignIn = voice.needsChatGPTSignIn
+                                            voice.dismissProblem()
+                                            if needsSignIn { openChatGPTSignIn() } else { openVoice() }
+                                        }, dismiss: voice.dismissProblem, signInAgain: voice.needsChatGPTSignIn)
                             } else {
                                 VoiceKeyNotice(addKey: { needsKey = false; openVoiceKey() }, close: { needsKey = false })
                             }

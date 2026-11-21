@@ -127,8 +127,8 @@ final class RelayIdentity {
 enum Keychain {
     private static let service = "nz.zheha.poki"
 
-    static func read(_ account: String) throws -> Data? {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account, kSecReturnData as String: true]
+    static func read(_ account: String, service name: String = service) throws -> Data? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account, kSecReturnData as String: true]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }

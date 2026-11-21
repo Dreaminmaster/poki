@@ -114,6 +114,8 @@ struct RootView: View {
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
+    @State private var signingInForVoice = false
+    @State private var resumeVoiceAfterSignIn = false
     @State private var detailsPath = NavigationPath()
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
@@ -175,6 +177,7 @@ struct RootView: View {
         ChatView(
             sharedDraft: $draft,
             openVoice: openLiveVoice,
+            openChatGPTSignIn: { signingInForVoice = true },
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
@@ -251,25 +254,13 @@ struct RootView: View {
             .sheet(isPresented: Binding(get: { detailsOpen && showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
-            .sheet(item: Binding(get: { CodexVoice.shared.authorization }, set: { _ in })) { authorization in
-                NavigationStack {
-                    Form {
-                        Section {
-                            Text(verbatim: authorization.code)
-                                .font(.title2.monospaced())
-                                .textSelection(.enabled)
-                            Link("Continue to ChatGPT", destination: authorization.url)
-                        } header: {
-                            Text("Device Code")
-                        } footer: {
-                            Text("Enter this code on the ChatGPT page. Poki will start voice when sign-in is complete.")
-                        }
-                    }
-                    .navigationTitle("Sign In for ChatGPT Voice")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.voice.stop() } } }
+            .sheet(isPresented: $signingInForVoice, onDismiss: {
+                if resumeVoiceAfterSignIn {
+                    resumeVoiceAfterSignIn = false
+                    openLiveVoice()
                 }
-                .interactiveDismissDisabled()
+            }) {
+                ChatGPTSignIn(startImmediately: true) { resumeVoiceAfterSignIn = true }
             }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
             .onChange(of: scenePhase) { takeEntry() }

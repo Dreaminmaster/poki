@@ -201,7 +201,8 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     /// `customURL`, an address not saved yet (the connection test on the editing page), `id` is the bare
     /// model id and `customAPI` and `customReasoning` are the page's choices.
     func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil) -> Model? {
-        guard let piProvider else { return nil }
+        let provider = self == .chatgpt && CodexAccount.accessToken != nil ? "openai-codex" : piProvider
+        guard let piProvider = provider else { return nil }
         if self == .custom {
             if let customURL {
                 let base = customURL.trimmingCharacters(in: .whitespaces)
@@ -393,7 +394,10 @@ enum ModelCredential {
             let custom = piProvider.flatMap { CustomProviders.provider(piProvider: $0) } ?? CustomProviders.current
             return custom.flatMap { CustomProviders.key($0.id) } ?? "none"
         }
-        if provider.signsIn { return await ChatGPTAccount.accessToken() }
+        if provider.signsIn {
+            if piProvider == "openai-codex" { return await ChatGPTAccount.codexAccessToken() }
+            return await ChatGPTAccount.accessToken()
+        }
         return ModelKeys.key(provider)
     }
 }

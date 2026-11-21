@@ -25,7 +25,8 @@ struct VoiceView: View {
                 Section {
                     LabeledContent {
                         if voice.usesChatGPTSubscription {
-                            Text("ChatGPT").foregroundStyle(Color.secondary)
+                            Text(CodexAccount.accessToken == nil ? AppLocalization.text("Sign In Again") : "ChatGPT")
+                                .foregroundStyle(Color.secondary)
                         } else {
                             Text(voice.canTalkLive ? (VoiceDirect.account == .openai ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
                                 .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)

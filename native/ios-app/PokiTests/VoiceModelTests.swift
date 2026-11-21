@@ -137,6 +137,17 @@ final class FakeTime {
     func settle() async { for _ in 0..<50 { await Task.yield() } }
 }
 
+@MainActor
+private final class FakeSubscriptionVoice: SubscriptionVoice {
+    private var onEvent: ((String, [String: Any]) -> Void)?
+    func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
+        self.onEvent = onEvent
+    }
+    func start(offer: String) async throws -> String { "fixture-sdp-answer" }
+    func stop() { onEvent = nil }
+    func notify(_ method: String, _ params: [String: Any]) { onEvent?(method, params) }
+}
+
 private actor VoiceRunnerTransport: HTTPTransport {
     let firstStarted: XCTestExpectation
     let firstMayFinish: AsyncStream<Void>
@@ -740,7 +751,7 @@ final class VoiceModelTests: XCTestCase {
         private(set) var microphone: [Bool] = []
         var link: FakeConnection { links.last! }
 
-        @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false,
+        @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false, codex: (any SubscriptionVoice)? = nil,
                         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = time ?? FakeTime()
             self.time = time
@@ -749,7 +760,7 @@ final class VoiceModelTests: XCTestCase {
             voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: { name, arguments, cancellation in
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) },
-                               connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock)
+                               connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock, codex: codex)
             made = { [unowned self] in
                 let link = FakeConnection()
                 link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
@@ -785,6 +796,60 @@ final class VoiceModelTests: XCTestCase {
                       ["type": "response.output_audio_transcript.done", "transcript": answer],
                       ["type": "response.done", "response": ["id": id]], ["type": "output_audio_buffer.stopped"])
         }
+    }
+
+    func testSubscriptionVoiceClosesTheMicrophoneAfterSilenceOrAnUnansweredTurn() async throws {
+        try await withChatGPTSelected {
+            for spoke in [false, true] {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                await h.connect()
+                XCTAssertEqual(h.links.last?.liveAnswer, "fixture-sdp-answer")
+                guard let link = h.links.last else { continue }
+                if spoke {
+                    codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
+                }
+                NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+                let deadline: Double = spoke ? 30 : 8
+                await h.time.advance(deadline - 1)
+                XCTAssertTrue(h.voice.isOn)
+                await h.time.advance(1)
+                XCTAssertFalse(h.voice.isOn)
+                XCTAssertEqual(h.voice.phase, .off)
+                XCTAssertTrue(link.closed)
+                XCTAssertEqual(h.microphone, [true, false])
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+        }
+    }
+
+    func testSubscriptionVoiceAuthorizationFailureShowsSignInAndClosesTheMicrophone() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            codex.notify("thread/realtime/error", ["kind": "signInRequired"])
+            XCTAssertTrue(h.voice.needsChatGPTSignIn)
+            XCTAssertEqual(h.voice.talkState?.reason, AppLocalization.text("Sign in to ChatGPT again to start a voice conversation."))
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertTrue(link.closed)
+            XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
+    private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
+        let selected = UserDefaults.standard.object(forKey: "chat.provider")
+        let saved = ModelKeys.key(.chatgpt)
+        defer {
+            ModelKeys.remove(.chatgpt)
+            if let saved { try? ModelKeys.save(saved, for: .chatgpt) }
+            UserDefaults.standard.set(selected, forKey: "chat.provider")
+        }
+        try ModelKeys.save(#"{"access":"fixture-access","refresh":"fixture-refresh","expires":1,"clientId":"fixture-registration"}"#, for: .chatgpt)
+        ModelKeys.selectedProvider = .chatgpt
+        try await run()
     }
 
     /// Said once, answered once: the conversation waits 8 s for the person to go on, then ends and lets

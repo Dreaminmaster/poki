@@ -1,4 +1,6 @@
+import CryptoKit
 import PiSwiftAI
+import Security
 import XCTest
 @testable import Poki
 
@@ -28,47 +30,26 @@ final class ChatGPTSignInTests: XCTestCase {
         AppLocalization.shared.preference = savedLanguage
     }
 
-    func testBrowserCallbackCanSaveAndRemoveTheSignIn() async throws {
-        let login = ChatGPTBrowserLogin()
-        ModelServerStub.answer = (200, Self.issued)
-        let opened = expectation(description: "ChatGPT authorization page opened")
-        login.onPage = { url in
-            guard let url else { return }
-            XCTAssertEqual(url.host(), "auth.openai.com")
-            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-            guard let state = items?.first(where: { $0.name == "state" })?.value,
-                  let redirect = items?.first(where: { $0.name == "redirect_uri" })?.value,
-                  var callback = URLComponents(string: redirect) else {
-                XCTFail("Authorization page omitted the loopback callback")
-                login.stop()
-                return
-            }
-            XCTAssertEqual(callback.host, "127.0.0.1")
-            XCTAssertEqual(callback.path, "/auth/callback")
-            callback.queryItems = [URLQueryItem(name: "code", value: "test-authorization-code"),
-                                   URLQueryItem(name: "state", value: state),
-                                   URLQueryItem(name: "client_id", value: "test-registration")]
-            guard let callbackURL = callback.url else { login.stop(); XCTFail("Invalid callback URL"); return }
-            Task {
-                defer { opened.fulfill() }
-                do {
-                    let (_, response) = try await URLSession.shared.data(from: callbackURL)
-                    XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-                } catch {
-                    login.stop()
-                    XCTFail("The authorization callback did not reach the listener")
-                }
-            }
-        }
-
-        try await ChatGPTAccount.save(login.signIn(inApp: true))
-        await fulfillment(of: [opened], timeout: 3)
-        XCTAssertTrue(ChatGPTAccount.signedIn)
-        let access = await ModelCredential.apiKey(for: .chatgpt)
-        XCTAssertEqual(access, "test-access-rotated")
+    func testSharedCodexSignInSelectsTheTextProviderWithoutALegacyCredential() async throws {
         try ChatGPTAccount.signOut()
-        XCTAssertNil(ModelKeys.key(.chatgpt))
-        XCTAssertFalse(ChatGPTAccount.signedIn)
+        try FileManager.default.createDirectory(at: CodexAccount.home, withIntermediateDirectories: true)
+        let path = try XCTUnwrap(realpath(CodexAccount.home.path(percentEncoded: false), nil))
+        defer { free(path) }
+        let fingerprint = SHA256.hash(data: Data(String(cString: path).utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }.joined()
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: "Codex Auth", kSecAttrAccount as String: "cli|\(fingerprint)"]
+        let stored = Data(#"{"auth_mode":"chatgpt","tokens":{"access_token":"fixture-shared-access"}}"#.utf8)
+        let status = SecItemAdd(query.merging([kSecValueData as String: stored]) { old, _ in old } as CFDictionary, nil)
+        XCTAssertEqual(status, errSecSuccess)
+        guard status == errSecSuccess else { return }
+        defer { SecItemDelete(query as CFDictionary) }
+
+        XCTAssertTrue(ChatGPTAccount.signedIn)
+        let model = try XCTUnwrap(ModelProvider.chatgpt.piModel("gpt-6.1-sol"))
+        XCTAssertEqual(model.provider, "openai-codex")
+        let token = await ModelCredential.apiKey(for: .chatgpt, piProvider: model.provider)
+        XCTAssertEqual(token, "fixture-shared-access")
     }
 
     func testExpiredSignInSharesRenewalAndStoresTheRotatedCredential() async throws {

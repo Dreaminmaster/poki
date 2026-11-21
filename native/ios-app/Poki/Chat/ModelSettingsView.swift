@@ -141,9 +141,7 @@ enum ModelAccounts {
     }
 
     static func canChat(_ provider: ModelProvider) -> Bool { provider.wired }
-    /// Live voice is a Realtime API: an OpenAI API key, or a custom provider whose service has one (a
-    /// ChatGPT sign-in can't open it).
-    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .openai || provider == .custom }
+    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .chatgpt || provider == .openai || provider == .custom }
 
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
@@ -158,6 +156,9 @@ enum ModelAccounts {
         var out: [String] = []
         if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(AppLocalization.text(LocalizedStringResource("Text Chat"))) }
         if provider == .openai, VoiceDirect.account == .openai { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
+        if provider == .chatgpt, ModelKeys.selectedProvider == .chatgpt, CodexAccount.accessToken != nil {
+            out.append(AppLocalization.text("Live Voice"))
+        }
         return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
     }
 
@@ -241,17 +242,25 @@ private struct AccountDetail: View {
                     } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
-                NavigationLink { LiveVoiceFeature(account: .openai) } label: {
+                if provider == .chatgpt {
                     LabeledContent {
-                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
+                        Text(CodexAccount.accessToken == nil ? AppLocalization.text("Sign In Again") : ModelKeys.selectedProvider == .chatgpt ? "ChatGPT" : AppLocalization.text("Off"))
                     } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
+                } else {
+                    NavigationLink { LiveVoiceFeature(account: .openai) } label: {
+                        LabeledContent {
+                            Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
+                        } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
+                    }
+                    .disabled(!ModelAccounts.canTalkLive(provider))
                 }
-                .disabled(!ModelAccounts.canTalkLive(provider))
             } header: {
                 Text("Use This Account For")
             } footer: {
                 if !ModelAccounts.canChat(provider) {
                     Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
+                } else if provider == .chatgpt {
+                    Text("Poki uses this ChatGPT sign-in for both text chat and live voice.")
                 } else if !ModelAccounts.canTalkLive(provider) {
                     Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open. Dictation in the message field works with this account.")
                 }
@@ -433,7 +442,7 @@ struct AddAccount: View {
                         }
                     }
                 } footer: {
-                    Text("Text chat works with every account. Live voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like.")
+                    Text("Text chat works with every account. Live voice works with ChatGPT, an OpenAI API key, or a custom endpoint with the Realtime API.")
                 }
             }
             .listStyle(.insetGrouped)
