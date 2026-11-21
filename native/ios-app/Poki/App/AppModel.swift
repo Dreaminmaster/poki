@@ -1843,7 +1843,7 @@ final class AppModel {
             if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
             closeAfterTalk()
         case .approvalRequested(let approval):
-            let origin = ApprovalClassifier.origin(voiceOn: voice.isOn)
+            let origin = ApprovalClassifier.origin(voiceOn: voice.isOn, outsideSession: approval.sourceSession)
             switch ApprovalClassifier.route(approval, voiceOn: voice.isOn, origin: origin) {
             case .allow:
                 // The rules were on when Poki started and asking has been turned off since.
