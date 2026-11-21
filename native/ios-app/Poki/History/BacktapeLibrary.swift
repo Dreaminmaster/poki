@@ -841,7 +841,9 @@ struct BacktapeLibrary: View {
             }
             .padding(.bottom, 8)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        // The settings pages' blue light (HomeBackdrop, as SettingsPageStyle draws it), frozen so a
+        // zoom never moves it: the soft edges under the bars blur the blue, with no band.
+        .background { HomeBackdrop(home: true, working: false, frozen: true).ignoresSafeArea() }
         .sensoryFeedback(.selection, trigger: zoom)
         .sensoryFeedback(.selection, trigger: expanded)
         .sensoryFeedback(.success, trigger: copied)

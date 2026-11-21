@@ -122,6 +122,8 @@ struct FirstRunGuide: View {
     var kind: FirstRun.Kind = .firstRun
     /// Drawn under the launch screen: the hello starts as the launch screen's own picture.
     var fromLaunch = false
+    /// Opened again from Settings: the hello offers Not Now, and every step shows where it stands.
+    var replay = false
     /// A setup step a link opened (a pairing file from Poki Setup) while the welcome is up.
     @Binding var link: SetupStep?
     var done: () -> Void
@@ -132,7 +134,7 @@ struct FirstRunGuide: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            StartHello(design: design, kind: kind, shown: stage == .hello, setUp: openPanel, later: finish)
+            StartHello(design: design, kind: kind, replay: replay, shown: stage == .hello, setUp: openPanel, later: finish)
                 .background { StartGround(design: design, hello: true) }
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: StartRoute.self) { route in
@@ -334,9 +336,9 @@ struct FirstRunAgain: View {
     var body: some View {
         Button { welcoming = true } label: {
             if row {
-                SettingsRow(title: "Show Welcome Pages Again", symbol: "hand.wave").contentShape(.rect)
+                SettingsRow(title: "Replay Setup Guide", symbol: "play.circle").contentShape(.rect)
             } else {
-                Text("Show Welcome Pages Again")
+                Text("Replay Setup Guide")
                     .foregroundStyle(Tint.blueText)
                     .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
                     .contentShape(.rect)
@@ -344,6 +346,6 @@ struct FirstRunAgain: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("setup.firstRun")
-        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(link: .constant(nil), done: { welcoming = false }) }
+        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(replay: true, link: .constant(nil), done: { welcoming = false }) }
     }
 }

@@ -117,6 +117,7 @@ struct StartButtons: View {
 struct StartHello: View {
     var design: StartDesign
     var kind: FirstRun.Kind
+    var replay = false
     var shown: Bool
     var setUp: () -> Void
     var later: () -> Void
@@ -139,7 +140,7 @@ struct StartHello: View {
                 Spacer(minLength: 16)
             }
             StartButtons(primary: kind == .firstRun ? "Set Up Poki" : "Check Setup", action: setUp,
-                         secondary: kind == .firstRun ? nil : "Not Now", secondaryAction: later,
+                         secondary: kind == .firstRun && !replay ? nil : "Not Now", secondaryAction: later,
                          primaryID: "firstRun.primary", secondaryID: "firstRun.later")
                 .padding(.bottom, 8)
         }

@@ -30,6 +30,7 @@ struct AutoUnlockSection: View {
                     Text("Poki could not confirm the unlock. Unlock your iPhone manually and check your saved passcode.")
                 }
             }
+            .settingsFooter()
         }
     }
 

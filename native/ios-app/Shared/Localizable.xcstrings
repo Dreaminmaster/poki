@@ -13037,28 +13037,6 @@
         }
       }
     },
-    "Show Welcome Pages Again" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show Welcome Pages Again"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新查看欢迎页"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新查看歡迎頁"
-          }
-        }
-      }
-    },
     "Saved. Change it and save again, or keep it as it is." : {
       "localizations" : {
         "en" : {
@@ -43758,6 +43736,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而它現在已中斷。執行 Poki Loopback 捷徑即可修復。"
+          }
+        }
+      }
+    },
+    "Replay Setup Guide" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replay Setup Guide"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新查看设置指南"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新查看設定指南"
           }
         }
       }

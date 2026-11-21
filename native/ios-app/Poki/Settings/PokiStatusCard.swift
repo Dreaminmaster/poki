@@ -65,8 +65,6 @@ struct PokiMenu<Face: View>: View {
     @ViewBuilder var face: () -> Face
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
-    @State private var showsAutoUnlock = false
-    @State private var showsAutoUnlockPasscode = false
 
     private var providers: [ModelProvider] {
         ModelProvider.allCases.filter { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }
@@ -126,12 +124,6 @@ struct PokiMenu<Face: View>: View {
                 Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
             }
             .id(modelVersion)
-            if model.supportsAutoUnlock || model.autoUnlock.enabled {
-                Button { showsAutoUnlock = true } label: {
-                    Label("Automatic Unlock", systemImage: "lock.open")
-                }
-                .accessibilityIdentifier("status.autoUnlock")
-            }
             if let openOutfits {
                 Button("Outfits", systemImage: "tshirt", action: openOutfits)
             }
@@ -144,22 +136,6 @@ struct PokiMenu<Face: View>: View {
         .sensoryFeedback(.selection, trigger: model.approvalMode)
         .sensoryFeedback(.selection, trigger: modelVersion)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
-        .sheet(isPresented: $showsAutoUnlock) {
-            NavigationStack {
-                Form {
-                    AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
-                                      showsPasscode: $showsAutoUnlockPasscode)
-                }
-                .navigationTitle("Automatic Unlock")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAutoUnlock = false } }
-                }
-                .sheet(isPresented: $showsAutoUnlockPasscode) {
-                    AutoUnlockPasscodeForm(setting: model.autoUnlock)
-                }
-            }
-        }
     }
 
     private func modelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {

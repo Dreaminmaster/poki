@@ -239,7 +239,7 @@ extension View {
                 Group {
                     switch route {
                     case .model, .voiceKey: ModelSettingsView()
-                    case .screenHistory: ScreenHistorySettingsView(asks: false)
+                    case .screenHistory: HistoryPage()
                     case .agents: AgentsAndRelayView(path: path)
                     default: EmptyView()
                     }

@@ -5,11 +5,20 @@ import SwiftUI
 // lock, and the two records, the Activity Log and the Observing Record.
 
 struct SecuritySettingsView: View {
+    @Environment(AppModel.self) private var model
     @ObservedObject private var capture = HistoryCapture.shared
+    @State private var showsAutoUnlockPasscode = false
 
     var body: some View {
         List {
             SecurityApprovalSections()
+
+            // Automatic Unlock (#555) belongs with what Poki may do by itself (the owner, Nov 21
+            // 2026): its only place, with the passcode and its explanation.
+            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+                AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                  showsPasscode: $showsAutoUnlockPasscode)
+            }
 
             Section {
                 NavigationLink(value: DetailsRoute.screenHistory) {
@@ -51,5 +60,8 @@ struct SecuritySettingsView: View {
         }
         .navigationTitle(AppLocalization.text("Security"))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
+        }
     }
 }

@@ -77,7 +77,7 @@ struct HistoryPage: View {
     /// Senses itself (Settings and Security open it): the history first, its settings behind the
     /// toolbar's button and the ask bar under it (the owner, Nov 21 2026: Senses opened on its
     /// settings, with the ask bar on a settings page).
-    var asSenses = false
+    var asSenses = true
     @ObservedObject private var capture = HistoryCapture.shared
     @ObservedObject private var lock = HistoryLock.shared
     @State private var layout = BacktapeLayout()
@@ -120,13 +120,14 @@ struct HistoryPage: View {
         }
         // History: the timeline. As Senses, its settings are one button away; from the settings
         // page's own History row it has none (one way in to each control).
-        .navigationTitle(AppLocalization.text(asSenses ? "Senses" : "History"))
+        // The history is the Senses page (the owner, Nov 21 2026): one title, wherever it opens from.
+        .navigationTitle(AppLocalization.text("Senses"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if asSenses {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink {
-                        ScreenHistorySettingsView(showsHistory: false).settingsPage()
+                        ScreenHistorySettingsView().settingsPage()
                     } label: {
                         Label("Senses Settings", systemImage: "gearshape")
                     }
@@ -188,8 +189,6 @@ struct HistoryPage: View {
 struct ScreenHistorySettingsView: View {
     /// No ask bar on a settings page (the owner, Nov 21 2026): it is on Senses' history page.
     var asks = false
-    /// Its History row; left out when the page is opened from the history itself.
-    var showsHistory = true
     @ObservedObject private var capture = HistoryCapture.shared
     @State private var asking = ""
     @ObservedObject private var lock = HistoryLock.shared
@@ -240,18 +239,6 @@ struct ScreenHistorySettingsView: View {
             SensesUseSection()
 
             Section {
-                if showsHistory {
-                NavigationLink {
-                    HistoryPage().settingsPage()
-                } label: {
-                    SettingsRow(
-                        title: "History",
-                        symbol: "clock.arrow.circlepath",
-                        value: size.entries > 0 ? "\(size.entries)" : nil
-                    )
-                }
-                .accessibilityIdentifier("screenHistory.records")
-                }
 
                 NavigationLink {
                     if lock.needsSetup {
@@ -283,7 +270,7 @@ struct ScreenHistorySettingsView: View {
                 .accessibilityIdentifier("screenHistory.clear")
             }
         }
-        .navigationTitle(AppLocalization.text("Senses"))
+        .navigationTitle(AppLocalization.text("Senses Settings"))
         .navigationBarTitleDisplayMode(.inline)
         .bottomBar(softEdge: true) { if asks { PokiAskBar(text: $asking, scope: .senses) } }
         .task(id: capture.changes) { size = await HistoryStore.shared.size() }
