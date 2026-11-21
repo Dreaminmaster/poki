@@ -39,8 +39,9 @@ enum SensesContext {
         case unavailable(String)
         /// The tape has nothing on it.
         case nothing
-        /// The local model's answer and whether it may go without asking, with the reason.
-        case summary(String, share: Bool, reason: String)
+        /// The local model's answer and whether it may go without asking, with the reason, and what
+        /// the chat's card shows of it: the apps, when, and the item found.
+        case summary(String, share: Bool, reason: String, shown: SensesShare? = nil)
     }
 
     static let notShared = "The owner did not allow sharing this. Do not ask for it again in this task. Go on without it, or ask the owner in plain words for what you need."
@@ -76,14 +77,17 @@ enum SensesContext {
         // or none picked, the reads that share words with the question stand in.
         let words = terms(question)
         var text = ""
+        var basis: [HistoryEntry] = []
         let spots = await moments(for: question, from: Date().addingTimeInterval(-span), to: Date())
         if !spots.isEmpty {
             let inside = entries.filter { entry in spots.contains { $0.start <= entry.at && entry.at < $0.end } }
             text = passages(inside, words: words, long: span > 20 * 3600)
+            basis = inside
             AppLog.shared.add("history", "personal context: \(spots.count) moments, \(inside.count) reads")
         }
         if text.isEmpty {
-            text = passages(pick(entries, for: question), words: words, long: span > 20 * 3600)
+            basis = pick(entries, for: question)
+            text = passages(basis, words: words, long: span > 20 * 3600)
         }
         if !known.isEmpty {
             text = "Habits learned from the person's use of the iPhone (inferred, not their words):\n" + known.joined(separator: "\n") + "\n\n" + text
@@ -92,26 +96,28 @@ enum SensesContext {
         You answer one question about a person, from their habits on their iPhone and text that was \
         on its screen. Say a habit is a habit, not something they said. Answer in the language of the question, in at most 4 plain sentences, with only what \
         the question asks for and only what the text shows. Never give message text, passwords, \
-        codes, card or account numbers. If the text does not answer the question, reply with the \
-        single word NONE.
+        codes, card or account numbers. When the question is about one post, video, article, page, \
+        product or place, end with one more line, exactly as ITEM: APP NAME | its title as the screen \
+        showed it. If the text does not answer the question, reply with the single word NONE and \
+        nothing else.
         """
         guard let raw = await BacktapeWriter.ask("Question: \(question)\n\n\(text)", instructions: instructions) else {
             return .unavailable("The model on this iPhone could not answer. Go on without it.")
         }
-        let answer = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(700))
-        if answer.isEmpty || answer.uppercased().hasPrefix("NONE") { return .nothing }
+        guard let parsed = SensesShare.parse(raw, entries: basis) else { return .nothing }
+        let answer = parsed.text
 
         // The pills' own rule first: money, codes, passwords, messages and quoted words are never
         // the model's to wave through.
-        if HomeShortcuts.isPrivate(answer) {
-            return .summary(answer, share: false, reason: "It may hold something private.")
+        if HomeShortcuts.isPrivate(parsed.answer + " " + (parsed.item?.title ?? "")) {
+            return .summary(answer, share: false, reason: "It may hold something private.", shown: parsed)
         }
         // Ask for Everything means what it says.
         if ApprovalLevel.saved == .everything {
-            return .summary(answer, share: false, reason: "")
+            return .summary(answer, share: false, reason: "", shown: parsed)
         }
         let verdict = await judge(answer, question: question, task: task)
-        return .summary(answer, share: verdict.share, reason: verdict.reason)
+        return .summary(answer, share: verdict.share, reason: verdict.reason, shown: parsed)
     }
 
     /// Tests of the query itself turn the check off; nothing else does.
