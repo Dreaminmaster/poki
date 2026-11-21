@@ -147,19 +147,17 @@ jobs:
           for spec in $TEST_SUITES; do
             suite="${spec%%:*}"
             minimum="${spec##*:}"
-            # New main has three Duo-specific cases; they require separate device coverage.
-            # Select the general ChatScrollTests suite without those cases on a standard iPhone.
-            extra=()
-            if [ "$suite" = ChatScrollTests ]; then
-              extra+=(
-                -skip-testing:PokiTests/ChatScrollTests/testHomeComposerKeepsItsMarginsInTheDuoLeftPane
-                -skip-testing:PokiTests/ChatScrollTests/testFoldedDuoHomeRespectsItsLeadingSafeArea
-                -skip-testing:PokiTests/ChatScrollTests/testDuoHomeRestoresItsLeadingSafeAreaWhenFoldedDuringACompanionTask
-              )
-            fi
+            # Duo-only cases are excluded from this ordinary-iPhone validation.
+            # Pass these fixed exclusions to every invocation. They are ignored by
+            # non-scroll suites; unlike an empty array this is safe with macOS Bash
+            # 3.2 under set -u (the previous runs failed before any tests started).
             "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
               -destination "id=$UDID" -derivedDataPath build/history-review \
-              -only-testing:PokiTests/$suite "${extra[@]}" -parallel-testing-enabled NO \
+              -only-testing:PokiTests/$suite \
+              -skip-testing:PokiTests/ChatScrollTests/testHomeComposerKeepsItsMarginsInTheDuoLeftPane \
+              -skip-testing:PokiTests/ChatScrollTests/testFoldedDuoHomeRespectsItsLeadingSafeArea \
+              -skip-testing:PokiTests/ChatScrollTests/testDuoHomeRestoresItsLeadingSafeAreaWhenFoldedDuringACompanionTask \
+              -parallel-testing-enabled NO \
               -resultBundlePath out/$suite.xcresult \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
               2>&1 | tee "out/$suite.log"
