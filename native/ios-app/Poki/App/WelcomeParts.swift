@@ -40,11 +40,13 @@ struct WelcomeLocalModels: View {
 
 /// Screen History, the page Settings has, which turns on only once the shortcut has run.
 struct WelcomeSensesRow: View {
+    /// Opens Senses, once the system prompt passed where Screen History is on.
+    var open: () -> Void
     @ObservedObject private var history = HistoryCapture.shared
     @ObservedObject private var reconnect = HistoryReconnect.shared
 
     var body: some View {
-        NavigationLink(value: DetailsRoute.screenHistory) {
+        UnlockLink(whenOff: true, go: open) {
             SettingsRow(title: "Screen History",
                         caption: history.enabled || reconnect.isSetUp ? "Experimental Feature" : "Needs the Poki Loopback shortcut",
                         symbol: "rectangle.stack",

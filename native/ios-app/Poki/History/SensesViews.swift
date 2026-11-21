@@ -47,18 +47,14 @@ struct SensesMemorySection: View {
     var body: some View {
         if use.learning {
             Section {
-                if lock.unlocked || lock.needsSetup {
+                if lock.unlocked {
                     SensesMemoryRows(saved: saved)
                 } else {
-                    NavigationLink {
-                        HistoryGate {
-                            Form { SensesMemoryRows(saved: saved) }
-                                .navigationTitle(AppLocalization.text("Learned from Screen History"))
-                                .navigationBarTitleDisplayMode(.inline)
-                        }
-                    } label: {
+                    // The rows show here once the system prompt has passed; nothing before it.
+                    Button { Task { await lock.open() } } label: {
                         SettingsRow(title: "Unlock to View", symbol: "lock")
                     }
+                    .disabled(lock.asking || lock.unavailable)
                     .accessibilityIdentifier("memory.senses.unlock")
                 }
             } header: {

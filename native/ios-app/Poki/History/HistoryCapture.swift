@@ -483,7 +483,6 @@ final class HistoryCapture: ObservableObject {
         // A run with no end waits for the connection or an agent's task like any run under way.
         // A run with no end also starts while the iPhone is locked: held, so it only opens its tunnel.
         if let refused = refusal(model), !always || refused == .notPaired { set(refused); return }
-        HistoryLock.shared.readStarting()
         run += 1
         let me = run
         once = minutes == nil && !always

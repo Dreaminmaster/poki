@@ -3,7 +3,7 @@ import UIKit
 import XCTest
 @testable import Poki
 
-/// Settings › Security, the page the Security row and the chat's "Approvals are off" line open.
+/// Security › Approvals, the page the chat's "Approvals are off" line opens.
 @MainActor
 final class ApprovalsPageTests: XCTestCase {
     /// The page lets the owner choose the way of asking again: its Approval Method is a control to pick
@@ -23,7 +23,7 @@ final class ApprovalsPageTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
-        window.rootViewController = UIHostingController(rootView: NavigationStack { SecuritySettingsView() }
+        window.rootViewController = UIHostingController(rootView: NavigationStack { ApprovalsSettingsView() }
             .environment(model).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }

@@ -800,9 +800,6 @@ struct BacktapeLibrary: View {
     @State private var pinched = false
     @State private var frames = BacktapeFrames()
     @State private var size: CGSize = .zero
-    @State private var asking: BacktapeTile?
-    @State private var pin = ""
-    @State private var wrong = false
     @State private var copied = 0
     @State private var forgotten = 0
 
@@ -848,25 +845,6 @@ struct BacktapeLibrary: View {
         .sensoryFeedback(.selection, trigger: expanded)
         .sensoryFeedback(.success, trigger: copied)
         .sensoryFeedback(.impact(weight: .heavy), trigger: forgotten)
-        .alert(LocalizedStringKey(asking?.zoom.forget ?? "Forget"), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } })) {
-            SecureField("PIN", text: $pin).keyboardType(.numberPad)
-            Button("Forget", role: .destructive) {
-                let tile = asking
-                asking = nil
-                if lock.unlock(pin: pin), let tile {
-                    Task { await forget(tile) }
-                } else {
-                    wrong = true
-                }
-                pin = ""
-            }
-            Button("Cancel", role: .cancel) { pin = "" }
-        } message: {
-            Text("Enter the Screen History PIN to forget this. It cannot be brought back.")
-        }
-        .alert("Wrong PIN", isPresented: $wrong) {
-            Button("OK", role: .cancel) {}
-        }
     }
 
     // MARK: One zoom's list
@@ -1017,15 +995,11 @@ struct BacktapeLibrary: View {
         copied += 1
     }
 
-    /// Forgetting is confirmed with Face ID or Touch ID, or with Poki's PIN where those are off.
+    /// Forgetting is confirmed with the system prompt: Face ID, Touch ID or the passcode, as the owner
+    /// set it on Face ID & Passcode.
     private func ask(_ tile: BacktapeTile) {
-        if lock.usesBiometrics {
-            Task {
-                if await lock.confirm(AppLocalization.bundle.localizedString(forKey: tile.zoom.forget, value: tile.zoom.forget, table: nil)) { await forget(tile) }
-            }
-        } else {
-            pin = ""
-            asking = tile
+        Task {
+            if await lock.confirm(AppLocalization.bundle.localizedString(forKey: tile.zoom.forget, value: tile.zoom.forget, table: nil)) { await forget(tile) }
         }
     }
 

@@ -345,6 +345,9 @@ final class AppModel {
 
     /// The outside agent driving the phone now: its MCP session's client, or the agent that handed
     /// a task to Poki. nil while Poki's own chat drives it.
+    /// Each outside session's latest stated intent, until its step is logged.
+    private var agentIntents: [String: String] = [:]
+
     var currentCaller: String? {
         let store = SessionStore.shared
         if let id = store.activeSessionID, let client = store.session(id)?.client { return client }
@@ -1805,9 +1808,11 @@ final class AppModel {
         // Every outside agent's session and step goes into the Sessions list, on or off.
         SessionStore.shared.observe(event, approvals: approvals)
         // The first agent through a connector names it (unless the owner did) and gives it its icon.
-        if case .session(.started(_, let client, _, let connector?)) = event {
+        if case .session(.started(_, let client, _, let connector?, _)) = event {
             identity.noteAgent(hash: connector, client: AgentName.pretty(client))
         }
+        // A computer running Poki MCP is listed on Agents › Computers; a new one waits for the owner.
+        if case .session(.started(_, _, _, _, let computer?)) = event { ComputerAccess.shared.seen(computer) }
         // Events after Turn off (the core's own "stopped") are not for the screen. An approval is
         // the exception: a call that asks one (the on-device chat, the gym probe) waits on the
         // owner's answer whether or not Poki is on, and dropping it left that call waiting for the
@@ -1856,7 +1861,13 @@ final class AppModel {
                 state.headline = summary
                 state.caller = caller
             }
-        case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, _):
+        case .stepIntent(let session, let intent):
+            if let session { agentIntents[session] = intent }
+        case .sessionNote(let session, let text):
+            // The agent's note, in the owner's record with the run it came from.
+            ActionLog.shared.add(text, app: nil, ok: true, session: SessionStore.shared.activeSessionID,
+                                 caller: session.flatMap { SessionStore.shared.outsideClient(ofMCPSession: $0) } ?? currentCaller, kind: .note)
+        case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, let stepSession):
             lastAgentActivity = Date(); lastStepAt = Date()
             if summary == "Look at the screen", AskPoki.chat?.waitingForSplitView == true { return }
             stepUnderWay = nil
@@ -1869,9 +1880,11 @@ final class AppModel {
             recentSteps.append(RecentStep(text: summary, app: app, failure: failed ? delivery : nil, at: Date()))
             // The owner's own record of every action, with the run it came from.
             let chat = AskPoki.chat
+            // An outside agent's step carries its stated intent, in its own words.
+            let intent = stepSession.flatMap { agentIntents.removeValue(forKey: $0) }
             ActionLog.shared.add(summary, app: app, ok: !failed,
                                  session: SessionStore.shared.activeSessionID ?? (chat?.running == true ? chat?.sessionID : nil),
-                                 caller: currentCaller)
+                                 caller: currentCaller, detail: intent.map { "“\($0)”" })
             if recentSteps.count > 20 { recentSteps.removeFirst(recentSteps.count - 20) }
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }

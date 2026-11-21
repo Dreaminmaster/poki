@@ -1,6 +1,8 @@
 import PokiCore
 import UIKit
 import XCTest
+import LocalAuthentication
+import notify
 @testable import Poki
 
 /// Screen History keeps only what the owner allows: a left-out app or the Home Screen leaves no read
@@ -16,7 +18,6 @@ final class ScreenHistoryTests: XCTestCase {
     private var savedExcluded: [String] = []
     private var savedIncluded: [String] = []
     // Only a disposable, unenrolled simulator may create/use this fixture PIN.
-    private let fixturePIN = "746293"
 
     override func setUp() async throws {
         savedLanguage = AppLocalization.shared.preference
@@ -53,26 +54,45 @@ final class ScreenHistoryTests: XCTestCase {
         AppLocalization.shared.preference = savedLanguage
     }
 
-    /// The production gate must be opened by the real PIN flow, not by a test-only bypass.
+    /// The production gate is opened by the real system prompt, not by a test-only bypass: the
+    /// simulator enrolls Face ID and is told a matching face, as Features › Face ID › Matching Face does.
     /// Run these destructive history fixtures only on a disposable simulator.
-    private func unlockHistoryForFixture() throws {
+    private func unlockHistoryForFixture() async throws {
         #if targetEnvironment(simulator)
-        let lock = HistoryLock.shared
-        if lock.unlocked { return }
-        if lock.hasPIN {
-            guard lock.unlock(pin: fixturePIN) else {
-                throw XCTSkip("An existing non-fixture history PIN is configured; use a disposable simulator.")
-            }
-        } else {
-            guard lock.needsSetup else {
-                throw XCTSkip("Biometrics are enrolled; use a fresh simulator without biometric enrollment.")
-            }
-            XCTAssertTrue(lock.setPIN(fixturePIN), "Failed to create fixture PIN")
+        guard await openWithSimulatedFace() else {
+            throw XCTSkip("The simulator's Face ID did not answer; use a disposable simulator.")
         }
-        XCTAssertTrue(lock.unlocked, "The real history lock must be open")
+        XCTAssertTrue(HistoryLock.shared.unlocked, "The real history lock must be open")
         #else
         throw XCTSkip("Screen history query fixtures require a disposable iOS simulator.")
         #endif
+    }
+
+    /// The system prompt, answered by the simulator's matching face.
+    private func openWithSimulatedFace() async -> Bool {
+        let lock = HistoryLock.shared
+        if lock.unlocked { return true }
+        Self.enrollSimulatorFaceID()
+        lock.refresh()
+        let prompt = Task { await lock.open() }
+        for _ in 0..<60 where !lock.unlocked {
+            notify_post("com.apple.BiometricKit_Sim.pearl.match")
+            notify_post("com.apple.BiometricKit_Sim.fingerTouch.match")
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return await prompt.value || lock.unlocked
+    }
+
+    private static func enrollSimulatorFaceID() {
+        var token: Int32 = 0
+        guard notify_register_check("com.apple.BiometricKit.enrollmentChanged", &token) == NOTIFY_STATUS_OK else { return }
+        _ = notify_set_state(token, 1)
+        _ = notify_post("com.apple.BiometricKit.enrollmentChanged")
+        _ = notify_cancel(token)
+        let deadline = Date().addingTimeInterval(10)
+        while !LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
     }
 
     /// A read as the launcher reports it for a screen whose text changed.
@@ -235,7 +255,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(capture.enabled)
         XCTAssertEqual(defaults.object(forKey: recordingKey) as? Bool, true)
         XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         let core = PokiCore(config: CoreConfig(screenHistory: HistoryStore.agentSource), host: AppCoreHost())
         let result = await core.callTool("screen_history", arguments: #"{"period":"last_hour"}"#)
         XCTAssertFalse(result.isError, result.text)
@@ -278,7 +298,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertEqual(initial.text, "Screen History is not turned on.")
         XCTAssertFalse(initial.text.contains("Secret draft"))
 
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         HistoryCapture.shared.enabled = true
         let listedOn = try await mcpTools()
         // Outside agents get the query; Poki's own chat asks through personal_context, which a model on
@@ -340,7 +360,7 @@ final class ScreenHistoryTests: XCTestCase {
         )
         HistoryStore.shared.add(at: tenMinutesAgo, app: "com.apple.mobilenotes", title: "Groceries", text: "Buy oat milk and figs")
 
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         HistoryCapture.shared.enabled = true
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
 
@@ -403,7 +423,7 @@ final class ScreenHistoryTests: XCTestCase {
             HistoryStore.shared.add(at: at, app: "com.apple.mobilenotes", title: "Notes", text: "Note-\(index): \(padding)")
         }
 
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         HistoryCapture.shared.enabled = true
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
 
@@ -464,17 +484,13 @@ final class ScreenHistoryTests: XCTestCase {
         try await assertRevokedPendingQuery(change: .deviceLock)
     }
 
-    func testPINChangeRevokesPendingRead() async throws {
-        try await assertRevokedPendingQuery(change: .changePIN)
-    }
-
-    func testBiometricsSettingChangeRevokesPendingRead() async throws {
-        try await assertRevokedPendingQuery(change: .changeBiometrics)
+    func testPasscodeSettingChangeRevokesPendingRead() async throws {
+        try await assertRevokedPendingQuery(change: .changePasscode)
     }
 
     /// Exercise new queries through the app's actual core/SQLite source, not a fake source.
     func testLockedHistoryRefusesNewQueriesAndGrantsFreshReadsAfterUnlock() async throws {
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         let capture = HistoryCapture.shared
         let lock = HistoryLock.shared
         capture.enabled = true
@@ -493,7 +509,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(locked.isError)
         XCTAssertFalse(locked.text.contains(canary))
 
-        XCTAssertTrue(lock.unlock(pin: fixturePIN))
+        XCTAssertTrue(await openWithSimulatedFace())
         // Poki's own chat reads Screen History through personal_context only (Senses, 6600edd8): the
         // raw query stays for outside agents, whatever the lock says.
         XCTAssertFalse(Harness.tools.map(\.name).contains("screen_history"))
@@ -511,7 +527,7 @@ final class ScreenHistoryTests: XCTestCase {
 
     /// The chat uses this same validation after its core await and before persisting a call.
     func testCompletedHistoryAnswerCannotCrossARevokedChatDeliveryBoundary() async throws {
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         HistoryCapture.shared.enabled = true
         let canary = "SYNTHETIC_CHAT_DELIVERY_CANARY"
         HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
@@ -521,7 +537,7 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(answer.isError, answer.text)
         XCTAssertTrue(answer.text.contains(canary), answer.text)
         HistoryLock.shared.lock()
-        XCTAssertTrue(HistoryLock.shared.unlock(pin: fixturePIN))
+        XCTAssertTrue(await openWithSimulatedFace())
         let safe = HistoryCapture.validateAgentAnswer(answer, revision: revision)
         XCTAssertTrue(safe.isError)
         XCTAssertFalse(safe.text.contains(canary))
@@ -531,7 +547,7 @@ final class ScreenHistoryTests: XCTestCase {
     /// The second request was authorized; locking before its reply must prevent the raw
     /// tool result from being resent during the third and fourth requests.
     func testLiveModelRequestsRefreshHistoryToolsAndDiscardRevokedEvidence() async throws {
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         let capture = HistoryCapture.shared
         capture.enabled = true
         let canary = "SYNTHETIC_MODEL_REQUEST_CANARY"
@@ -592,19 +608,17 @@ final class ScreenHistoryTests: XCTestCase {
     }
 
     private enum PendingPrivacyChange {
-        case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePIN, changeBiometrics
+        case turnOff, turnOffThenOn, changeAppScope, clear, lockThenUnlock, deviceLock, changePasscode
     }
 
     private func assertRevokedPendingQuery(change: PendingPrivacyChange) async throws {
-        try unlockHistoryForFixture()
+        try await unlockHistoryForFixture()
         let capture = change == .deviceLock ? HistoryCapture() : HistoryCapture.shared
         let lock = HistoryLock.shared
         capture.enabled = true
         defer { if change == .deviceLock { capture.enabled = false } }
-        let savedBiometrics = lock.biometricsOn
-        defer {
-            if lock.unlocked, lock.biometricsOn != savedBiometrics { _ = lock.setBiometrics(savedBiometrics) }
-        }
+        let savedPasscode = lock.passcodeOn
+        defer { if lock.passcodeOn != savedPasscode { _ = lock.changePasscode(savedPasscode) } }
         let canary = "SYNTHETIC_PRIVATE_HISTORY_CANARY"
         HistoryStore.shared.add(at: Date().addingTimeInterval(-120), app: "com.apple.mobilenotes", title: "Notes", text: canary)
         let delayedRead = SuspendedScreenHistoryRead()
@@ -642,20 +656,19 @@ final class ScreenHistoryTests: XCTestCase {
         case .lockThenUnlock:
             lock.lock()
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-            XCTAssertTrue(lock.unlock(pin: fixturePIN))
+            XCTAssertTrue(await openWithSimulatedFace())
         case .deviceLock:
             XCTAssertFalse(capture.isRunning)
             NotificationCenter.default.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
             XCTAssertFalse(lock.unlocked, "Device lock must revoke even with no recording run")
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-            XCTAssertFalse(lock.unlock(pin: fixturePIN), "Protected data is still unavailable")
+            let early = await lock.open()
+            XCTAssertFalse(early, "Protected data is still unavailable")
             NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
-            XCTAssertTrue(lock.unlock(pin: fixturePIN))
-        case .changePIN:
-            // This regenerates the real credential's salt and grant, using only the fixture PIN.
-            XCTAssertTrue(lock.setPIN(fixturePIN))
-        case .changeBiometrics:
-            XCTAssertTrue(lock.setBiometrics(!savedBiometrics))
+            XCTAssertTrue(await openWithSimulatedFace())
+        case .changePasscode:
+            // Changing how history opens closes it, with the read under way.
+            XCTAssertTrue(lock.changePasscode(!savedPasscode))
         }
         await delayedRead.release()
 

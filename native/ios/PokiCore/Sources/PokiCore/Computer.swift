@@ -51,6 +51,9 @@ final class Computer: @unchecked Sendable {
     /// The numbers of the latest read. An element that is still there in the next read keeps its
     /// number, so a `do` can list only what changed.
     var refs: [Int: Element] = [:]
+    /// The do call under way: the agent's intent and its MCP session, for an approval it asks.
+    var currentIntent: String?
+    var currentSession: String?
     var listed: [(ref: Int, element: Element)] = []
     var nextRef = 1
     /// Every element of the latest tree with a frame, listed or not (for what covers what).
@@ -1032,7 +1035,17 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+    /// The intents on the actions themselves (`{tap, intent}`), for an approval when the call had none.
+    static func stepIntents(_ actions: [JSON]) -> String? {
+        let words = actions.compactMap { $0["intent"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return words.isEmpty ? nil : String(words.joined(separator: "; ").prefix(160))
+    }
+
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, intent: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+        // Calls run one at a time (the core's gate): an approval this call asks for carries them.
+        currentIntent = intent
+        currentSession = local ? nil : session
+        defer { currentIntent = nil; currentSession = nil }
         let originalActionCount = actions.count
         var actions = actions
         var bound: String?
@@ -1074,6 +1087,10 @@ final class Computer: @unchecked Sendable {
             actionSucceeded = onActionSucceeded
         }
         var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: actionSucceeded))
+        // An outside agent that gave no intent is reminded on every answer (the owner, Nov 21 2026).
+        if !local, session != nil, intent == nil, !actions.isEmpty {
+            result.text += "\nintent missing: give every do with actions an intent, one short sentence on what it is for. The owner reads it, and without it a sensitive step always goes to them."
+        }
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
@@ -1277,7 +1294,8 @@ final class Computer: @unchecked Sendable {
                 }
                 let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
-                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty)
+                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
+                                           session: currentSession, intent: currentIntent ?? Self.stepIntents(tail))
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))

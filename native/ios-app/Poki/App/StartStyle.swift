@@ -300,7 +300,7 @@ struct StartFlowPage: View {
             Form {
                 StartHero(symbol: "square.stack.3d.up", title: "Features",
                           line: "All optional. Each can be changed later in Settings.")
-                WelcomeFeaturesSection(onItsPage: true)
+                WelcomeFeaturesSection(onItsPage: true, openSenses: { path.append(DetailsRoute.screenHistory) })
                 Section {
                     NavigationLink(value: DetailsRoute.agents) {
                         SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right")

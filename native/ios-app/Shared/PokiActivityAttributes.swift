@@ -131,6 +131,10 @@ struct PendingApproval: Codable, Hashable {
     /// chat app on a screen not read yet reads as sending, and stops, while a payment, a deletion, Wallet
     /// and a tap after a launch do not.
     var stopsWhenOff: Bool? = nil
+    /// The outside agent's MCP session that asked, nil for Poki's own chat; and the agent's words on
+    /// what the step is for. Only the auto classifier reads the intent; the cards never show it as fact.
+    var session: String? = nil
+    var intent: String? = nil
 
     /// The card offers Don’t Ask Again.
     var offersStopAsking: Bool { stopsWhenOff == true }
