@@ -93,6 +93,7 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
 - **Questions and ideas:** Join [GitHub Discussions](https://github.com/JosssphZhou/poki/discussions).
 - **Bugs and requests:** Open an issue in [GitHub Issues](https://github.com/JosssphZhou/poki/issues).
 - **Contribute code:** Read [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Code of conduct:** Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 See all contributors in [CONTRIBUTING.md](CONTRIBUTING.md#contributors).
 
