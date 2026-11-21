@@ -1345,6 +1345,8 @@ struct ComposerInputView: View {
     @State private var fieldFrame: CGRect = .zero
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
+    /// The field's notices: one at a time, on glass just above it.
+    @State private var notices = NoticeQueue()
     @State private var fieldScroll = CapsuleScroll()
     /// A swipe down that started on a message scrolled away from its first line: it scrolls the message.
     @State private var swipeScrolls: Bool?
@@ -1368,38 +1370,58 @@ struct ComposerInputView: View {
 
     private var voice: VoiceModel { model.voice }
     private var hasText: Bool { !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// A talk is under way, so its row stands where the field was (a talk that broke is a notice).
+    private var talking: Bool { voice.talkState.map { !$0.isFailed } ?? false }
+
+    private static let voiceKeyNotice = "voice.key"
+    private static let voiceFailedNotice = "voice.failed"
+    private static let fileNotice = "composer.file"
+    private static let dictationNotice = "composer.dictation"
+
+    /// Talk with Poki with no voice key (or Live Voice off): what it is missing, and where to add it.
+    private func postVoiceKeyNotice() {
+        let off = ModelKeys.hasKey(.openai) && VoiceDirect.account == nil
+        notices.post(Notice(id: Self.voiceKeyNotice, style: .warning,
+                            title: AppLocalization.text(off ? LocalizedStringResource("Live Voice Is Off") : LocalizedStringResource("No Voice Key Set Up")),
+                            message: AppLocalization.text(off ? LocalizedStringResource("Turn it on in Settings. Dictate works without it.")
+                                                              : LocalizedStringResource("Talk needs an OpenAI key. Dictate works without one.")),
+                            actionTitle: AppLocalization.text(off ? LocalizedStringResource("Open Settings") : LocalizedStringResource("Add Key"))),
+                     action: { needsKey = false; openVoiceKey() }, onDismiss: { needsKey = false })
+    }
+
+    /// A talk that broke: it ends at once (the field comes back), and why it broke, with Try Again,
+    /// waits in the notice slot.
+    private func showVoiceFailure(_ state: TalkState) {
+        notices.post(Notice(id: Self.voiceFailedNotice, style: .error, title: state.word, message: state.reason,
+                            actionTitle: AppLocalization.text(LocalizedStringResource("Try Again"))),
+                     action: { openVoice() })
+        voice.dismissProblem()
+        #if DEBUG && targetEnvironment(simulator)
+        voice.staged = nil
+        #endif
+    }
     /// Something to send: words, or pictures on their own.
     private var canSend: Bool { hasText || !attachments.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let problem = problem ?? (dictation.on ? nil : dictation.problem) {
-                Text(problem).font(.allo(.footnote)).foregroundStyle(Tint.red)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
-                    .transition(.opacity)
-            }
             if !attachments.isEmpty {
                 AttachmentStrip(attachments: attachments) { item in
                     withAnimation(.snappy) { attachments.removeAll { $0.id == item.id } }
                     photoAssets = photoAssets.filter { $0.value != item.id }
                 }
             }
-            // The apps and connectors that fit the words at the caret: in the bar's own column above
-            // the field, so it takes its taps (an overlay outside the safe-area bar's frame let them
-            // through to the conversation, which closed the keyboard) and never covers the words.
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
-                if voice.talkState != nil || needsKey {
+                // The talk's own row while a talk runs. What goes wrong with it (no key, a lost
+                // connection) is said in the notice slot above, never in this pill.
+                if talking, let talk = voice.talkState {
                     ScrollView {
                         Group {
-                            if let talk = voice.talkState {
-                                TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
-                                        interrupt: voice.stopTalking, end: voice.stop,
-                                        retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
-                            } else {
-                                VoiceKeyNotice(addKey: { needsKey = false; openVoiceKey() }, close: { needsKey = false })
-                            }
+                            TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
+                                    interrupt: voice.stopTalking, end: voice.stop,
+                                    retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { voiceContentHeight = $0 }
@@ -1436,7 +1458,7 @@ struct ComposerInputView: View {
             }
             .padding(controlInset)
             .contentShape(.rect)
-            .onTapGesture { if voice.talkState == nil, !needsKey { focused = true } }
+            .onTapGesture { if !talking { focused = true } }
             .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), fallback: .bar)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { barFrame = $0 }
@@ -1446,8 +1468,7 @@ struct ComposerInputView: View {
         .preference(key: MentionFloatKey.self, value: mentionFloat)
         .animation(.snappy, value: dictation.on)
         .animation(.snappy, value: adding)
-        .animation(TalkMotion.enter, value: voice.talkState != nil)
-        .animation(TalkMotion.enter, value: needsKey)
+        .animation(TalkMotion.enter, value: talking)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
         // Talk with Poki with no voice key, from the field's button, a link or Poki's profile: what it is
         // missing. The keyboard goes down: the field it belongs to is not on screen.
@@ -1458,19 +1479,42 @@ struct ComposerInputView: View {
             needsKey = true
         }
         // The talk's bar stands where the field was: the keyboard goes down with the field.
-        .onChange(of: voice.talkState != nil) { _, talking in if talking { focused = false; needsKey = false } }
+        .onChange(of: talking) { _, talking in if talking { focused = false; needsKey = false } }
         // A suggestion picked or a task starting puts the key's message away.
         .onChange(of: input) { _, text in if !text.isEmpty, !dictation.on { needsKey = false } }
         // The keyboard asked for (a suggestion, New Conversation) while the talk's bar stands in the
         // field's place has no field to go to; over the key's message it brings the field back.
         .onChange(of: focused) { _, now in
             guard now else { return }
-            if voice.talkState != nil { focused = false } else { needsKey = false }
+            if talking { focused = false } else { needsKey = false }
         }
         .onChange(of: running) { _, now in if now { needsKey = false } }
         .animation(.snappy, value: running)
         .animation(.snappy, value: attachments)
         .animation(.snappy, value: problem)
+        // Everything the field has to say goes to the one notice slot above it.
+        .onChange(of: needsKey) { _, needs in
+            if needs { postVoiceKeyNotice() } else { notices.clear(Self.voiceKeyNotice) }
+        }
+        .onChange(of: voice.talkState) { _, state in
+            guard case .failed = state, let state else { return }
+            showVoiceFailure(state)
+        }
+        .onChange(of: problem) { _, problem in
+            if let problem {
+                notices.post(Notice(id: Self.fileNotice, style: .error, title: problem), onDismiss: { self.problem = nil })
+            } else {
+                notices.clear(Self.fileNotice)
+            }
+        }
+        .onChange(of: dictation.problem) { _, problem in
+            if let problem {
+                notices.post(Notice(id: Self.dictationNotice, style: .warning, title: AppLocalization.text(LocalizedStringResource("Dictation Can’t Start")),
+                                    message: problem))
+            } else {
+                notices.clear(Self.dictationNotice)
+            }
+        }
         .onChange(of: dictation.text) { _, text in if dictation.on { input = dictation.base + text } }
         // A keyboard that was still composing (autocorrect, Pinyin) can commit its text after Send has
         // emptied the field, which put the sent message back: for a moment after Send, that is undone.
@@ -1516,6 +1560,8 @@ struct ComposerInputView: View {
             try? await Task.sleep(for: .seconds(1))
             switch shot {
             case "needs-key": needsKey = true
+            case "failed": voice.staged = .failed(TalkState.connectionLost)
+            case "file-problem": problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
             case "add-key": openVoiceKey()
             case "talk":
                 openVoice()
@@ -1660,11 +1706,26 @@ struct ComposerInputView: View {
     /// when it opens, and its taps land: drawn outside the bar's own frame, they went through to the
     /// conversation. It grows out of the caret's corner on a soft spring, and only fades with Reduce Motion.
     private var mentionFloat: MentionFloat? {
-        guard let shown = mentionMatches else { return nil }
+        guard let shown = mentionMatches else { return noticeFloat }
         let picker = MentionPicker(matches: shown.matches, pick: { mentions.pick($0) }, dismiss: { mentions.dismiss() })
             .padding(.bottom, 4)
         return MentionFloat(ids: shown.matches.map(\.id), origin: CGPoint(x: barFrame.minX + shown.x, y: barFrame.minY),
                             reduceMotion: reduceMotion, view: AnyView(picker))
+    }
+
+    /// The current notice, as wide as the bar, just above it (while no mention list is open).
+    private var noticeFloat: MentionFloat? {
+        guard let notice = notices.current, !adding, barFrame.width > 0 else { return nil }
+        let view = NoticeView(notice: notice, act: { notices.act(notice.id) }, dismiss: { notices.dismiss(notice.id) })
+            .frame(width: barFrame.width)
+            .padding(.bottom, 8)
+            .task(id: notice.id) {
+                guard let lasts = notice.lasts else { return }
+                try? await Task.sleep(for: lasts)
+                if !Task.isCancelled { notices.clear(notice.id) }
+            }
+        return MentionFloat(ids: ["notice." + notice.id, notice.title, notice.message ?? ""], origin: CGPoint(x: barFrame.minX, y: barFrame.minY),
+                            reduceMotion: reduceMotion, view: AnyView(view))
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {

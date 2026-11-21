@@ -4,65 +4,10 @@ import UIKit
 // Speaking to Poki from the message field. The empty field's main button starts a talk with Poki at
 // once (the owner, 2026-11-13: one tap, no menu); dictation has its own microphone beside it. The talk
 // goes on in the chat with the field as its bar (pull request #250's interaction), and Talk with Poki
-// without a voice key says so in the field's place, with a button to the key's form in Settings. The
+// without a voice key says so in the notice slot above the field (NoticeSlot), with a button to the key's form in Settings. The
 // old Voice page no longer opens from anywhere a person can reach. The code and the look are this app's:
 // glass, Poki's blue and its brand band, the system's type. The bars in the talk's mark are LiveKit's
 // (TalkBars.swift) and the light along the bottom edge is Jacob Mobin's (TalkEdgeGlow.swift).
-
-/// In the message field's place, on its glass: Talk with Poki was asked for with no OpenAI key and no
-/// voice bridge. It says what is missing and goes straight to the OpenAI key's form in Settings. With
-/// the key there but Live Voice turned off, it says that and goes to Live Voice.
-struct VoiceKeyNotice: View {
-    var addKey: () -> Void
-    var close: () -> Void
-
-    var body: some View {
-        let off = ModelKeys.hasKey(.openai) && VoiceDirect.account == nil
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "key.fill").font(.allo(.body, .semibold)).foregroundStyle(.white)
-                    .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(off ? LocalizedStringKey("Live Voice Is Off") : LocalizedStringKey("No Voice Key Set Up")).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
-                    Text(off ? LocalizedStringKey("Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it.")
-                             : LocalizedStringKey("Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it."))
-                        .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("composer.speak.needs-key")
-            }
-            // Side by side at the trailing edge; one above the other when large text leaves no room.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { Spacer(minLength: 0); later; add(off) }
-                VStack(spacing: 8) { add(off).frame(maxWidth: .infinity); later.frame(maxWidth: .infinity) }
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var later: some View {
-        Button(action: close) {
-            Text("Not Now").font(.allo(.body, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Color(.label).opacity(0.1), in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("composer.speak.later")
-    }
-
-    private func add(_ off: Bool) -> some View {
-        Button(action: addKey) {
-            Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.allo(.body, .semibold)).foregroundStyle(.white).lineLimit(1)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Tint.blue, in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("composer.speak.add-key")
-    }
-}
 
 /// The message field while you talk with Poki: what the talk is doing and for how long, a way to stop
 /// Poki's answer while it speaks, Poki's voice on or off, and End. End here and End on the Live Activity

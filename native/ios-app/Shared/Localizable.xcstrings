@@ -25583,6 +25583,54 @@
         }
       }
     },
+    "Dictation Can’t Start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法开始听写"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開始聽寫"
+          }
+        }
+      }
+    },
+    "Turn it on in Settings. Dictate works without it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在设置中打开。听写无需它也能用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在設定中開啟。聽寫無需它也能用。"
+          }
+        }
+      }
+    },
+    "Talk needs an OpenAI key. Dictate works without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话需要 OpenAI 密钥。听写无需密钥也能用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對話需要 OpenAI 密鑰。聽寫無需密鑰也能用。"
+          }
+        }
+      }
+    },
     "Search Apps" : {
       "localizations" : {
         "zh-Hans" : {
