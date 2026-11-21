@@ -148,6 +148,46 @@ final class ModelSessionMetadataTests: XCTestCase {
         XCTAssertEqual(server.requestHeaders.count, 1)
     }
 
+    /// Paired loopback measurements isolate the cost of routing metadata from the
+    /// same request and model. This is diagnostic evidence, not a latency threshold.
+    func testOpenCodeRoutingMetadataPairedStepTiming() async throws {
+        let samples = 12
+        let server = try FakeCompletions(replies: Array(repeating: FakeCompletions.text("OK"), count: samples * 2))
+        let model = Model(id: "timing-fixture", name: "Timing fixture", api: .openAICompletions,
+                          provider: "opencode-go", baseUrl: "http://127.0.0.1:\(server.port)/v1",
+                          reasoning: false, input: [.text],
+                          cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
+                          contextWindow: 1_000, maxTokens: 100)
+        func step(_ id: String) async -> Double {
+            let loop = PiLoop(provider: .custom, model: model, sessionID: id, tools: []) { _ in
+                .init(text: "No tools", jpeg: nil, isError: true)
+            }
+            let started = ProcessInfo.processInfo.systemUptime
+            let outcome = await loop.run("Reply OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
+            XCTAssertEqual(outcome, .done)
+            return (ProcessInfo.processInfo.systemUptime - started) * 1_000
+        }
+        var without: [Double] = []
+        var withHeader: [Double] = []
+        let session = "01234567-89ab-cdef-0123-456789abcdef"
+        for _ in 0..<samples {
+            without.append(await step(""))
+            withHeader.append(await step(session))
+        }
+        func median(_ values: [Double]) -> Double {
+            let ordered = values.sorted()
+            return (ordered[(ordered.count - 1) / 2] + ordered[ordered.count / 2]) / 2
+        }
+        let headers = server.requestHeaders
+        XCTAssertEqual(headers.count, samples * 2)
+        for i in 0..<samples {
+            XCTAssertNil(headers[i * 2]["x-opencode-session"])
+            XCTAssertEqual(headers[i * 2 + 1]["x-opencode-session"], session)
+        }
+        print(String(format: "Poki routing metadata step benchmark: n=%d paired, baseline median %.2f ms, with OpenCode header median %.2f ms, delta %.2f ms (loopback, no physical iPhone)",
+                     samples, median(without), median(withHeader), median(withHeader) - median(without)))
+    }
+
     /// Production-configured model, real ChatModel/ApprovalClassifier, and URLProtocol
     /// interception. No fabricated Model resolver or model-only test initializer.
     private func withRoutingFixture(_ body: (AppModel, SessionStore) async throws -> Void) async throws {
