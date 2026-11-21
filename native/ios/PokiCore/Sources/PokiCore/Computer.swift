@@ -1162,7 +1162,8 @@ final class Computer: @unchecked Sendable {
                 }
                 let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
-                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty)
+                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
+                                           sourceSession: local ? nil : session)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))
