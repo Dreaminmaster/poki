@@ -2,6 +2,13 @@ name: Fork iOS PR verification
 
 on:
   workflow_dispatch:
+  # Run only when this fork-local test definition changes on default branch.
+  # No product-source pushes or upstream changes activate these costly macOS jobs.
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fork-ios-verify.yml
 
 permissions:
   contents: read
