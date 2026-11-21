@@ -24,6 +24,35 @@ final class ModelSessionMetadataTests: XCTestCase {
                                                headers: ["X-OpenCode-Session": "provided"])?["X-OpenCode-Session"], "provided")
     }
 
+    func testBackupRequestRechecksHostAndUsesOnlyItsOwningConversation() throws {
+        let primary = try XCTUnwrap(URL(string: "https://opencode.ai/v1/responses"))
+        var request = URLRequest(url: primary)
+        // Deliberately stale metadata from a different conversation must not reach a backup.
+        request.setValue("other-chat-id", forHTTPHeaderField: "x-opencode-session")
+        request.setValue("Other Client", forHTTPHeaderField: "x-opencode-client")
+        request.setValue("Bearer fixture", forHTTPHeaderField: "Authorization")
+        let actualID = "own-chat-MixedCase-123"
+
+        let outside = try XCTUnwrap(URL(string: "https://unrelated-gateway.example/v1/responses"))
+        let moved = CustomEndpointClient.routedFallback(request, to: outside, conversationSessionID: actualID)
+        XCTAssertEqual(moved.url, outside)
+        XCTAssertNil(moved.value(forHTTPHeaderField: "x-opencode-session"))
+        XCTAssertNil(moved.value(forHTTPHeaderField: "x-opencode-client"))
+        XCTAssertEqual(moved.value(forHTTPHeaderField: "Authorization"), "Bearer fixture")
+
+        let trusted = try XCTUnwrap(URL(string: "https://opencode.ai/inference/go/openai/v1/responses"))
+        let again = CustomEndpointClient.routedFallback(request, to: trusted, conversationSessionID: actualID)
+        XCTAssertEqual(again.value(forHTTPHeaderField: "x-opencode-session"), actualID)
+        XCTAssertEqual(again.value(forHTTPHeaderField: "x-opencode-client"), "Poki")
+
+        let noOwner = CustomEndpointClient.routedFallback(request, to: trusted, conversationSessionID: nil)
+        XCTAssertNil(noOwner.value(forHTTPHeaderField: "x-opencode-session"))
+        // Never let a plain generic endpoint acquire an OpenCode header on fallback.
+        let plain = URLRequest(url: primary)
+        let plainBackup = CustomEndpointClient.routedFallback(plain, to: trusted, conversationSessionID: actualID)
+        XCTAssertNil(plainBackup.value(forHTTPHeaderField: "x-opencode-session"))
+    }
+
     func testRequestIdentityUsesTheRealPokiProductName() {
         let identity = PiLoop.clientIdentity(version: "0.4.0")
         XCTAssertEqual(formatUserAgent(identity: identity), "Poki/0.4.0")
@@ -275,6 +304,36 @@ final class ModelSessionMetadataTests: XCTestCase {
             _ = await ApprovalClassifier.decide(idle, level: .strict, voice: [], resolveModel: { _, _ in approvalModel })
             XCTAssertEqual(approvals.requestHeaders.count, 2)
             XCTAssertEqual(approvals.requestHeaders.last?["x-opencode-session"], "approval-\(idle.id)")
+        }
+    }
+
+    /// An externally handed-over task is a separate saved conversation. Its network
+    /// identity must not come from the on-screen owner chat (or from the MCP caller ID).
+    func testOutsideAgentTaskSendsItsOwnConversationID() async throws {
+        let ownerServer = try FakeCompletions(replies: [FakeCompletions.text("Owner answer.")])
+        let externalServer = try FakeCompletions(replies: [FakeCompletions.text("External answer.")])
+        try await withRoutingFixture { app, store in
+            let owner = ChatModel(app: app, store: store, resolveModel: { _, _ in self.fixtureModel(ownerServer) })
+            defer { owner.stop() }
+            owner.newConversation()
+            let ownerID = owner.sessionID
+            owner.send("Owner request in the on-screen conversation.")
+            try await self.waitForTask(owner)
+            XCTAssertEqual(ownerServer.requestHeaders.first?["x-opencode-session"], ownerID)
+
+            // The same creation path as AskPoki.run, but isolated from global MCP state.
+            let outsideID = store.handoffID(for: "external-fixture-session")
+            XCTAssertNotEqual(outsideID, ownerID)
+            let handoff = ChatModel(app: app, kind: .handoff, requester: "Synthetic external agent",
+                                    sessionID: outsideID, store: store,
+                                    resolveModel: { _, _ in self.fixtureModel(externalServer) })
+            defer { handoff.stop() }
+            _ = await handoff.runDelegated("A synthetic task started from outside the chat.")
+            XCTAssertEqual(handoff.sessionID, outsideID)
+            XCTAssertEqual(owner.sessionID, ownerID)
+            XCTAssertFalse(externalServer.requestHeaders.isEmpty, "The handoff must send a real PiSwift HTTP request")
+            XCTAssertTrue(externalServer.requestHeaders.allSatisfy { $0["x-opencode-session"] == outsideID })
+            XCTAssertFalse(externalServer.requestHeaders.contains { $0["x-opencode-session"] == ownerID })
         }
     }
 
