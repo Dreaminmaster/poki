@@ -78,7 +78,7 @@ enum MentionSearch {
     }
 
     /// The apps and connectors for a query, best first.
-    static func matches(_ query: String, pending: Bool, explicit: Bool) -> [MentionMatch] {
+    static func matches(_ query: String, pending: Bool, explicit: Bool, limit: Int = most) -> [MentionMatch] {
         // The keyboard's syllable marks go: apostrophes, and every kind of space (Pinyin puts a six-per-em
         // space, U+2006, between syllables, so "tb" composing was "t b" and matched nothing).
         let typed = fold(String(String.UnicodeScalarView(query.unicodeScalars.filter {
@@ -102,7 +102,7 @@ enum MentionSearch {
         if typed.isEmpty {
             // Nothing typed after @: the recent ones, then the connectors.
             let recent = MentionRecents.apps.prefix(most).map { MentionMatch(capsule: $0, insert: $0.name) }
-            return Array((scored.map(\.match) + recent).prefix(most))
+            return Array((scored.map(\.match) + recent).prefix(limit))
         }
         for capsule in AppCapsule.catalog {
             var best: Int?
@@ -129,7 +129,7 @@ enum MentionSearch {
             }
         }
         var seen = Set<String>()
-        return scored.sorted { $0.score > $1.score }.map(\.match).filter { seen.insert($0.capsule.id).inserted }.prefix(most).map { $0 }
+        return scored.sorted { $0.score > $1.score }.map(\.match).filter { seen.insert($0.capsule.id).inserted }.prefix(limit).map { $0 }
     }
 
     /// 100 for the whole name, 80 for its start, 60 for the start of one of its words, 30 inside it.
@@ -200,13 +200,15 @@ enum MentionRecents {
         for case .app(let app, _) in CapsuleText.segments(text).reversed() where !app.isConnector { used(app.id) }
     }
 
-    /// The recent apps that still make a capsule; with none yet, the first apps installed here that Poki knows.
+    /// The recent apps that still make a capsule; with few yet, the apps installed here that Poki knows, then Apple's.
     static var apps: [AppCapsule] {
         let catalog = AppCapsule.catalog
         let byID = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let recent = ids.compactMap { byID[$0] }
         if recent.count >= 4 { return recent }
         let installed = catalog.filter { app in !recent.contains(app) && DynamicApps.name(forID: app.id) != nil }
-        return Array((recent + installed).prefix(most))
+        // Apple's own apps are on every iPhone: they fill the rest when little else is known yet.
+        let apple = catalog.filter { app in app.id.hasPrefix("com.apple.") && !recent.contains(app) && !installed.contains(app) }
+        return Array((recent + installed + apple).prefix(most))
     }
 }

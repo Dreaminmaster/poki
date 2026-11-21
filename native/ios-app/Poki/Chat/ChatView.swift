@@ -372,8 +372,10 @@ extension View {
         if #available(iOS 26.0, *) {
             safeAreaBar(edge: .bottom, spacing: 0) { bar().glassGroup(spacing: 8) }
                 .scrollEdgeEffectStyle(softEdge ? .soft : .automatic, for: .bottom)
+                .overlayPreferenceValue(MentionFloatKey.self) { MentionFloatLayer(float: $0) }
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) { bar() }
+                .overlayPreferenceValue(MentionFloatKey.self) { MentionFloatLayer(float: $0) }
         }
     }
 
@@ -1385,7 +1387,6 @@ struct ComposerInputView: View {
             // The apps and connectors that fit the words at the caret: in the bar's own column above
             // the field, so it takes its taps (an overlay outside the safe-area bar's frame let them
             // through to the conversation, which closed the keyboard) and never covers the words.
-            mentionList
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
@@ -1442,6 +1443,7 @@ struct ComposerInputView: View {
             .coordinateSpace(.named("composer"))
             .animation(.snappy(duration: 0.22), value: mentions.query == nil)
         }
+        .preference(key: MentionFloatKey.self, value: mentionFloat)
         .animation(.snappy, value: dictation.on)
         .animation(.snappy, value: adding)
         .animation(TalkMotion.enter, value: voice.talkState != nil)
@@ -1612,8 +1614,7 @@ struct ComposerInputView: View {
 
     /// Plus's sheet, with the library, Files and the camera opening over it.
     private var addSheet: some View {
-        ComposerAddSheet(room: Self.most - attachments.count, picked: Set(photoAssets.keys),
-                         togglePhoto: { asset in Task { await toggle(asset) } },
+        ComposerAddSheet(room: Self.most - attachments.count,
                          choosePhotos: { choosingPhotos = true },
                          takePhoto: { takingPhoto = true },
                          chooseFiles: { choosingFiles = true },
@@ -1636,21 +1637,6 @@ struct ComposerInputView: View {
             }
     }
 
-    /// A recent photo from the sheet's strip: in the message, or out of it again.
-    private func toggle(_ asset: PHAsset) async {
-        let key = asset.localIdentifier
-        if let id = photoAssets[key] {
-            photoAssets[key] = nil
-            withAnimation(.snappy) { attachments.removeAll { $0.id == id } }
-            return
-        }
-        guard attachments.count < Self.most, let data = await RecentPhotos.data(asset) else {
-            if attachments.count < Self.most { problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file.")) }
-            return
-        }
-        if let id = add({ try AttachmentReader.photo(data) }) { photoAssets[key] = id }
-    }
-
     /// An app or connector picked in plus's sheet: its name goes at the end of the message, as its capsule.
     private func mention(_ match: MentionMatch) {
         if !match.isConnector { CapsuleText.confirm(match.insert); MentionRecents.used(match.capsule.id) }
@@ -1659,21 +1645,26 @@ struct ComposerInputView: View {
         focused = true
     }
 
-    /// The apps and connectors that fit the words at the caret, just above it.
-    @ViewBuilder private var mentionList: some View {
-        if focused, let query = mentions.query {
-            let matches = MentionSearch.matches(query.text, pending: query.pending, explicit: query.explicit)
-            if !matches.isEmpty, query.explicit || !query.pending || query.text.count >= 2 {
-                // Starting under the caret's letter, above the whole field, so it never covers what is
-                // being written and stays clear of the keyboard; the column's spacing (8) and its own
-                // 4 keep it more than the bar's glass group spacing away, so the shapes stay apart.
-                let x = min(max(0, fieldFrame.minX + query.caret.minX - 14), max(0, barFrame.width - 260))
-                MentionPicker(matches: matches, pick: { mentions.pick($0) }, dismiss: { mentions.dismiss() })
-                    .padding(.leading, x)
-                    .padding(.bottom, 4)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomLeading)))
-            }
-        }
+    /// The apps and connectors to offer for the words at the caret, or nil when the list is closed.
+    private var mentionMatches: (matches: [MentionMatch], x: CGFloat)? {
+        guard focused, !adding, let query = mentions.query else { return nil }
+        let matches = MentionSearch.matches(query.text, pending: query.pending, explicit: query.explicit)
+        guard !matches.isEmpty, query.explicit || !query.pending || query.text.count >= 2 else { return nil }
+        // Starting under the caret's letter and staying clear of the bar's trailing edge.
+        let x = min(max(0, fieldFrame.minX + query.caret.minX - 14), max(0, barFrame.width - 260))
+        return (matches, x)
+    }
+
+    /// The apps and connectors that fit the words at the caret, just above the field. It is handed up
+    /// to the page (`bottomBar` draws it), so the bar never grows and the conversation never moves
+    /// when it opens, and its taps land: drawn outside the bar's own frame, they went through to the
+    /// conversation. It grows out of the caret's corner on a soft spring, and only fades with Reduce Motion.
+    private var mentionFloat: MentionFloat? {
+        guard let shown = mentionMatches else { return nil }
+        let picker = MentionPicker(matches: shown.matches, pick: { mentions.pick($0) }, dismiss: { mentions.dismiss() })
+            .padding(.bottom, 4)
+        return MentionFloat(ids: shown.matches.map(\.id), origin: CGPoint(x: barFrame.minX + shown.x, y: barFrame.minY),
+                            reduceMotion: reduceMotion, view: AnyView(picker))
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {
@@ -1886,5 +1877,46 @@ struct LiveVoiceTranscript: View {
             }
             .animation(PlanMotion.enter, value: voice.lines)
         }
+    }
+}
+
+/// The mention list the message field hands up, with where its bottom-leading corner goes (global).
+struct MentionFloat: Equatable {
+    var ids: [String]
+    var origin: CGPoint
+    var reduceMotion: Bool
+    var view: AnyView
+    static func == (a: MentionFloat, b: MentionFloat) -> Bool { a.ids == b.ids && a.origin == b.origin && a.reduceMotion == b.reduceMotion }
+}
+
+struct MentionFloatKey: PreferenceKey {
+    static let defaultValue: MentionFloat? = nil
+    static func reduce(value: inout MentionFloat?, nextValue: () -> MentionFloat?) { value = value ?? nextValue() }
+}
+
+/// Draws the mention list over the page, just above the message field, so opening it moves nothing.
+struct MentionFloatLayer: View {
+    let float: MentionFloat?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            ZStack(alignment: .bottomLeading) {
+                Color.clear.allowsHitTesting(false)
+                if let float {
+                    float.view
+                        .fixedSize()
+                        .padding(.leading, max(0, float.origin.x - frame.minX))
+                        .padding(.bottom, max(0, frame.maxY - float.origin.y))
+                        .transition(float.reduceMotion ? .opacity : .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.9, anchor: .bottomLeading)).combined(with: .offset(y: 10)),
+                            removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .bottomLeading))))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .animation(float?.reduceMotion == true ? .easeOut(duration: 0.15) : .spring(duration: 0.34, bounce: 0.2), value: float == nil)
+            .animation(.snappy(duration: 0.2), value: float?.ids)
+        }
+        .ignoresSafeArea()
     }
 }
