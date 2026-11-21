@@ -87,7 +87,7 @@ targets:
         NSFaceIDUsageDescription: Poki uses Face ID to unlock Screen History, so only you can open it.
         NSCameraUsageDescription: Poki uses the camera to take photos you send in a message, and to scan the pairing code Poki Setup shows on your computer.
         NSMicrophoneUsageDescription: Poki listens while you talk to it in Voice, and sends that audio to OpenAI to understand what you ask.
-        NSSpeechRecognitionUsageDescription: Without an OpenAI key, Poki turns what you say in Voice into text on this iPhone and sends the text to your chosen model.
+        NSSpeechRecognitionUsageDescription: Poki uses speech recognition for dictation. Poki transcribes app audio on this iPhone.
         # The voice bridge runs on the person's Mac on the local network, over plain HTTP.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -112,6 +112,7 @@ targets:
         com.apple.security.application-groups: [$(POKI_APP_GROUP)]
     dependencies:
       - target: PokiWidgets
+      - target: PokiBroadcast
       - package: PokiCore
       - package: WebRTC
       - package: PiSwift
@@ -154,6 +155,7 @@ targets:
     sources:
       - path: PokiWidgets
       - path: Shared
+        excludes: [AppAudioCapture.swift]
     info:
       path: PokiWidgets/Info.plist
       properties:
@@ -173,6 +175,32 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID).widgets
+
+  PokiBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - PokiBroadcast
+      - Shared/AppAudioCapture.swift
+    info:
+      path: PokiBroadcast/Info.plist
+      properties:
+        CFBundleDisplayName: Poki App Audio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        PokiAppGroup: $(POKI_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+    entitlements:
+      path: PokiBroadcast/PokiBroadcast.entitlements
+      properties:
+        com.apple.security.application-groups: [$(POKI_APP_GROUP)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID).app-audio
+        APPLICATION_EXTENSION_API_ONLY: YES
 
 schemes:
   Poki:

@@ -18,9 +18,17 @@ app, edition, version, build = pathlib.Path(sys.argv[1]), *sys.argv[2:]
 if edition not in ('local', 'external'):
     raise SystemExit('Expected local or external connection edition')
 extensions = {p.name for p in (app / 'PlugIns').glob('*.appex')}
-expected = {'PokiWidgets.appex'} | ({'PokiTunnel.appex'} if edition == 'local' else set())
+expected = {'PokiWidgets.appex', 'PokiBroadcast.appex'} | ({'PokiTunnel.appex'} if edition == 'local' else set())
 if extensions != expected:
     raise SystemExit(f'Wrong extensions for {edition}: {sorted(extensions)}')
+with (app / 'PlugIns/PokiBroadcast.appex/Info.plist').open('rb') as f:
+    extension = plistlib.load(f).get('NSExtension', {})
+if extension.get('NSExtensionPointIdentifier') != 'com.apple.broadcast-services-upload':
+    raise SystemExit('Missing app-audio broadcast extension point')
+if extension.get('NSExtensionPrincipalClass') != 'PokiBroadcast.SampleHandler':
+    raise SystemExit('Wrong app-audio broadcast entry point')
+if extension.get('RPBroadcastProcessMode') != 'RPBroadcastProcessModeSampleBuffer':
+    raise SystemExit('App-audio broadcast must use sample buffers')
 if edition == 'local':
     with (app / 'PlugIns/PokiTunnel.appex/Info.plist').open('rb') as f:
         extension = plistlib.load(f).get('NSExtension', {})

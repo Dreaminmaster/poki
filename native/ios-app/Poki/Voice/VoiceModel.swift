@@ -313,6 +313,7 @@ final class VoiceModel {
 
     private var link: VoiceConnection?
     private var usesLive = false
+    private var appAudio: AppAudioContext?
     private var liveCloseTimeout: Task<Void, Never>?
     private var liveUsageSeconds: Double?
     private var liveSpeechStopped = false
@@ -501,17 +502,20 @@ final class VoiceModel {
     /// Opens the connection for one session: events, then why it closed.
     private let connection: @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection
     private let time: VoiceClock
+    private let recentAppAudio: @MainActor () async -> AppAudioContext?
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
          phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
          holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
-         time: VoiceClock = VoiceClock()) {
+         time: VoiceClock = VoiceClock(),
+         recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() }) {
         self.clearTap = clearTap
         self.phoneTool = phoneTool
         self.holdMicrophone = holdMicrophone
         self.connection = connection
         self.time = time
+        self.recentAppAudio = recentAppAudio
         // Poki in the background goes on with the talk (the owner, 2026-11-13): you speak to it from the
         // app you went to, and the Live Activity says what it is doing and carries End. It ends there as
         // it does in front, when nobody speaks for `followUp` after an answer. Only the wait for a server
@@ -663,15 +667,20 @@ final class VoiceModel {
     func start(microphone: Bool = true) async {
         if let liveCloseTimeout { await liveCloseTimeout.value }
         guard link == nil, dictation == nil, !isConnecting else { return }
-        let account = VoiceDirect.account
-        let key = VoiceDirect.apiKey(for: account)
-        if key == nil, bridge == nil, !rehearsing {
-            if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.words) }
-            return
-        }
         phase = .connecting
         session += 1
         let number = session
+        let context = microphone ? await recentAppAudio() : nil
+        guard number == session else { return }
+        appAudio = context
+        let account = VoiceDirect.account
+        let key = VoiceDirect.apiKey(for: account)
+        if key == nil, bridge == nil, !rehearsing {
+            if VoiceDirect.canDictate, microphone, appAudio == nil {
+                await startDictation()
+            } else { phase = .lost(VoiceError.noBridge.words) }
+            return
+        }
         let bridge = self.bridge
         func configuration() async throws -> VoiceBridge.Token {
             if rehearsing { return Self.rehearsalToken }
@@ -832,7 +841,10 @@ final class VoiceModel {
         interrupted = false
         stallWatch?.cancel()
         stallWatch = nil
-        if ready || liveCloseTimeout != nil, let from = transcript?.from {
+        if appAudio != nil {
+            lastEnd = nil
+            lastLines = []
+        } else if ready || liveCloseTimeout != nil, let from = transcript?.from {
             let said = lines[min(from, lines.count)...].filter { $0.role == .you || $0.role == .poki }
             if !said.isEmpty {
                 lastEnd = time.now()
@@ -848,6 +860,7 @@ final class VoiceModel {
         }
         link = nil
         usesLive = false
+        appAudio = nil
         screenItem = nil
         holdingMicrophone = false
         ready = false
@@ -1148,8 +1161,16 @@ final class VoiceModel {
             ready = true
             watchForStall(session: number)
             phase = .listening
-            carryOver(link)
-            catchUp(link)
+            if let appAudio {
+                let notes = appAudio.modelNotes(byteLimit: usesLive ? Self.liveNoteByteLimit : nil)
+                guard notes.allSatisfy({ link.send(note($0)) }) else {
+                    closed("could not send the media context", session: number)
+                    return
+                }
+            } else {
+                carryOver(link)
+                catchUp(link)
+            }
             endIfDone()
         case "session.input_transcript.delta", "session.output_transcript.delta":
             let role: VoiceLine.Role = type == "session.input_transcript.delta" ? .you : .poki
@@ -1169,8 +1190,9 @@ final class VoiceModel {
                 appendLiveSpeech(text, audio: audio, itemID: itemID)
                 let utterance = Self.liveSpeechParts(liveCallerSpeech.text).filter { !Self.liveBackchannels.contains($0) }
                 if !liveCallerSpeech.alreadyHandled, Self.liveRequestsStop(utterance) {
-                    cancelLiveTask()
-                    stopLivePlayback(on: link, note: "The user stopped the reply and cancelled the phone task. Drop the reply and stay silent until a new request.")
+                    if appAudio == nil { cancelLiveTask() }
+                    let stopped = appAudio == nil ? "The user stopped the reply and cancelled the phone task." : "The user stopped the reply."
+                    stopLivePlayback(on: link, note: stopped + " Drop the reply and stay silent until a new request.")
                 } else if !liveCallerSpeech.alreadyHandled, !utterance.isEmpty {
                     resumeLiveAudio(link)
                     if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
@@ -1421,6 +1443,10 @@ final class VoiceModel {
     /// Runs a call once. The same call_id again (a repeated event) is ignored.
     private func run(_ call: VoiceCall) {
         guard !calls.contains(where: { $0.id == call.id }) else { return }
+        if appAudio != nil {
+            refuseMediaTool(call)
+            return
+        }
         if usesLive, let refusal = call.delegation.flatMap({ liveDelegations[$0] })?.refusal {
             completeLiveControl(call, state: .failed, output: refusal)
             return
@@ -1531,6 +1557,17 @@ final class VoiceModel {
         }
     }
 
+    private func refuseMediaTool(_ call: VoiceCall) {
+        log.add("voice", "tool refused during media questions")
+        let item: [String: Any] = ["type": "function_call_output", "call_id": call.id,
+                                  "output": "This is a media question. Phone tools are unavailable. Answer the user's question from the media excerpt."]
+        let event = usesLive ? "response.item.create" : "conversation.item.create"
+        if link?.send(["type": event, "item": item]) == true, !usesLive {
+            wantsResponse = true
+            flush()
+        }
+    }
+
     private func finish(_ id: String, state: VoiceCall.State, output: String, screen: Data? = nil) {
         guard let index = calls.firstIndex(where: { $0.id == id }) else { return }
         calls[index].state = state
@@ -1550,7 +1587,8 @@ final class VoiceModel {
     /// Hands a finished call to the model: as its function_call_output in the session that asked, or as a
     /// note in a later session. With no session, it waits for the next one.
     private func deliver(_ index: Int) {
-        guard let link, ready, !calls[index].delivered, !calls[index].silentResult, calls[index].state != .running else { return }
+        guard appAudio == nil, let link, ready, !calls[index].delivered,
+              !calls[index].silentResult, calls[index].state != .running else { return }
         let call = calls[index]
         let sameSession = call.session == session
         if usesLive && !sameSession {
@@ -1620,7 +1658,9 @@ final class VoiceModel {
         guard wantsResponse || pendingRealtimeTurns > 0,
               usesLive || (activeResponse == nil && requestedAnswer == nil), ready, let link else { return }
         let id = UUID().uuidString
-        guard link.send(["type": "response.create", "event_id": id]) else { return }
+        var event: [String: Any] = ["type": "response.create", "event_id": id]
+        if appAudio != nil, !usesLive { event["response"] = ["tool_choice": "none"] }
+        guard link.send(event) else { return }
         wantsResponse = false
         if pendingRealtimeTurns > 0 { pendingRealtimeTurns -= 1 }
         awaitingAnswer = true
