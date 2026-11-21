@@ -74,14 +74,28 @@ enum HistoryNames {
 // MARK: The page
 
 struct HistoryPage: View {
+    /// Senses itself (Settings and Security open it): the history first, its settings behind the
+    /// toolbar's button and the ask bar under it (the owner, Nov 21 2026: Senses opened on its
+    /// settings, with the ask bar on a settings page).
+    var asSenses = false
     @ObservedObject private var capture = HistoryCapture.shared
     @ObservedObject private var lock = HistoryLock.shared
     @State private var layout = BacktapeLayout()
     @State private var loaded = false
+    @State private var asking = ""
 
     /// What was read off the screen is behind the lock. With Screen History off the page holds only
     /// what Poki and agents did, which the Activity Log shows openly.
-    private var locked: Bool { capture.enabled && !lock.unlocked }
+    private var locked: Bool { capture.enabled && !lock.unlocked && !Self.sample }
+
+    /// `-pokiHistorySample 1` (Debug): three weeks of made-up reads, to look at the zoom.
+    private static var sample: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "pokiHistorySample")
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         Group {
@@ -101,18 +115,41 @@ struct HistoryPage: View {
                     }
                 }
             } else {
-                BacktapeLibrary(layout: layout)
+                BacktapeLibrary(layout: layout, askText: asSenses ? $asking : nil)
             }
         }
-        // History: the timeline under Senses. Its settings are on the Senses page it opens from, so
-        // it has no settings button of its own (one way in to each control).
-        .navigationTitle(AppLocalization.text("History"))
+        // History: the timeline. As Senses, its settings are one button away; from the settings
+        // page's own History row it has none (one way in to each control).
+        .navigationTitle(AppLocalization.text(asSenses ? "Senses" : "History"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if asSenses {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        ScreenHistorySettingsView(showsHistory: false).settingsPage()
+                    } label: {
+                        Label("Senses Settings", systemImage: "gearshape")
+                    }
+                    .accessibilityIdentifier("senses.settings")
+                }
+            }
+        }
+        // With nothing kept yet the ask bar still sits at the foot (BacktapeLibrary has its own).
+        .bottomBar(softEdge: true) {
+            if asSenses && !locked && layout.isEmpty { PokiAskBar(text: $asking, scope: .senses).padding(.bottom, 4) }
+        }
         .task(id: "\(capture.changes) \(capture.enabled)") { await load() }
     }
 
     /// The owner's reads while Screen History is on, and what Poki did either way, newest first.
     private func load() async {
+        #if DEBUG
+        if Self.sample {
+            layout = BacktapeLayout.build(Self.sampleEntries())
+            loaded = true
+            return
+        }
+        #endif
         await capture.tidy()
         let kept = capture.enabled ? await HistoryStore.shared.recent() : []
         let steps = BacktapeActivity.entries()
@@ -120,6 +157,25 @@ struct HistoryPage: View {
         layout = BacktapeLayout.build(entries)
         loaded = true
     }
+
+    #if DEBUG
+    private static func sampleEntries() -> [HistoryEntry] {
+        let apps = ["com.apple.mobilesafari", "com.tencent.xin", "com.xingin.discover", "com.apple.MobileSMS", "com.apple.mobilenotes", "com.apple.Maps"]
+        let words = ["Hotel options for the trip", "Group chat about dinner", "A video about coffee", "Notes for the meeting", "Directions to the station", "Reading the news"]
+        var entries: [HistoryEntry] = []
+        var id: Int64 = 1
+        let now = Date()
+        for hour in stride(from: 0, to: 21 * 24, by: 3) {
+            for minute in stride(from: 0, to: 60, by: 12) {
+                let at = now.addingTimeInterval(-Double(hour * 3600 + minute * 60))
+                let k = Int(id) % apps.count
+                entries.append(HistoryEntry(id: id, at: at, app: apps[k], title: words[k], text: words[k]))
+                id += 1
+            }
+        }
+        return entries
+    }
+    #endif
 }
 
 // MARK: Settings
@@ -130,8 +186,10 @@ struct HistoryPage: View {
 /// clearing. Retention, the lock and the record are one row further, on Screen History Settings.
 /// The ask bar at the foot was the Senses card's panel's (f1a436ae); it stays with the page.
 struct ScreenHistorySettingsView: View {
-    /// The ask bar at the foot; the welcome's setup step leaves it out.
-    var asks = true
+    /// No ask bar on a settings page (the owner, Nov 21 2026): it is on Senses' history page.
+    var asks = false
+    /// Its History row; left out when the page is opened from the history itself.
+    var showsHistory = true
     @ObservedObject private var capture = HistoryCapture.shared
     @State private var asking = ""
     @ObservedObject private var lock = HistoryLock.shared
@@ -182,6 +240,7 @@ struct ScreenHistorySettingsView: View {
             SensesUseSection()
 
             Section {
+                if showsHistory {
                 NavigationLink {
                     HistoryPage().settingsPage()
                 } label: {
@@ -192,6 +251,7 @@ struct ScreenHistorySettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("screenHistory.records")
+                }
 
                 NavigationLink {
                     if lock.needsSetup {

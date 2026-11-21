@@ -191,7 +191,8 @@ struct PokiDetailsView: View {
                 case .conversations:
                     ConversationsSettingsView(openSession: { id in dismiss(); openSession(id) })
                 case .screenHistory:
-                    ScreenHistorySettingsView()
+                    // Senses opens on the history itself; its settings are a button on it.
+                    HistoryPage(asSenses: true)
                 case .voice:
                     VoiceView(embedded: true)
                 case .connection:

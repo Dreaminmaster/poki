@@ -742,44 +742,49 @@ final class BacktapeFrames {
     var frames: [String: CGRect] = [:]
 }
 
-/// The ground under a bar of the library: the page's colour where the bar is, thinning out just
-/// below it, so what scrolls passes under the bar the way it passes under the system's soft edge.
-/// It is drawn once for the page, never by a list, so a zoom that swaps lists leaves it as it is.
-struct BacktapeEdge: View {
-    var edge: VerticalEdge
-    /// The bar's height from the screen's edge: the safe area on that side.
-    var depth: CGFloat
-    private let fade: CGFloat = 24
+/// A zoom's list content, scaled from the point the zoom started at: in from small or large as it
+/// arrives, and out past the page as it leaves (its last update, in the zoom's own animation). The
+/// scroll view around it keeps its size, so its soft edges under the bars never scale.
+struct BacktapeZoomMove<Content: View>: View {
+    var own: BacktapeZoom
+    var current: BacktapeZoom
+    var inward: Bool
+    var anchor: UnitPoint
+    @ViewBuilder var content: Content
+    @State private var arrived = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let total = max(1, depth + fade)
-        let solid = depth / total
-        LinearGradient(
-            stops: [
-                .init(color: Color(.systemGroupedBackground), location: 0),
-                .init(color: Color(.systemGroupedBackground), location: solid),
-                .init(color: Color(.systemGroupedBackground).opacity(0), location: 1),
-            ],
-            startPoint: edge == .top ? .top : .bottom,
-            endPoint: edge == .top ? .bottom : .top
-        )
-        // Laid out at the safe area's edge, then moved out over the bar to the screen's edge.
-        .frame(height: total)
-        .offset(y: edge == .top ? -depth : depth)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        let leaving = own != current
+        let scale: CGFloat = reduceMotion ? 1 : leaving ? (inward ? 1.6 : 0.6) : arrived ? 1 : (inward ? 0.72 : 1.35)
+        // The anchor is the point on screen, so it is found in the part of the list that shows.
+        let anchor = self.anchor
+        content
+            .visualEffect { view, proxy in
+                let size = proxy.size
+                let shown = proxy.bounds(of: .scrollView) ?? CGRect(origin: .zero, size: size)
+                let point = UnitPoint(x: (shown.minX + anchor.x * shown.width) / max(1, size.width),
+                                      y: (shown.minY + anchor.y * shown.height) / max(1, size.height))
+                return view.scaleEffect(scale, anchor: point)
+            }
+            .onAppear {
+                guard !arrived else { return }
+                withAnimation(.spring(duration: 0.46, bounce: 0.12)) { arrived = true }
+            }
     }
 }
 
 extension View {
-    /// No scroll edge of its own (iOS 26): the library draws one ground for all its lists.
-    @ViewBuilder func withoutScrollEdges() -> some View {
-        if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .all) } else { self }
+    /// The system's progressive blur under the bars (iOS 26); the bars' own material before it.
+    @ViewBuilder func softScrollEdges() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .all) } else { self }
     }
 }
 
 struct BacktapeLibrary: View {
     var layout: BacktapeLayout
+    /// Senses' ask bar, under the zoom bar in the same bottom bar, so the soft edge covers both.
+    var askText: Binding<String>? = nil
     @ObservedObject var capture = HistoryCapture.shared
     @ObservedObject var lock = HistoryLock.shared
     @State private var notes = BacktapeNotes.shared
@@ -804,12 +809,12 @@ struct BacktapeLibrary: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
+                // Only the list's content scales; the scroll view and its soft edges under the bars
+                // stay the size of the page and only fade, so nothing moves under the bars during a
+                // zoom (the flash the owner saw on 2026-11-19 was two scroll edges scaling there).
                 tape(zoom)
                     .id(zoom)
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: inward ? 0.72 : 1.35, anchor: point).combined(with: .opacity),
-                        removal: .scale(scale: inward ? 1.6 : 0.6, anchor: point).combined(with: .opacity)
-                    ))
+                    .transition(.opacity)
             }
             .coordinateSpace(.named("backtape"))
             .simultaneousGesture(
@@ -826,20 +831,15 @@ struct BacktapeLibrary: View {
                     }
                     .onEnded { _ in pinched = false }
             )
-            // One ground under the top and the bottom bars that stays put while the lists change.
-            // Each list's own scroll edge went with it: during a zoom two of them scaled and faded
-            // under the bars, which flickered there, and the glass over them changed tint with them
-            // (the owner, 2026-11-19).
-            .overlay(alignment: .top) { BacktapeEdge(edge: .top, depth: geometry.safeAreaInsets.top) }
-            .overlay(alignment: .bottom) { BacktapeEdge(edge: .bottom, depth: geometry.safeAreaInsets.bottom) }
             .onAppear { size = geometry.size }
             .onChange(of: geometry.size) { _, new in size = new }
         }
-        // The bar's own ground (iOS 18) would come and go as one list leaves and the next arrives.
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .bottom) {
-            BacktapeZoomBar(zoom: zoom) { go($0, at: nil) }
-                .padding(.bottom, 8)
+        .bottomBar(softEdge: true) {
+            VStack(spacing: 10) {
+                BacktapeZoomBar(zoom: zoom) { go($0, at: nil) }
+                if let askText { PokiAskBar(text: askText, scope: .senses) }
+            }
+            .padding(.bottom, 8)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .sensoryFeedback(.selection, trigger: zoom)
@@ -872,6 +872,7 @@ struct BacktapeLibrary: View {
     private func tape(_ zoom: BacktapeZoom) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
+                BacktapeZoomMove(own: zoom, current: self.zoom, inward: inward, anchor: point) {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(layout.groups[zoom] ?? []) { group in
                         if let start = group.start {
@@ -899,9 +900,10 @@ struct BacktapeLibrary: View {
                 .scrollTargetLayout()
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
+                }
             }
             .scrollPosition(Binding(get: { places[zoom] ?? ScrollPosition(idType: String.self) }, set: { places[zoom] = $0 }))
-            .withoutScrollEdges()
+            .softScrollEdges()
             .onAppear {
                 if let target { proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: point.y)) }
             }
