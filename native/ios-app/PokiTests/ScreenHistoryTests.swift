@@ -509,7 +509,8 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertTrue(locked.isError)
         XCTAssertFalse(locked.text.contains(canary))
 
-        XCTAssertTrue(await openWithSimulatedFace())
+        let opened1 = await openWithSimulatedFace()
+        XCTAssertTrue(opened1)
         // Poki's own chat reads Screen History through personal_context only (Senses, 6600edd8): the
         // raw query stays for outside agents, whatever the lock says.
         XCTAssertFalse(Harness.tools.map(\.name).contains("screen_history"))
@@ -537,7 +538,8 @@ final class ScreenHistoryTests: XCTestCase {
         XCTAssertFalse(answer.isError, answer.text)
         XCTAssertTrue(answer.text.contains(canary), answer.text)
         HistoryLock.shared.lock()
-        XCTAssertTrue(await openWithSimulatedFace())
+        let opened2 = await openWithSimulatedFace()
+        XCTAssertTrue(opened2)
         let safe = HistoryCapture.validateAgentAnswer(answer, revision: revision)
         XCTAssertTrue(safe.isError)
         XCTAssertFalse(safe.text.contains(canary))
@@ -656,7 +658,8 @@ final class ScreenHistoryTests: XCTestCase {
         case .lockThenUnlock:
             lock.lock()
             XCTAssertFalse(HistoryCapture.agentQueryAllowed)
-            XCTAssertTrue(await openWithSimulatedFace())
+            let opened3 = await openWithSimulatedFace()
+            XCTAssertTrue(opened3)
         case .deviceLock:
             XCTAssertFalse(capture.isRunning)
             NotificationCenter.default.post(name: UIApplication.protectedDataWillBecomeUnavailableNotification, object: nil)
@@ -665,7 +668,8 @@ final class ScreenHistoryTests: XCTestCase {
             let early = await lock.open()
             XCTAssertFalse(early, "Protected data is still unavailable")
             NotificationCenter.default.post(name: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil)
-            XCTAssertTrue(await openWithSimulatedFace())
+            let opened4 = await openWithSimulatedFace()
+            XCTAssertTrue(opened4)
         case .changePasscode:
             // Changing how history opens closes it, with the read under way.
             XCTAssertTrue(lock.changePasscode(!savedPasscode))
