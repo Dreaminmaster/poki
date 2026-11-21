@@ -75,7 +75,7 @@ final class TalkActivity {
         guard wasMidTurn, !mid, voice.isOn, activity.state.stepCount > 0 else { return }
         let asked = voice.lines.lastIndex { $0.role == .you }
         let said = voice.lines[(asked.map { $0 + 1 } ?? 0)...].last { $0.role == .poki }?.text
-        activity.finishNow(alert: true, result: said, task: asked.map { voice.lines[$0].text })
+        activity.finishNow(alert: false, result: said, task: asked.map { voice.lines[$0].text })
     }
 
     /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first, while
