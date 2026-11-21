@@ -413,6 +413,12 @@ struct ConversationTitle: View {
             if let app, AppIconStore.shared.icon(app, dark: scheme == .dark) != nil { AppIconView(app: app, size: min(34, iconSize)) }
             Text(verbatim: session.name).font(.allo(size: nameSize)).foregroundStyle(Color(.label))
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            // A session from a computer with Poki MCP (the owner, Nov 21 2026): which computer it was.
+            if let computer = session.computer {
+                Image(systemName: "laptopcomputer")
+                    .font(.allo(.footnote, .medium)).foregroundStyle(Color(.secondaryLabel))
+                    .accessibilityLabel(Text(verbatim: String(format: AppLocalization.text("On %@"), computer.name)))
+            }
         }
         .task(id: app) { if let app { await AppIconStore.shared.load(app) } }
     }
@@ -559,7 +565,11 @@ struct SessionView: View {
     private func caption(_ session: SavedSession?) -> String {
         guard let session else { return "" }
         switch session.kind {
-        case .agent: return AppLocalization.text(LocalizedStringResource("Over MCP, \(ChatTime.row(session.started))"))
+        case .agent:
+            if let computer = session.computer {
+                return AppLocalization.text(LocalizedStringResource("On \(computer.name), \(ChatTime.row(session.started))"))
+            }
+            return AppLocalization.text(LocalizedStringResource("Over MCP, \(ChatTime.row(session.started))"))
         case .handoff: return AppLocalization.text(LocalizedStringResource("Handed to Poki, \(ChatTime.row(session.started))"))
         case .voice: return AppLocalization.text(LocalizedStringResource("Voice, \(ChatTime.row(session.started))"))
         case .poki: return ""

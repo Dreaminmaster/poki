@@ -69,7 +69,7 @@ struct WelcomePanel: View {
                 .settingsFooter()
             }
 
-            WelcomeFeaturesSection()
+            WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
 
             Section {
                 NavigationLink(value: DetailsRoute.agents) {
@@ -145,12 +145,14 @@ struct WelcomePanel: View {
 struct WelcomeFeaturesSection: View {
     /// On its own start flow page, whose title and line already say what the header and footer do.
     var onItsPage = false
+    /// Opens Senses on the page's navigation path.
+    var openSenses: () -> Void
     @State private var voiceAllowed = WelcomePanel.voiceAllowedNow
     @State private var notices = UNAuthorizationStatus.notDetermined
 
     var body: some View {
         Section {
-            WelcomeSensesRow()
+            WelcomeSensesRow(open: openSenses)
             NavigationLink(value: SettingsRoute.memory) {
                 SettingsRow(title: "Memory", caption: "What Poki keeps about you and your apps", symbol: "bookmark")
             }

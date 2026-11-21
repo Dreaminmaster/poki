@@ -59,8 +59,11 @@ async fn main() -> Result<()> {
     let mut pin = String::new();
     std::io::stdin().take(64).read_to_string(&mut pin)?;
     let pin = pin.trim();
-    if pin.len() != 6 || !pin.bytes().all(|c| c.is_ascii_digit()) {
-        return Err("Expected six ASCII digits; nothing sent".into());
+    // iOS's 4- and 6-digit codes submit themselves on the keypad. Other passcodes are never typed
+    // here: this helper cannot confirm the lock screen's field is in front, and keys sent blind
+    // could put the passcode into an open app.
+    if !(pin.len() == 4 || pin.len() == 6) || !pin.bytes().all(|c| c.is_ascii_digit()) {
+        return Err("Expected four or six ASCII digits; nothing sent".into());
     }
     tokio::time::timeout(Duration::from_secs(25), unlock(&args[2], pin, &keypad)).await??;
     Ok(())

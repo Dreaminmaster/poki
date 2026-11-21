@@ -13,7 +13,7 @@ struct AutoUnlockSection: View {
             .accessibilityIdentifier("autoUnlock.toggle")
             .disabled(!canEnable && !setting.enabled)
             if canEnable && setting.enabled {
-                Button("Update Passcode") { showsPasscode = true }
+                Button("Update Passcode") { askThenShowForm() }
             }
             if setting.deletionFailed {
                 Button("Delete Saved Passcode", role: .destructive) { change(false) }
@@ -34,9 +34,16 @@ struct AutoUnlockSection: View {
         }
     }
 
+    /// The passcode form opens only after the system prompt (the owner, Nov 21 2026).
+    private func askThenShowForm() {
+        Task {
+            if await HistoryLock.shared.confirm(AppLocalization.text("Save your passcode for Automatic Unlock")) { showsPasscode = true }
+        }
+    }
+
     private func change(_ on: Bool) {
         if on {
-            showsPasscode = true
+            askThenShowForm()
         } else {
             try? setting.disable()
         }
@@ -53,11 +60,16 @@ struct AutoUnlockPasscodeForm: View {
         NavigationStack {
             Form {
                 Section {
+                    // Not a number pad: a custom or alphanumeric passcode has letters and any length.
                     SecureField("iPhone Passcode", text: $passcode)
-                        .keyboardType(.numberPad)
+                        .keyboardType(.default)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { if AutoUnlock.accepts(passcode) { save() } }
                         .accessibilityIdentifier("autoUnlock.passcode")
                 } footer: {
-                    Text("Enter your 4- or 6-digit iPhone passcode. Poki uses it only on the lock screen.")
+                    Text("Enter your iPhone passcode as you type it on the lock screen, numbers or letters. Poki uses it only there.")
                 }
             }
             .navigationTitle("Automatic Unlock")

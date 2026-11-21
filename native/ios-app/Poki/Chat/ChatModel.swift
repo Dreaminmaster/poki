@@ -1655,7 +1655,7 @@ final class ChatModel {
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .waiting { steps[i].state = .current }
             }
-        case .relay, .session: break
+        case .relay, .session, .stepIntent, .sessionNote: break
         }
     }
 

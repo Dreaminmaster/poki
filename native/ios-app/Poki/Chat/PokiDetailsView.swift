@@ -40,7 +40,8 @@ struct PokiDetailsView: View {
                     // Senses and Memory, one plain row each (the owner, Nov 20 2026: each showed twice
                     // while f1a436ae's cards sat under these rows). Senses holds every sense, its
                     // history and its ask bar; Memory holds the library and its ask bar.
-                    NavigationLink(value: DetailsRoute.screenHistory) {
+                    // With Screen History on, the system prompt comes first and Senses opens after it.
+                    UnlockLink(whenOff: true, go: { path.append(DetailsRoute.screenHistory) }) {
                         SettingsRow(title: "Senses", symbol: "clock.arrow.circlepath", value: screenHistoryValue)
                     }
                     .accessibilityIdentifier("details.senses")
@@ -93,9 +94,9 @@ struct PokiDetailsView: View {
 
                 // What Poki may do and read, and who else may use it.
                 Section {
-                    // Approvals, what Screen History may read, its lock and the records, on one page.
-                    // The approval method in use shows here.
-                    NavigationLink(value: DetailsRoute.approvals) {
+                    // Approvals, Screen History, the Activity Log and Face ID & Passcode, a page each
+                    // (the owner, Nov 21 2026). The approval method in use shows here.
+                    NavigationLink(value: DetailsRoute.security) {
                         SettingsRow(title: "Security", symbol: "checkmark.shield", value: model.approvalMode.title)
                     }
                     .accessibilityIdentifier("moreSettings.approvals")
@@ -203,8 +204,14 @@ struct PokiDetailsView: View {
                     AgentsAndRelayView(path: $path)
                 case .updates:
                     SigningUpdatesPage()
+                case .security:
+                    SecuritySettingsView(path: $path)
                 case .approvals:
-                    SecuritySettingsView()
+                    ApprovalsSettingsView()
+                case .screenHistorySettings:
+                    HistoryGate(whenOff: true) { ScreenHistorySettingsView() }
+                case .lockSettings:
+                    HistoryLockSettings()
                 case .appearance:
                     AppearanceView()
                 case .interfaceSize:
@@ -277,6 +284,9 @@ struct PokiDetailsView: View {
 
 enum DetailsRoute: Hashable {
     case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
+    /// Security's own page (its four rows), Screen History's settings (the page the Senses gear opens
+    /// too) and Face ID & Passcode.
+    case security, screenHistorySettings, lockSettings
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey
@@ -840,12 +850,25 @@ struct SecurityApprovalSections: View {
     }
 }
 
-/// Approvals as a page of its own: Security's first sections.
+/// Security › Approvals: what Poki and agents may do without asking, and Automatic Unlock with it
+/// (what Poki may do by itself, the owner, Nov 21 2026).
 struct ApprovalsSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var showsAutoUnlockPasscode = false
+
     var body: some View {
-        List { SecurityApprovalSections() }
-            .navigationTitle(AppLocalization.text("Approvals"))
-            .navigationBarTitleDisplayMode(.inline)
+        List {
+            SecurityApprovalSections()
+            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+                AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                  showsPasscode: $showsAutoUnlockPasscode)
+            }
+        }
+        .navigationTitle(AppLocalization.text("Approvals"))
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
+        }
     }
 }
 
@@ -988,6 +1011,9 @@ struct AgentsAndRelayView: View {
                 }
                 .settingsFooter()
             }
+
+            // Computers with Poki MCP (issue #609), each allowed or turned off on its own.
+            ComputersSection()
         }
         .navigationTitle(AppLocalization.text("Agents"))
         .navigationBarTitleDisplayMode(.inline)

@@ -25,8 +25,9 @@ def main():
     if not args.stdin and not sys.stdin.isatty():
         parser.error("Use an interactive terminal for hidden passcode input.")
     pin = sys.stdin.read().strip() if args.stdin else getpass.getpass("Passcode (hidden; not saved): ")
-    if len(pin) != 6 or not pin.isascii() or not pin.isdecimal():
-        print("Expected six ASCII digits; nothing sent.", file=sys.stderr)
+    # Keypad codes only (4 or 6 digits): other passcodes would be typed without seeing the lock screen.
+    if len(pin) not in (4, 6) or not pin.isascii() or not pin.isdecimal():
+        print("Expected four or six ASCII digits; nothing sent.", file=sys.stderr)
         return 2
     try:
         result = subprocess.run(

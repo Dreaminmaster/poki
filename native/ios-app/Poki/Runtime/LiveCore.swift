@@ -24,6 +24,8 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
+        // Agents › Computers: a computer the owner turned off, or has not answered yet, is refused.
+        config.computerAccess = { ComputerAccess.decision($0.id) }
         // Read at each run, from Settings › Models › Fast Decisions: nil until a model is picked, and
         // a routine then stops where the screen differs, as it always did.
         config.decider = { QuickFixes.decider }
@@ -38,7 +40,12 @@ final class LiveCore: CoreSession {
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
         pump = Task { [core] in
-            for await event in core.events { continuation.yield(Self.map(event)) }
+            for await event in core.events {
+                if case .toolStarted(let activity) = event, let intent = activity.intent {
+                    continuation.yield(.stepIntent(session: activity.session, intent: intent))
+                }
+                continuation.yield(Self.map(event))
+            }
         }
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
@@ -107,10 +114,12 @@ final class LiveCore: CoreSession {
             switch outcome { case .done(let text): delivery = text; case .failed(let text): delivery = "failed: \(text)" }
             return .toolFinished(summary: activity.summary, delivery: delivery, app: facts.app, thumbnail: facts.thumbnail, error: facts.error, session: activity.session)
         case .approvalRequested(let approval):
-            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires, stopsWhenOff: approval.stopsWhenOff))
+            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires, stopsWhenOff: approval.stopsWhenOff,
+                                                      session: approval.session, intent: approval.intent))
         case .approvalEnded(let id, let approved): return .approvalEnded(id: id, approved: approved)
         case .handoffRequested(let id, let kind, let text, let app): return .handoffRequested(id: id, kind: kind, text: text, app: app)
         case .handoffEnded(let id, let how): return .handoffEnded(id: id, how: how)
+        case .sessionNote(let session, let text): return .sessionNote(session: session, text: text)
         }
     }
 }
