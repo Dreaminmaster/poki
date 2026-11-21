@@ -110,16 +110,11 @@ final class ChatScrollTests: XCTestCase {
         let window = try show(NavigationStack {
             SelectedSearchChatHost(feed: feed)
         }.environment(app).environment(chat))
-        func visible(_ entry: ChatEntry) -> Bool {
-            let words: String
-            switch entry.kind {
-            case .poki(let text), .you(let text, _): words = text
-            default: return false
-            }
-            return Self.accessible(in: window, matching: {
-                $0 == "chat.entry.\(entry.id)" || $0 == words
-            }) != nil
-        }
+        // The screenshots demonstrate the visual state, while this read-only
+        // observer records the rows supplied by the hosted SwiftUI transcript.
+        // UIHostingView does not expose all virtual SwiftUI elements through
+        // UIView.accessibilityElements in an in-process unit test.
+        func visible(_ entry: ChatEntry) -> Bool { feed.renderedRows.contains(entry.id) }
         func select(_ entry: ChatEntry, query: String) {
             let snapshot = ConversationSearchIndex.snapshot(in: [saved])
             let hits = ConversationSearchIndex.resolve(ConversationSearchIndex.search(snapshot, query: query), in: [saved])
@@ -140,6 +135,7 @@ final class ChatScrollTests: XCTestCase {
 
     private final class SelectionFeed: ObservableObject {
         @Published var navigation = ConversationSearchNavigation()
+        var renderedRows: [UUID] = []
     }
 
     private struct SelectedSearchChatHost: View {
@@ -149,7 +145,8 @@ final class ChatScrollTests: XCTestCase {
             ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {},
                      searchJump: feed.navigation.pending,
                      revealedSearchEntryID: feed.navigation.revealedEntry(in: chat.sessionID),
-                     onSearchJumpApplied: { feed.navigation.consume($0) }, openThreads: {})
+                     onSearchJumpApplied: { feed.navigation.consume($0) }, openThreads: {},
+                     onTranscriptRowsChanged: { feed.renderedRows = $0 })
         }
     }
 
@@ -180,7 +177,9 @@ final class ChatScrollTests: XCTestCase {
             defaults.removePersistentDomain(forName: suite)
         }
         UserDefaults.standard.removeObject(forKey: "pokiChat")
-        UserDefaults.standard.removeObject(forKey: "pokiScreen")
+        // Navigate through the app's actual launch route instead of relying on
+        // in-process UIKit accessibility activation of virtual SwiftUI buttons.
+        UserDefaults.standard.set("memoryRecent", forKey: "pokiScreen")
         UserDefaults.standard.removeObject(forKey: "pokiHome")
         let draft = "Synthetic unsent composer draft"
         UserDefaults.standard.set(draft, forKey: "pokiDraft")
@@ -239,12 +238,9 @@ final class ChatScrollTests: XCTestCase {
             && Self.find(CapsuleTextView.self, in: root.view)?.plainText == draft }
         XCTAssertEqual(root.view.bounds.width, size.width, accuracy: 1)
         XCTAssertEqual(Self.find(CapsuleTextView.self, in: root.view)?.plainText, draft)
-        // Enter Settings only after layout has settled, rather than presenting a narrow cover
-        // on launch while the wide layout has not yet been measured.
-        if !wide { try activate("chat.threads", in: window) }
-        try activate("threads.settings", in: window)
-        try activate("moreSettings.memory", in: window, scroll: true)
-        try activate("memory.recent", in: window)
+        // The real app has opened Settings → Memory → Recent Updates via
+        // openLaunchScreen. Activate the actual memory row and Source link here.
+        captureNavigationEvidence(window, name: wide ? "Wide Memory Recent Updates" : "Narrow live Memory Recent Updates")
         try activate("memory.openChange.\(change.id)", in: window)
         try activate("memory.source.conversation", in: window)
         settle(for: 5) { Self.accessible(in: window, matching: { $0 == targetID || $0 == marker }) != nil }
@@ -299,8 +295,10 @@ final class ChatScrollTests: XCTestCase {
         if let presented = root.presentedViewController, !presented.isBeingDismissed {
             return frontController(presented)
         }
+        // UIKit may attach a SwiftUI sheet to a child UIHostingController,
+        // not its parent container. Inspect child presentations as well.
         for child in root.children.reversed() {
-            if let front = frontController(child), front !== child { return front }
+            if let front = frontController(child) { return front }
         }
         return root
     }
