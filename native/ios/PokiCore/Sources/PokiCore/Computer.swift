@@ -39,6 +39,9 @@ final class Computer: @unchecked Sendable {
     let config: CoreConfig
     let approvals: Approvals
     let emit: @Sendable (CoreEvent) -> Void
+    /// Legacy sessionless Core calls keep their own device-local approval identity.
+    /// They are never mistaken for Poki's chat or any explicitly named MCP session.
+    private let anonymousExternalOrigin = "anonymous-external-\(UUID().uuidString)"
     /// Explicit state machine for steps handed to the owner (`{handoff: {kind, text}}`).
     let handoff: HandoffTracker
 
@@ -1034,10 +1037,10 @@ final class Computer: @unchecked Sendable {
         scrollFound = nil
         typedInto = nil
         var started = now()
-        // A client can call tools/call without mcp-session-id. Treat that as an
-        // anonymous *external* call, never as the owner's local chat; its grant
-        // is scoped to this invocation only and cannot be spent by the next.
-        let sourceSession: String? = local ? nil : (session ?? "anonymous-external-\(UUID().uuidString)")
+        // A client can call without mcp-session-id. Its approval remains external,
+        // with a device-local identity distinct from Poki's own chat. Named MCP
+        // sessions never share approvals with each other or this fallback.
+        let sourceSession: String? = local ? nil : (session ?? anonymousExternalOrigin)
         let callStarted = started
         var approvalWaited = 0.0
         var until: Double
