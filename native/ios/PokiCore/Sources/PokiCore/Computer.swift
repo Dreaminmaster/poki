@@ -545,7 +545,7 @@ final class Computer: @unchecked Sendable {
         lines += did.map { "did: \($0)" }
         if let error { lines.append("error: \(error)") }
         lines += extra
-        lines.append("poki: Poki is in front, showing the owner's chat with you, so no screen of the task is read yet. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved skill.")
+        lines.append("poki: Poki is in front. The owner's chat is private, so this read has no screenshot or element numbers. Open the task's app with do {launch: \"bundle id\"}, or send {button: \"home\"} by itself to read the Home Screen. Run a saved skill after reaching a readable screen.")
         return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil, screen: "poki", waitingForOwner: handoffWaiting, screenEvidence: [])
     }
 
@@ -935,7 +935,7 @@ final class Computer: @unchecked Sendable {
     }
 
     private func readRequiredAfterAuthorization() -> ToolResult {
-        ToolResult(text: "Automation is ready. Nothing was sent. Call look to read the current screen before choosing the next action. Coordinates need a current screenshot; element numbers need current references.",
+        ToolResult(text: "Automation is ready. Nothing was sent. Call look to read the current screen before choosing the next action. Coordinates need a current screenshot; element numbers need current references. Send {button: \"home\"} by itself to search from the Home Screen, or launch the task's app in a separate call.",
                    jpeg: nil, isError: true)
     }
 
@@ -1074,7 +1074,7 @@ final class Computer: @unchecked Sendable {
     }
 
     private func unknownApp(_ name: String) -> ActionFailure {
-        ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+        ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id. To search from the Home Screen, send {button: \"home\"} by itself. Use the returned screen to swipe down, then type the app's name and tap its result.", delivery: .notSent)
     }
 
     private func installedLaunchBundle(_ given: String) throws -> String {
@@ -1393,9 +1393,11 @@ final class Computer: @unchecked Sendable {
             result.text += "\ntook: \(Self.seconds(total)) s in all: \(Self.seconds(prepared - callStarted)) s before the actions (runner start, busy wait, lock check), \(Self.seconds(actionsTook)) s actions, \(Self.seconds(readTook)) s read\(approvalWaited > 0 ? ", \(Self.seconds(approvalWaited)) s the owner's approval" : "")\(total - parts > 2 ? ", \(Self.seconds(total - parts)) s elsewhere" : "")"
         }
         let openedApp = launched.map { lastForeground?.bundleID == $0 } ?? false
+        let openedHome = toRun.count == 1 && toRun.first?["button"]?.text?.lowercased() == "home"
+            && lastForeground?.bundleID == "com.apple.springboard"
         // Voice can open a Settings link before asking the runner to wait for its screen.
         let settledVoiceScreen = byOwnersVoice && actions.count == 1 && actions.first?["wait_until"]?["settled"]?.bool == true
-        if local, !finish, let revision, !result.isError, openedApp || settledVoiceScreen,
+        if local, !finish, let revision, !result.isError, openedApp || openedHome || settledVoiceScreen,
            let evidence = result.screenEvidence, host.currentRunner.automationRevision == revision {
             authorizationRead = (revision, localTask, evidence)
         }
