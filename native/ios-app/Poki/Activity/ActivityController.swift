@@ -75,11 +75,10 @@ final class ActivityController {
 
     /// True when the owner turned Ready off: no idle Live Activity. It starts when work begins while
     /// Poki is in front, and goes when the run has folded.
-    var hidesWhenIdle: () -> Bool = { ActivityController.hidesReady }
+    /// No Ready Live Activity while Poki waits for work (the owner, Nov 21 2026: Show Ready is gone).
+    var hidesWhenIdle: () -> Bool = { true }
     /// Ready is off unless the owner turned it on in Settings › Connection: no Live Activity while
     /// nothing happens.
-    nonisolated static let hidesReadyKey = "liveActivity.hidesReady"
-    nonisolated static var hidesReady: Bool { UserDefaults.standard.object(forKey: hidesReadyKey) as? Bool ?? true }
     /// Poki is in front: iOS starts a Live Activity only then.
     var canStart: () -> Bool = { true }
     /// The device name `start` was last asked with: the activity is wanted, shown or not.
@@ -197,15 +196,6 @@ final class ActivityController {
     /// Nothing is happening and Ready is not wanted. A pop-up still on the activity (Paired, a
     /// pairing code) stays until it clears.
     private var hidesNow: Bool { activity != nil && state.isQuiet && state.event == nil && hidesWhenIdle() }
-
-    /// Ready was turned on or off in Settings (Poki is in front, so a Live Activity can start).
-    func idleSettingChanged() {
-        if hidesNow {
-            hide()
-        } else if activity == nil, let wanted, !hidesWhenIdle() {
-            start(deviceName: wanted)
-        }
-    }
 
     /// Takes the activity off the screen but keeps it wanted: the next work brings it back.
     private func hide() {

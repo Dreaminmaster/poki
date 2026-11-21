@@ -125,7 +125,7 @@ struct HistoryPage: View {
         .toolbar {
             if asSenses {
                 ToolbarItem(placement: .primaryAction) {
-                    // The same page as Security › Screen History, not a copy (the owner, Nov 21 2026).
+                    // The same page as Settings › Screen History, not a copy (the owner, Nov 21 2026).
                     // History is already open here, or off, so it opens at once.
                     NavigationLink {
                         HistoryGate(whenOff: true) { ScreenHistorySettingsView().settingsPage() }
@@ -182,7 +182,7 @@ struct HistoryPage: View {
 
 // MARK: Settings
 
-/// Screen History's one settings page (the owner, Nov 21 2026): Security › Screen History and the gear
+/// Screen History's one settings page (the owner, Nov 21 2026): Settings › Screen History and the gear
 /// on Senses open this same view, so both show and change one set of settings. Its switch and status,
 /// what the history is used for, which apps are read, how long it is kept (on the page, not one row
 /// further), the loopback shortcut it needs, and Clear History, which asks twice: which part, then the
@@ -311,12 +311,6 @@ struct ScreenHistorySettingsView: View {
                 }
                 .disabled(size.entries == 0 || lock.asking)
                 .accessibilityIdentifier("screenHistory.clear")
-            } footer: {
-                Group {
-                    Text(verbatim: String(format: AppLocalization.text("Clearing cannot be undone. Poki asks for %@ before it clears."),
-                                          lock.usesBiometrics ? lock.biometricsLabel : AppLocalization.text("your passcode")))
-                }
-                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Screen History"))
