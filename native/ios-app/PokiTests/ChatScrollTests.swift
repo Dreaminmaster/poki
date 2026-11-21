@@ -304,13 +304,25 @@ final class ChatScrollTests: XCTestCase {
     }
 
     private static func accessible(in root: UIView, matching matches: (String) -> Bool) -> NSObject? {
-        let front = (root as? UIWindow).flatMap { frontController($0.rootViewController)?.view }
-        let searchRoot = front ?? root
-        // UIKit sometimes exposes hosted elements through the controller, and
-        // sometimes through the window's accessibility containers.
-        var pending: [NSObject] = [searchRoot]
-        if let controller = (root as? UIWindow).flatMap({ frontController($0.rootViewController) }) {
-            pending.append(controller)
+        // Do not reduce the search to the deepest hosting controller. A SwiftUI
+        // sheet/NavigationStack can install its list in a *sibling* host while
+        // frontController() returns the composer behind it. Start from the full
+        // window and visit every presented/child controller as well as UIKit's
+        // virtual accessibility containers; the lookup still activates only the
+        // real, on-screen control.
+        var pending: [NSObject] = [root]
+        if let window = root as? UIWindow, let rootController = window.rootViewController {
+            var controllers: [UIViewController] = [rootController]
+            var seenControllers = Set<ObjectIdentifier>()
+            while let controller = controllers.popLast() {
+                guard seenControllers.insert(ObjectIdentifier(controller)).inserted else { continue }
+                pending.append(controller)
+                pending.append(controller.view)
+                controllers.append(contentsOf: controller.children)
+                if let presented = controller.presentedViewController, !presented.isBeingDismissed {
+                    controllers.append(presented)
+                }
+            }
         }
         var visited = Set<ObjectIdentifier>()
         while let item = pending.popLast() {
