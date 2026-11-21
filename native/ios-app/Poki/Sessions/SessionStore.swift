@@ -690,7 +690,7 @@ final class SessionStore {
             if pendingAgentSteps[id]?.isEmpty == true { pendingAgentSteps.removeValue(forKey: id) }
             // The completed outside tool no longer owns future approvals. Preserve a
             // different in-flight session if its tool started after this one.
-            if currentSession == conversations[id] ?? id, pendingAgentSteps[id] == nil {
+            if currentSession == (conversations[id] ?? id), pendingAgentSteps[id] == nil {
                 currentSession = nil
             }
             update(agent: id) { session in
