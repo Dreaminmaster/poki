@@ -116,6 +116,8 @@ public struct Approval: Sendable, Equatable {
     /// What it covers: the same actions sent again on the same controls run once it is granted.
     var scope: ApprovalScope
     var workspaceSession: String?
+    /// The MCP call that actually raised this approval, never inferred from the chat screen.
+    public var sourceSession: String? = nil
 
     func covers(_ other: ApprovalScope, workspaceSession session: String?) -> Bool {
         workspaceSession == session && scope.covers(other)
@@ -394,7 +396,8 @@ final class Approvals: @unchecked Sendable {
         apply(.consumeGrant(scope: scope, workspaceSession: workspaceSession)).consumed
     }
 
-    func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil, stopsWhenOff: Bool = false) -> Approval {
+    func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil,
+                 stopsWhenOff: Bool = false, sourceSession: String? = nil) -> Approval {
         let date = Date()
         let approval = Approval(
             id: String(UUID().uuidString.prefix(8)).lowercased(),
@@ -405,7 +408,8 @@ final class Approvals: @unchecked Sendable {
             expires: date.addingTimeInterval(lifetime),
             stopsWhenOff: stopsWhenOff,
             scope: scope,
-            workspaceSession: workspaceSession
+            workspaceSession: workspaceSession,
+            sourceSession: sourceSession
         )
         apply(.request(approval), now: date)
         Task { [weak self, lifetime] in
