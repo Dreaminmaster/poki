@@ -27151,6 +27151,22 @@
         }
       }
     },
+    "Outfit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "装扮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裝扮"
+          }
+        }
+      }
+    },
     "Search Apps" : {
       "localizations" : {
         "zh-Hans" : {

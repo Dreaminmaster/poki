@@ -14,7 +14,7 @@ struct BearWardrobeSheet: View {
     var body: some View {
         NavigationStack {
             quickOutfits
-                .navigationTitle(AppLocalization.text("Outfits"))
+                .navigationTitle(AppLocalization.text("Outfit"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -151,13 +151,17 @@ private struct WardrobeGrid: View {
                     else { wardrobe.selection = BearOutfitSelection(option) }
                 } label: {
                     VStack(spacing: 3) {
+                        // The picture keeps one size whatever the name does: the name wraps under it
+                        // in two lines' room, so every tile in a row matches.
                         tile(image: image, none: option == nil, selected: selected)
+                            .frame(width: imageSide, height: imageSide)
                             .padding(5)
                         Text(name)
                             .font(.allo(.caption, selected ? .semibold : .regular))
                             .foregroundStyle(selected ? Color.accentColor : Color.primary)
                             .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2, reservesSpace: true)
+                            .minimumScaleFactor(0.85)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .top)
                     .contentShape(.rect)
@@ -168,6 +172,10 @@ private struct WardrobeGrid: View {
                 .accessibilityIdentifier("wardrobe.\(slot?.rawValue ?? "set").\(option?.id ?? 0)")
             }
     }
+
+    /// The picture's side: the tile less its padding, never larger than the 60 points it was drawn for
+    /// at the default size.
+    private var imageSide: CGFloat { max(52, tileWidth - 2) }
 
     private var tileWidth: CGFloat {
         if typeSize >= .accessibility3 { return 132 }
@@ -187,8 +195,6 @@ private struct WardrobeGrid: View {
             }
         }
         .clipShape(shape)
-        .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: 60)
         .overlay {
             if selected {
                 shape.strokeBorder(Color.accentColor, lineWidth: 1.5)

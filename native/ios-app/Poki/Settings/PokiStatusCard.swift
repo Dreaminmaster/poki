@@ -123,7 +123,7 @@ struct PokiMenu<Face: View>: View {
                 // owner, Nov 21 2026: no Ready header, no divider before Outfits).
                 if let openOutfits {
                     Button(action: openOutfits) {
-                        Label("Outfits", systemImage: "tshirt")
+                        Label("Outfit", systemImage: "tshirt")
                         Text(verbatim: BearWardrobe.shared.selection == .bare
                              ? AppLocalization.text("None") : BearWardrobe.shared.selection.displayName)
                     }

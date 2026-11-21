@@ -182,7 +182,7 @@ struct PokiFlight: View {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(Text("Outfits"))
+                        .accessibilityLabel(Text("Outfit"))
                         .accessibilityIdentifier("chat.header.outfits")
                     }
                 }
