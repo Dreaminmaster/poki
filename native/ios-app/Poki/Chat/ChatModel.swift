@@ -1834,12 +1834,14 @@ final class ChatModel {
             // The phone is back with you for the passcode: the step waits, the card says it is your turn.
             modelPlan = Sample.coffeeSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.coffee, delivered: true)), onIt, steps(Sample.coffeeSteps, done: 2, then: .waiting)]
+        #if DEBUG
         case "card":
             // A finished search with its result card (Taobao's list), for the card's look.
             let json = #"{"app":"com.taobao.taobao4iphone","kind":"\#(Taobao.kind)","recommended":"a","primary":{"label":"查看","say":"打开 {title}"},"items":[{"id":"a","title":"象印保温杯 480ml","price":"¥199","sold":"3000+人付款"},{"id":"b","title":"膳魔师保温杯 500ml","price":"¥229","sold":"1万+人付款"},{"id":"c","title":"虎牌保温杯 360ml","price":"¥169","sold":"800+人付款"}]}"#
             var entriesNow = [ChatEntry(.time(start)), ChatEntry(.you("找一款保温杯", delivered: true)), onIt, steps(Sample.momSteps, done: 4, then: nil)]
             if let card = try? JSONDecoder().decode(ResultCard.self, from: Data(json.utf8)), card.problem == nil { entriesNow.append(ChatEntry(.card(card))) }
             entries = entriesNow
+        #endif
         case "failed":
             var plan = ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Notification Center")), state: .done),
                                         PlanStep(AppLocalization.text(LocalizedStringResource("Tap Clear All")), state: .failed)]))
