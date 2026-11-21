@@ -79,7 +79,11 @@ enum MentionSearch {
 
     /// The apps and connectors for a query, best first.
     static func matches(_ query: String, pending: Bool, explicit: Bool) -> [MentionMatch] {
-        let typed = fold(query.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: " ", with: ""))
+        // The keyboard's syllable marks go: apostrophes, and every kind of space (Pinyin puts a six-per-em
+        // space, U+2006, between syllables, so "tb" composing was "t b" and matched nothing).
+        let typed = fold(String(String.UnicodeScalarView(query.unicodeScalars.filter {
+            !CharacterSet.whitespacesAndNewlines.contains($0) && $0 != "'" && $0 != "\u{2019}"
+        })))
         // Latin letters the keyboard is still composing are Pinyin (Zhuyin, Cangjie and kana compose
         // in their own script): they spell a Chinese name, not a Latin one, so only the Pinyin keys of Chinese
         // names match until the keyboard commits ("tai" no longer offers Tailscale over 太平洋保险).

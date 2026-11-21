@@ -39,6 +39,12 @@ final class MentionSearchTests: XCTestCase {
         XCTAssertTrue(ids("tao", pending: true).contains(taobao))
     }
 
+    /// The Pinyin keyboard composes with a six-per-em space between syllables ("t\u{2006}b").
+    func testPinyinSyllableSpacesDoNotStopTheMatch() {
+        XCTAssertTrue(ids("t\u{2006}b", pending: true).contains(taobao))
+        XCTAssertTrue(ids("tao\u{2006}bao", pending: true).contains(taobao))
+    }
+
     func testCommittedChineseFindsTheNameFromTheEndOfTheRun() {
         let found = MentionSearch.query(before: "帮我打开淘", pendingStart: nil)
         XCTAssertEqual(found?.text, "淘")
