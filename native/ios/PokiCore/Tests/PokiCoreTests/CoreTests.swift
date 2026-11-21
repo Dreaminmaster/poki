@@ -550,6 +550,14 @@ final class ApprovalTests: XCTestCase {
         let local = await localCore.callTool("do", arguments: #"{"actions":[{"tap":1}]}"#)
         XCTAssertTrue(local.text.contains("approval_required"), local.text)
         XCTAssertNil(localCore.pendingApproval?.sourceSession)
+
+        // MCP allows a first tools/call without mcp-session-id. It is still
+        // external and must never be classified as the visible owner's chat.
+        let (anonymousCore, _, _) = makeCore(screenWithDelete()) { $0.approvalWait = 0 }
+        _ = await anonymousCore.call("look", [:])
+        let anonymous = await anonymousCore.call("do", ["actions": [["tap": 1]]])
+        XCTAssertTrue(anonymous.text.contains("approval_required"), anonymous.text)
+        XCTAssertTrue(anonymousCore.pendingApproval?.sourceSession?.hasPrefix("anonymous-external-") == true)
     }
 
     /// A grant is for the request *and* its caller: another MCP client must not
