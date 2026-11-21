@@ -883,7 +883,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
-        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { received.fulfill() }
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")], onRequest: { _ in received.fulfill() })
         ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
         let restored = ChatModel(app: app)
         restored.restore(saved)
@@ -909,7 +909,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task received")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -959,7 +959,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task reached model")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -973,7 +973,7 @@ final class ChatHarnessTests: XCTestCase {
         }
         let selected = expectation(description: "chosen task reached model")
         let finished = expectation(description: "chosen task finished")
-        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")]) { _ in selected.fulfill() }
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")], onRequest: { _ in selected.fulfill() })
         _ = chat(on: server)
         let chat = ChatModel(app: try XCTUnwrap(app))
         chat.newConversation()
