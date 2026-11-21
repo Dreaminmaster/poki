@@ -28523,22 +28523,6 @@
         }
       }
     },
-    "Share Run Log for Maintainers" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "与维护者共享运行日志"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "與維護者共享執行日誌"
-          }
-        }
-      }
-    },
     "Optional, for live voice without an OpenAI key on this iPhone. Run bin/voice-bridge.mjs on your Mac and enter the address it gives." : {
       "localizations" : {
         "zh-Hans" : {
@@ -37643,28 +37627,6 @@
         }
       }
     },
-    "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "记录每次技能的运行结果、停止位置和耗时，不包含输入文本，用于帮助维护者提升技能稳定性。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "記錄每次技能的執行結果、停止位置與耗時，不包含輸入文字，用於協助維護者提升技能穩定性。"
-          }
-        }
-      }
-    },
     "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview." : {
       "localizations" : {
         "en" : {
@@ -43758,6 +43720,94 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新查看設定指南"
+          }
+        }
+      }
+    },
+    "Get Debug Bundle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Debug Bundle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "获取调试包"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取得除錯套件"
+          }
+        }
+      }
+    },
+    "Building" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Building"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在生成"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在產生"
+          }
+        }
+      }
+    },
+    "Couldn’t Make the Debug Bundle" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t Make the Debug Bundle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法生成调试包"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法產生除錯套件"
+          }
+        }
+      }
+    },
+    "The debug bundle holds logs and settings for Poki’s maintainers. It leaves out keys, passwords, chats, memory and screen text." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The debug bundle holds logs and settings for Poki’s maintainers. It leaves out keys, passwords, chats, memory and screen text."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调试包包含供 Poki 维护者使用的日志和设置，不含密钥、密码、聊天、记忆和屏幕文字。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除錯套件包含供 Poki 維護者使用的記錄和設定，不含金鑰、密碼、聊天、記憶和螢幕文字。"
           }
         }
       }
