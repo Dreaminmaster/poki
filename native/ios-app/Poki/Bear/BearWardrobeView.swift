@@ -23,21 +23,6 @@ struct BearWardrobeSheet: View {
                             .accessibilityIdentifier("wardrobe.close")
                     }
                 }
-                .navigationDestination(isPresented: $mixing) {
-                    BearMixView()
-                        .navigationTitle(AppLocalization.text("Mix and Match"))
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .primaryAction) {
-                                Button("Remove All", role: .destructive) {
-                                    BearWardrobe.shared.selection = .bare
-                                }
-                                .tint(.red)
-                                .disabled(BearWardrobe.shared.selection == .bare)
-                                .accessibilityIdentifier("wardrobe.removeAll")
-                            }
-                        }
-                }
         }
         .presentationDetents([Self.quick, .large], selection: $detent)
         .presentationContentInteraction(.scrolls)
@@ -54,52 +39,66 @@ struct BearWardrobeSheet: View {
         .onDisappear { navigationTask?.cancel() }
     }
 
+    /// Everything on one page (the owner, Nov 21 2026): whole outfits, then each kind of piece in its
+    /// own row of tiles, the bear above wearing the choice as it is made. No settings row, no line
+    /// saying what is worn (the bear shows it), no second page for mixing.
     private var quickOutfits: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Current outfit: \(BearWardrobe.shared.selection.displayName)")
-                    .font(.allo(.subheadline))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("wardrobe.current")
-
-                WardrobeGrid(slot: nil)
-
-                VStack(spacing: 0) {
-                    Button {
-                        rootDetent = detent
-                        navigationTask?.cancel()
-                        if detent == .large {
-                            mixing = true
-                        } else {
-                            detent = .large
-                            navigationTask = Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 100))
-                                guard !Task.isCancelled, !mixing else { return }
-                                mixing = true
-                            }
+        let wardrobe = BearWardrobe.shared
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                row("Full Outfits", slot: nil)
+                row(BearOutfitSlot.headwear.name, slot: .headwear)
+                row(BearOutfitSlot.clothes.name, slot: .clothes)
+                if let outfit = wardrobe.selection.clothes {
+                    VStack(spacing: 0) {
+                        ColorPicker("Main Color", selection: color(\.primary, outfit: outfit), supportsOpacity: false)
+                            .padding(.horizontal, 14).frame(minHeight: 44)
+                        Divider().padding(.leading, 14)
+                        ColorPicker("Accent Color", selection: color(\.accent, outfit: outfit), supportsOpacity: false)
+                            .padding(.horizontal, 14).frame(minHeight: 44)
+                        if wardrobe.colors != BearOutfitColors() {
+                            Divider().padding(.leading, 14)
+                            Button("Reset Colors") { wardrobe.colors = BearOutfitColors() }
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 14)
                         }
-                    } label: {
-                        destinationLabel("Mix and Match", icon: "hanger")
                     }
-                    .accessibilityIdentifier("wardrobe.mix")
-
-                    Divider().padding(.leading, 44)
-
-                    Button(action: showSettings) {
-                        destinationLabel("Settings", icon: "gearshape")
-                    }
-                    .accessibilityIdentifier("wardrobe.settings")
+                    .font(.allo(.body))
+                    .background(.fill.tertiary, in: .rect(cornerRadius: 16))
+                    .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .background(.fill.tertiary, in: .rect(cornerRadius: 16))
             }
             .frame(maxWidth: 520)
             .padding(.horizontal, 12)
             .padding(.top, 12)
             .padding(.bottom, 20)
             .frame(maxWidth: .infinity)
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: wardrobe.selection)
         }
         .softTopEdge()
+    }
+
+    private func row(_ title: LocalizedStringResource, slot: BearOutfitSlot?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.allo(.headline, .bold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isHeader)
+            WardrobeGrid(slot: slot, horizontal: true)
+        }
+    }
+
+    private func color(_ component: WritableKeyPath<BearOutfitColors, UInt32?>, outfit: BearOutfit) -> Binding<Color> {
+        let wardrobe = BearWardrobe.shared
+        return Binding {
+            Color(hex: wardrobe.colors[keyPath: component] ?? outfit.defaultColors[keyPath: component] ?? 0xFFFFFF)
+        } set: { color in
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            guard UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a) else { return }
+            let rgb = [r, g, b].map { UInt32((min(max($0, 0), 1) * 255).rounded()) }
+            let value = rgb[0] << 16 | rgb[1] << 8 | rgb[2]
+            guard wardrobe.colors[keyPath: component] != value else { return }
+            wardrobe.colors[keyPath: component] = value
+        }
     }
 
     private func destinationLabel(_ title: LocalizedStringResource, icon: String) -> some View {
@@ -123,12 +122,25 @@ struct BearWardrobeSheet: View {
 
 private struct WardrobeGrid: View {
     let slot: BearOutfitSlot?
+    /// One row that scrolls sideways, as the wardrobe's page shows each kind of piece.
+    var horizontal = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let wardrobe = BearWardrobe.shared
         let options: [BearOutfit?] = [nil] + BearOutfit.allCases.map(Optional.some)
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 6)], spacing: 12) {
+        if horizontal {
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 6) { tiles(options, wardrobe: wardrobe).frame(width: tileWidth + 8) }
+                    .padding(.horizontal, 4)
+            }
+            .scrollIndicators(.hidden)
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 6)], spacing: 12) { tiles(options, wardrobe: wardrobe) }
+        }
+    }
+
+    @ViewBuilder private func tiles(_ options: [BearOutfit?], wardrobe: BearWardrobe) -> some View {
             ForEach(options, id: \.self) { option in
                 let piece = slot.flatMap { option?.piece($0) }
                 let name = piece?.name ?? option?.name ?? "No Outfit"
@@ -155,7 +167,6 @@ private struct WardrobeGrid: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("wardrobe.\(slot?.rawValue ?? "set").\(option?.id ?? 0)")
             }
-        }
     }
 
     private var tileWidth: CGFloat {

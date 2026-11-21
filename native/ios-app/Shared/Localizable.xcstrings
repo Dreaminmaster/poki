@@ -44669,6 +44669,28 @@
           }
         }
       }
+    },
+    "Full Outfits" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full Outfits"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整套装扮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整套裝扮"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
