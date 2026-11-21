@@ -66,7 +66,7 @@ final class AutomationStartupTests: XCTestCase {
             covered.forEach { $0.accessibilityElementsHidden = true }
             let window = UIWindow(windowScene: scene)
             window.frame = scene.screen.bounds
-            let host = UIHostingController(rootView: NavigationStack { ConnectionView() }.environment(model).environment(chat)
+            let host = UIHostingController(rootView: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }.environment(model).environment(chat)
                 .environment(\.locale, AppLocalization.locale))
             window.rootViewController = host
             window.makeKeyAndVisible()
