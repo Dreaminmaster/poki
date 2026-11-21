@@ -393,9 +393,12 @@ on the phone; the next first `look` of a task in that app names the saved skills
   never makes the pause longer); the answer says "read after N ms". After a single local number-key
   tap on an identified numeric display, reading starts immediately and reuses a verified screenshot
   once a second tree confirms the app, layout, and value (retaking the screenshot if the confirming
-  tree arrives more than 0.6 s after the picture); if nothing changes within the 0.45 s tap pause,
-  observation stops instead of waiting longer. Other taps keep the fixed 0.45 s pause, and turning
-  `quickRead` off restores the fixed pause for number-key taps too.
+  tree arrives more than 0.6 s after the picture). If nothing changes through the 0.8 s late-update
+  window or the tap stays unconfirmed on the same display, observation stops, reports
+  `touch effect: unconfirmed`, and omits the screenshot rather than returning an unconfirmed or
+  cached pre-tap image, so the caller rechecks with `look` without repeating the tap. Other taps
+  keep the fixed 0.45 s pause, and turning `quickRead` off restores the fixed pause for number-key
+  taps too.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
   The owner locks a note or a skill: no agent forgets, edits, renames or saves over a locked one
@@ -598,9 +601,12 @@ on the phone; the next first `look` of a task in that app names the saved skills
   "; an alert is over the list ("Just a moment": Not now): answer it first".
 - **No picture at all: the read before's stands in, marked stale.** When neither the runner nor the
   host gives a picture (a restart under load), the answer carries the picture of the read before
-  with "the screenshot is the one of the read before, 14 s old (no newer one came)". The host's
-  own path gets up to 15 s of the call's remaining time, and starts beside the runner's screenshot
-  when the runner is already busy at the read's start, so the two are not in series.
+  with "the screenshot is the one of the read before, 14 s old (no newer one came)". Exception: after
+  an unconfirmed local number-key tap with `CoreConfig.quickRead` on, Poki clears the cached
+  screenshot and returns no image instead of substituting an unconfirmed or pre-tap picture, so the
+  caller rechecks with `look` without repeating the tap. The host's own path gets up to 15 s of the
+  call's remaining time, and starts beside the runner's screenshot when the runner is already busy
+  at the read's start, so the two are not in series.
 - **A launch under a system alert names the alert.** When the read after a launch shows the Home
   screen with an alert (a permission prompt), the answer ends with "a system alert is in front
   (""Photos" Would Like to Send You Notifications": Don't Allow, Allow); the launched app is behind

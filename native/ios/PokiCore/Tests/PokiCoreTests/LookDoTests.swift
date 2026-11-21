@@ -855,7 +855,7 @@ final class LookDoTests: XCTestCase {
         XCTAssertEqual(taps.value, 1)
     }
 
-    func testNumberKeyStopsObservingWithinTapPauseWhenScreenDoesNotChange() async {
+    func testNumberKeyOmitsOldPictureAndStopsEarlyWhenScreenDoesNotChange() async {
         let (core, wda, _) = makeCore()
         let before = numberDisplayPicture("0")
         let taps = LockedBox(0)
@@ -880,8 +880,59 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(result.text.contains("StaticText \"0\" [16,130,358,70]"), result.text)
         XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
         XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
-        XCTAssertEqual(result.jpeg, Data("jpeg:\(before.count)".utf8), result.text)
-        XCTAssertLessThan(elapsed, 1.0, result.text)
+        XCTAssertFalse(result.text.contains("tap observation:"), result.text)
+        XCTAssertNil(result.jpeg, result.text)
+        XCTAssertLessThan(elapsed, 1.3, result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyWaitsForLateUpdateAfterTapPauseWithoutReturningOldPicture() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let settled = numberDisplayPicture("7")
+        let taps = LockedBox(0)
+        let tapAt = LockedBox<Date?>(nil)
+        let beforeNodes = [Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        let afterNodes = [Node("StaticText", "7", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        @Sendable func treeJSON(_ nodes: [Node]) -> JSON {
+            let children: [JSON] = nodes.map { n in
+                ["type": .string("XCUIElementType\(n.type)"), "label": n.label.map(JSON.string) ?? .null,
+                 "rect": ["x": .number(n.frame[0]), "y": .number(n.frame[1]), "width": .number(n.frame[2]), "height": .number(n.frame[3])],
+                 "children": []]
+            }
+            return ["type": "XCUIElementTypeApplication", "label": "Calculator",
+                    "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.set("GET /source") { _ in
+            guard let tapped = tapAt.value else { return (200, ["value": treeJSON(beforeNodes)]) }
+            let updated = Date().timeIntervalSince(tapped) >= 0.65
+            try await Task.sleep(nanoseconds: 200_000_000)
+            return (200, ["value": treeJSON(updated ? afterNodes : beforeNodes)])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard let tapped = tapAt.value else { return (200, ["value": .string(before.base64EncodedString())]) }
+            let updated = Date().timeIntervalSince(tapped) >= 0.65
+            try await Task.sleep(nanoseconds: 200_000_000)
+            let picture = updated ? settled : before
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            tapAt.value = Date()
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertFalse(result.text.contains("tap observation:"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settled.count)".utf8), result.text)
         XCTAssertEqual(taps.value, 1)
     }
 

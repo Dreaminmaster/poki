@@ -1409,15 +1409,15 @@ final class Computer: @unchecked Sendable {
         // whose parts said 5 s answered after 29.8 s).
         let total = now() - callStarted
         let readTook = now() - readStarted
+        #if canImport(OSLog)
         if let tapRead {
             let firstPicture = tapRead.firstPictureAt.map { String(Int((($0 - readStarted) * 1000).rounded())) } ?? "none"
             let target = tapRead.targetAt.map { String(Int((($0 - readStarted) * 1000).rounded())) } ?? "none"
-            let timing = "tap observation: input_uptime=\(readStarted) first_picture_ms=\(firstPicture) target_tree_ms=\(target) read_ms=\(Int((readTook * 1000).rounded())) rereads=\(tapRead.reading == nil ? tapRead.samples : tapRead.samples - 1) reason=\(tapRead.reason)"
-            #if canImport(OSLog)
+            let rereads = tapRead.reading == nil ? tapRead.samples : max(0, tapRead.samples - 1)
+            let timing = "tap observation: input_uptime=\(readStarted) first_picture_ms=\(firstPicture) target_tree_ms=\(target) read_ms=\(Int((readTook * 1000).rounded())) rereads=\(rereads) reason=\(tapRead.reason)"
             Logger(subsystem: "nz.zheha.poki", category: "screen").notice("\(timing, privacy: .public)")
-            #endif
-            result.text += "\n" + timing
         }
+        #endif
         let parts = (prepared - callStarted) + actionsTook + readTook + approvalWaited
         lastCallTook = total
         if total >= 8 || total - parts > 2 {
@@ -1773,11 +1773,14 @@ final class Computer: @unchecked Sendable {
         var reason = "settling deadline"
     }
 
+    private static let idleNumberTapWindow = 0.8
+
     private func readNumberTap(_ target: NumberTapTarget, started: Double, until: Double) async -> TapRead {
         let deadline = min(started + Self.settleWindow, until - config.readTimeout - 0.3)
-        let idleDeadline = min(started + (Self.settle[ActionKind.tap.rawValue] ?? 0.45), deadline)
+        let idleDeadline = min(started + Self.idleNumberTapWindow, deadline)
         var result = TapRead()
         var prior: (picture: PictureSketch, at: Double)?
+        var lastUnconfirmed: Reading?
         var triedFirstPicture = false
         var sawChange = false
         while deadline - now() > 0.15, !Task.isCancelled {
@@ -1788,19 +1791,22 @@ final class Computer: @unchecked Sendable {
             if result.firstPictureAt == nil { result.firstPictureAt = reading.firstPictureAt }
             guard reading.foreground?.bundleID == target.app, reading.foreground?.pokiPane == nil else {
                 result.reason = "foreground changed or is unknown"
-                break
+                return result
             }
             guard let value = target.displayValue(in: reading.elements) else {
                 result.reason = "screen layout changed"
-                break
+                return result
             }
             if value == target.expected, result.targetAt == nil { result.targetAt = reading.treeAt }
             guard reading.notes.isEmpty, reading.screenshotCompanion == nil, let png = reading.png,
                   let pictureAt = reading.firstPictureAt, let treeAt = reading.treeAt,
                   treeAt - pictureAt <= Runner.pictureLagLimit else {
                 result.reason = "no fresh picture paired with the tree"
-                break
+                return result
             }
+            var withoutPicture = reading
+            withoutPicture.png = nil
+            lastUnconfirmed = withoutPicture
             let picture = PictureSketch(png: png)
             let displayChanged = picture.differs(from: target.before, inside: target.frame, on: target.screen) == true
             if value != target.beforeValue || displayChanged { sawChange = true }
@@ -1830,7 +1836,7 @@ final class Computer: @unchecked Sendable {
                             let available = deadline - now()
                             guard available > 0.1, (try? await runner.screenSize(timeout: available)) == target.screen else {
                                 result.reason = "screen size changed or is unknown"
-                                break
+                                return result
                             }
                         }
                         result.reading = reading
@@ -1842,15 +1848,22 @@ final class Computer: @unchecked Sendable {
                 prior = (picture, pictureAt)
             } else {
                 prior = nil
-                if !sawChange, now() >= idleDeadline {
-                    result.reading = reading
+                if !sawChange, sampleAt >= idleDeadline {
+                    result.reading = withoutPicture
                     result.reason = "no change before settle pause"
                     return result
                 }
             }
-            let nextSample = sawChange ? min(deadline, sampleAt + 0.12) : min(idleDeadline, sampleAt + 0.12)
+            let nextSample: Double
+            if sawChange {
+                nextSample = min(deadline, sampleAt + 0.12)
+            } else {
+                let candidate = max(sampleAt + 0.12, now())
+                nextSample = idleDeadline - candidate <= 0.15 ? idleDeadline : min(idleDeadline, candidate)
+            }
             await sleep(seconds: max(0, nextSample - now()))
         }
+        result.reading = lastUnconfirmed
         return result
     }
 
