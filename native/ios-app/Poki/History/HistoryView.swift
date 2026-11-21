@@ -223,7 +223,7 @@ struct ScreenHistorySettingsView: View {
                 .alert("Set Up the Shortcut First", isPresented: $needsShortcut) {
                     Button("OK", role: .cancel) {}
                 } message: {
-                    Text("Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on.")
+                    Text("Screen History needs the Poki Loopback shortcut. Add it below, run it once, then turn Screen History on.")
                 }
                 if capture.enabled {
                     SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: recordingStatus)
@@ -337,12 +337,12 @@ struct CellularShortcutSection: View {
                 .accessibilityIdentifier("cellularShortcut.lastRun")
         } header: {
             Group {
-                SettingsHeader("On Cellular")
+                SettingsHeader("Poki Loopback Shortcut")
             }
             .settingsHeader()
         } footer: {
             Group {
-                Text("On cellular, iOS lets Poki keep a connection but not open a new one. This shortcut connects it again. Turn its automation on, turn Confirm Before Run off, and choose your VPN app.")
+                Text("It checks the loopback and repairs it when it is down, on Wi-Fi or cellular.")
             }
             .settingsFooter()
         }

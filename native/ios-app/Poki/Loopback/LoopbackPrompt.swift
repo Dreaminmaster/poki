@@ -152,9 +152,9 @@ private struct LoopbackPromptSheet: View {
     private var message: String {
         let reads: String
         if action == .shortcut {
-            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular."))
+            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and it is off. The Poki Loopback shortcut checks it and repairs it on any network. Add it once."))
         } else if action == .run {
-            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Run the Poki Loopback shortcut and Poki turns it on again."))
+            reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and it is off. Run the Poki Loopback shortcut and it repairs the loopback."))
         } else if action == .wiFi {
             reads = AppLocalization.text(LocalizedStringResource("Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Connect to Wi-Fi and Poki turns it on again."))
         } else if let lastRead {

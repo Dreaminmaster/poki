@@ -42718,22 +42718,6 @@
         }
       }
     },
-    "Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "屏幕历史需要让 Poki 在蜂窝网络下保持连接的快捷指令。请在下方添加并运行一次，然后再打开屏幕历史。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "螢幕歷史需要讓 Poki 在行動網路下保持連線的捷徑。請在下方加入並執行一次，然後再打開螢幕歷史。"
-          }
-        }
-      }
-    },
     "Run the Shortcut" : {
       "localizations" : {
         "zh-Hans" : {
@@ -42814,22 +42798,6 @@
         }
       }
     },
-    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. The Poki shortcut turns it on again when Wi-Fi disconnects. Add it once and Poki keeps reading on cellular." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。Poki 快捷指令会在 Wi-Fi 断开时重新打开它。添加一次，Poki 在蜂窝网络下也能继续读取。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。Poki 捷徑會在 Wi-Fi 斷開時重新打開它。加入一次，Poki 在行動網路下也能繼續讀取。"
-          }
-        }
-      }
-    },
     "Set Up by Hand" : {
       "localizations" : {
         "zh-Hans" : {
@@ -42858,22 +42826,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未能連線"
-          }
-        }
-      }
-    },
-    "On Cellular" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用蜂窝网络时"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用行動網路時"
           }
         }
       }
@@ -42942,22 +42894,6 @@
         }
       }
     },
-    "Screen History reads this iPhone through the loopback, and on cellular iOS does not let it start. Run the Poki Loopback shortcut and Poki turns it on again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "屏幕历史通过回环连接读取这台 iPhone，而在蜂窝网络下 iOS 不允许启动它。运行 Poki Loopback 快捷指令，Poki 会重新打开它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而在行動網路下 iOS 不允許啟動它。執行 Poki Loopback 捷徑，Poki 會重新打開它。"
-          }
-        }
-      }
-    },
     "On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps add the automation that runs it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -42986,22 +42922,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打開回環連線"
-          }
-        }
-      }
-    },
-    "On cellular, iOS lets Poki keep a connection but not open a new one. This shortcut connects it again. Turn its automation on, turn Confirm Before Run off, and choose your VPN app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用蜂窝网络时，iOS 允许 Poki 保持连接，但不允许建立新连接。这个快捷指令会让它重新连接。请打开它的自动化，关闭“运行前确认”，并选择你的 VPN App。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "使用行動網路時，iOS 允許 Poki 保持連線，但不允許建立新連線。這個捷徑會讓它重新連線。請打開它的自動化，關閉「執行前確認」，並選擇你的 VPN App。"
           }
         }
       }
@@ -43728,6 +43648,116 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "感知設定"
+          }
+        }
+      }
+    },
+    "Poki Loopback Shortcut" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback Shortcut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback 快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback 捷徑"
+          }
+        }
+      }
+    },
+    "It checks the loopback and repairs it when it is down, on Wi-Fi or cellular." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It checks the loopback and repairs it when it is down, on Wi-Fi or cellular."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它会检查回环连接，断开时自动修复，无论是 Wi-Fi 还是蜂窝网络。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它會檢查回環連線，中斷時自動修復，無論是 Wi-Fi 還是行動網路。"
+          }
+        }
+      }
+    },
+    "Screen History needs the Poki Loopback shortcut. Add it below, run it once, then turn Screen History on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screen History needs the Poki Loopback shortcut. Add it below, run it once, then turn Screen History on."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史需要 Poki Loopback 快捷指令。请在下方添加并运行一次，然后再打开屏幕历史。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史需要 Poki Loopback 捷徑。請在下方加入並執行一次，然後再開啟螢幕歷史。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and it is off. The Poki Loopback shortcut checks it and repairs it on any network. Add it once." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screen History reads this iPhone through the loopback, and it is off. The Poki Loopback shortcut checks it and repairs it on any network. Add it once."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而它现在已断开。Poki Loopback 快捷指令会检查并修复它，任何网络都适用。添加一次即可。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而它現在已中斷。Poki Loopback 捷徑會檢查並修復它，任何網路都適用。加入一次即可。"
+          }
+        }
+      }
+    },
+    "Screen History reads this iPhone through the loopback, and it is off. Run the Poki Loopback shortcut and it repairs the loopback." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screen History reads this iPhone through the loopback, and it is off. Run the Poki Loopback shortcut and it repairs the loopback."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕历史通过回环连接读取这台 iPhone，而它现在已断开。运行 Poki Loopback 快捷指令即可修复。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕歷史透過回環連線讀取這台 iPhone，而它現在已中斷。執行 Poki Loopback 捷徑即可修復。"
           }
         }
       }

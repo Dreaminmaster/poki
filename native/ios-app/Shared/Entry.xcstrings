@@ -481,18 +481,24 @@
         }
       }
     },
-    "Poki opens its connection to this iPhone again and says whether it worked. Use it in a shortcut that turns Cellular Data off first and back on afterwards." : {
+    "Poki opens its connection to this iPhone again and says whether it worked. The Poki Loopback shortcut uses it to repair the loopback." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki opens its connection to this iPhone again and says whether it worked. The Poki Loopback shortcut uses it to repair the loopback."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 会重新打开与这台 iPhone 的连接，并告知是否成功。请在快捷指令中先关闭蜂窝数据，运行后再打开。"
+            "value" : "Poki 重新连接这台 iPhone 并告诉你是否成功。Poki Loopback 快捷指令用它来修复回环连接。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 會重新打開與這台 iPhone 的連線，並告知是否成功。請在捷徑中先關閉行動數據，執行後再打開。"
+            "value" : "Poki 重新連線這台 iPhone 並告訴你是否成功。Poki Loopback 捷徑用它來修復回環連線。"
           }
         }
       }

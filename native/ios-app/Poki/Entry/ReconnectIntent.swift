@@ -7,7 +7,7 @@ import AppIntents
 /// wait for it and not guess a delay.
 struct ReconnectPokiIntent: AppIntent {
     static let title = LocalizedStringResource("Reconnect Poki", table: "Entry")
-    static let description = IntentDescription(LocalizedStringResource("Poki opens its connection to this iPhone again and says whether it worked. Use it in a shortcut that turns Cellular Data off first and back on afterwards.", table: "Entry"))
+    static let description = IntentDescription(LocalizedStringResource("Poki opens its connection to this iPhone again and says whether it worked. The Poki Loopback shortcut uses it to repair the loopback.", table: "Entry"))
     static let openAppWhenRun = false
 
     init() {}
