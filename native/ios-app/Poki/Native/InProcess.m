@@ -412,6 +412,15 @@ static id PKForegroundElementTimed(id ax, PKDisplayGeometry geometry, CGRect *pa
     return candidates.firstObject;
 }
 
+/// A BOOL property of an element snapshot, or `fallback` when the snapshot does not have it.
+static BOOL PKSnapshotFlag(id node, NSString *key, BOOL fallback) {
+    @try {
+        id value = [node valueForKey:key];
+        if ([value respondsToSelector:@selector(boolValue)]) return [value boolValue];
+    } @catch (__unused NSException *e) {}
+    return fallback;
+}
+
 /// The attributes the XML needs and no more: each extra one (visibility, hittability) costs the AX
 /// server more round trips per element.
 static NSArray *PKSnapshotAttributes(void) {
@@ -2750,6 +2759,10 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
                 f = CGRectIsNull(f) ? CGRectZero : CGRectOffset(f, -shift.x, -shift.y);
             }
             [xml appendFormat:@" x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\"", (int)lround(f.origin.x), (int)lround(f.origin.y), (int)lround(f.size.width), (int)lround(f.size.height)];
+            // The snapshot already carries enabled and selected (PKSnapshotAttributes asks for both);
+            // only the exceptions are written, so an ordinary tree grows by nothing (issue #609).
+            if (!PKSnapshotFlag(node, @"enabled", YES)) [xml appendString:@" enabled=\"false\""];
+            if (PKSnapshotFlag(node, @"selected", NO)) [xml appendString:@" selected=\"true\""];
             BOOL keyboard = [node respondsToSelector:@selector(hasKeyboardFocus)] ? [node hasKeyboardFocus]
                 : [node respondsToSelector:@selector(hasFocus)] && [node hasFocus];
             if (!focus && keyboard && (!paneRead || !CGRectIsEmpty(f)) && ([type hasSuffix:@"Field"] || [type hasSuffix:@"TextView"])) {
