@@ -22,8 +22,8 @@ struct SensesUseSection: View {
         } footer: {
             Group {
                 Text(LocalizedStringKey(use.insightModel == .onDevice
-                    ? "Poki learns your usual apps and routines from which apps you use and when, suggests pills for the time of day, and answers Poki's questions about you. A model on this iPhone checks each answer, and asks you first when it is private. Your screen text never leaves this iPhone."
-                    : "Poki learns your usual apps and routines from which apps you use and when. Interests and pill ideas are written by your chat model, which then reads your summaries and screen titles. A model on this iPhone still checks each answer for Poki's chat, and asks you first when it is private."))
+                    ? "Poki learns which apps you use and when, and suggests pills for the time of day. A model on this iPhone checks every answer about you and asks you first when it's private. Screen text stays on this iPhone."
+                    : "Poki learns which apps you use and when. Your chat model writes interests and pill ideas from your summaries and screen titles. A model on this iPhone still checks every answer about you and asks you first when it's private."))
             }
             .settingsFooter()
         }

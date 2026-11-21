@@ -60,7 +60,7 @@ struct MemoryView: View {
         let apps = library.apps
         List {
             if library.items.isEmpty {
-                Section { MemoryEmptyCard(title: "No memories yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
+                Section { MemoryEmptyCard(title: "No Memories Yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
             } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 MemorySearchResults(query: query, page: page)
             } else {

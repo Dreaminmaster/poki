@@ -435,7 +435,7 @@ private struct ProxyAppPage: View {
         Form {
             Section {
                 ForEach(Array(app.steps.enumerated()), id: \.offset) { i, line in
-                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }
+                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }.font(.allo(.subheadline))
                 }
             } header: {
                 Group {
@@ -486,8 +486,8 @@ private struct LocalDevVPNPage: View {
     var body: some View {
         Form {
             Section {
-                Label("No proxy app? Install LocalDevVPN, a free loopback app built for this.", systemImage: "1.circle")
-                Label("Open it and tap Connect, then return to Poki. It may disconnect another VPN app.", systemImage: "2.circle")
+                Label("No proxy app? Install LocalDevVPN, a free loopback app built for this.", systemImage: "1.circle").font(.allo(.subheadline))
+                Label("Open it and tap Connect, then return to Poki. It may disconnect another VPN app.", systemImage: "2.circle").font(.allo(.subheadline))
             } header: {
                 Group {
      Text("How To") 
@@ -576,8 +576,8 @@ private struct PairingPage: View {
             Section {
                 Label("Waiting for Settings. Tap Pair with Poki there.", systemImage: "dot.radiowaves.left.and.right")
                     .symbolEffect(.pulse, options: .repeating)
-                Label("Open **Settings › Privacy & Security › Developer Mode**.", systemImage: "1.circle")
-                Label("Tap **Pair with Poki** and enter the code shown here and on the Lock Screen.", systemImage: "2.circle")
+                Label("Open **Settings › Privacy & Security › Developer Mode**.", systemImage: "1.circle").font(.allo(.subheadline))
+                Label("Tap **Pair with Poki** and enter the code shown here and on the Lock Screen.", systemImage: "2.circle").font(.allo(.subheadline))
             }
             Section {
                 Button("Open Settings", systemImage: "gear") { openSettings(model, for: .pairing) }
@@ -602,9 +602,9 @@ private struct PairingPage: View {
                 }
             } else if SetupStep.onDevicePairing {
                 Section {
-                    Label("Connect to Wi‑Fi and tap **Start Pairing**. Allow local network access when prompted.", systemImage: "1.circle")
-                    Label("Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle")
-                    Label("Enter the code shown here and on the Lock Screen.", systemImage: "3.circle")
+                    Label("Connect to Wi‑Fi and tap **Start Pairing**. Allow local network access when prompted.", systemImage: "1.circle").font(.allo(.subheadline))
+                    Label("Poki opens the main Settings page. Go to **Privacy & Security › Developer Mode** and tap **Pair with Poki**.", systemImage: "2.circle").font(.allo(.subheadline))
+                    Label("Enter the code shown here and on the Lock Screen.", systemImage: "3.circle").font(.allo(.subheadline))
                 } header: {
                     Group {
      Text("How To") 
@@ -613,7 +613,7 @@ private struct PairingPage: View {
                 }
             } else {
                 Section {
-                    Label("Pairing on the phone itself needs iOS 27; this iPhone runs iOS \(UIDevice.current.systemVersion). Pair it from a computer instead.", systemImage: "1.circle")
+                    Label("Pairing on the phone itself needs iOS 27; this iPhone runs iOS \(UIDevice.current.systemVersion). Pair it from a computer instead.", systemImage: "1.circle").font(.allo(.subheadline))
                     Label("Open **Poki Setup** on your Mac or PC, connect this iPhone by cable, and tap **Pair**. Tap **Trust** on the iPhone when asked.", systemImage: "2.circle")
                     Label("Send the pairing file here: tap **Scan Pairing Code** below (or scan Poki Setup's code with the Camera), AirDrop the file to this iPhone and open it with Poki, or tap **Import Pairing File** below.", systemImage: "3.circle")
                 } header: {
@@ -857,7 +857,7 @@ struct SetupStepPage: View {
             }
             Section {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }
+                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }.font(.allo(.subheadline))
                 }
             } header: {
                 Group {

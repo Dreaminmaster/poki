@@ -147,12 +147,12 @@ struct ScreenHistorySettingsView: View {
         return count > 0 ? "\(count)" : nil
     }
 
-    private var recordingStatus: LocalizedStringKey {
-        if !capture.enabled { return "Off" }
-        if capture.status == .reading { return "Recording" }
+    /// Only while Screen History is on: off, the switch above already says so.
+    private var recordingStatus: String {
+        if capture.status == .reading { return AppLocalization.text(LocalizedStringResource("Recording")) }
         // A run that waits says why: the iPhone is locked, an agent's task, or no local connection.
-        if capture.isRunning, let held = capture.held { return LocalizedStringKey(HistoryNames.status(held)) }
-        return "Paused, Waiting to Resume"
+        if capture.isRunning, let held = capture.held { return AppLocalization.text(LocalizedStringResource(String.LocalizationValue(HistoryNames.status(held)))) }
+        return AppLocalization.text(LocalizedStringResource("Paused, Waiting to Resume"))
     }
 
     var body: some View {
@@ -167,12 +167,14 @@ struct ScreenHistorySettingsView: View {
                 } message: {
                     Text("Screen History needs the shortcut that keeps Poki connected on cellular. Add it below, run it once, then turn Screen History on.")
                 }
-                SettingsRow(title: "Status", caption: recordingStatus, symbol: "dot.radiowaves.left.and.right")
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("screenHistory.status")
+                if capture.enabled {
+                    SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: recordingStatus)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("screenHistory.status")
+                }
             } footer: {
                 Group {
-                    Text("While on, Poki records screen text whenever iOS lets it run. It pauses when the iPhone locks or iOS suspends Poki, and resumes when Poki can run again. Text is stored on this iPhone, excluding apps you leave out and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent.")
+                    Text("Poki saves screen text on this iPhone, except password fields and apps you exclude. It pauses while the iPhone is locked. When Poki or an agent searches your history, the matching text goes to your AI provider or that agent.")
                 }
                 .settingsFooter()
             }
@@ -219,16 +221,6 @@ struct ScreenHistorySettingsView: View {
                     clearing = true
                 }
                 .accessibilityIdentifier("screenHistory.clear")
-            } footer: {
-                Group {
-                    if size.entries > 0 {
-                        Text(verbatim: String(
-                            format: AppLocalization.text("Storage used: %@"),
-                            ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)
-                        ))
-                    }
-                }
-                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Senses"))
@@ -281,7 +273,7 @@ struct CellularShortcutSection: View {
             } label: {
                 SettingsRow(title: "Set Up by Hand", symbol: "list.number")
             }
-            SettingsRow(title: "Last Run", symbol: "arrow.triangle.2.circlepath", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
+            SettingsRow(title: "Last Run", symbol: "clock", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
                 .accessibilityIdentifier("cellularShortcut.lastRun")
         } header: {
             Group {
@@ -363,8 +355,7 @@ struct BacktapeSettingsPage: View {
                 .settingsFooter()
             }
             Section {
-                NavigationLink { HistoryGate { HistoryLockSettings().settingsPage() } } label: { Text("Screen History Lock") }
-                NavigationLink { HistoryGate { HistoryRecordPage().settingsPage() } } label: { Text("Observing Record") }
+                // The lock and the Observing Record are on Security, once (the owner, Nov 20 2026).
                 LabeledContent("Storage Used") {
                     Text(verbatim: "\(ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file))")
                 }

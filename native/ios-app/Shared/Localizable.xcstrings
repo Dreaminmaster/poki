@@ -763,23 +763,6 @@
         }
       }
     },
-    "No memories yet" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无记忆"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暫無記憶"
-          }
-        }
-      }
-    },
     "The preferences and habits Poki notes will appear here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36472,22 +36455,6 @@
         }
       }
     },
-    "While on, Poki records screen text whenever iOS lets it run. It pauses when the iPhone locks or iOS suspends Poki, and resumes when Poki can run again. Text is stored on this iPhone, excluding apps you leave out and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开后，只要 iOS 允许 Poki 运行，Poki 就会记录屏幕文字。iPhone 锁定或 iOS 暂停 Poki 时会暂停记录，Poki 恢复运行后会继续。文字保存在这台 iPhone 上。排除的 App 和密码栏不会被记录。Poki 或已连接的智能体查询屏幕记录时，相关文字可能会发送给所选的 AI 服务商或已连接的智能体。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟後，只要 iOS 允許 Poki 執行，Poki 就會記錄螢幕文字。iPhone 鎖定或 iOS 暫停 Poki 時會暫停記錄，Poki 恢復執行後會繼續。文字儲存在這部 iPhone 上。排除的 App 和密碼欄不會被記錄。Poki 或已連線的代理程式查詢螢幕記錄時，相關文字可能會傳送給所選的 AI 服務供應商或已連線的代理程式。"
-          }
-        }
-      }
-    },
     "Screen History" : {
       "localizations" : {
         "zh-Hans" : {
@@ -37116,22 +37083,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "排除應用"
-          }
-        }
-      }
-    },
-    "Storage used: %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已用空间：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已用空間：%@"
           }
         }
       }
@@ -42283,50 +42234,6 @@
         }
       }
     },
-    "Poki learns your usual apps and routines from which apps you use and when, suggests pills for the time of day, and answers Poki's questions about you. A model on this iPhone checks each answer, and asks you first when it is private. Your screen text never leaves this iPhone." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki learns your usual apps and routines from which apps you use and when, suggests pills for the time of day, and answers Poki's questions about you. A model on this iPhone checks each answer, and asks you first when it is private. Your screen text never leaves this iPhone."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会根据你在什么时间用哪些 App 来了解你常用的 App 和习惯，按时段推荐主页建议，并回答 Poki 关于你的问题。这台 iPhone 上的模型会检查每个回答，涉及隐私时会先问你。你的屏幕文字不会离开这台 iPhone。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會根據你在什麼時間用哪些 App 來了解你常用的 App 和習慣，按時段推薦主頁建議，並回答 Poki 關於你的問題。這部 iPhone 上的模型會檢查每個回答，涉及隱私時會先問你。你的螢幕文字不會離開這部 iPhone。"
-          }
-        }
-      }
-    },
-    "Poki learns your usual apps and routines from which apps you use and when. Interests and pill ideas are written by your chat model, which then reads your summaries and screen titles. A model on this iPhone still checks each answer for Poki's chat, and asks you first when it is private." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki learns your usual apps and routines from which apps you use and when. Interests and pill ideas are written by your chat model, which then reads your summaries and screen titles. A model on this iPhone still checks each answer for Poki's chat, and asks you first when it is private."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会根据你在什么时间用哪些 App 来了解你常用的 App 和习惯。兴趣和建议由你的聊天模型生成，它会读取你的摘要和屏幕标题。给 Poki 聊天的每个回答仍由这台 iPhone 上的模型检查，涉及隐私时会先问你。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會根據你在什麼時間用哪些 App 來了解你常用的 App 和習慣。興趣和建議由你的聊天模型生成，它會讀取你的摘要和螢幕標題。給 Poki 聊天的每個回答仍由這部 iPhone 上的模型檢查，涉及隱私時會先問你。"
-          }
-        }
-      }
-    },
     "Learned from Screen History" : {
       "localizations" : {
         "en" : {
@@ -42849,6 +42756,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。確認嚴格度位於「設定 › 安全」。"
+          }
+        }
+      }
+    },
+    "Poki saves screen text on this iPhone, except password fields and apps you exclude. It pauses while the iPhone is locked. When Poki or an agent searches your history, the matching text goes to your AI provider or that agent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会把屏幕文字保存在这台 iPhone 上，密码栏和排除的 App 除外。iPhone 锁定时暂停记录。Poki 或智能体查询屏幕记录时，相关文字会发送给你的 AI 服务商或该智能体。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會把螢幕文字儲存在這部 iPhone 上，密碼欄和排除的 App 除外。iPhone 鎖定時暫停記錄。Poki 或代理程式查詢螢幕記錄時，相關文字會傳送給你的 AI 服務供應商或該代理程式。"
+          }
+        }
+      }
+    },
+    "Poki learns which apps you use and when, and suggests pills for the time of day. A model on this iPhone checks every answer about you and asks you first when it's private. Screen text stays on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会了解你在什么时间用哪些 App，并按时段推荐主页建议。关于你的每个回答都由这台 iPhone 上的模型检查，涉及隐私时会先问你。屏幕文字只留在这台 iPhone 上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會了解你在什麼時間用哪些 App，並按時段推薦主頁建議。關於你的每個回答都由這部 iPhone 上的模型檢查，涉及隱私時會先問你。螢幕文字只留在這部 iPhone 上。"
+          }
+        }
+      }
+    },
+    "Poki learns which apps you use and when. Your chat model writes interests and pill ideas from your summaries and screen titles. A model on this iPhone still checks every answer about you and asks you first when it's private." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会了解你在什么时间用哪些 App。兴趣和建议由你的聊天模型根据摘要和屏幕标题生成。关于你的每个回答仍由这台 iPhone 上的模型检查，涉及隐私时会先问你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會了解你在什麼時間用哪些 App。興趣和建議由你的聊天模型根據摘要和螢幕標題生成。關於你的每個回答仍由這部 iPhone 上的模型檢查，涉及隱私時會先問你。"
+          }
+        }
+      }
+    },
+    "No Memories Yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无记忆"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無記憶"
           }
         }
       }

@@ -184,6 +184,10 @@ private struct SettingsPageStyle: ViewModifier {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background { HomeBackdrop(home: true, working: false, frozen: true) }
+            // The soft edge under the title on every settings page, the welcome's setup list included:
+            // left to the system there, the large title collapsed into a nearly opaque band with a
+            // straight line through the first card (the owner, Nov 20 2026).
+            .softTopEdge()
     }
 }
 
