@@ -114,6 +114,47 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertEqual((itemFields["image_screenshot"] as? [String: Any])?["type"] as? String, "string")
     }
 
+    func testFinishTaskDescribesTheFieldsUsedByCtripCardsAndPhotoCrops() throws {
+        let finish = try XCTUnwrap(Harness.tools.first { $0.name == "finish_task" })
+        let fields = try XCTUnwrap(finish.schema["properties"] as? [String: Any])
+        let cardSchema = try XCTUnwrap(fields["card"] as? [String: Any])
+        let description = try XCTUnwrap(cardSchema["description"] as? String)
+        let lines = description.split(separator: "\n")
+        let rooms = try XCTUnwrap(lines.first { $0.hasPrefix(Ctrip.rooms + " ") })
+        let fares = try XCTUnwrap(lines.first { $0.hasPrefix(Ctrip.fares + " ") })
+
+        let roomCard = try make(Ctrip.rooms, Ctrip.app, [
+            ["id": "king", "title": "King Room", "hotel": "Harbor Hotel", "dates": "Dec 2–4", "price": "¥700", "was": "¥850"],
+            ["id": "twin", "title": "Twin Room", "dates": "Dec 2–4", "price": "¥800", "was": "¥900"],
+        ])
+        let roomWords = rooms.split { !$0.isLetter && $0 != "_" }
+        for field in ["dates", "was"] {
+            XCTAssertNotNil(roomCard.items.first?.text(field))
+            XCTAssertTrue(roomWords.contains(Substring(field)), "The room instructions must carry \(field).")
+        }
+        let roomAction = try XCTUnwrap(String(rooms).components(separatedBy: " / ").last)
+        let selectedAction = roomCard.selected("twin").fill(roomAction)
+        XCTAssertTrue(selectedAction.contains("Twin Room") && selectedAction.contains("Dec 2–4"), selectedAction)
+
+        let fareCard = try make(Ctrip.fares, Ctrip.app, [
+            ["id": "economy", "title": "Economy", "price": "¥900", "refund": "No refund. Changes cost ¥200."],
+        ])
+        XCTAssertEqual(fareCard.items[0].text("refund"), "No refund. Changes cost ¥200.")
+        XCTAssertTrue(fares.contains("refund (refund and change rules)"), "Both fare rules belong in refund.")
+
+        let cardFields = try XCTUnwrap(cardSchema["properties"] as? [String: Any])
+        let items = try XCTUnwrap(cardFields["items"] as? [String: Any])
+        let item = try XCTUnwrap(items["items"] as? [String: Any])
+        let itemFields = try XCTUnwrap(item["properties"] as? [String: Any])
+        let image = try XCTUnwrap(itemFields["image"] as? [String: Any])
+        let imageDescription = try XCTUnwrap(image["description"] as? String)
+        let pictures = try XCTUnwrap(lines.first { $0.hasPrefix("For pictured items,") })
+        for guidance in [imageDescription, String(pictures)] {
+            XCTAssertTrue(guidance.contains("photo itself"), "Crop coordinates must describe the photo.")
+            XCTAssertTrue(guidance.contains("exclude") && guidance.contains("row"), "Keep the surrounding row out of the crop.")
+        }
+    }
+
     func testImageBoxRequiresFourFiniteNumbersWithPositiveDimensions() throws {
         let items: [[String: Any]] = [
             ["id": "a", "title": "A", "price": "¥27.8", "image": [-9.5, 198, 140, 140]],
