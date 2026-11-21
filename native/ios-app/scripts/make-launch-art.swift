@@ -1,5 +1,5 @@
 // Draws the launch screen's word and bear at 3x (see Poki/LaunchArt/README.md) and writes two PNGs.
-//   swift make-launch-art.swift <AlloRounded-ExtraBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
+//   swift make-launch-art.swift <AlloRounded-Black.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Allo or a shadow itself: both are
 // drawn here, at build time, from the design's values.
 import CoreGraphics
@@ -8,14 +8,15 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// "Poki" over the light: the design's colour and weight. The font file passed in must be this weight.
+/// "Poki" over the light, in Allo Rounded Black and a near-black ink: ExtraBold in 0x3A3C41 read as a
+/// grey label, not a launch screen's word (the owner, Nov 20 2026). The font file passed in must be this weight.
 enum Word {
   static let text = "Poki"
-  static let colour: UInt32 = 0x3A3C41
+  static let colour: UInt32 = 0x1C1D21
   /// The same word for Dark Mode: the welcome's hello draws it over the dark home page (LaunchArt.on),
   /// where the light appearance's ink all but disappears.
   static let darkColour: UInt32 = 0xF2F4F7
-  static let weight = "ExtraBold"
+  static let weight = "Black"
   static let size: CGFloat = 60
   static let lineHeight: CGFloat = 64
   static let tracking: CGFloat = -0.045
@@ -40,7 +41,7 @@ enum Bear {
 let scale: CGFloat = 3
 let args = CommandLine.arguments
 guard args.count == 6 else {
-  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-ExtraBold.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
+  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-Black.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
 }
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 
