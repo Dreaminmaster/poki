@@ -322,17 +322,34 @@ final class ModelSessionMetadataTests: XCTestCase {
             XCTAssertEqual(ApprovalClassifier.route(owned, voiceOn: false, origin: ownerOrigin), .model(reply: false))
             _ = await ApprovalClassifier.decide(owned, level: .strict, voice: [], origin: ownerOrigin)
             XCTAssertEqual(ModelServerStub.requests.last?.headers["x-opencode-session"], owner.sessionID)
-            let before = ModelServerStub.requests.count
-
+            // Keep an actual owner ChatModel request in progress while a completely
+            // unrelated MCP approval arrives. The old implementation borrowed this
+            // chat's session because it checked only owner.running.
+            ModelServerStub.responder = { _, body in
+                let text = String(decoding: body, as: UTF8.self)
+                if text.contains("Owner live approval route regression")
+                    && !text.contains("You name chat conversations") {
+                    Thread.sleep(forTimeInterval: 3)
+                }
+                return (200, "text/event-stream", FakeCompletions.text("Held owner response."))
+            }
+            owner.send("Owner live approval route regression")
+            XCTAssertTrue(owner.running, "the real owner request must be live during the external approval")
             let outside = PendingApproval(id: UUID().uuidString, app: "Phone",
                                           summary: "Synthetic external action", reason: "a call",
-                                          expires: .now.addingTimeInterval(60))
-            let external = ApprovalClassifier.Origin.outsideAgent("mcp-external-session")
+                                          expires: .now.addingTimeInterval(60),
+                                          sourceSession: "mcp-external-session")
+            let external = ApprovalClassifier.origin(voiceOn: false, outsideSession: outside.sourceSession)
+            XCTAssertEqual(external, .outsideAgent("mcp-external-session"))
             XCTAssertEqual(ApprovalClassifier.route(outside, voiceOn: false, origin: external), .owner)
             let verdict = await ApprovalClassifier.decide(outside, level: .strict, voice: [], origin: external)
             XCTAssertFalse(verdict.allowed)
-            XCTAssertEqual(ModelServerStub.requests.count, before, "An outside request must not invoke the owner's model context")
-            XCTAssertEqual(ApprovalClassifier.origin(voiceOn: false, outsideSession: "mcp-external-session"), external)
+            let wrongRequests = ModelServerStub.requests.filter {
+                String(decoding: $0.body, as: UTF8.self).contains("Synthetic external action")
+            }
+            XCTAssertTrue(wrongRequests.isEmpty, "An external approval borrowed the concurrent owner's model context")
+            XCTAssertEqual(owner.sessionID, ownerOrigin.routingSessionID)
+            owner.stop()
         }
     }
 
