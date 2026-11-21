@@ -6,6 +6,7 @@ final class ModelServerStub: URLProtocol {
     struct Sent {
         let url: URL?
         let body: Data
+        let headers: [String: String]
         var json: [String: Any] {
             (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         }
@@ -36,7 +37,10 @@ final class ModelServerStub: URLProtocol {
     override func startLoading() {
         let body = Self.bodyData(from: request)
         let customResponder = Self.lock.withLock { () -> (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))? in
-            Self.recorded.append(Sent(url: request.url, body: body))
+            let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into: [String: String]()) { result, field in
+                result[field.key.lowercased()] = field.value
+            }
+            Self.recorded.append(Sent(url: request.url, body: body, headers: headers))
             return Self.responder
         }
         let reply: (status: Int, type: String, body: String)
