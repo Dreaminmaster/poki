@@ -112,6 +112,17 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if provider == .custom {
+                    // PiSwift uses sessionId for both OpenCode's routing header and
+                    // the OpenAI Responses prompt_cache_key. Generic compatible
+                    // gateways may reject that extra JSON field, even when their
+                    // connection check succeeds. Preserve the SDK's narrowly scoped
+                    // OpenCode header, then prevent implicit cache fields on every
+                    // custom request (including auxiliary naming/approvals).
+                    options.headers = openCodeSessionHeaders(
+                        model: model, sessionId: sessionID, headers: options.headers)
+                    options.sessionId = nil
+                }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
             sessionId: sessionID,
