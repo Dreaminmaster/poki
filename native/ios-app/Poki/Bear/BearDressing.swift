@@ -19,7 +19,7 @@ final class BearDressing {
             let model: ModelEntity
             let joints: [Int]
             let paints: [Int: KeyPath<BearOutfitColors, UInt32?>]
-            let materials: [any Material]
+            let originalTints: [Int: UIColor]
         }
 
         let root = Entity()
@@ -47,7 +47,12 @@ final class BearDressing {
                                 for part in mesh.parts { paints[part.materialIndex] = color }
                             }
                         }
-                        skins.append(Skin(model: model, joints: indices, paints: paints, materials: component.materials))
+                        let originalTints = paints.reduce(into: [Int: UIColor]()) { tints, paint in
+                            if let material = component.materials[paint.key] as? PhysicallyBasedMaterial {
+                                tints[paint.key] = material.baseColor.tint
+                            }
+                        }
+                        skins.append(Skin(model: model, joints: indices, paints: paints, originalTints: originalTints))
                         if let light { model.components.set(ImageBasedLightReceiverComponent(imageBasedLight: light)) }
                     } else {
                         model.isEnabled = false
@@ -68,10 +73,11 @@ final class BearDressing {
         func recolor(_ colors: BearOutfitColors) {
             for skin in skins where !skin.paints.isEmpty {
                 guard var component = skin.model.model else { continue }
-                var materials = skin.materials
+                var materials = component.materials
                 for (index, color) in skin.paints {
-                    guard let rgb = colors[keyPath: color], var material = materials[index] as? PhysicallyBasedMaterial else { continue }
-                    material.baseColor.tint = UIColor(hex: rgb)
+                    guard let original = skin.originalTints[index],
+                          var material = materials[index] as? PhysicallyBasedMaterial else { continue }
+                    material.baseColor.tint = colors[keyPath: color].map { UIColor(hex: $0) } ?? original
                     materials[index] = material
                 }
                 component.materials = materials
