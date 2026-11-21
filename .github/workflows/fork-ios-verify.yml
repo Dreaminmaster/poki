@@ -22,6 +22,9 @@ jobs:
           - pr: 322
             ref: 8ccebea7ebad255137d8f5eea802028780a6581a
             tests: 'ModelSessionMetadataTests:12 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
+          - pr: 322-baseline
+            ref: 32aa5346c9a4c72bb03baa3306c5eb093da5696a
+            tests: 'SessionRoutingBaselineTests:2'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
     timeout-minutes: 90
@@ -39,6 +42,31 @@ jobs:
           mkdir -p out
           git rev-parse HEAD | tee out/source-revision.txt
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Add test-only baseline regression probes
+        if: matrix.pr == '322-baseline'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:ci/session-routing-baseline.swift" > native/ios-app/PokiTests/SessionRoutingBaselineTests.swift
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("native/ios-app/PokiTests/ConnectionCheckTests.swift")
+          source = path.read_text()
+          a = '        let body: Data\n        var json: [String: Any] {'
+          b = '        let body: Data\n        let headers: [String: String]\n        var json: [String: Any] {'
+          c = '            Self.recorded.append(Sent(url: request.url, body: body))'
+          d = '''            let visible = Set(["x-opencode-session", "x-opencode-client", "user-agent"])
+            let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into: [String: String]()) { result, field in
+                let name = field.key.lowercased()
+                if visible.contains(name) { result[name] = field.value }
+            }
+            Self.recorded.append(Sent(url: request.url, body: body, headers: headers))'''
+          assert source.count(a) == 1 and source.count(c) == 1, "unexpected base fixture shape"
+          path.write_text(source.replace(a, b).replace(c, d))
+          PY
+          echo 'Baseline product SHA:' "$(git rev-parse HEAD)"
+          git status --short
       - name: Select newest released Xcode
         shell: bash
         run: |
@@ -138,6 +166,7 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee out/build.log
       - name: Run required XCTest suites on exact revision
+        if: matrix.pr != '322-baseline'
         shell: bash
         env:
           TEST_SUITES: ${{ matrix.tests }}
@@ -174,6 +203,35 @@ jobs:
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
           done
+      - name: Verify both merge-base regressions fail for the missing session header
+        if: matrix.pr == '322-baseline'
+        shell: bash
+        run: |
+          set -uo pipefail
+          APP="build/history-review/Build/Products/Debug-iphonesimulator/Poki.app"
+          xcrun simctl install "$UDID" "$APP" || exit 1
+          TIMEOUT=$(command -v timeout || command -v gtimeout)
+          "$TIMEOUT" 600 xcodebuild test-without-building \
+            -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review \
+            -only-testing:PokiTests/SessionRoutingBaselineTests -parallel-testing-enabled NO \
+            -resultBundlePath out/baseline.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/baseline.log
+          code=\${PIPESTATUS[0]}
+          if [ "$code" -eq 0 ]; then echo 'Baseline unexpectedly passed both session routing regressions'; exit 1; fi
+          xcrun xcresulttool get test-results summary --path out/baseline.xcresult | tee out/baseline.json || exit 1
+          python3 - <<'PY'
+          import json
+          d=json.load(open("out/baseline.json"))
+          assert d["totalTestCount"] == 2, f"not both baseline tests executed: {d}"
+          assert d["failedTests"] == 2 and d["skippedTests"] == 0, f"not both known regressions: {d}"
+          PY
+          if [ "$(grep -c 'missing x-opencode-session' out/baseline.log)" -lt 2 ]; then
+            echo 'The two failures were not the expected missing routing headers'
+            exit 1
+          fi
+          echo 'Both baseline regressions failed for missing session headers as expected.'
       - name: Preserve build and test evidence
         if: always()
         uses: actions/upload-artifact@v4
