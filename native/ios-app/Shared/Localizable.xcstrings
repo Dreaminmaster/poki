@@ -6331,23 +6331,6 @@
         }
       }
     },
-    "Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已关闭操作确认，可以在 [设置 › 操作确认](poki://approvals) 里重新打开"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已關閉操作確認，可以在 [設定 › 操作確認](poki://approvals) 裡重新開啟"
-          }
-        }
-      }
-    },
     "Allows this step and turns approvals off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22486,28 +22469,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agents"
-          }
-        }
-      }
-    },
-    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。确认严格度位于“设置 › 操作确认”。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。確認嚴格度位於「設定 › 操作確認」。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Off by default. ask_poki lets external agents hand repetitive tasks to Poki’s built-in agent. Takes effect next launch. Auto-Classifier is in Settings › Approvals."
           }
         }
       }
@@ -42840,6 +42801,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不會自動批准，每項請求都需你回答。"
+          }
+        }
+      }
+    },
+    "Turn On Local Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启本机通道"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟本機通道"
+          }
+        }
+      }
+    },
+    "Approvals are off. Turn them back on in [Settings › Security](poki://approvals)." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭操作确认，可以在 [设置 › 安全](poki://approvals) 里重新打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉操作確認，可以在 [設定 › 安全](poki://approvals) 裡重新開啟"
+          }
+        }
+      }
+    },
+    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Security." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。确认严格度位于“设置 › 安全”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。確認嚴格度位於「設定 › 安全」。"
           }
         }
       }

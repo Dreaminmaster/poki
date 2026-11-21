@@ -298,7 +298,7 @@ final class ChatModel {
     /// Don’t Ask Again turned approvals off: one line in the chat, with the way back.
     private func approvalsStopped() {
         guard !isSample else { return }
-        add(.poki(AppLocalization.text(LocalizedStringResource("Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)."))))
+        add(.poki(AppLocalization.text(LocalizedStringResource("Approvals are off. Turn them back on in [Settings › Security](poki://approvals)."))))
     }
 
     /// A live voice conversation that just ended, into this chat's history (and its saved session).

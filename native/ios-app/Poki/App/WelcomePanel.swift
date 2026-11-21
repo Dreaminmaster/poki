@@ -130,7 +130,8 @@ struct WelcomePanel: View {
 
     private func stepRow(_ step: SetupStep) -> some View {
         let done = model.stepReadyForUse(step)
-        return SettingsRow(title: LocalizedStringKey(step.pageTitle), symbol: step.symbol,
+        // The names Connection lists them by, so a step has one name wherever it shows.
+        return SettingsRow(title: step.rowTitle, symbol: step.symbol,
                            value: done ? nil : nextStep?.step == step ? AppLocalization.text(LocalizedStringResource("Next")) : nil,
                            warns: !done && nextStep?.step == step, accessory: done ? .done : nil)
     }

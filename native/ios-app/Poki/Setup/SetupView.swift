@@ -157,7 +157,7 @@ extension SetupStep {
         switch self {
         case .runner: AppLocalization.text("Install Poki Runner")
         case .developerMode: AppLocalization.text("Turn On Developer Mode")
-        case .loopback: AppLocalization.text("Turn On Loopback")
+        case .loopback: AppLocalization.text("Turn On Local Connection")
         case .pairing: AppLocalization.text("Pair This iPhone")
         case .automation: AppLocalization.text("Allow UI Automation")
         case .background: AppLocalization.text("Keep Poki Running")
@@ -875,7 +875,8 @@ struct SetupStepPage: View {
                 .settingsFooter()
             }
         }
-        .navigationTitle(step.pageTitle)
+        // The step's name as Connection and the welcome list it (the owner, Nov 20 2026: one name each).
+        .navigationTitle(Text(step.rowTitle))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume() }
     }
@@ -938,7 +939,8 @@ struct SetupStepPage: View {
             }
             content
         }
-        .navigationTitle(step.pageTitle)
+        // The step's name as Connection and the welcome list it (the owner, Nov 20 2026: one name each).
+        .navigationTitle(Text(step.rowTitle))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()

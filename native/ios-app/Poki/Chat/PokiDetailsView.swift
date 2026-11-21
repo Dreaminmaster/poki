@@ -953,11 +953,7 @@ struct AgentsAndRelayView: View {
                         SettingsLabel("Address", systemImage: "network")
                     }
                 }
-            } header: {
-                Group {
-                    SettingsHeader("MCP Relay")
-                }
-                .settingsHeader()
+            // No "MCP Relay" header: the switch under it already says it (the owner, Nov 20 2026).
             } footer: {
                 Group {
                     Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")

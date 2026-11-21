@@ -273,10 +273,13 @@ struct SigningSection: View {
                 SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
             }
         } footer: {
-            Group {
-                Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+            // While the update itself asks for the sign-in, the footer above already says why.
+            if signer.updateStep != .signIn {
+                Group {
+                    Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+                }
+                .settingsFooter()
             }
-            .settingsFooter()
         }
         SignerActivityRows(signer: signer)
     }
