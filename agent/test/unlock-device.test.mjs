@@ -24,3 +24,27 @@ test('Unlock host sends the configured passcode only on stdin and hides helper e
   await writeFile(helper, '#!/usr/bin/env python3\nimport sys\nprint(sys.stdin.read(),file=sys.stderr)\nsys.exit(1)\n');
   await assert.rejects(unlockDevice('synthetic-device'), error => !error.message.includes('813790') && /did not complete/.test(error.message));
 });
+
+test('Unlock host takes any passcode iOS allows and refuses the rest before sending', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'poki-unlock-'));
+  const before = { passcode: process.env.POKI_IPHONE_PASSCODE, native: process.env.POKI_UNLOCK_NATIVE };
+  t.after(async () => {
+    for (const [name, value] of [['POKI_IPHONE_PASSCODE', before.passcode], ['POKI_UNLOCK_NATIVE', before.native]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+  const helper = join(dir, 'fake-native');
+  process.env.POKI_UNLOCK_NATIVE = helper;
+  await writeFile(helper, '#!/usr/bin/env python3\nimport sys,os,json\nassert sys.stdin.read()==os.environ["EXPECT"]\nprint(json.dumps({"input_sent":True}))\n', { mode: 0o700 });
+  for (const passcode of ['1234', '813790', '12345678', 'Bear 2 honey!', ' padded ']) {
+    process.env.POKI_IPHONE_PASSCODE = passcode;
+    process.env.EXPECT = passcode;
+    await unlockDevice('synthetic-device');
+  }
+  delete process.env.EXPECT;
+  for (const passcode of ['123', 'x'.repeat(129), 'café1234', 'line\nbreak']) {
+    process.env.POKI_IPHONE_PASSCODE = passcode;
+    await assert.rejects(unlockDevice('synthetic-device'), /4 to 128 characters/);
+  }
+});

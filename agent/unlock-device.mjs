@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 export async function unlockDevice(device, signal) {
   const passcode = process.env.POKI_IPHONE_PASSCODE;
   if (!passcode) throw new Error('No iPhone passcode is configured locally. Unlock input was not sent.');
-  if (!/^\d{6}$/.test(passcode)) throw new Error('The configured passcode does not match the six-digit keypad helper.');
+  // Any passcode iOS allows: 4 or 6 digits, a custom numeric code, or an alphanumeric one.
+  if (!/^[ -~]{4,128}$/.test(passcode)) throw new Error('The configured passcode must be 4 to 128 characters typed on a US keyboard. Unlock input was not sent.');
   const env = { ...process.env };
   delete env.POKI_IPHONE_PASSCODE;
   const args = [fileURLToPath(new URL('./skills/iphone-unlock/scripts/unlock.py', import.meta.url)), '--device', device, '--stdin'];
