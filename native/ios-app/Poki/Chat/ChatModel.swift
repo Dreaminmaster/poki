@@ -612,7 +612,9 @@ final class ChatModel {
             ? AppIconStore.bundleIDs(namedIn: text) : []
         if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
             let context = Harness.taskInstructions(for: taskRequest,
-                                                   includeMemoryAttribution: !SkillStore.shared.notes.isEmpty)
+                                                   includeMemoryAttribution: !SkillStore.shared.notes.isEmpty,
+                                                   includeCountedScroll: countedScroll != nil,
+                                                   includeCountedScrollReply: kind == .poki && countedScroll != nil)
             let instructions = [context.text, restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             // Another model starts a new conversation on the model's side; the chat on screen stays.
             if client?.signature != "\(provider.rawValue)/\(model)" {
@@ -725,17 +727,23 @@ final class ChatModel {
             let loop = modelLoop(provider: prepared.provider, model: piModel, inSplitView: splitSession != nil)
             let taskPrompt = prepared.continuation == nil ? prepared.message : taskRequest
             let includeMemoryAttribution = !SkillStore.shared.notes.isEmpty
+            let includeCountedScroll = prepared.countedScroll != nil
+            let includeCountedScrollReply = kind == .poki && includeCountedScroll
             let rendersCards = kind == .poki
             let resultCardMode = Harness.resultCardMode(for: taskPrompt, rendersCards: rendersCards)
             taskResultCardMode = resultCardMode
             let context = Harness.taskInstructions(for: taskPrompt,
                                                    inSplitView: splitSession != nil,
-                                                   includeMemoryAttribution: includeMemoryAttribution)
+                                                   includeMemoryAttribution: includeMemoryAttribution,
+                                                   includeCountedScroll: includeCountedScroll,
+                                                   includeCountedScrollReply: includeCountedScrollReply)
             offeredMemories = context.notes
             let instructions = [context.text, restoredContext, prepared.continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message,
                                          images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns,
                                          includeMemoryAttribution: includeMemoryAttribution,
+                                         includeCountedScroll: includeCountedScroll,
+                                         includeCountedScrollReply: includeCountedScrollReply,
                                          rendersCards: rendersCards,
                                          resultCardMode: resultCardMode,
                                          timing: timing) { [weak self] text in
@@ -1207,6 +1215,8 @@ final class ChatModel {
                                              tools: Harness.toolSpecs(inSplitView: false,
                                                                       includeScreenHistory: HistoryCapture.agentQueryAllowed,
                                                                       includeMemoryAttribution: !SkillStore.shared.notes.isEmpty,
+                                                                      includeCountedScroll: messageScroll != nil,
+                                                                      includeCountedScrollReply: kind == .poki && messageScroll != nil,
                                                                       resultCardMode: taskResultCardMode))
             } catch {
                 client.forgetUnansweredQuestion()
@@ -1301,10 +1311,16 @@ final class ChatModel {
            let readApp = answer.readApp {
             observeTaskApp(readApp)
         }
+        let deliveredAnswer: PokiCore.ToolAnswer
+        if runToken == token, (call.name == "do" || call.name == "look"), taskResultCardMode == .none {
+            deliveredAnswer = Harness.strippingScreenshotID(from: answer)
+        } else {
+            deliveredAnswer = answer
+        }
         calls.append(record)
         if runToken == token, !stopAsked, running { awaitingModel = true }
         persist()
-        return answer
+        return deliveredAnswer
     }
 
     private func performCall(_ call: ToolCall) async -> PokiCore.ToolAnswer {

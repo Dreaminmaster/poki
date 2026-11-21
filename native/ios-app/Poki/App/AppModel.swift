@@ -222,7 +222,7 @@ final class AppModel {
     let host = AppCoreHost()
     let autoUnlock = AutoUnlock()
     // The 0.4.7 candidate keeps Automatic Unlock off, including existing opt-ins.
-    private static let automaticUnlockAvailable = false
+    nonisolated static let automaticUnlockAvailable = false
     var supportsAutoUnlock: Bool { Self.automaticUnlockAvailable && UIDevice.current.userInterfaceIdiom == .phone }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current

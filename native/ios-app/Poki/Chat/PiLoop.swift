@@ -32,28 +32,23 @@ final class PiLoop {
     private let stall = StallWatch()
 
     private struct FinishToolCache: @unchecked Sendable {
-        struct Key: Hashable {
-            let includeMemoryAttribution: Bool
-            let resultCardMode: Harness.ResultCardMode
-        }
         private final class Store: @unchecked Sendable {
             let lock = NSLock()
-            var tools: [Key: AgentTool] = [:]
+            var tools: [Harness.ResultCardMode: AgentTool] = [:]
         }
         private let store = Store()
         private let execute: AgentToolExecute
 
         init(execute: @escaping AgentToolExecute) { self.execute = execute }
 
-        func tool(includeMemoryAttribution: Bool, resultCardMode: Harness.ResultCardMode) -> AgentTool {
-            let key = Key(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
-            if let cached = store.lock.withLock({ store.tools[key] }) { return cached }
-            let spec = Harness.finishTask(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
+        func tool(resultCardMode: Harness.ResultCardMode) -> AgentTool {
+            if let cached = store.lock.withLock({ store.tools[resultCardMode] }) { return cached }
+            let spec = Harness.finishTask(resultCardMode: resultCardMode)
             let built = AgentTool(label: spec.name, name: spec.name, description: spec.description,
                                   parameters: spec.schema.mapValues { AnyCodable($0) }, execute: execute)
             return store.lock.withLock {
-                if let existing = store.tools[key] { return existing }
-                store.tools[key] = built
+                if let existing = store.tools[resultCardMode] { return existing }
+                store.tools[resultCardMode] = built
                 return built
             }
         }
@@ -67,12 +62,20 @@ final class PiLoop {
     private final class ToolPolicy: @unchecked Sendable {
         private let lock = NSLock()
         private var includeMemoryAttribution = true
+        private var includeCountedScroll = true
+        private var includeCountedScrollReply = true
         private var rendersCards = true
         private var resultCardMode: Harness.ResultCardMode = .all
 
-        func set(includeMemoryAttribution: Bool, rendersCards: Bool, resultCardMode: Harness.ResultCardMode) {
+        func set(includeMemoryAttribution: Bool,
+                 includeCountedScroll: Bool,
+                 includeCountedScrollReply: Bool,
+                 rendersCards: Bool,
+                 resultCardMode: Harness.ResultCardMode) {
             lock.withLock {
                 self.includeMemoryAttribution = includeMemoryAttribution
+                self.includeCountedScroll = includeCountedScroll
+                self.includeCountedScrollReply = includeCountedScrollReply
                 self.rendersCards = rendersCards
                 self.resultCardMode = resultCardMode
             }
@@ -85,8 +88,8 @@ final class PiLoop {
             }
         }
 
-        func current() -> (memoryAttribution: Bool, resultCardMode: Harness.ResultCardMode) {
-            lock.withLock { (includeMemoryAttribution, resultCardMode) }
+        func current() -> (memoryAttribution: Bool, countedScroll: Bool, countedScrollReply: Bool, resultCardMode: Harness.ResultCardMode) {
+            lock.withLock { (includeMemoryAttribution, includeCountedScroll, includeCountedScrollReply, resultCardMode) }
         }
     }
 
@@ -174,7 +177,10 @@ final class PiLoop {
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low,
                                      tools: Self.availableTools(variants, allowed: HistoryCapture.agentQueryAllowed,
-                                                                includeMemoryAttribution: true, resultCardMode: .all),
+                                                                includeMemoryAttribution: true,
+                                                                includeCountedScroll: true,
+                                                                includeCountedScrollReply: true,
+                                                                resultCardMode: .all),
                                      messages: messages),
             streamFn: { model, transcript, options in
                 // API credentials may have suspended after prepareRequest. Recheck at
@@ -220,6 +226,8 @@ final class PiLoop {
                 let currentPolicy = policy.current()
                 let tools = Self.availableTools(variants, allowed: revision != nil,
                                                 includeMemoryAttribution: currentPolicy.memoryAttribution,
+                                                includeCountedScroll: currentPolicy.countedScroll,
+                                                includeCountedScrollReply: currentPolicy.countedScrollReply,
                                                 resultCardMode: currentPolicy.resultCardMode)
                 var context = request.context
                 context.tools = tools
@@ -255,16 +263,23 @@ final class PiLoop {
     /// screen, or `maxTurns` model turns (a ceiling for a model that runs away). Owner waits reset the
     /// stall history. `onText` gets each finished text block.
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int,
-             includeMemoryAttribution: Bool = true, rendersCards: Bool = true,
+             includeMemoryAttribution: Bool = true,
+             includeCountedScroll: Bool = true,
+             includeCountedScrollReply: Bool = true,
+             rendersCards: Bool = true,
              resultCardMode: Harness.ResultCardMode = .all,
              timing: ChatStepTiming? = nil, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
         toolPolicy.set(includeMemoryAttribution: includeMemoryAttribution,
+                       includeCountedScroll: includeCountedScroll,
+                       includeCountedScrollReply: includeCountedScrollReply,
                        rendersCards: rendersCards,
                        resultCardMode: resultCardMode)
         agent.tools = Self.availableTools(toolVariants, allowed: HistoryCapture.agentQueryAllowed,
                                           includeMemoryAttribution: includeMemoryAttribution,
+                                          includeCountedScroll: includeCountedScroll,
+                                          includeCountedScrollReply: includeCountedScrollReply,
                                           resultCardMode: resultCardMode)
         use(instructions)
         let turns = Counter()
@@ -347,6 +362,8 @@ final class PiLoop {
 
     private nonisolated static func availableTools(_ variants: [ToolVariant], allowed: Bool,
                                                    includeMemoryAttribution: Bool,
+                                                   includeCountedScroll: Bool,
+                                                   includeCountedScrollReply: Bool,
                                                    resultCardMode: Harness.ResultCardMode) -> [AgentTool] {
         variants.compactMap { variant in
             let tool: AgentTool
@@ -354,9 +371,11 @@ final class PiLoop {
             case .standard(let withMemory, let withoutMemory):
                 tool = includeMemoryAttribution ? withMemory : withoutMemory
             case .finish(let cache):
-                tool = cache.tool(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
+                tool = cache.tool(resultCardMode: resultCardMode)
             }
             if tool.name == "screen_history", !allowed { return nil }
+            if tool.name == "count_messages", !includeCountedScroll { return nil }
+            if tool.name == Harness.countedScrollReplyTool, !(includeCountedScroll && includeCountedScrollReply) { return nil }
             return tool
         }
     }
