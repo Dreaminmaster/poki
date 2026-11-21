@@ -66,7 +66,7 @@ struct PokiDetailsView: View {
                 // What Poki works with.
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
-                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue,
+                        SettingsRow(title: "Setup", symbol: "checklist", value: connectionValue,
                                     valueIsAction: !isSample && !model.setupReadyForUse)
                     }
                     .accessibilityIdentifier("details.hands")
@@ -197,7 +197,7 @@ struct PokiDetailsView: View {
                 case .voice:
                     VoiceView(embedded: true)
                 case .connection:
-                    ConnectionView()
+                    SetupSettingsPage(path: $path)
                 case .advanced:
                     AdvancedSettingsView()
                 case .agents:
@@ -404,14 +404,15 @@ struct PressedDimStyle: ButtonStyle {
     }
 }
 
-// MARK: Connection
+// MARK: Setup
 
-/// Connection: whether Poki may act on this iPhone and each thing the phone needs for it (the setup
-/// items, each opening its own page), with the guide that walks through them and the first run.
-struct ConnectionView: View {
+/// Setup (Connection before Nov 21 2026): whether Poki may act on this iPhone, then the setup list the
+/// guide's last page shows (the iPhone's steps in one card, the shortcut, Models, Features, Agents)
+/// with Guide Me, and the Live Activity's Ready.
+struct SetupSettingsPage: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
-    @State private var guiding = false
+    @Binding var path: NavigationPath
 
     private var on: Bool { model.sessionOn && !model.ownerPaused }
 
@@ -460,6 +461,8 @@ struct ConnectionView: View {
                 .settingsFooter()
             }
 
+            SetupSections(path: $path, guideMe: true)
+
             Section {
                 Toggle(isOn: Binding(get: { model.showsReadyActivity }, set: { model.setShowsReadyActivity($0) })) {
                     SettingsRow(title: "Show Ready", symbol: "platter.filled.top.iphone")
@@ -479,37 +482,10 @@ struct ConnectionView: View {
                 .settingsFooter()
             }
 
-            Section {
-                ForEach(SetupStep.shown) { step in
-                    let done = model.stepReadyForUse(step)
-                    NavigationLink(value: step) {
-                        SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
-                                    warns: !done, accessory: done ? .done : nil)
-                    }
-                }
-                Button { guiding = true } label: {
-                    SettingsRow(title: model.setupReadyForUse ? "Set Up Again" : "Continue Setup", symbol: "checklist")
-                }
-                .accessibilityIdentifier("moreSettings.setup")
-                FirstRunAgain(row: true)
-            } header: {
-                Group {
-                    SettingsHeader("This iPhone")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
-                }
-                .settingsFooter()
-            }
         }
-        .navigationTitle(AppLocalization.text("Connection"))
+        .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
-        .sheet(isPresented: $guiding) {
-            SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
-        }
     }
 
     private func set(_ on: Bool) {
@@ -1027,7 +1003,7 @@ struct AgentsAndRelayView: View {
 }
 
 extension SetupStep {
-    /// Short row title on Connection's list of what this iPhone needs.
+    /// Short row title on the Setup page's list of what this iPhone needs.
     var rowTitle: LocalizedStringKey {
         switch self {
         case .developerMode: "Developer Mode"

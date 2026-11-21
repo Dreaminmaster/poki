@@ -766,7 +766,6 @@ struct BackgroundPage: View {
 struct SetupChecklist: View {
     @Environment(AppModel.self) private var model
     @Environment(\.pokiDetailsOpen) private var detailsOpen
-    @State private var guiding = false
 
     var body: some View {
         List {
@@ -782,7 +781,7 @@ struct SetupChecklist: View {
             }
             SigningSection()
             Section {
-                Button { guiding = true } label: { Label("Setup Guide", systemImage: "list.number") }
+                SetupGuideMe()
             } footer: {
                 Group {
                     Text("Walks through every item in order. You can close it at any time and pick up from this list.")
@@ -793,7 +792,6 @@ struct SetupChecklist: View {
         .listStyle(.insetGrouped)
         .navigationTitle(AppLocalization.text("Setup"))
         .onAppear { model.loopback.resume() }
-        .sheet(isPresented: $guiding) { SetupGuide(start: SetupStep.shown.first { !model.isDone($0) }) }
         .background(EmptyView().sheet(isPresented: Binding(get: { model.signer.needsCodeSheet && !detailsOpen }, set: { model.signer.needsCodeSheet = $0 })) { VerificationCodeSheet() })
     }
 }
@@ -1003,37 +1001,3 @@ struct SetupStepPage: View {
     }
 }
 
-/// The setup guidance as a walk through every item, from the first one still open. Close leaves it at
-/// any time; the checklist keeps what is done.
-struct SetupGuide: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(AppModel.self) private var model
-    @State private var index: Int
-
-    init(start: SetupStep?) {
-        _index = State(initialValue: start.flatMap { SetupStep.shown.firstIndex(of: $0) } ?? 0)
-    }
-
-    private var steps: [SetupStep] { SetupStep.shown }
-
-    var body: some View {
-        NavigationStack {
-            SetupStepPage(step: steps[index])
-                .id(steps[index])
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-                    ToolbarItemGroup(placement: .bottomBar) {
-                        Button("Back", systemImage: "chevron.left") { index -= 1 }.disabled(index == 0)
-                        Spacer()
-                        Text("\(index + 1) of \(steps.count)").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
-                        Spacer()
-                        if index + 1 < steps.count {
-                            Button("Next", systemImage: "chevron.right") { index += 1 }
-                        } else {
-                            Button("Done") { dismiss() }.bold()
-                        }
-                    }
-                }
-        }
-    }
-}

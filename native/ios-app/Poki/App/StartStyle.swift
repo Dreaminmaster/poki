@@ -242,20 +242,13 @@ struct StartHero: View {
 }
 
 /// The start flow, one pushed page at a time (the owner, Nov 21 2026: walked through step by step,
-/// as the system's own setup is): each of the iPhone's steps, the models, the features, and the list
-/// of everything at the end.
+/// as the system's own setup is): each item of the setup list (`SetupItem`) on its own page, and the
+/// list itself at the end.
 enum StartRoute: Hashable {
-    case step(SetupStep)
-    /// The Poki Loopback Shortcut, on its own page right after the loopback (the owner, Nov 21 2026).
-    case shortcut
-    case models
-    case features
+    case item(SetupItem)
     case summary
 
-    static var order: [StartRoute] {
-        SetupStep.shown.flatMap { $0 == .loopback ? [StartRoute.step($0), .shortcut] : [StartRoute.step($0)] }
-            + [.models, .features, .summary]
-    }
+    static var order: [StartRoute] { SetupItem.all.map(StartRoute.item) + [.summary] }
 
     var next: StartRoute? {
         let all = Self.order
@@ -274,15 +267,15 @@ struct StartFlowPage: View {
 
     var body: some View {
         switch route {
-        case .step(let step):
+        case .item(.step(let step)):
             SetupStepPage(step: step, hero: true)
                 .settingsPage()
                 .bottomBar(softEdge: true) { stepButtons(step) }
-        case .shortcut:
+        case .item(.shortcut):
             StartShortcutPage(goOn: goOn)
-        case .models:
+        case .item(.models):
             StartModelsPage(goOn: goOn)
-        case .features:
+        case .item(.features):
             Form {
                 StartHero(symbol: "square.stack.3d.up", title: "Features",
                           line: "All optional. Each can be changed later in Settings.")
@@ -304,7 +297,7 @@ struct StartFlowPage: View {
             .settingsPage()
             .bottomBar(softEdge: true) { StartButtons(primary: "Continue", action: goOn) }
         case .summary:
-            WelcomePanel(kind: kind, path: $path, finish: finish, summary: true)
+            WelcomePanel(kind: kind, path: $path, finish: finish)
         }
     }
 

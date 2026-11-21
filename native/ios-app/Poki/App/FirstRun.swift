@@ -19,7 +19,7 @@ enum EarlierVersion {
 /// The welcome panel: on a fresh install, and once after each new version (the owner, 2026-11-20), Poki
 /// comes out of the launch screen into one page that sets up everything it uses. A fresh install gets the
 /// hello first; an update gets a shorter hello that names the version. It can be gone through again from
-/// Settings › Connection.
+/// Settings › Setup, with Guide Me.
 enum FirstRun {
     /// Absent until the first launch of a version with the first run decides it, once.
     static let key = "pokiFirstRun"
@@ -124,6 +124,8 @@ struct FirstRunGuide: View {
     var fromLaunch = false
     /// Opened again from Settings: the hello offers Not Now, and every step shows where it stands.
     var replay = false
+    /// Guide Me's pages, up to the first item still open, already pushed when the guide opens.
+    var startAt: [StartRoute] = []
     /// A setup step a link opened (a pairing file from Poki Setup) while the welcome is up.
     @Binding var link: SetupStep?
     var done: () -> Void
@@ -131,6 +133,17 @@ struct FirstRunGuide: View {
     @State private var stage = WelcomeHello.Stage.launch
     @State private var path = NavigationPath()
     private let design = StartDesign.current
+
+    init(kind: FirstRun.Kind = .firstRun, fromLaunch: Bool = false, replay: Bool = false, startAt: [StartRoute] = [],
+         link: Binding<SetupStep?>, done: @escaping () -> Void) {
+        self.kind = kind
+        self.fromLaunch = fromLaunch
+        self.replay = replay
+        self.startAt = startAt
+        _link = link
+        self.done = done
+        _path = State(initialValue: NavigationPath(startAt))
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -321,31 +334,5 @@ struct LaunchArt {
         }
         laidOut[key] = art
         return art
-    }
-}
-
-/// Settings' way back into the welcome: a blue text button that opens it over everything.
-/// It carries its own cover, so whichever settings page lists the setup items places it with one line.
-/// `wide` stretches it to the page width with a 44-point row, for pages that are not a List; `row`
-/// draws it as a settings row, with the icon the rows beside it have.
-struct FirstRunAgain: View {
-    var wide = false
-    var row = false
-    @State private var welcoming = false
-
-    var body: some View {
-        Button { welcoming = true } label: {
-            if row {
-                SettingsRow(title: "Replay Setup Guide", symbol: "play.circle").contentShape(.rect)
-            } else {
-                Text("Replay Setup Guide")
-                    .foregroundStyle(Tint.blueText)
-                    .frame(maxWidth: wide ? .infinity : nil, minHeight: wide ? 44 : nil)
-                    .contentShape(.rect)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("setup.firstRun")
-        .fullScreenCover(isPresented: $welcoming) { FirstRunGuide(replay: true, link: .constant(nil), done: { welcoming = false }) }
     }
 }

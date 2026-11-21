@@ -3,21 +3,170 @@ import Speech
 import SwiftUI
 import UserNotifications
 
-/// The welcome's one page: everything Poki uses, as rows like Settings', each with where it stands and a
-/// tap to the page that sets it up. The pages are Settings' own (the setup steps, Models, Screen History,
-/// Memory, Agents), so nothing here is a second copy of them. What Poki needs before it can work (the
-/// iPhone's steps and a model) comes first and the button at the bottom goes to the next of those; the
-/// rest is optional and says so.
+/// Everything Poki can be set up with, as one list (the owner, Nov 21 2026: one checklist in two
+/// forms). The start flow walks it one page each (`StartRoute`); the Setup page in Settings and the
+/// guide's last page show it as sections (`SetupSections`), the iPhone's steps folded into one card.
+enum SetupItem: Hashable {
+    case step(SetupStep)
+    /// The Poki Loopback Shortcut, right after the loopback.
+    case shortcut
+    case models
+    /// Screen History, Memory, Dictation, Notifications and Agents, all optional.
+    case features
+
+    static var all: [SetupItem] {
+        SetupStep.shown.flatMap { $0 == .loopback ? [SetupItem.step($0), .shortcut] : [SetupItem.step($0)] }
+            + [.models, .features]
+    }
+
+    /// Still to do: Guide Me starts at the first of these. The features are optional, never open.
+    @MainActor func isOpen(_ model: AppModel) -> Bool {
+        switch self {
+        case .step(let step): !model.stepReadyForUse(step)
+        case .shortcut: !HistoryReconnect.shared.isSetUp
+        case .models: !ModelKeys.hasUsableKey
+        case .features: false
+        }
+    }
+
+    @MainActor static func firstOpen(_ model: AppModel) -> SetupItem? { all.first { $0.isOpen(model) } }
+}
+
+/// The setup list's sections, one copy for the Setup page and the guide's last page: the iPhone's
+/// steps in one foldable card, the Poki Loopback Shortcut, Models, Features and Agents. The rows open
+/// Settings' own pages, so nothing here is a second copy of them.
+struct SetupSections: View {
+    @Environment(AppModel.self) private var model
+    @Binding var path: NavigationPath
+    /// On the Setup page: Guide Me under the card, which walks the list one page at a time.
+    var guideMe = false
+
+    @State private var hasModel = ModelKeys.hasUsableKey
+    @State private var modelName = ModelKeys.selectedModelName
+    /// Nil until the card is opened or closed by hand: open while a step is missing, closed once all are done.
+    @State private var stepsOpen: Bool?
+
+    /// The first of this iPhone's steps still open.
+    private var nextStep: SetupStep? { SetupStep.shown.first { !model.stepReadyForUse($0) } }
+
+    var body: some View {
+        Section {
+            DisclosureGroup(isExpanded: Binding(get: { stepsOpen ?? (nextStep != nil) }, set: { stepsOpen = $0 })) {
+                ForEach(SetupStep.shown) { step in
+                    NavigationLink(value: step) { stepRow(step) }
+                        .accessibilityIdentifier("firstRun.step.\(step.rawValue)")
+                }
+            } label: {
+                stepsRow
+            }
+            .accessibilityIdentifier("setup.steps")
+            if guideMe { SetupGuideMe() }
+        } footer: {
+            Group {
+                Text("Each one is turned on once. They tick themselves as you go.")
+            }
+            .settingsFooter()
+        }
+
+        WelcomeCellularSection()
+
+        Section {
+            NavigationLink(value: DetailsRoute.model) {
+                SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
+                            symbol: "sparkles", value: hasModel ? modelName : nil,
+                            accessory: hasModel ? .done : nil)
+            }
+            .accessibilityIdentifier("firstRun.models")
+            WelcomeLocalModels()
+        } header: {
+            Group {
+                SettingsHeader("Models")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
+            }
+            .settingsFooter()
+        }
+
+        WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
+
+        Section {
+            NavigationLink(value: DetailsRoute.agents) {
+                SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right")
+            }
+            .accessibilityIdentifier("firstRun.agents")
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
+            .onAppear(perform: refresh)
+        } header: {
+            Group {
+                SettingsHeader("Connections")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Let Claude, ChatGPT and other agents use this iPhone")
+            }
+            .settingsFooter()
+        }
+    }
+
+    /// The card's own row: how many of the steps are done.
+    private var stepsRow: some View {
+        let steps = SetupStep.shown
+        let done = steps.filter(model.stepReadyForUse).count
+        return SettingsRow(title: "Required Steps", symbol: "iphone.gen3",
+                           value: AppLocalization.text(LocalizedStringResource("\(done) of \(steps.count) Done")),
+                           warns: done < steps.count)
+    }
+
+    private func stepRow(_ step: SetupStep) -> some View {
+        let done = model.stepReadyForUse(step)
+        // The names the Setup page lists them by, so a step has one name wherever it shows.
+        return SettingsRow(title: step.rowTitle, symbol: step.symbol,
+                           value: done ? nil : nextStep == step ? AppLocalization.text(LocalizedStringResource("Next")) : nil,
+                           warns: !done && nextStep == step, accessory: done ? .done : nil)
+    }
+
+    private func refresh() {
+        hasModel = ModelKeys.hasUsableKey
+        modelName = ModelKeys.selectedModelName
+    }
+}
+
+/// Guide Me: the start flow over everything, opened at the first item still open (at the first page
+/// once all are done), with the pages before it behind Back.
+struct SetupGuideMe: View {
+    @Environment(AppModel.self) private var model
+    @State private var start: [StartRoute]?
+
+    var body: some View {
+        Button {
+            let order = StartRoute.order
+            let open = SetupItem.firstOpen(model).flatMap { order.firstIndex(of: .item($0)) } ?? 0
+            start = Array(order[...open])
+        } label: {
+            SettingsRow(title: "Guide Me", symbol: "signpost.right").contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("setup.guideMe")
+        .fullScreenCover(isPresented: Binding(get: { start != nil }, set: { if !$0 { start = nil } })) {
+            FirstRunGuide(replay: true, startAt: start ?? [], link: .constant(nil), done: { start = nil })
+        }
+    }
+}
+
+/// The guide's last page: the setup list itself, with the button at the bottom going to the next
+/// item still open.
 struct WelcomePanel: View {
     @Environment(AppModel.self) private var model
     var kind: FirstRun.Kind
     @Binding var path: NavigationPath
     var finish: () -> Void
-    /// The start flow's last page: the cellular shortcut was offered on Local Connection's own page.
-    var summary = false
 
     @State private var hasModel = ModelKeys.hasUsableKey
-    @State private var modelName = ModelKeys.selectedModelName
 
     static var voiceAllowedNow: Bool {
         AVAudioApplication.shared.recordPermission == .granted && SFSpeechRecognizer.authorizationStatus() == .authorized
@@ -30,64 +179,7 @@ struct WelcomePanel: View {
 
     var body: some View {
         List {
-            Section {
-                ForEach(SetupStep.shown) { step in
-                    NavigationLink(value: step) { stepRow(step) }
-                        .accessibilityIdentifier("firstRun.step.\(step.rawValue)")
-                }
-            } header: {
-                Group {
-                    SettingsHeader("This iPhone")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Each one is turned on once. They tick themselves as you go.")
-                }
-                .settingsFooter()
-            }
-
-            if !summary { WelcomeCellularSection() }
-
-            Section {
-                NavigationLink(value: DetailsRoute.model) {
-                    SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
-                                symbol: "sparkles", value: hasModel ? modelName : nil,
-                                accessory: hasModel ? .done : nil)
-                }
-                .accessibilityIdentifier("firstRun.models")
-                WelcomeLocalModels()
-            } header: {
-                Group {
-                    SettingsHeader("Models")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
-                }
-                .settingsFooter()
-            }
-
-            WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
-
-            Section {
-                NavigationLink(value: DetailsRoute.agents) {
-                    SettingsRow(title: "Agents", caption: "Let Claude, ChatGPT and other agents use this iPhone",
-                                symbol: "chevron.left.forwardslash.chevron.right")
-                }
-                .accessibilityIdentifier("firstRun.agents")
-            } header: {
-                Group {
-                    SettingsHeader("Connections")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Let Claude, ChatGPT and other agents use this iPhone")
-                }
-                .settingsFooter()
-            }
+            SetupSections(path: $path)
         }
         .settingsPage()
         .navigationTitle(kind == .firstRun ? AppLocalization.text("Set Up Poki") : AppLocalization.text("Check Setup"))
@@ -95,27 +187,16 @@ struct WelcomePanel: View {
         // edge instead of showing through them (the footer's words ran into Finish Later).
         .bottomBar(softEdge: true) { buttons }
         .onAppear { model.loopback.resume() }
-        .onChange(of: path.count) { _, _ in refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-    }
-
-    private func stepRow(_ step: SetupStep) -> some View {
-        let done = model.stepReadyForUse(step)
-        // The names Connection lists them by, so a step has one name wherever it shows.
-        return SettingsRow(title: step.rowTitle, symbol: step.symbol,
-                           value: done ? nil : nextStep?.step == step ? AppLocalization.text(LocalizedStringResource("Next")) : nil,
-                           warns: !done && nextStep?.step == step, accessory: done ? .done : nil)
+        .onChange(of: path.count) { _, _ in hasModel = ModelKeys.hasUsableKey }
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in hasModel = ModelKeys.hasUsableKey }
     }
 
     // MARK: The buttons
 
     private var buttons: some View {
-        VStack(spacing: 4) {
-            StartButtons(primary: primaryWord, action: primary,
-                         secondary: nextStep != nil || !hasModel ? (kind == .firstRun ? "Finish Later" : "Not Now") : nil,
-                         secondaryAction: finish)
-        }
+        StartButtons(primary: primaryWord, action: primary,
+                     secondary: nextStep != nil || !hasModel ? (kind == .firstRun ? "Finish Later" : "Not Now") : nil,
+                     secondaryAction: finish)
     }
 
     private var primaryWord: LocalizedStringKey {
@@ -132,11 +213,6 @@ struct WelcomePanel: View {
         } else {
             finish()
         }
-    }
-
-    private func refresh() {
-        hasModel = ModelKeys.hasUsableKey
-        modelName = ModelKeys.selectedModelName
     }
 }
 
