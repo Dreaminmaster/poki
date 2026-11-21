@@ -115,18 +115,22 @@ struct PokiMenu<Face: View>: View {
                         Text("Payments, deletions and actions in Wallet always need your confirmation.")
                     }
                 } label: {
-                    Label("Approval Method", systemImage: "checkmark.shield")
+                    Label("Approval", systemImage: "checkmark.shield")
                     Text(verbatim: model.approvalMode.title)
                 }
                 .accessibilityIdentifier("status.approvals")
-            } header: {
-                // Where Poki stands, which the top bar no longer says in words: its face shows it there.
-                Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
+                // In the same group as Model and Approval, with what Poki wears as its second line (the
+                // owner, Nov 21 2026: no Ready header, no divider before Outfits).
+                if let openOutfits {
+                    Button(action: openOutfits) {
+                        Label("Outfits", systemImage: "tshirt")
+                        Text(verbatim: BearWardrobe.shared.selection == .bare
+                             ? AppLocalization.text("None") : BearWardrobe.shared.selection.displayName)
+                    }
+                    .accessibilityIdentifier("status.outfits")
+                }
             }
             .id(modelVersion)
-            if let openOutfits {
-                Button("Outfits", systemImage: "tshirt", action: openOutfits)
-            }
         } label: {
             face()
         }

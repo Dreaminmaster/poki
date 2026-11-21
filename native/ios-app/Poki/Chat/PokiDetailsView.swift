@@ -531,7 +531,6 @@ struct ConnectionView: View {
 /// the hood (diagnostics, the log, testing options).
 struct AdvancedSettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var runLog: URL?
 
     var body: some View {
         @Bindable var model = model
@@ -575,22 +574,7 @@ struct AdvancedSettingsView: View {
             }
 
             Section {
-                if let runLog {
-                    ShareLink(item: runLog) { SettingsRow(title: "Share Run Log for Maintainers", symbol: "square.and.arrow.up") }
-                }
-            } header: {
-                Group {
-                    SettingsHeader("Memory")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Logs each skill run, stop point, and duration without recording typed text. This helps maintainers improve skill reliability.")
-                }
-                .settingsFooter()
-            }
-
-            Section {
+                DebugBundleRow()
                 NavigationLink(value: SettingsRoute.diagnostics) {
                     SettingsRow(title: "Diagnostics", symbol: "stethoscope")
                 }
@@ -610,15 +594,15 @@ struct AdvancedSettingsView: View {
                     SettingsHeader("Debugging")
                 }
                 .settingsHeader()
+            } footer: {
+                Group {
+                    Text("The debug bundle holds logs and settings for Poki’s maintainers. It leaves out keys, passwords, chats, memory and screen text.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Advanced"))
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            // The run log is written to tmp for the share sheet, as Memory did it.
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("poki-agent-debug.json")
-            if (try? ChatDebugLog.exportBundle().write(to: file, options: .atomic)) != nil { runLog = file }
-        }
     }
 }
 

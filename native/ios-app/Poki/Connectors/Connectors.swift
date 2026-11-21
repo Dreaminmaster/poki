@@ -25,6 +25,21 @@ struct MCPConnector: Identifiable, Hashable, Codable {
     var custom = false
     /// Where a token is made, for a connector that takes one.
     var tokenHelp: String? = nil
+    /// The brand's picture in the asset catalogue, when Poki has it.
+    var iconAsset: String? = nil
+    /// What Poki can do with it, in one line (the detail page's footer).
+    var about: String? = nil
+    // A custom connector's details, found by its live check (`ConnectorProbe`) or set under Advanced.
+    /// Sign in only when a chat first needs it, not when the connector is added.
+    var signInWhenNeeded: Bool? = nil
+    /// The owner's own OAuth client, in place of registration; its secret is in the keychain.
+    var clientID: String? = nil
+    /// The names of the request headers sent with every call; their values are in the keychain.
+    var headerNames: [String]? = nil
+    var registration: ConnectorProbe.Registration? = nil
+    var transport: ConnectorProbe.Transport? = nil
+    /// The server's own icon, cached after the live check.
+    var iconURL: String? = nil
 
     /// The name as written after @ in a message: no spaces, so the mention ends where the word does.
     var handle: String { name.replacingOccurrences(of: " ", with: "") }
@@ -39,15 +54,23 @@ struct MCPConnector: Identifiable, Hashable, Codable {
     /// Common connectors with a remote MCP server on the open web. Their addresses are the services'
     /// own streamable HTTP endpoints.
     static let presets: [MCPConnector] = [
-        MCPConnector(id: "notion", name: "Notion", url: "https://mcp.notion.com/mcp", sign: .oauth, symbol: "doc.text"),
-        MCPConnector(id: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", sign: .oauth, symbol: "line.3.horizontal.decrease.circle"),
+        MCPConnector(id: "notion", name: "Notion", url: "https://mcp.notion.com/mcp", sign: .oauth, symbol: "doc.text",
+                     iconAsset: "Connector-notion", about: "Search, read and write your pages and databases."),
+        MCPConnector(id: "linear", name: "Linear", url: "https://mcp.linear.app/mcp", sign: .oauth, symbol: "line.3.horizontal.decrease.circle",
+                     iconAsset: "Connector-linear", about: "Find, create and update issues and projects."),
         MCPConnector(id: "github", name: "GitHub", url: "https://api.githubcopilot.com/mcp/", sign: .token, symbol: "chevron.left.forwardslash.chevron.right",
-                     tokenHelp: "https://github.com/settings/personal-access-tokens"),
-        MCPConnector(id: "atlassian", name: "Atlassian", url: "https://mcp.atlassian.com/v1/mcp", sign: .oauth, symbol: "square.stack.3d.up"),
-        MCPConnector(id: "asana", name: "Asana", url: "https://mcp.asana.com/v2/mcp", sign: .oauth, symbol: "circle.grid.cross"),
-        MCPConnector(id: "canva", name: "Canva", url: "https://mcp.canva.com/mcp", sign: .oauth, symbol: "paintpalette"),
-        MCPConnector(id: "stripe", name: "Stripe", url: "https://mcp.stripe.com", sign: .oauth, symbol: "creditcard"),
-        MCPConnector(id: "huggingface", name: "Hugging Face", url: "https://huggingface.co/mcp", sign: .oauth, symbol: "face.smiling"),
+                     tokenHelp: "https://github.com/settings/personal-access-tokens",
+                     iconAsset: "Connector-github", about: "Read code, issues and pull requests, and open new ones."),
+        MCPConnector(id: "atlassian", name: "Atlassian", url: "https://mcp.atlassian.com/v1/mcp", sign: .oauth, symbol: "square.stack.3d.up",
+                     iconAsset: "Connector-atlassian", about: "Work with Jira issues and Confluence pages."),
+        MCPConnector(id: "asana", name: "Asana", url: "https://mcp.asana.com/v2/mcp", sign: .oauth, symbol: "circle.grid.cross",
+                     iconAsset: "Connector-asana", about: "Find and update tasks and projects."),
+        MCPConnector(id: "canva", name: "Canva", url: "https://mcp.canva.com/mcp", sign: .oauth, symbol: "paintpalette",
+                     iconAsset: "Connector-canva", about: "Find, create and export designs."),
+        MCPConnector(id: "stripe", name: "Stripe", url: "https://mcp.stripe.com", sign: .oauth, symbol: "creditcard",
+                     iconAsset: "Connector-stripe", about: "Look up customers, payments and invoices."),
+        MCPConnector(id: "huggingface", name: "Hugging Face", url: "https://huggingface.co/mcp", sign: .oauth, symbol: "face.smiling",
+                     iconAsset: "Provider-huggingface", about: "Search models, datasets and Spaces."),
     ]
 }
 
@@ -65,8 +88,11 @@ struct MCPConnectorAccount: Identifiable, Hashable, Codable {
 
     let id: UUID
     let connector: String
-    /// The owner's name for it ("Work", "Personal"); the connector's name with a number when left empty.
+    /// A name the owner gave it with Rename (and the Work or Personal of accounts added before names
+    /// came from the sign-in). Empty: named by `identity`, else the connector's name with a number.
     var label: String
+    /// Who signed in, from the sign-in itself (an email, a user name or a display name).
+    var identity: String? = nil
     /// Its tools are offered to the model in every chat. Off: only when the message mentions it.
     var automatic = true
     var asks: Asks = .changes
@@ -123,15 +149,35 @@ final class MCPConnectors {
     /// Connectors with at least one account, in the order of `all`.
     var connected: [MCPConnector] { all.filter { c in accounts.contains { $0.connector == c.id } } }
 
-    /// "Notion", or "Notion Work" when the connector has more than one account.
+    /// The account's name: the one the owner gave it, else who signed in, else "Notion" for the
+    /// first and "Notion Account 2" for the next.
     func title(_ account: MCPConnectorAccount) -> String {
         guard let connector = connector(account.connector) else { return account.label }
+        return Self.title(account, connector: connector, index: (accounts(of: connector).firstIndex { $0.id == account.id } ?? 0) + 1)
+    }
+
+    nonisolated static func title(_ account: MCPConnectorAccount, connector: MCPConnector, index: Int) -> String {
         let label = account.label.trimmingCharacters(in: .whitespaces)
-        if label.isEmpty {
-            let index = (accounts(of: connector).firstIndex { $0.id == account.id } ?? 0) + 1
-            return index == 1 ? connector.name : "\(connector.name) \(index)"
+        if !label.isEmpty { return "\(connector.name) \(label)" }
+        if let identity = account.identity?.trimmingCharacters(in: .whitespaces), !identity.isEmpty { return identity }
+        return index == 1 ? connector.name : AppLocalization.text(LocalizedStringResource("\(connector.name) Account \(index)"))
+    }
+
+    /// Who signed in, read from the sign-in's own tokens: the ID token's (or a JWT access token's)
+    /// email, preferred user name, name or login. nil for an opaque token.
+    nonisolated static func identity(idToken: String?, accessToken: String?) -> String? {
+        for token in [idToken, accessToken].compactMap({ $0 }) {
+            let parts = token.split(separator: ".")
+            guard parts.count == 3 else { continue }
+            var base = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            while base.count % 4 != 0 { base += "=" }
+            guard let data = Data(base64Encoded: base),
+                  let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            for key in ["email", "preferred_username", "name", "login", "username"] {
+                if let value = claims[key] as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty { return value }
+            }
         }
-        return "\(connector.name) \(label)"
+        return nil
     }
 
     // MARK: Changes
@@ -139,6 +185,11 @@ final class MCPConnectors {
     func addCustom(name: String, url: String, sign: MCPConnector.Sign) -> MCPConnector {
         let connector = MCPConnector(id: "custom-" + UUID().uuidString.prefix(8).lowercased(), name: name, url: url, sign: sign,
                                      symbol: "puzzlepiece.extension", custom: true)
+        return addCustom(connector)
+    }
+
+    @discardableResult
+    func addCustom(_ connector: MCPConnector) -> MCPConnector {
         custom.append(connector)
         save()
         return connector
@@ -210,6 +261,23 @@ enum MCPCredentials {
 
     static func save(token: String, for id: UUID) {
         try? Keychain.write(Data(token.utf8), account: account(id) + ".token")
+    }
+
+    /// A custom connector's own client secret and request header values, by connector id.
+    static func clientSecret(_ connector: String) -> String? {
+        (try? Keychain.read("connector.\(connector).clientSecret")).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    static func save(clientSecret: String, for connector: String) {
+        try? Keychain.write(Data(clientSecret.utf8), account: "connector.\(connector).clientSecret")
+    }
+
+    static func header(_ name: String, connector: String) -> String? {
+        (try? Keychain.read("connector.\(connector).header.\(name)")).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    static func save(header value: String, named name: String, for connector: String) {
+        try? Keychain.write(Data(value.utf8), account: "connector.\(connector).header.\(name)")
     }
 
     static func delete(_ id: UUID) {
