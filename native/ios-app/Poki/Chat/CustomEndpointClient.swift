@@ -53,17 +53,45 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
     /// The address requests are made for, and the ones to move them to, in order.
     private let primary: String?
     let backups: [String]
+    /// The conversation that owns requests made by this HTTP client. Never take this from global chat state.
+    private let conversationSessionID: String?
 
-    init(inner: any ProviderHTTPClient = DefaultProviderHTTPClient(), primary: String? = nil, backups: [String] = []) {
+    init(inner: any ProviderHTTPClient = DefaultProviderHTTPClient(), primary: String? = nil,
+         backups: [String] = [], conversationSessionID: String? = nil) {
         self.inner = inner
         self.primary = primary.map(ModelCatalog.normalizedAddress)
         self.backups = backups.map(ModelCatalog.normalizedAddress).filter { !$0.isEmpty }
+        self.conversationSessionID = conversationSessionID
     }
 
-    /// The client for one custom provider's model: its first address and the backups that speak the
-    /// same API.
-    convenience init(for model: Model) {
-        self.init(primary: model.baseUrl, backups: Self.backupAddresses(for: model))
+    /// The client for one custom provider's model and one saved conversation.
+    convenience init(for model: Model, sessionID: String? = nil) {
+        self.init(primary: model.baseUrl, backups: Self.backupAddresses(for: model),
+                  conversationSessionID: sessionID)
+    }
+
+    /// A backup URL is a *new* recipient. Do not forward the primary's OpenCode session
+    /// headers into an unrelated gateway. Even for an OpenCode-hosted backup, use the
+    /// request owner's ID, not a header captured from a different request or chat.
+    static func routedFallback(_ request: URLRequest, to url: URL, conversationSessionID: String?) -> URLRequest {
+        var moved = request
+        moved.url = url
+        let hadSessionHeader = (request.allHTTPHeaderFields ?? [:])
+            .contains { $0.key.caseInsensitiveCompare("x-opencode-session") == .orderedSame }
+        for name in (moved.allHTTPHeaderFields ?? [:]).keys
+            where name.caseInsensitiveCompare("x-opencode-session") == .orderedSame ||
+                  name.caseInsensitiveCompare("x-opencode-client") == .orderedSame {
+            moved.setValue(nil, forHTTPHeaderField: name)
+        }
+        let host = url.host?.lowercased() ?? ""
+        let trustedOpenCode = url.scheme?.lowercased() == "https"
+            && (host == "opencode.ai" || host.hasSuffix(".opencode.ai"))
+        if hadSessionHeader && trustedOpenCode,
+           let sessionID = conversationSessionID, !sessionID.isEmpty {
+            moved.setValue(sessionID, forHTTPHeaderField: "x-opencode-session")
+            moved.setValue("Poki", forHTTPHeaderField: "x-opencode-client")
+        }
+        return moved
     }
 
     static func backupAddresses(for model: Model) -> [String] {
@@ -106,9 +134,7 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
         if let primary {
             for backup in backups {
                 guard let url = Self.moved(request.url, from: primary, to: backup) else { continue }
-                var next = request
-                next.url = url
-                attempts.append(next)
+                attempts.append(Self.routedFallback(request, to: url, conversationSessionID: conversationSessionID))
             }
         }
         var tried: [String] = []
