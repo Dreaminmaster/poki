@@ -432,6 +432,7 @@ struct AddCustomConnectorView: View {
                                        address: url?.absoluteString ?? address, probe: found, finish: { dismiss() })
             }
         }
+        .presentationDetents([.large])
     }
 
     @ViewBuilder private func stepRow(_ step: ConnectorProbe.Step, _ title: LocalizedStringKey) -> some View {
@@ -519,7 +520,7 @@ struct CustomConnectorDetails: View {
                 Group {
                     if probe.needsSignIn {
                         switch probe.registration {
-                        case .dynamic: Text("Detected. Poki registers itself with the server's sign-in.")
+                        case .dynamic: Text("Detected. Poki registers itself with the server’s sign-in.")
                         case .metadataDocument: Text("Detected. The server takes a client ID document. If signing in fails, use your own client under Advanced.")
                         case .none: Text("Detected. The server needs your own client, under Advanced.")
                         }
