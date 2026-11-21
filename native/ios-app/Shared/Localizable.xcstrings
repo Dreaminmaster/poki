@@ -769,22 +769,6 @@
         }
       }
     },
-    "Optional. A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可选。这台 iPhone 上的小模型负责快速判断并写屏幕历史笔记，它读到的内容不会离开手机。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可選。這台 iPhone 上的小模型負責快速判斷並寫螢幕歷史筆記，它讀到的內容不會離開手機。"
-          }
-        }
-      }
-    },
     "Tap Open Karing below." : {
       "localizations" : {
         "zh-Hans" : {
@@ -46288,6 +46272,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "整套裝扮"
+          }
+        }
+      }
+    },
+    "Optional" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可選"
+          }
+        }
+      }
+    },
+    "A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上的小模型负责快速判断并写屏幕历史笔记，它读到的内容不会离开手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台 iPhone 上的小模型負責快速判斷並寫螢幕歷史筆記，它讀到的內容不會離開手機。"
           }
         }
       }

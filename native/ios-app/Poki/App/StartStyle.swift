@@ -413,12 +413,12 @@ struct StartModelsPage: View {
                 if LocalModels.recommends { LocalRecommendation() }
             } header: {
                 Group {
-                    Text("On This iPhone")
+                    Text("Optional")
                 }
                 .settingsHeader()
             } footer: {
                 Group {
-                    Text("Optional. A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone.")
+                    Text("A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone.")
                 }
                 .settingsFooter()
             }

@@ -481,6 +481,8 @@ private struct LoopbackPage: View {
 
     private func pick(_ choice: LoopbackChoice) {
         copied = false
+        // The full list folds back once one is picked, so its steps come up right under it.
+        withAnimation { showsAll = false }
         model.chooseConnection(.proxy)
         model.setup.proxyApp = choice.id
     }
