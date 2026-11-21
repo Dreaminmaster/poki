@@ -84,7 +84,7 @@ unset POKI_IPHONE_PASSCODE
 
 The installing agent provides these commands but does not run them or inspect the variable. If the daemon uses a custom `POKI_MCP_STATE_DIR`, the user must set that same path in this terminal.
 
-When configured, Poki Agent can use its host-integrated `unlock_device` tool on a locked phone. The host passes the passcode to the helper over stdin, outside model context and tool arguments. The helper accepts any passcode iOS allows: 4 or 6 digits are tapped on the keypad, and a custom numeric or alphanumeric code (up to 128 characters on a US keyboard) is typed as hardware keyboard keys followed by Return. The verified hardware case is only iPhone17,1 in portrait orientation with a six-digit passcode and a 402-by-874-point keypad. The keyboard path and other layouts are not verified on a phone. Inspect the resulting screen before claiming that the phone is unlocked.
+When configured, Poki Agent can use its host-integrated `unlock_device` tool on a locked phone. The host passes the passcode to the helper over stdin, outside model context and tool arguments. The helper taps 4- or 6-digit passcodes on the keypad. It refuses a custom numeric or alphanumeric passcode without sending input: those go into the lock screen's text field, which the helper cannot see, and keys sent blind could land in an open app. Poki's Automatic Unlock on the iPhone handles every kind, because it checks the lock screen first. The verified hardware case is only iPhone17,1 in portrait orientation with a six-digit passcode and a 402-by-874-point keypad. Other layouts are not verified. Inspect the resulting screen before claiming that the phone is unlocked.
 
 `./bin/setup` and `npm run build:native` build the helper. Check it from the repository root:
 

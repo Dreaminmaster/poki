@@ -24,10 +24,10 @@ def main():
         parser.error("Keypad file does not exist.")
     if not args.stdin and not sys.stdin.isatty():
         parser.error("Use an interactive terminal for hidden passcode input.")
-    pin = sys.stdin.read().rstrip("\r\n") if args.stdin else getpass.getpass("Passcode (hidden; not saved): ")
-    # Any passcode iOS allows: 4 or 6 digits, a custom numeric code, or an alphanumeric one.
-    if not 4 <= len(pin) <= 128 or not all(" " <= c <= "~" for c in pin):
-        print("Expected a passcode of 4 to 128 characters typed on a US keyboard; nothing sent.", file=sys.stderr)
+    pin = sys.stdin.read().strip() if args.stdin else getpass.getpass("Passcode (hidden; not saved): ")
+    # Keypad codes only (4 or 6 digits): other passcodes would be typed without seeing the lock screen.
+    if len(pin) not in (4, 6) or not pin.isascii() or not pin.isdecimal():
+        print("Expected four or six ASCII digits; nothing sent.", file=sys.stderr)
         return 2
     try:
         result = subprocess.run(
