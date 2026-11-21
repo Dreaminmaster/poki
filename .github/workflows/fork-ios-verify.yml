@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: 8ccebea7ebad255137d8f5eea802028780a6581a
+            ref: 93178eb2da195ab8e948fb58426ad95a1bcdc009
             tests: 'ModelSessionMetadataTests:12 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
           - pr: 322-baseline
             ref: 32aa5346c9a4c72bb03baa3306c5eb093da5696a
@@ -137,6 +137,7 @@ jobs:
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b 2>&1 | tee out/simulator-boot.log
       - name: Verify core approval origin and cross-session isolation
+        if: matrix.pr != '322-baseline'
         shell: bash
         run: |
           set -euo pipefail
