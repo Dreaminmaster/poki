@@ -511,9 +511,8 @@ final class ApprovalDefaultTests: XCTestCase {
 @MainActor
 final class PasscodeTests: XCTestCase {
     /// After a restart iOS asks for the passcode before the first automation. The launcher says so
-    /// (code "passcode"); the agent reads a plain "starting" with the reason, and the Live Activity
-    /// asks the owner; the hint clears when the runner answers.
-    func testPasscodeWaitIsNamedAndClears() {
+    /// (code "passcode"); the tool waits for the owner, and the Live Activity asks them.
+    func testRunnerPasscodePromptReportsAuthorizationWaitUntilReady() {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         model.loopback.simulate(.working(ms: 9))
         model.inProcessReadyForProbe()
@@ -522,8 +521,9 @@ final class PasscodeTests: XCTestCase {
         XCTAssertTrue(model.passcodeHint)
         let text = model.host.currentRunner.describe
         XCTAssertTrue(text.contains("passcode"), text)
-        XCTAssertTrue(text.contains("Call again"), text)
-        XCTAssertTrue(text.hasPrefix("starting"), text)
+        guard case .awaitingAutomationAuthorization = model.host.currentRunner else {
+            return XCTFail("The original tool cannot wait for the owner in state: \(text)")
+        }
         model.runnerChanged(RunnerStatus(state: "running"))
         XCTAssertFalse(model.passcodeHint)
         XCTAssertTrue(model.host.currentRunner.isRunning)
@@ -723,7 +723,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         UIAccessibility.post(notification: .screenChanged, argument: window.rootViewController?.view)
@@ -1505,7 +1505,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
@@ -1558,7 +1558,7 @@ final class InProcessPasscodeTests: XCTestCase {
         window.frame = scene.screen.bounds
         let chat = chat ?? ChatModel(app: model)
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.locale, AppLocalization.locale))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
@@ -1797,6 +1797,94 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
 
+    /// Any web page, message or app can open a `poki://` link. One that names a relay only asks: the
+    /// relay could see the screen and act on the phone, so nothing changes until the owner allows it.
+    func testARelayLinkAsksAndDoesNotSetTheRelay() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let before = model.relayAddress
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .continueRouting)
+        XCTAssertEqual(model.relayAddress, before, "not set by the link alone")
+        XCTAssertEqual(model.linkAsk?.host, "https://evil.example")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+        XCTAssertEqual(model.relayAddress, before, "declined")
+    }
+
+    /// #350 review: a second link while the first one's alert is on screen. Allow and Don't Allow apply
+    /// to the request the alert shows, and the second link changes nothing.
+    func testASecondLinkWhileOneAsksChangesNothing() throws {
+        for allow in [true, false] {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let keys = ["relayAddress", "relayEnabled"]
+            let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+            defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+            let before = model.relayAddress
+            let missingChecksum = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist"))
+            _ = model.open(link: missingChecksum)
+            let previousNote = try XCTUnwrap(model.pairingNote)
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))), .continueRouting)
+            let shown = try XCTUnwrap(model.linkAsk)
+            XCTAssertEqual(shown.host, "https://mine.example")
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .ignored)
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "the second link does not replace the one on screen")
+            let sum = String(repeating: "ab", count: 32)
+            let download = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist&sha256=\(sum)"))
+            let inline = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+            for link in [download, inline, missingChecksum] {
+                XCTAssertEqual(model.open(link: link), .ignored, "discarded pairing links do not open the pairing page")
+                XCTAssertEqual(model.pairingNote, previousNote, "discarded pairing links leave the previous message alone")
+                XCTAssertEqual(model.linkAsk?.id, shown.id, "discarded pairing links do not replace the request")
+            }
+
+            model.answerLink(allow, to: UUID())
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "an answer to another request does nothing")
+            model.answerLink(allow, to: shown.id)
+            XCTAssertNil(model.linkAsk, "nothing else waits: the second link was turned away")
+            XCTAssertNotEqual(model.relayAddress?.origin.host(), "evil.example")
+            if allow {
+                XCTAssertEqual(model.relayAddress?.origin.host(), "mine.example", "Allow sets the relay the alert showed")
+            } else {
+                XCTAssertEqual(model.relayAddress, before, "Don't Allow leaves the relay as it was")
+            }
+        }
+    }
+
+    func testInvalidInlinePairingDataShowsAnErrorWithoutAsking() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let invalid = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+        XCTAssertEqual(model.open(link: invalid), .showSetup(.pairing))
+        XCTAssertNil(model.linkAsk, "invalid property-list bytes cannot be approved")
+        XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+    }
+
+    func testIncompleteInlinePairingRecordsShowAnErrorWithoutAsking() throws {
+        let records: [[String: Any]] = [["identifier": "example"], ["HostID": "example"]]
+        for record in records {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let data = try PropertyListSerialization.data(fromPropertyList: record, format: .binary, options: 0)
+            var link = URLComponents()
+            link.scheme = "poki"
+            link.host = "pairing"
+            link.queryItems = [URLQueryItem(name: "data", value: data.base64URL)]
+            XCTAssertEqual(model.open(link: try XCTUnwrap(link.url)), .showSetup(.pairing))
+            XCTAssertNil(model.linkAsk, "an incomplete pairing record cannot be approved")
+            XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+        }
+    }
+
+    /// A pairing link from outside asks before it replaces the pairing file, and one that fetches a
+    /// file must say which file (its checksum), or Poki would fetch and keep whatever the address serves.
+    func testAPairingLinkAsksAndNeedsItsChecksum() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist"))), .showSetup(.pairing))
+        XCTAssertNil(model.linkAsk, "no checksum, nothing to ask")
+        let sum = String(repeating: "ab", count: 32)
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist&sha256=\(sum)"))), .showSetup(.pairing))
+        XCTAssertEqual(model.linkAsk?.host, "192.168.1.5")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+    }
+
     /// Every setup step done and a connection chosen, with the loopback not yet checked.
     private func modelWithLoopbackChosen(launcher: FakeLauncher, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) throws -> (model: AppModel, restore: () -> Void) {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "relayAddress", "relayEnabled", "wantsOn"]
@@ -1876,7 +1964,7 @@ final class FrontendSubtractionTests: XCTestCase {
                        "Settings must clear waiting_network loopback issues once 10.7.0.1 answers")
 
         let chatLabels = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chatLabels.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") },
@@ -1967,7 +2055,7 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")
         XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
         let chat = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chat.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") }, "Chat after the task: \(chat)")

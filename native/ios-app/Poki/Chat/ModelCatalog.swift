@@ -305,16 +305,18 @@ enum ModelCatalog {
     /// Live voice models (Realtime): for OpenAI the built-in one and any the key's list adds, off at
     /// first; for a custom provider the Realtime models its list names (the built-in one's name until it
     /// has been read).
-    static let voiceDefault = "gpt-realtime-2.1"
+    static let voiceDefault = "gpt-live-1.1"
+    static let voiceRealtime = "gpt-realtime-2.1"
 
     static func voiceChoices(for account: VoiceAccount) -> [ChatModelChoice] {
         switch account {
         case .openai:
-            let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault }
-            return [ChatModelChoice(id: voiceDefault, name: "GPT Realtime 2.1")] + listed.map { ChatModelChoice(id: $0, name: $0) }
+            let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault && $0 != voiceRealtime }
+            return [ChatModelChoice(id: voiceDefault, name: "GPT-Live 1.1"), ChatModelChoice(id: voiceRealtime, name: "GPT Realtime 2.1")]
+                + listed.map { ChatModelChoice(id: $0, name: $0) }
         case .custom(let id):
             let listed = UserDefaults.standard.stringArray(forKey: "models.listed.voice.custom.\(id.uuidString)") ?? []
-            return (listed.isEmpty ? [voiceDefault] : listed).map { ChatModelChoice(id: $0, name: $0) }
+            return (listed.isEmpty ? [voiceRealtime] : listed).map { ChatModelChoice(id: $0, name: $0) }
         }
     }
 
@@ -331,7 +333,7 @@ enum ModelCatalog {
         if on { ids.insert(id) } else { ids.remove(id) }
         UserDefaults.standard.set(Array(ids), forKey: "models.enabled.voice" + account.storeSuffix)
         if !ids.contains(voiceModelID(for: account)) {
-            setVoiceModelID(voiceChoices(for: account).first { ids.contains($0.id) }?.id ?? voiceDefault, for: account)
+            setVoiceModelID(voiceModelID(for: account), for: account)
         }
         ModelKeys.saved += 1
     }

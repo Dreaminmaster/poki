@@ -1571,7 +1571,7 @@ final class GymTests: XCTestCase {
         _ = await core.call("look", [:])
         let dump = "Error Domain=FBSOpenApplicationServiceErrorDomain Code=1 \"The request to open \"com.apple.mobilenotes\" failed.\" UserInfo={BSErrorCodeDescription=RequestDenied, NSUnderlyingError=0x600000c8 {Error Domain=FBSOpenApplicationErrorDomain Code=4 \"Application \"com.apple.mobilenotes\" is unknown to FrontBoard.\" UserInfo={BSErrorCodeDescription=InvalidRequest}}, NSLocalizedFailureReason=Application \"com.apple.mobilenotes\" is unknown to FrontBoard., NSLocalizedDescription=The request to open \"com.apple.mobilenotes\" failed.}"
         wda.set("POST /wda/apps/activate") { _ in (500, ["value": ["error": "unknown error", "message": .string(dump)]]) }
-        let result = await core.call("do", ["actions": [["launch": "com.apple.mobilenotes"]]])
+        let result = await core.call("do", ["actions": [["launch": ["bundle": "com.apple.mobilenotes"]]]])
         XCTAssertTrue(result.text.contains("launch com.apple.mobilenotes: no app with that bundle id is installed on this device"), result.text)
         XCTAssertFalse(result.text.contains("FBSOpen"), result.text)
         XCTAssertTrue(result.text.contains("not sent") || result.text.contains("not_sent"), result.text)

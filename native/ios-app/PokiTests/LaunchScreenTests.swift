@@ -147,6 +147,17 @@ final class LaunchScreenTests: XCTestCase {
         }
     }
 
+    func testLaunchPicturesStaySmall() throws {
+        let (_, view) = try launchView()
+        for part: LaunchCurtain.Part in [.backdrop, .word, .bear] {
+            let imageView = try XCTUnwrap(view.viewWithTag(part.rawValue) as? UIImageView)
+            let picture = try XCTUnwrap(imageView.image?.cgImage)
+            // The launch art uses a 4 MiB budget per decoded RGBA image.
+            XCTAssertLessThanOrEqual(picture.width * picture.height * 4, 4 << 20,
+                                     "\(part) is \(picture.width) by \(picture.height) pixels")
+        }
+    }
+
     /// The picture shrunk to 20 by 44 RGB samples, which evens out the grain.
     private func samples(_ image: CGImage) throws -> [UInt8] {
         let (width, height) = (20, 44)

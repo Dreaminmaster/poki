@@ -89,6 +89,9 @@ struct LaunchLayers: ViewModifier {
     @Binding var curtain: Bool
     @Binding var welcome: FirstRun.Kind?
     @Binding var link: SetupStep?
+    /// The first frame under the curtain, with its display time, and the curtain gone (the startup log).
+    var firstFrame: (CFTimeInterval) -> Void = { _ in }
+    var finished: () -> Void = {}
 
     func body(content: Content) -> some View {
         content
@@ -96,12 +99,16 @@ struct LaunchLayers: ViewModifier {
             .overlay {
                 if let kind = welcome {
                     FirstRunGuide(kind: kind, fromLaunch: true, link: $link, done: { welcome = nil })
+                        .logStartupAppearance(.welcome)
                         .transition(.opacity)
                 }
             }
             .overlay {
                 if curtain {
-                    LaunchCurtain(handsOver: welcome != nil, done: { curtain = false })
+                    LaunchCurtain(handsOver: welcome != nil, firstFrame: firstFrame, done: {
+                        curtain = false
+                        finished()
+                    })
                         .ignoresSafeArea()
                         .allowsHitTesting(false)
                 }

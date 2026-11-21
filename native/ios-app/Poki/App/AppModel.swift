@@ -231,6 +231,8 @@ final class AppModel {
     private var launcherConfig: LauncherConfig?
 
     let host = AppCoreHost()
+    let autoUnlock = AutoUnlock()
+    var supportsAutoUnlock: Bool { UIDevice.current.userInterfaceIdiom == .phone }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
@@ -372,19 +374,21 @@ final class AppModel {
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
-                           phoneTool: { name, arguments in
+                           phoneTool: { name, arguments, cancellation in
                                #if DEBUG && targetEnvironment(simulator)
                                if TalkRehearsal.asked { return await TalkRehearsal.step() }
                                #endif
-                               let tool = { (name: String, arguments: String) async -> PhoneAnswer in
-                                   let result = await core.tool(name, arguments: arguments)
-                                   return (result.text, result.isError, result.jpeg)
+                               return await PhoneOperationCancellation.$current.withValue(cancellation) {
+                                   let tool = { (name: String, arguments: String) async -> PhoneAnswer in
+                                       let result = await core.tool(name, arguments: arguments)
+                                       return (result.text, result.isError, result.jpeg)
+                                   }
+                                   guard name == "open_app" else { return await tool(name, arguments) }
+                                   return await VoiceApps.open(arguments, tool: tool, openLink: { url in
+                                       guard cancellation?.isCancelled != true, UIApplication.shared.applicationState == .active else { return false }
+                                       return await UIApplication.shared.open(url)
+                                   })
                                }
-                               guard name == "open_app" else { return await tool(name, arguments) }
-                               return await VoiceApps.open(arguments, tool: tool, openLink: { url in
-                                   guard UIApplication.shared.applicationState == .active else { return false }
-                                   return await UIApplication.shared.open(url)
-                               })
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
                            connection: VoiceModel.connection)
@@ -395,6 +399,12 @@ final class AppModel {
         host.update(key: identity.signingKey, hashes: identity.accessHashes)
         host.onConsent { [weak self] client, callback, connector in
             await self?.askToConnect(client: client, callback: callback, connector: connector) ?? false
+        }
+        if transport == nil, supportsAutoUnlock {
+            host.onAutoUnlock { [weak self] timeout in
+                guard let self, await self.canAutoUnlock else { return false }
+                return await self.unlockForLocalTask(timeout: timeout)
+            }
         }
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
         // them while the runner is fine, so the runner is asked first; only a runner that does not
@@ -495,6 +505,15 @@ final class AppModel {
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    private var canAutoUnlock: Bool {
+        sessionOn && !ownerPaused && ChatModel.delegatedBusy == nil &&
+            (automationPath == .runner || inProcessSession == .open)
+    }
+
+    private func unlockForLocalTask(timeout: Double) async -> Bool {
+        await autoUnlock.unlock(using: automation, opensSession: automationPath == .runner, timeout: timeout)
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
@@ -1252,7 +1271,7 @@ final class AppModel {
     }
 
     func stopSession() {
-        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode
+        let awaitingAuthorization = passcodeConfirmationPending || inProcessPasscode || runner.code == "passcode"
         cancelPasscodeHeadsUp()
         sessionStartTask?.cancel()
         pendingPrepareForTask = false
@@ -1394,8 +1413,12 @@ final class AppModel {
         // The runner is asked to shut itself down (it ends its test and exits) and the launcher's
         // session is closed; the launcher also ends the process through the developer services.
         if !Self.onSimulator { Task { await RunnerProbe.shutdown() } }
+        let awaitingAuthorization = runner.code == "passcode"
         launcher.stop()
         standBy(reason: reason)
+        if awaitingAuthorization {
+            host.update(runner: .failed("Poki was stopped while waiting for automation authorization", fix: nil))
+        }
         confirmRunnerEnded()
     }
 
@@ -1690,7 +1713,7 @@ final class AppModel {
             return inProcessSession.agentState
         }
         if status.code == "passcode" {
-            return .starting("the phone is asking the owner for the passcode (iOS does this once before the first automation after a restart or a force quit); the Live Activity tells the owner; the runner starts the moment it is entered. Call again in about 10 s; nothing is lost and no action is needed from you")
+            return .awaitingAutomationAuthorization("iOS is waiting for the owner to enter the passcode in the system prompt on the iPhone. The Live Activity asks them. Continue the task once automation is ready")
         }
         let preLaunch = ["connecting", "pairing", "tunnel", "waiting_network", "standby", "idle"].contains(status.state)
         if preLaunch, !loopback.isWorking, loopback.state != .checking || status.state == "waiting_network" {
@@ -1744,8 +1767,7 @@ final class AppModel {
         if status.state != "launching" { launchingSince = nil; passcodeHint = inProcessPasscode }
         if status.code == "passcode", runner.code != "passcode" {
             // iOS is asking for the passcode before the first UI automation after a restart. The
-            // launcher waits minutes for it; the person is asked on the Live Activity, and the agent
-            // reads a plain "starting" meanwhile (coreState).
+            // launcher waits for it, and the Live Activity asks the owner.
             passcodeHint = true
             log.add("runner", "the runner has not answered for 12 s: asking the owner for the passcode on the Live Activity")
             activity.update { $0.phase = .handoff; $0.handoff = .init(id: Self.runnerPasscodeHandoff, kind: .runnerPasscode, text: nil, app: nil, since: Date()) }
@@ -2112,9 +2134,9 @@ final class AppModel {
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
-    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil) async -> PokiCore.ToolAnswer {
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
-        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask) }
+        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }
@@ -2127,7 +2149,20 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded)
+    }
+
+    func itemPictures(for card: ResultCard, localTask: String) async -> [String: Data]? {
+        let requests = card.items.compactMap { item -> (String, ItemPictureRequest)? in
+            guard let id = item.text("image_screenshot"), let box = item.box("image") else { return nil }
+            return (item.id, ItemPictureRequest(screenshotID: id, box: box))
+        }
+        guard !requests.isEmpty else { return nil }
+        let found = await core.itemPictures(Dictionary(requests, uniquingKeysWith: { first, _ in first }), localTask: localTask)
+        let cut = found.reduce(into: [String: Data]()) { pictures, source in
+            pictures.merge(ResultCardPictures.cut(source), uniquingKeysWith: { first, _ in first })
+        }
+        return cut.isEmpty ? nil : cut
     }
 
     /// After Stop: waits until the phone has finished the action a stopped call had already sent.
@@ -2326,8 +2361,7 @@ final class AppModel {
 
     /// A pairing file as bytes: from Files, AirDrop, a `poki://pairing` link or Poki Setup on a computer.
     func importPairingFile(_ data: Data, how: String) throws {
-        // A lockdown pairing plist or an RPPairing file; both are property lists.
-        _ = try PropertyListSerialization.propertyList(from: data, format: nil)
+        try Self.checkPairingFileFormat(data)
         try data.write(to: AppFiles.pairingFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         // Chosen by hand: it replaces the phone's own pairing as well.
         try? FileManager.default.removeItem(at: AppFiles.phonePairingFile)
@@ -2339,49 +2373,161 @@ final class AppModel {
         log.add("pairing", "pairing file \(how)")
     }
 
+    private static func checkPairingFileFormat(_ data: Data) throws {
+        guard let record = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              isRemotePairingRecord(record) || isLockdownPairingRecord(record) else {
+            throw CocoaError(.propertyListReadCorrupt)
+        }
+    }
+
+    private static func isRemotePairingRecord(_ record: [String: Any]) -> Bool {
+        record["identifier"] is String && (record["public_key"] as? Data)?.count == 32 && (record["private_key"] as? Data)?.count == 32
+    }
+
+    private static func isLockdownPairingRecord(_ record: [String: Any]) -> Bool {
+        // Required fields in the launcher's lockdown pairing format. EscrowBag and UDID are optional.
+        let identifiers = ["HostID", "SystemBUID", "WiFiMACAddress"]
+        let credentials = ["DeviceCertificate", "HostCertificate", "HostPrivateKey", "RootCertificate", "RootPrivateKey"]
+        return identifiers.allSatisfy { record[$0] is String } && credentials.allSatisfy { record[$0] is Data }
+    }
+
     /// What the last pairing link or file did, for the pairing page.
     var pairingNote: String?
 
-    /// A link Poki was opened with. `poki://pairing?url=…[&sha256=…]` fetches a pairing file (Poki
+    /// A link that would change the relay or the pairing file waits here for the owner's answer. Any web
+    /// page, message, code or app can open a `poki://` link, so such a link alone never changes either.
+    struct LinkAsk: Identifiable {
+        enum Kind {
+            case relay(RelayAddress)
+            case pairingData(Data)
+            case pairingURL(URL, sha256: String)
+        }
+        let id = UUID()
+        let kind: Kind
+        /// The relay's address, or the computer the pairing file comes from.
+        let host: String
+    }
+    private(set) var linkAsk: LinkAsk?
+
+    /// While one link waits for the owner, another is turned away, not queued and not put in its place:
+    /// the alert on screen keeps the request it shows, so Allow never applies a link the owner did not see.
+    private func canAskAboutLink() -> Bool {
+        guard linkAsk == nil else {
+            log.add("app", "a link came while another waits for the owner; it was not used")
+            return false
+        }
+        return true
+    }
+
+    private func ask(_ kind: LinkAsk.Kind, host: String) {
+        linkAsk = LinkAsk(kind: kind, host: host)
+        if case .relay = kind {
+            log.add("app", "a link asks to change the relay to \(host), waiting for the owner")
+        } else {
+            log.add("app", "a link asks to replace the pairing file, waiting for the owner")
+        }
+    }
+
+    /// The owner's answer to `linkAsk`. `id` is the request the alert showed: an answer to any other
+    /// request does nothing, and there is no answer that names none.
+    func answerLink(_ allow: Bool, to id: LinkAsk.ID) {
+        guard let ask = linkAsk, id == ask.id else { return }
+        linkAsk = nil
+        guard allow else {
+            log.add("app", "the owner declined the link")
+            if case .relay = ask.kind { return }
+            pairingNote = AppLocalization.text(LocalizedStringResource("The pairing link was not used."))
+            return
+        }
+        switch ask.kind {
+        case .relay(let address):
+            log.add("relay", setRelay(address.origin.absoluteString) ? "set by link, allowed by the owner" : "link carried no relay address")
+        case .pairingData(let data):
+            do { try importPairingFile(data, how: "received by link") } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
+        case .pairingURL(let from, let sha256):
+            fetchPairingFile(from: from, expected: sha256)
+        }
+    }
+
+    private func fetchPairingFile(from: URL, expected: String) {
+        pairingNote = AppLocalization.text(LocalizedStringResource("Fetching the pairing file from \(from.host() ?? AppLocalization.text("your computer"))…"))
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: from)
+                if SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() != expected {
+                    throw NSError(domain: "poki", code: 1, userInfo: [NSLocalizedDescriptionKey: AppLocalization.text(LocalizedStringResource("the file does not match the link"))])
+                }
+                try importPairingFile(data, how: "fetched from \(from.host() ?? "?")")
+            } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Could not get the pairing file. \(error.localizedDescription)")) }
+        }
+    }
+
+    enum LinkOpening: Equatable {
+        case ignored
+        case continueRouting
+        case showSetup(SetupStep)
+    }
+
+    /// A link Poki was opened with. `poki://pairing?url=…&sha256=…` fetches a pairing file (Poki
     /// Setup serves it on the local network and shows the link as a code); `poki://pairing?data=…`
     /// carries one in base64url; `poki://setup?relay=…` sets the relay. A file URL is a pairing file
-    /// opened from AirDrop or Files. Returns the setup step to show, or nil when the link was none of these.
-    func open(link url: URL) -> SetupStep? {
+    /// opened from AirDrop or Files. Ignored links leave the current page in place.
+    ///
+    /// A pairing or relay link from outside Poki only asks (`linkAsk`): nothing changes until the owner
+    /// allows it. `scanned` is Poki's own scanner on the pairing page, which the owner pointed at the
+    /// code: that is their answer already. The other links (`chat`, `log`, `voice`, a setup step) only
+    /// show a screen and need no answer.
+    func open(link url: URL, scanned: Bool = false) -> LinkOpening {
         if url.isFileURL {
             do { try importPairingFile(from: url) } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
             try? FileManager.default.removeItem(at: url)
-            return .pairing
+            return .showSetup(.pairing)
         }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
         case "pairing":
+            guard scanned || canAskAboutLink() else { return .ignored }
             if let text = item("data"), let data = Data(base64URL: text) {
-                do { try importPairingFile(data, how: "received by link") } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)")) }
-            } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme ?? "") {
-                let expected = item("sha256")?.lowercased()
-                pairingNote = AppLocalization.text(LocalizedStringResource("Fetching the pairing file from \(from.host() ?? AppLocalization.text("your computer"))…"))
-                Task {
-                    do {
-                        let (data, _) = try await URLSession.shared.data(from: from)
-                        if let expected, SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() != expected {
-                            throw NSError(domain: "poki", code: 1, userInfo: [NSLocalizedDescriptionKey: AppLocalization.text(LocalizedStringResource("the file does not match the link"))])
-                        }
-                        try importPairingFile(data, how: "fetched from \(from.host() ?? "?")")
-                    } catch { pairingNote = AppLocalization.text(LocalizedStringResource("Could not get the pairing file. \(error.localizedDescription)")) }
+                do {
+                    if scanned {
+                        try importPairingFile(data, how: "scanned")
+                    } else {
+                        try Self.checkPairingFileFormat(data)
+                        pairingNote = nil
+                        ask(.pairingData(data), host: "")
+                    }
+                } catch {
+                    pairingNote = AppLocalization.text(LocalizedStringResource("Invalid Pairing File. \(error.localizedDescription)"))
+                }
+            } else if let from = item("url").flatMap(URL.init(string:)), ["http", "https"].contains(from.scheme?.lowercased() ?? ""), let host = from.host(), !host.isEmpty {
+                // The checksum is not optional: without it a link could have Poki fetch and keep any file.
+                // Poki Setup always sends it.
+                if let expected = item("sha256")?.lowercased(), expected.count == 64, expected.allSatisfy(\.isHexDigit) {
+                    if scanned { fetchPairingFile(from: from, expected: expected) } else { pairingNote = nil; ask(.pairingURL(from, sha256: expected), host: host) }
+                } else {
+                    pairingNote = AppLocalization.text(LocalizedStringResource("This pairing link is incomplete. Make a new code in Poki Setup."))
                 }
             } else {
                 pairingNote = AppLocalization.text(LocalizedStringResource("The pairing link carried no file."))
             }
-            return .pairing
+            return .showSetup(.pairing)
         case "setup" where item("step") != nil:
             // The Live Activity's link to a setup step (pairing).
-            return item("step").flatMap(SetupStep.init(rawValue:))
+            guard let step = item("step").flatMap(SetupStep.init(rawValue:)) else { return .continueRouting }
+            return .showSetup(step)
         case "setup":
-            // Poki Setup hands over the relay it configured (the Cloudflare proxy); the chat shows it.
-            if let relay = item("relay") { log.add("relay", setRelay(relay) ? "set by link" : "link carried no relay address") }
-            return nil
-        default: return nil
+            // Poki Setup hands over the relay it configured (the Cloudflare proxy). The relay can see the
+            // screen and act on the phone, so the link only asks. The relay already in use needs no answer.
+            guard let text = item("relay") else { return .continueRouting }
+            guard canAskAboutLink() else { return .ignored }
+            guard let address = RelayAddress(text) else {
+                log.add("relay", "link carried no relay address")
+                return .continueRouting
+            }
+            if address != relayAddress { ask(.relay(address), host: address.origin.absoluteString) }
+            return .continueRouting
+        default: return .continueRouting
         }
     }
 
@@ -2543,7 +2689,7 @@ final class AppModel {
     /// The pairing is an RPPairing record made on this iPhone, the only kind the launcher can hand to the mounted image.
     private var hasPhonePairing: Bool {
         guard let pairingPath, let record = Self.pairingRecord(at: pairingPath) else { return false }
-        return record["identifier"] is String && (record["public_key"] as? Data)?.count == 32 && (record["private_key"] as? Data)?.count == 32
+        return Self.isRemotePairingRecord(record)
     }
     var setupReadyForUse: Bool { SetupStep.shown.allSatisfy(stepReadyForUse) }
 

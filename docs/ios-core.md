@@ -407,11 +407,12 @@ on the phone; the next first `look` of a task in that app names the saved skills
   anything is sent when there is no decider), and a step's `check: "what should be true"` is one
   yes or no after the step, where a clear no stops the run and an unsure answer is reported.
 - **Apps by name, and the session's app** (`CoreConfig.appNames`, on by default; a switch in the
-  app's Testing Options). `{launch: "Clock"}` takes the name the iPhone shows as well as a bundle id,
-  resolved by `CoreConfig.resolveApp` (the app backs it with the apps it knows, by the edition the
-  phone has, and with the phone's own app list). A name nothing resolves, anywhere in the call or in a
-  path's steps, is refused before the first action is sent; a dotted name shaped like a web address
-  ("Booking.com") is a name, not a bundle id. `do {app: "Clock", actions: […]}` names the app once
+  app's Testing Options). `{launch: "Clock"}` first matches an installed bundle ID exactly, then
+  looks up an installed app by name through `CoreConfig.resolveInstalledApp`. This works for names
+  with dots, too. If a string does not match an installed app, the whole batch or path is refused
+  before it sends any action. `{launch: {name: "Clock"}}` uses `CoreConfig.resolveApp`, and
+  `{launch: {bundle: "com.apple.mobiletimer"}}` passes the ID to the runner as given.
+  `do {app: "Clock", actions: […]}` uses the same installed-app lookup and names the app once
   for the session: it is brought to the front first when it is not there already (the latest read
   says so, checked with the runner when that read is over 10 s old), and later calls in
   the same session need not name it. The handle outlives every change of screen; an answer says so

@@ -15,13 +15,17 @@ struct ResultCard: Codable, Equatable {
     var recommended: String
     var primary: Action
     var next: Action?
+    /// Each item's picture (a product's photo), JPEG, cut from the phone's screenshot where the item's
+    /// `image` box points (`ResultCardPictures`). Only items whose picture was
+    /// whole on the screen have one.
+    var pictures: [String: Data]?
 
     /// One choice. Every kind of card needs only its id and title; the rest are the app's own fields,
     /// kept as the model sent them for that app's look to read.
     struct Item: Codable, Equatable, Identifiable {
         let id: String
         let title: String
-        let fields: [String: JSON]
+        fileprivate(set) var fields: [String: JSON]
 
         init(from decoder: Decoder) throws {
             fields = try [String: JSON](from: decoder)
@@ -38,6 +42,14 @@ struct ResultCard: Codable, Equatable {
             fields[key]?.text.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
         }
 
+        /// A box the model gave as [x, y, width, height] in the screenshot's points, such as `image`.
+        func box(_ key: String) -> Rect? {
+            guard case .array(let parts)? = fields[key], parts.count == 4 else { return nil }
+            let n = parts.compactMap { part -> Double? in if case .number(let v) = part, v.isFinite { return v } else { return nil } }
+            guard n.count == 4, n[2] > 0, n[3] > 0 else { return nil }
+            return Rect(x: n[0], y: n[1], width: n[2], height: n[3])
+        }
+
         /// A button's words for this item: each `{field}` becomes the item's value of it.
         func fill(_ template: String) -> String {
             template.replacing(ResultCard.field) { match in text(String(match.1)) ?? "" }
@@ -50,9 +62,21 @@ struct ResultCard: Codable, Equatable {
         var say: String
     }
 
+    var roomHotelName: String? {
+        guard kind == Ctrip.rooms else { return nil }
+        return items.lazy.compactMap { $0.text("hotel") }.first
+    }
+
     /// The selected item: the one you chose, or Poki's suggestion.
     func selected(_ chosen: String?) -> Item {
-        items.first { $0.id == chosen } ?? items.first { $0.id == recommended } ?? items[0]
+        var item = items.first { $0.id == chosen } ?? items.first { $0.id == recommended } ?? items[0]
+        if let roomHotelName {
+            item.fields["hotel"] = .string(roomHotelName)
+        } else if kind == RailwayTransfers.kind, let legs = ResultCardLeg.legs(of: item), let ends = RailwayTransfers.Ends(item, legs) {
+            item.fields["from"] = .string(ends.from)
+            item.fields["depart"] = .string(ends.depart)
+        }
+        return item
     }
 
     /// A `{field}` in a button's words.
@@ -78,7 +102,7 @@ struct ResultCard: Codable, Equatable {
     func context(chosen: String?) -> String {
         let choice = selected(chosen)
         let rows = items.map { item in
-            ([item.title] + item.fields.keys.sorted().filter { $0 != "id" && $0 != "title" }.compactMap { key in
+            ([item.title] + item.fields.keys.sorted().filter { $0 != "id" && $0 != "title" && $0 != "image_screenshot" }.compactMap { key in
                 item.text(key).map { "\(key) \($0)" }
             }).joined(separator: ", ")
         }
@@ -103,6 +127,15 @@ enum ResultCardLooks {
         RailwayTrains.kind: ResultCardLook(problem: RailwayTrains.problem, tint: RailwayTrains.blue, buttonShape: .roundedRectangle(radius: 8)) {
             AnyView(RailwayTrainsList(card: $0, selected: $1, choose: $2))
         },
+        Ctrip.flights: Ctrip.look(Ctrip.flights),
+        Ctrip.hotels: Ctrip.look(Ctrip.hotels),
+        Ctrip.rooms: Ctrip.look(Ctrip.rooms),
+        Ctrip.fares: Ctrip.look(Ctrip.fares),
+        Taobao.kind: Taobao.look,
+        Dianping.kind: Dianping.look,
+        UberEats.kind: UberEats.look,
+        RailwayTransfers.kind: RailwayTransfers.look,
+        AnyAppList.kind: AnyAppList.look,
     ]
 }
 

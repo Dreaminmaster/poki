@@ -18,6 +18,8 @@ public struct ToolResult: Sendable {
     var readApp: String?
     var automationAuthorizationDeclined = false
     var screenEvidence: ScreenEvidence? = nil
+    var numberedScreen: PokiCore.NumberedScreen? = nil
+    var itemPictureSource: ItemPictureSource?
 }
 
 struct ScreenEvidence: OptionSet, Sendable {
@@ -141,6 +143,8 @@ final class Computer: @unchecked Sendable {
     /// The agent's memory library, and this task's recorded steps (what skills {save} keeps).
     var memory: SkillStore?
     var trace: [RecordedStep] = []
+    /// The foreground a new skill step can use. Home and launch invalidate it until a read.
+    var skillStepApp: String?
     var recordingTask: String?
     var memoryAppsOffered: Set<String> = []
     /// A skill ran whole in this task (the finish line does not offer to save it again).
@@ -226,6 +230,7 @@ final class Computer: @unchecked Sendable {
                     jpeg: nil, isError: true, splitViewNeedsRead: true, screenEvidence: [])
             }
         }
+        skillStepApp = reading.foreground?.bundleID
         if reading.png != nil || !reading.elements.isEmpty {
             await updateReadSize(until: now() + 1.5)
         }
@@ -488,11 +493,25 @@ final class Computer: @unchecked Sendable {
         var evidence: ScreenEvidence = []
         if treeRead || pictureOnly { evidence.insert(.references) }
         if reading.png != nil, jpeg != nil, size != nil { evidence.insert(.screenshot) }
+        let numberedScreen: PokiCore.NumberedScreen?
+        if full, evidence.contains(.references), let bundleID = reading.foreground?.bundleID {
+            let elements = Dictionary(uniqueKeysWithValues: shown.indices.prefix(1000).map { (assigned[$0]!, shown[$0]) })
+            numberedScreen = PokiCore.NumberedScreen(bundleID: bundleID, elements: elements)
+        } else {
+            numberedScreen = nil
+        }
+        var itemPictureSource: ItemPictureSource?
+        let pokiPane = reading.foreground?.pokiPane
+        if !inWorkspace, reading.screenshotCompanion == nil, pokiPane != "left", pokiPane != "right",
+           let png = reading.png, jpeg != nil, let size {
+            let images = reading.elements.filter { $0.type == "Image" && !$0.fromPicture }.map(\.frame)
+            itemPictureSource = ItemPictureSource(png: png, screen: size, images: images)
+        }
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
                           waitingForOwner: handoffWaiting, readApp: treeRead ? reading.foreground?.bundleID : nil,
-                          screenEvidence: evidence)
+                          screenEvidence: evidence, numberedScreen: numberedScreen, itemPictureSource: itemPictureSource)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -560,12 +579,18 @@ final class Computer: @unchecked Sendable {
         if local { authorizationRead = nil }
         let until: Double
         let revision: UInt64?
-        switch await waitForRunner(until: now() + config.toolDeadline, authorization: local ? .read : .none) {
+        switch await waitForRunner(until: now() + config.toolDeadline, authorization: local ? .ready : .none) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }
         if let selectedPane, selectedPane.session != session, (hasLocalWorkspace || !beginsTask() || pane == nil) { return workspaceInUse() }
-        if let pane {
+        async let locked = isLocked()
+        var unlocked = false
+        if localTask != nil, await locked {
+            unlocked = await unlockForLocalTask(until: until)
+            if !unlocked { unlocked = await !isLocked() }
+        }
+        if let pane, !(await locked) || unlocked {
             if let failure = await selectPane(pane, session: session, until: until) { return failure }
             workspaceOwner.value = local && pane != "auto" ? session : nil
         }
@@ -576,7 +601,6 @@ final class Computer: @unchecked Sendable {
         }
         let begins = beginsTask() || recordingTask != localTask || (pane != nil && origin?.session != session)
         if begins { beginRecording(task: localTask); typedText = nil }
-        async let locked = isLocked()
         var result = restartNote(await readAndReply(until: until, full: full))
         if let selectedPane {
             if !result.isError, let size, let paneOffset {
@@ -619,13 +643,16 @@ final class Computer: @unchecked Sendable {
         }
         if begins, let app = lastForeground { origin = (app, session, now()) } else if origin?.session == session { origin?.lastCall = now() }
         if begins, let line = skillsLine() { result.text += "\n" + line }
-        guard await locked else {
-            if local, let revision, !Task.isCancelled, !result.isError, let evidence = result.screenEvidence,
-               host.currentRunner.automationRevision == revision {
-                authorizationRead = (revision, localTask, evidence)
-            }
-            return result
+        if await locked, !unlocked { return lockedScreen(result) }
+        if local, let revision, !Task.isCancelled, !result.isError, let evidence = result.screenEvidence,
+           host.currentRunner.automationRevision == revision {
+            authorizationRead = (revision, localTask, evidence)
         }
+        return result
+    }
+
+    private func lockedScreen(_ result: ToolResult) -> ToolResult {
+        var result = result
         var lines = result.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         lines.insert("screen: locked (the owner has to unlock the phone before anything can be done)", at: min(1, lines.count))
         result.text = lines.joined(separator: "\n")
@@ -746,8 +773,8 @@ final class Computer: @unchecked Sendable {
         let finger = humanize.drag(from: from, to: end, seconds: travel, hold: hold, rest: rest)
         workspaceReads.removeValue(forKey: side)
         do {
-            _ = try await runner.call("POST", "/poki/workspace-drag", Humanize.actions([finger]),
-                                      timeout: min(until - now(), travel + hold + rest + 4), countsAsMiss: false)
+            _ = try await runner.input("/poki/workspace-drag", Humanize.actions([finger]),
+                                       timeout: min(until - now(), travel + hold + rest + 4), countsAsMiss: false)
             workspaceDrop = (target, .sent)
             if let drag { workspaceDrags.append(drag) }
         } catch let error as RunnerError where error.delivery == .unknown {
@@ -768,7 +795,7 @@ final class Computer: @unchecked Sendable {
     private func clearPaneRead() {
         confirmedPaneRead = false
         lastPNG = nil; lastPNGAt = nil; lastPicture = nil; lastTree = nil; size = nil
-        refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil
+        refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil; skillStepApp = nil
         typedInto = nil; typedText = nil; swipeUnread = false
     }
 
@@ -836,9 +863,24 @@ final class Computer: @unchecked Sendable {
         (try? await runner.raw("GET", "/wda/locked", timeout: 1, countsAsMiss: false))?.bool ?? false
     }
 
+    private func unlockForLocalTask(until: Double) async -> Bool {
+        let timeout = min(16, until - now() - config.readTimeout)
+        guard timeout > 0, approvals.pending == nil, !handoffWaiting, !Task.isCancelled else { return false }
+        let unlocked = await host.unlockForLocalTask(timeout: timeout)
+        if selectedPane != nil {
+            invalidateWorkspaceRead()
+            selectedPane = nil
+            paneOffset = nil
+        } else {
+            clearPaneRead()
+        }
+        authorizationRead = nil
+        return unlocked
+    }
+
     static let authorizationWait: Double = 90
 
-    private enum AuthorizationWait { case none, read, action }
+    private enum AuthorizationWait { case none, ready, freshScreen }
 
     private enum RunnerReadiness {
         case ready(deadline: Double, revision: UInt64?)
@@ -853,7 +895,7 @@ final class Computer: @unchecked Sendable {
         var waitedForOwner = false
         while state.isStarting, !Task.isCancelled {
             if authorization != .none {
-                if state.isOpeningInProcessAutomation, authorizationDeadline == nil {
+                if state.isWaitingForAutomation, authorizationDeadline == nil {
                     authorizationDeadline = now() + Self.authorizationWait
                 }
                 if case .awaitingAutomationAuthorization = state { waitedForOwner = true }
@@ -872,7 +914,7 @@ final class Computer: @unchecked Sendable {
         if state.isRunning {
             if authorizationDeadline != nil {
                 // The owner may have left the phone on a different screen while approving automation.
-                if authorization == .action, waitedForOwner { return .blocked(readRequiredAfterAuthorization()) }
+                if authorization == .freshScreen, waitedForOwner { return .blocked(readRequiredAfterAuthorization()) }
                 return .ready(deadline: now() + config.toolDeadline, revision: state.automationRevision)
             }
             return .ready(deadline: until, revision: state.automationRevision)
@@ -886,11 +928,11 @@ final class Computer: @unchecked Sendable {
         if case .failed = state {
             return .blocked(ToolResult(text: "runner: \(state.describe)\nNothing was sent. Fix it on the phone, then call look again.", jpeg: nil, isError: true))
         }
-        return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. It is still starting (the first start after a restart can wait for the owner to enter their password on the phone, which the phone asks them for); call look or status again every few seconds, and go on with the task when it answers with the screen.", jpeg: nil, isError: false, waitingForOwner: true))
+        return .blocked(ToolResult(text: "\(why)runner: \(state.describe)\nNothing was sent. Call look or status again in a few seconds and continue the task when automation is ready.", jpeg: nil, isError: false, waitingForOwner: true))
     }
 
     func bindCompanionTarget() async -> Bool {
-        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .read),
+        guard case .ready = await waitForRunner(until: now() + config.toolDeadline, authorization: .ready),
               !Task.isCancelled else { return false }
         return (try? await runner.call("POST", "/poki/companion-target", timeout: 4, countsAsMiss: false))?.bool == true
     }
@@ -900,7 +942,7 @@ final class Computer: @unchecked Sendable {
                    jpeg: nil, isError: true)
     }
 
-    private func canActAfterAuthorization(_ action: JSON, evidence: ScreenEvidence) -> Bool {
+    private func hasRequiredScreenEvidence(_ action: JSON, evidence: ScreenEvidence) -> Bool {
         guard let kind = ActionKind(action) else { return true }
         let target = action[kind.rawValue]
         func sourceForPoint(_ point: JSON?) -> ScreenEvidence {
@@ -952,7 +994,7 @@ final class Computer: @unchecked Sendable {
         case .swipe:
             return true
         default:
-            return canActAfterAuthorization(step, evidence: evidence)
+            return hasRequiredScreenEvidence(step, evidence: evidence)
         }
     }
 
@@ -990,24 +1032,25 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+        let originalActionCount = actions.count
         var actions = actions
         var bound: String?
         if config.appNames() {
-            // A name nothing knows, anywhere in the batch or in a path's steps, is refused before the
-            // first action is sent, not when its turn comes.
-            if let unknown = actions.lazy.compactMap(unknownAppName).first {
-                return ToolResult(text: "do: no app named \"\(unknown)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+            do {
+                actions = try actions.map(resolvingLaunchNames)
+            } catch {
+                return ToolResult(text: "\(error)", jpeg: nil, isError: true)
             }
-            actions = actions.map(withAppNames)
             // The session's app: named once, kept until it is let go, a task ends or a new one begins.
             if beginsTask() { sessionApp = nil }
             if let app {
                 if app == .bool(false) || app == .null {
                     sessionApp = nil
-                } else if let given = app.string?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
-                    guard let bundle = config.resolveApp(given) ?? (Self.looksLikeBundleID(given) ? given : nil) else {
-                        return ToolResult(text: "do: no app named \"\(given)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", jpeg: nil, isError: true)
+                } else if let text = app.string,
+                          case let given = text.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
+                    guard let bundle = config.resolveInstalledApp(text) else {
+                        return ToolResult(text: unknownApp(given).message, jpeg: nil, isError: true)
                     }
                     sessionApp = (bundle, given, session)
                     if actions.first?["launch"] == nil, actions.count < 20, await !isInFront(bundle) { actions.insert(["launch": .string(bundle)], at: 0) }
@@ -1021,7 +1064,16 @@ final class Computer: @unchecked Sendable {
             // in front, so none is sent.
             return ToolResult(text: "do: app is turned off on this phone (Apps by Name, in Poki's Testing Options); nothing was sent. Send the actions without app, starting with {launch: \"bundle id\"} when the app is not in front", jpeg: nil, isError: true)
         }
-        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask))
+        let actionSucceeded: PokiCore.ActionSucceeded?
+        if let onActionSucceeded, actions.count > originalActionCount {
+            // The app binding prepended a launch, which has no index in the model's batch.
+            actionSucceeded = { index, step, skill in
+                if index > 0 { onActionSucceeded(index - 1, step, skill) }
+            }
+        } else {
+            actionSucceeded = onActionSucceeded
+        }
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: actionSucceeded))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
@@ -1043,56 +1095,50 @@ final class Computer: @unchecked Sendable {
         return front == bundle
     }
 
-    /// The app name of a launch (or of a launch in a path's steps) that neither the host knows nor is a
-    /// bundle id: nil when every launch in it has an app to open.
-    func unknownAppName(_ action: JSON) -> String? {
-        if let spec = action["launch"] {
-            guard let given = (spec.string ?? spec["bundle"]?.string ?? spec["name"]?.string ?? spec["app"]?.string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !given.isEmpty else { return nil }
-            return config.resolveApp(given) == nil && !Self.looksLikeBundleID(given) ? given : nil
+    private func unknownApp(_ name: String) -> ActionFailure {
+        ActionFailure(message: "do: no app named \"\(name)\" is known on this phone; nothing was sent. Give its bundle id, or go home ({button: \"home\"}), swipe down to search, type its name and tap it", delivery: .notSent)
+    }
+
+    private func installedLaunchBundle(_ given: String) throws -> String {
+        guard let bundle = config.resolveInstalledApp(given) else {
+            throw unknownApp(given.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        if let steps = action["path"]?["steps"]?.array ?? action["path"]?.array { return steps.lazy.compactMap(unknownAppName).first }
-        return nil
+        return bundle
     }
 
-    /// The web suffixes an app's name can end in ("Booking.com", "Twitch.tv", "Mail.ru"), where a
-    /// bundle id of two parts has its maker's domain the other way round ("tv.twitch").
-    static let webSuffixes: Set<String> = ["com", "net", "org", "io", "co", "ai", "app", "me", "tv", "fm", "gg", "so", "ly", "ru", "cn", "jp", "de", "fr", "uk", "us", "info", "xyz"]
-
-    /// Whether a launch's text is a bundle id ("com.apple.mobiletimer", "tv.twitch") rather than an
-    /// app's name: two parts or more, each of ASCII letters, digits or hyphens, one of them longer than
-    /// a letter (initials such as "A.B.C" are a name), and not a web address ("Booking.com").
-    static func looksLikeBundleID(_ text: String) -> Bool {
-        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count >= 2, text.count <= 155, parts.contains(where: { $0.count > 1 }),
-              parts.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" } }) else { return false }
-        return !(parts.count == 2 && webSuffixes.contains(parts[1].lowercased()))
-    }
-
-    /// A launch by name as a launch by bundle id, also inside a path's steps. A name the host does not
-    /// know is left as it is, and the launch says so.
-    func withAppNames(_ action: JSON) -> JSON {
-        guard case .object(var o) = action else { return action }
-        if let spec = o["launch"] {
-            if let given = spec.string { if let bundle = config.resolveApp(given) { o["launch"] = .string(bundle) } }
-            else if case .object(var inner) = spec, let given = inner["bundle"]?.string ?? inner["name"]?.string ?? inner["app"]?.string {
-                inner["bundle"] = .string(config.resolveApp(given) ?? given)
-                inner["name"] = nil
-                inner["app"] = nil
-                o["launch"] = .object(inner)
+    private func resolvingLaunchNames(_ action: JSON) throws -> JSON {
+        guard case .object(var fields) = action else { return action }
+        if let spec = fields["launch"] {
+            if let given = spec.string {
+                fields["launch"] = .string(try installedLaunchBundle(given))
+            } else if case .object(var launch) = spec, launch["bundle"]?.string == nil {
+                if let name = launch["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    guard let bundle = config.resolveApp(name) else { throw unknownApp(name) }
+                    launch["bundle"] = .string(bundle)
+                } else if let given = launch["app"]?.string {
+                    launch["bundle"] = .string(try installedLaunchBundle(given))
+                } else {
+                    return action
+                }
+                launch["name"] = nil
+                launch["app"] = nil
+                fields["launch"] = .object(launch)
             }
-            return .object(o)
+            return .object(fields)
         }
-        if case .object(var path)? = o["path"], let steps = path["steps"]?.array {
-            path["steps"] = .array(steps.map(withAppNames))
-            o["path"] = .object(path)
-            return .object(o)
+        if case .object(var path)? = fields["path"], let steps = path["steps"]?.array {
+            path["steps"] = .array(try steps.map(resolvingLaunchNames))
+            fields["path"] = .object(path)
+            return .object(fields)
         }
-        if let steps = o["path"]?.array { o["path"] = .array(steps.map(withAppNames)); return .object(o) }
+        if let steps = fields["path"]?.array {
+            fields["path"] = .array(try steps.map(resolvingLaunchNames))
+            return .object(fields)
+        }
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
         var started = now()
@@ -1102,15 +1148,16 @@ final class Computer: @unchecked Sendable {
         let revision: UInt64?
         // Actions that find their own targets on the screen they land on (a path or a skill by text)
         // need no read of the screen the owner left after authorizing automation.
-        let blind = !actions.isEmpty && actions.allSatisfy { canActAfterAuthorization($0, evidence: []) }
-        switch await waitForRunner(until: started + config.toolDeadline, authorization: local ? (blind ? .read : .action) : .none) {
+        let needsCurrentScreen = actions.contains { !hasRequiredScreenEvidence($0, evidence: []) }
+        let authorization: AuthorizationWait = local ? (needsCurrentScreen ? .freshScreen : .ready) : .none
+        switch await waitForRunner(until: started + config.toolDeadline, authorization: authorization) {
         case .ready(let deadline, let readyRevision): (until, revision) = (deadline, readyRevision)
         case .blocked(let result): return result
         }
         if local, let revision {
             let read = authorizationRead
             let evidence = read?.revision == revision && read?.task == localTask ? read?.evidence ?? [] : []
-            if actions.contains(where: { !canActAfterAuthorization($0, evidence: evidence) }) {
+            if actions.contains(where: { !hasRequiredScreenEvidence($0, evidence: evidence) }) {
                 return readRequiredAfterAuthorization()
             }
         }
@@ -1121,6 +1168,7 @@ final class Computer: @unchecked Sendable {
             typedText = nil
             if let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), let bundle = front["bundleId"]?.string {
                 origin = (Foreground(bundleID: bundle, name: front["name"]?.string), session, now())
+                skillStepApp = bundle
             }
         } else {
             origin?.lastCall = now()
@@ -1132,14 +1180,9 @@ final class Computer: @unchecked Sendable {
             return await withPicture("not_sent: the runner is still finishing an earlier \(busy); nothing was sent. Call look again in a few seconds; it answers when the runner is through, or after the restart.", timeout: until - now() - 0.5, isErrorWithoutPicture: false)
         }
 
-        // A locked phone takes no input but the buttons; the owner unlocks it.
         // While a step is handed to the owner, nothing is sent (they may be typing a password):
         // the model sees the screen, waits, or takes the step back.
         let harmless = actions.allSatisfy { $0["wait"] != nil || $0["wait_until"] != nil || $0["handoff"] != nil }
-        if selectedPane != nil, !harmless, !confirmedPaneRead {
-            return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
-                              jpeg: nil, isError: true, splitViewNeedsRead: true)
-        }
         if let action = actions.first, let drag = action["drag"], drag["to_pane"] != nil,
            let from = try? point(drag["from"]), let attempted = workspaceDrag(from: from),
            workspaceDrags.contains(where: { $0.matches(attempted) }) {
@@ -1153,7 +1196,20 @@ final class Computer: @unchecked Sendable {
         }
         let onlyButtons = actions.allSatisfy { $0["button"] != nil || $0["wait"] != nil }
         if !onlyButtons, await isLocked() {
-            return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
+            guard localTask != nil, !harmless else {
+                return ToolResult(text: "screen: locked. Nothing was sent. The owner has to unlock the phone; call look once they have.", jpeg: nil, isError: true, waitingForOwner: true)
+            }
+            guard await unlockForLocalTask(until: until) else {
+                let result = await readAndReply(until: until, full: true, error: "Automatic unlock could not be confirmed. Nothing was sent. Call look before choosing the next action.")
+                return await isLocked() ? lockedScreen(result) : result
+            }
+            if needsCurrentScreen {
+                return await readAndReply(until: until, full: true, error: "The iPhone unlocked. No requested action was sent. Call look before acting on the new screen.")
+            }
+        }
+        if selectedPane != nil, !harmless, !confirmedPaneRead {
+            return ToolResult(text: "Split View: look at the selected pane before sending input; nothing was sent",
+                              jpeg: nil, isError: true, splitViewNeedsRead: true)
         }
 
         // The approval card is in Poki: no input lands there, and the request waiting stays for the owner.
@@ -1214,7 +1270,7 @@ final class Computer: @unchecked Sendable {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
-                    (did, error, lastKind, replayedSkills) = await run(Array(actions[..<at]), started: started, until: until)
+                    (did, error, lastKind, replayedSkills) = await run(Array(actions[..<at]), started: started, until: until, onActionSucceeded: onActionSucceeded)
                     if error != nil {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
@@ -1265,7 +1321,7 @@ final class Computer: @unchecked Sendable {
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
-        let (moreDid, moreError, moreKind, moreReplayedSkills) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved)
+        let (moreDid, moreError, moreKind, moreReplayedSkills) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onActionSucceeded: onActionSucceeded)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -1353,6 +1409,13 @@ final class Computer: @unchecked Sendable {
         lastCallTook = total
         if total >= 8 || total - parts > 2 {
             result.text += "\ntook: \(Self.seconds(total)) s in all: \(Self.seconds(prepared - callStarted)) s before the actions (runner start, busy wait, lock check), \(Self.seconds(actionsTook)) s actions, \(Self.seconds(readTook)) s read\(approvalWaited > 0 ? ", \(Self.seconds(approvalWaited)) s the owner's approval" : "")\(total - parts > 2 ? ", \(Self.seconds(total - parts)) s elsewhere" : "")"
+        }
+        let openedApp = launched.map { lastForeground?.bundleID == $0 } ?? false
+        // Voice can open a Settings link before asking the runner to wait for its screen.
+        let settledVoiceScreen = byOwnersVoice && actions.count == 1 && actions.first?["wait_until"]?["settled"]?.bool == true
+        if local, !finish, let revision, !result.isError, openedApp || settledVoiceScreen,
+           let evidence = result.screenEvidence, host.currentRunner.automationRevision == revision {
+            authorizationRead = (revision, localTask, evidence)
         }
         // The read above is the work's last screen; the owner then sees their own app again.
         if finish, error == nil {
@@ -1520,7 +1583,7 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:]) async -> (did: [String], error: String?, lastKind: String?, replayedSkills: [String]) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onActionSucceeded: PokiCore.ActionSucceeded?) async -> (did: [String], error: String?, lastKind: String?, replayedSkills: [String]) {
         var did: [String] = []
         var replayedSkills: [String] = []
         var error: String?
@@ -1551,10 +1614,18 @@ final class Computer: @unchecked Sendable {
             let began = now()
             let givenUp = runner.actionsGivenUp.value
             let recorded = recordable(action)
+            let afterInput: Runner.AfterInput? = onActionSucceeded.map { notify in
+                { @MainActor @Sendable step in
+                    guard !Task.isCancelled, now() <= min(actionsUntil, step?.deadline ?? actionsUntil) else { return }
+                    notify(index, step?.index, step?.skill)
+                }
+            }
             do {
                 let replayed = ActionKind(action) == .run ? LockedBox<String?>(nil) : nil
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
-                    try await perform(action, until: actionsUntil, backTarget: check.backTarget) { replayed?.value = $0 }
+                    try await Runner.$afterInput.withValue(afterInput) {
+                        try await perform(action, until: actionsUntil, backTarget: check.backTarget) { replayed?.value = $0 }
+                    }
                 }
                 if let name = replayed?.value { replayedSkills.append(name) }
                 if let recorded { trace.append(recorded) }
@@ -1586,7 +1657,9 @@ final class Computer: @unchecked Sendable {
                 var recoveryNote = "", recoveryLog = ""
                 if let text = action["type"]?.text, action["via"]?.string != "paste", !why.contains("split_view_changed"),
                    !(failure is ActionFailure), failure is RunnerError || failure is DeadlineExceeded {
-                    let recovered = await recoverType(action, text: text, why: why, until: until - config.readTimeout - 0.5)
+                    let recovered = await Runner.$afterInput.withValue(afterInput) {
+                        await recoverType(action, text: text, why: why, until: until - config.readTimeout - 0.5)
+                    }
                     if let done = recovered.done {
                         lastKind = "type"
                         did.append("\(done) (sent, \(Int(((now() - began) * 1000).rounded())) ms)")
@@ -1626,6 +1699,7 @@ final class Computer: @unchecked Sendable {
         guard let screen = size, let elements = await settledRead(until: min(until, now() + Self.settleWindow)) else {
             return ("the action before it may have changed the screen, and it could not be read again to check this one. Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
+        skillStepApp = elements.foreground.bundleID
         let backTarget = kind == .back ? BackTarget(in: elements.all) : nil
         let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen))
         for press in presses(kind, action, scan, unread: false, backTarget: backTarget) {
@@ -1922,13 +1996,20 @@ final class Computer: @unchecked Sendable {
     /// key's tap lands on the keyboard's own return key (Go, Search, Send: `returnKeyLabels`), judged
     /// with the key.
     func presses(_ kind: ActionKind, _ action: JSON, _ scan: SensitiveScan, unread: Bool, backTarget: BackTarget? = nil) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+        let spec = action[kind.rawValue]
+        let localDrag = kind == .drag && spec?["to_pane"] == nil
+        // Photos can put the text of a receipt in the Image's label. A gesture over that image
+        // moves content, even when the label contains a payment or deletion word.
+        func isPhotoContent(_ element: Element?) -> Bool {
+            scan.front?.bundleID == "com.apple.mobileslideshow" && element?.type == "Image"
+        }
         // On a screen read after the numbers were given, a number is judged by what lies where it is touched.
         func under(_ p: (x: Double, y: Double)?) -> Element? { p.flatMap { element(at: $0, in: scan.elements) } }
         func at(_ spec: JSON?) -> (element: Element?, atPoint: Bool, judged: Press)? {
             guard let spec else { return nil }
             let atPoint = spec.array != nil || spec["x"] != nil
             let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
-            return (control(e), atPoint, .tap)
+            return (localDrag && isPhotoContent(e) ? nil : control(e), atPoint, .tap)
         }
         func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
             guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance) else { return [] }
@@ -1938,7 +2019,7 @@ final class Computer: @unchecked Sendable {
         /// (a control takes a touch that began outside it as no press), and only a control: a photo
         /// or a page under the whole stroke is content.
         func strokeBetween(_ from: (x: Double, y: Double), _ to: (x: Double, y: Double)) -> [(element: Element?, atPoint: Bool, judged: Press)] {
-            guard !unread, let down = element(at: from, in: scan.elements), down == element(at: to, in: scan.elements), let pressed = control(down) else { return [] }
+            guard !unread, let down = element(at: from, in: scan.elements), down == element(at: to, in: scan.elements), !isPhotoContent(down), let pressed = control(down) else { return [] }
             return [(pressed, false, .stroke)]
         }
         /// An element that covers most of the screen is a photo, a page or a list, not a control: its
@@ -1947,7 +2028,6 @@ final class Computer: @unchecked Sendable {
             guard let e, let screen = size, screen.width > 0, screen.height > 0 else { return e }
             return e.frame.width * e.frame.height > Self.contentShare * screen.width * screen.height ? nil : e
         }
-        let spec = action[kind.rawValue]
         switch kind {
         case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
         // The field is tapped before the text goes.

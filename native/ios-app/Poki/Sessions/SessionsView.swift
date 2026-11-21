@@ -190,7 +190,13 @@ struct SessionsView: View {
         .accessibilityElement(children: .combine)
         // The icon says which app the conversation worked in; VoiceOver says its name, as the iPhone names it.
         .accessibilityValue(Text(verbatim: [AppName.display(app), needs ? AppLocalization.text(LocalizedStringResource("Needs your attention")) : nil,
-                                                         trouble.map { $0 == .failed ? AppLocalization.text(LocalizedStringResource("Failed")) : AppLocalization.text(LocalizedStringResource("Stopped")) }]
+                                                         trouble.map {
+                                                             switch $0 {
+                                                             case .failed: AppLocalization.text(LocalizedStringResource("Failed"))
+                                                             case .interrupted: AppLocalization.text(LocalizedStringResource("Task interrupted"))
+                                                             default: AppLocalization.text(LocalizedStringResource("Stopped"))
+                                                             }
+                                                         }]
             .compactMap { $0 }.joined(separator: ", ")))
         // In the drawer a sideways drag closes it, so Rename, Archive and Delete are only in the menu there.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {

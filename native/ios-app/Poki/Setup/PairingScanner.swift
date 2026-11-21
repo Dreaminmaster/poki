@@ -48,7 +48,8 @@ struct PairingScannerSheet: View {
     var body: some View {
         NavigationStack {
             PairingScanner { url in
-                _ = model.open(link: url)
+                // Scanned here, by the owner, on the pairing page: no second question.
+                _ = model.open(link: url, scanned: true)
                 dismiss()
             }
             .ignoresSafeArea()

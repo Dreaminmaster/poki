@@ -763,6 +763,23 @@
         }
       }
     },
+    "No memories yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无记忆"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無記憶"
+          }
+        }
+      }
+    },
     "The preferences and habits Poki notes will appear here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2142,6 +2159,29 @@
         }
       }
     },
+    "The disk image is downloaded, but its developer tools are not available on this iPhone. Try turning Automation on. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The disk image is downloaded, but its developer tools are not available on this iPhone. Try turning Automation on. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁盘映像已下载，但这台 iPhone 的开发者工具尚不可用。请尝试打开「自动化」。如果仍然失败，请连接电脑，在 Poki Setup 中重新准备这台 iPhone。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁碟映像已下載，但這台 iPhone 的開發者工具尚不可用。請嘗試開啟「自動化」。如果仍然失敗，請連接電腦，在 Poki Setup 中重新準備這台 iPhone。"
+          }
+        }
+      }
+    },
     "Failed to download the developer disk image. Make sure your network can reach GitHub (turn on a proxy or a global VPN), then tap Download Again. You can also write it from Poki Setup on your computer." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2161,6 +2201,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載開發者磁碟映像失敗。請確認網路能存取 GitHub（開啟代理或全域 VPN），然後點一下重新下載；也可以用電腦上的 Poki Setup 寫入。"
+          }
+        }
+      }
+    },
+    "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn Automation on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn Automation on."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法加载开发者工具。请将这台 iPhone 连接到电脑，在 Poki Setup 中重新准备，然后重新打开 Poki 并开启「自动化」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法載入開發者工具。請將這台 iPhone 連接到電腦，在 Poki Setup 中重新準備，然後重新開啟 Poki 並開啟「自動化」。"
           }
         }
       }
@@ -5052,6 +5115,22 @@
         }
       }
     },
+    "Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 菜单里更换聊天模型。轻点首页的头像或对话顶部的名字打开菜单。输入框听写不需要账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 選單裡更換聊天模型。輕點首頁的頭像或對話頂部的名字開啟選單。輸入框聽寫不需要帳戶。"
+          }
+        }
+      }
+    },
     "Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account." : {
       "localizations" : {
         "zh-Hans" : {
@@ -6268,6 +6347,23 @@
         }
       }
     },
+    "Approvals are off. Turn them back on in [Settings › Approvals](poki://approvals)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭操作确认，可以在 [设置 › 操作确认](poki://approvals) 里重新打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已關閉操作確認，可以在 [設定 › 操作確認](poki://approvals) 裡重新開啟"
+          }
+        }
+      }
+    },
     "Allows this step and turns approvals off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7452,6 +7548,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已打斷"
+          }
+        }
+      }
+    },
+    "Task interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中斷"
           }
         }
       }
@@ -18781,6 +18893,54 @@
         }
       }
     },
+    "New message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新消息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新訊息"
+          }
+        }
+      }
+    },
+    "Reply to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回覆 Poki"
+          }
+        }
+      }
+    },
+    "Replying to Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在回复 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在回覆 Poki"
+          }
+        }
+      }
+    },
     "Reply" : {
       "localizations" : {
         "zh-Hans" : {
@@ -22410,6 +22570,28 @@
         }
       }
     },
+    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。确认严格度位于“设置 › 操作确认”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。確認嚴格度位於「設定 › 操作確認」。"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off by default. ask_poki lets external agents hand repetitive tasks to Poki’s built-in agent. Takes effect next launch. Auto-Classifier is in Settings › Approvals."
+          }
+        }
+      }
+    },
     "Input Without Screen Sharing" : {
       "localizations" : {
         "zh-Hans" : {
@@ -22781,6 +22963,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "詢問最多"
+          }
+        }
+      }
+    },
+    "Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "宽松。在 Poki 自己的聊天中，除非某一步明显与你的要求无关或你已拒绝，否则聊天模型会批准。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "寬鬆。在 Poki 自己的聊天中，除非某一步明顯與你的要求無關或你已拒絕，否則聊天模型會批准。"
+          }
+        }
+      }
+    },
+    "Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适中。在 Poki 自己的聊天中，某一步直接服务于你的要求时，聊天模型会批准。其余的会询问你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "適中。在 Poki 自己的聊天中，某一步直接服務於你的要求時，聊天模型會批准。其餘的會詢問你。"
+          }
+        }
+      }
+    },
+    "Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "严格。在 Poki 自己的聊天中，只有你明确要求过该操作时，聊天模型才会批准。其余的会询问你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "嚴格。在 Poki 自己的聊天中，只有你明確要求過該操作時，聊天模型才會批准。其餘的會詢問你。"
           }
         }
       }
@@ -33257,6 +33487,22 @@
         }
       }
     },
+    "Ask All. Nothing is approved automatically. Each request needs your answer." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次都问。不会自动批准，每项请求都需你回答。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次都問。不會自動批准，每項請求都需你回答。"
+          }
+        }
+      }
+    },
     "Connect to Wi-Fi: the developer services need it." : {
       "localizations" : {
         "zh-Hans" : {
@@ -36409,6 +36655,22 @@
         }
       }
     },
+    "While on, Poki records screen text whenever iOS lets it run. It pauses when the iPhone locks or iOS suspends Poki, and resumes when Poki can run again. Text is stored on this iPhone, excluding apps you leave out and password fields. When Poki or a connected agent queries history, relevant text may be sent to the selected AI provider or connected agent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开后，只要 iOS 允许 Poki 运行，Poki 就会记录屏幕文字。iPhone 锁定或 iOS 暂停 Poki 时会暂停记录，Poki 恢复运行后会继续。文字保存在这台 iPhone 上。排除的 App 和密码栏不会被记录。Poki 或已连接的智能体查询屏幕记录时，相关文字可能会发送给所选的 AI 服务商或已连接的智能体。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟後，只要 iOS 允許 Poki 執行，Poki 就會記錄螢幕文字。iPhone 鎖定或 iOS 暫停 Poki 時會暫停記錄，Poki 恢復執行後會繼續。文字儲存在這部 iPhone 上。排除的 App 和密碼欄不會被記錄。Poki 或已連線的代理程式查詢螢幕記錄時，相關文字可能會傳送給所選的 AI 服務供應商或已連線的代理程式。"
+          }
+        }
+      }
+    },
     "Screen History" : {
       "localizations" : {
         "zh-Hans" : {
@@ -37041,6 +37303,22 @@
         }
       }
     },
+    "Storage used: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已用空间：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已用空間：%@"
+          }
+        }
+      }
+    },
     "View History" : {
       "localizations" : {
         "zh-Hans" : {
@@ -37557,6 +37835,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "預設開啟。「依名稱打開 App」讓代理用名稱打開 App，並把它作為目前操作的 App。「螢幕穩定後立即讀取」會在打開 App、滑動或按下按鈕後，螢幕一有變化並穩定下來就讀取，不再固定等待。更動從下一步起生效。"
+          }
+        }
+      }
+    },
+    "After restarting your iPhone, unlock it once yourself before Poki can unlock it automatically." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重启后，请先手动解锁一次，Poki 才能自动解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重新啟動後，請先手動解鎖一次，Poki 才能自動解鎖。"
+          }
+        }
+      }
+    },
+    "Automatic Unlock" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动解锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動解鎖"
+          }
+        }
+      }
+    },
+    "Could Not Save Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法儲存密碼"
+          }
+        }
+      }
+    },
+    "Delete Saved Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除已存密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除已存密碼"
+          }
+        }
+      }
+    },
+    "Enter your 4- or 6-digit iPhone passcode. Poki uses it only on the lock screen." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入 4 位或 6 位 iPhone 锁屏密码。Poki 只在锁定屏幕上使用它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入 4 位或 6 位 iPhone 鎖定畫面密碼。Poki 只在鎖定畫面上使用它。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t delete the saved passcode. Try again to turn off Automatic Unlock." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能删除已存的密码。请重试以关闭自动解锁。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能刪除已存的密碼。請重試以關閉自動解鎖。"
+          }
+        }
+      }
+    },
+    "Poki could not confirm the unlock. Unlock your iPhone manually and check your saved passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能确认解锁。请手动解锁 iPhone，并检查已存的密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 未能確認解鎖。請手動解鎖 iPhone，並檢查已存的密碼。"
+          }
+        }
+      }
+    },
+    "Poki stores your passcode on this iPhone to unlock it for tasks you start in Poki. Turning this off deletes the passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 将密码保存在这台 iPhone 上，用于在你发起任务时解锁。关闭后会删除密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 將密碼儲存在這部 iPhone 上，用於在你發起任務時解鎖。關閉後會刪除密碼。"
+          }
+        }
+      }
+    },
+    "Update Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新密碼"
+          }
+        }
+      }
+    },
+    "iPhone Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 锁屏密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 鎖定畫面密碼"
           }
         }
       }
@@ -42820,6 +43258,388 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每個列表提供下方各供應商中勾選的模型。感知在這部 iPhone 上讀取螢幕並檢查隱私。洞察使用「感知」頁面中選擇的模型。訊息欄中的聽寫不需要模型。"
+          }
+        }
+      }
+    },
+    "Use This Relay?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use This Relay?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此中转？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此中轉？"
+          }
+        }
+      }
+    },
+    "Use This Pairing File?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use This Pairing File?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此配对文件？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此配對檔案？"
+          }
+        }
+      }
+    },
+    "A link asks Poki to connect through %@. Whoever runs that relay can see your screen and act on this iPhone through Poki. Allow it only if you set up this relay yourself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link asks Poki to connect through %@. Whoever runs that relay can see your screen and act on this iPhone through Poki. Allow it only if you set up this relay yourself."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接要求 Poki 通过 %@ 连接。运行该中转的人可以通过 Poki 查看你的屏幕并操作此 iPhone。仅在这是你本人搭建的中转时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結要求 Poki 透過 %@ 連線。執行該中轉的人可以透過 Poki 查看你的螢幕並操作此 iPhone。僅在這是你本人架設的中轉時才允許。"
+          }
+        }
+      }
+    },
+    "A link carries a pairing file for Poki. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link carries a pairing file for Poki. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接为 Poki 带来了配对文件。它会替换此 iPhone 现有的配对，文件有误时自动化将停止工作。仅在这是你本人用 Poki Setup 生成的文件时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結為 Poki 帶來了配對檔案。它會取代此 iPhone 現有的配對，檔案有誤時自動化將停止運作。僅在這是你本人用 Poki Setup 產生的檔案時才允許。"
+          }
+        }
+      }
+    },
+    "A link asks Poki to fetch a pairing file from %@. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A link asks Poki to fetch a pairing file from %@. It replaces the pairing this iPhone has now, and automation stops if the file is wrong. Allow it only if you made it yourself in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有链接要求 Poki 从 %@ 获取配对文件。它会替换此 iPhone 现有的配对，文件有误时自动化将停止工作。仅在这是你本人用 Poki Setup 生成的文件时才允许。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有連結要求 Poki 從 %@ 取得配對檔案。它會取代此 iPhone 現有的配對，檔案有誤時自動化將停止運作。僅在這是你本人用 Poki Setup 產生的檔案時才允許。"
+          }
+        }
+      }
+    },
+    "The pairing link was not used." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The pairing link was not used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未使用该配对链接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未使用該配對連結。"
+          }
+        }
+      }
+    },
+    "This pairing link is incomplete. Make a new code in Poki Setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This pairing link is incomplete. Make a new code in Poki Setup."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配对链接不完整。请在 Poki Setup 中重新生成配对码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此配對連結不完整。請在 Poki Setup 中重新產生配對碼。"
+          }
+        }
+      }
+    },
+    "I confirmed %lld of %lld older messages." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我已确认 %1$lld 条较早的消息，目标是 %2$lld 条。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我已確認 %1$lld 則較早的訊息，目標是 %2$lld 則。"
+          }
+        }
+      }
+    },
+    "I couldn't match the messages across the last scroll." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后一次滚动前后的消息无法对上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後一次捲動前後的訊息無法對上。"
+          }
+        }
+      }
+    },
+    "I couldn't read the messages after the scroll." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动后我没能读到消息。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "捲動後我沒能讀到訊息。"
+          }
+        }
+      }
+    },
+    "I couldn't verify a starting message." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我没能确认起始消息。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我沒能確認起始訊息。"
+          }
+        }
+      }
+    },
+    "I stopped after %lld steps." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "执行 %lld 步后我停下了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行 %lld 步後我停下了。"
+          }
+        }
+      }
+    },
+    "The app or pane changed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用或分屏窗格变了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 或分割畫面的窗格變了。"
+          }
+        }
+      }
+    },
+    "The last confirmed message is at the top of the checked screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后确认的消息在刚检查的画面顶端。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後確認的訊息在剛檢查的畫面頂端。"
+          }
+        }
+      }
+    },
+    "The last confirmed message is “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最后确认的消息是「%@」。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最後確認的訊息是「%@」。"
+          }
+        }
+      }
+    },
+    "The list stopped moving." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "消息列表不再移动。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息列表不再移動。"
+          }
+        }
+      }
+    },
+    "The scroll action failed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动失败了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "捲動失敗了。"
+          }
+        }
+      }
+    },
+    "The task ended before I could verify the requested count." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务在确认到目标条数前结束了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務在確認到目標則數前結束了。"
+          }
+        }
+      }
+    },
+    "The task was stopped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任务已停止。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任務已停止。"
+          }
+        }
+      }
+    },
+    "Leg %lld" : {
+      "comment" : "A result card's leg of a journey with changes, as 12306 numbers them (1程, 2程)",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld程"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld程"
           }
         }
       }

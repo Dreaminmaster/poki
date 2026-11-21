@@ -401,6 +401,7 @@ struct ConnectionView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @State private var guiding = false
+    @State private var showsAutoUnlockPasscode = false
 
     private var on: Bool { model.sessionOn && !model.ownerPaused }
 
@@ -441,7 +442,7 @@ struct ConnectionView: View {
                         } else if !on, !model.sessionStarting, let problem = model.problem {
                             Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
                                 .foregroundStyle(.red)
-                        } else if !on, !model.sessionStarting, case .downloaded = model.diskImage.state {
+                        } else if !on, !model.sessionStarting, model.isDone(.pairing), case .downloaded = model.diskImage.state {
                             Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
                         }
                     }
@@ -466,6 +467,11 @@ struct ConnectionView: View {
                          : "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications.")
                 }
                 .settingsFooter()
+            }
+
+            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+                AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                  showsPasscode: $showsAutoUnlockPasscode)
             }
 
             Section {
@@ -498,6 +504,9 @@ struct ConnectionView: View {
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
         .sheet(isPresented: $guiding) {
             SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
+        }
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
         }
     }
 

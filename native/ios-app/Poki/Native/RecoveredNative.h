@@ -24,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable id)openWithoutAutomation:(NSError **)error;
 /// Whether Automation Mode was turned on for the current session and not paused since.
 - (BOOL)automationOn;
+- (nullable id)enabledSessionWithGeneration:(uint64_t *)generation;
 - (BOOL)isCurrent:(id)session generation:(uint64_t)generation;
 // Ends the current session (and Automation Mode with it). YES when one was open. The next prepare
 // opens a new one, with a new generation.

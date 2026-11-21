@@ -1,5 +1,5 @@
 #!/bin/bash
-# check.sh [--apps|--cycle] [NATIVE_DIR]
+# check.sh [--apps|--cycle|--duo-cover-compat XCODE] [NATIVE_DIR]
 # On a new simulator, Poki's in-process code (NATIVE_DIR, default this checkout's Poki/Native) reads the
 # fixture app's element tree, taps its text field, types, and reads the value and keyboard focus back.
 # The tree must hold every labelled element that the simulator's own accessibility reader
@@ -13,6 +13,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE=field
 if [ "${1:-}" = "--apps" ]; then MODE=apps; shift; fi
 if [ "${1:-}" = "--cycle" ]; then MODE=cycle; shift; fi
+FIXTURE_DEV="$(xcode-select -p)"
+if [ "${1:-}" = "--duo-cover-compat" ]; then
+  MODE=cover-compat
+  POKI_CHECK_DUO=1
+  FIXTURE_DEV="${2:?supply the Xcode 27.0 application path}/Contents/Developer"
+  shift 2
+fi
 # --shot full|letterboxed: only read the screen and take Poki's picture of it. "full" needs a picture
 # of the whole display; "letterboxed" needs the refusal a build with an SDK before iOS 27.1 gets on
 # an iPhone Duo (#419). POKI_CHECK_DUO=1 runs any mode on an iPhone Duo simulator.
@@ -45,7 +52,7 @@ cp "$HERE/Info.plist" "$APP/Info.plist"
 codesign -s - --force "$APP" >/dev/null 2>&1
 xcrun clang -fobjc-arc -fblocks -framework Foundation -framework AppKit -framework UniformTypeIdentifiers \
   "$REPO/native/simulator.m" -o "$WORK/simulator"
-xcodebuild -project "$REPO/bin/fixture-app/PokiMCPFixture.xcodeproj" -scheme PokiMCPFixture -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+DEVELOPER_DIR="$FIXTURE_DEV" xcodebuild -project "$REPO/bin/fixture-app/PokiMCPFixture.xcodeproj" -scheme PokiMCPFixture -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath "$WORK/fixture" CODE_SIGNING_ALLOWED=NO -quiet build
 FIXTURE="$WORK/fixture/Build/Products/Debug-iphonesimulator/PokiMCPFixture.app"
 
@@ -140,9 +147,13 @@ else:
 PY
   exit 0
 fi
-xcrun simctl launch "$UDID" local.poki.inprocess-check -mode "$MODE" -tag field -delay 8 -text "$TEXT" -times "${POKI_CHECK_TIMES:-1}" >/dev/null
-sleep 3
-xcrun simctl launch "$UDID" local.pokimcp.fixture >/dev/null
+if [ "$MODE" = cover-compat ]; then
+  xcrun simctl launch "$UDID" local.poki.inprocess-check -mode "$MODE" -tag field -text "$TEXT" >/dev/null
+else
+  xcrun simctl launch "$UDID" local.poki.inprocess-check -mode "$MODE" -tag field -delay 8 -text "$TEXT" -times "${POKI_CHECK_TIMES:-1}" >/dev/null
+  sleep 3
+  xcrun simctl launch "$UDID" local.pokimcp.fixture >/dev/null
+fi
 for _ in $(seq 90); do [ -s "$DOCS/field.json" ] && break; sleep 1; done
 if [ ! -s "$DOCS/field.json" ]; then
   echo "::error::the check app wrote no result in 90 s"
@@ -155,10 +166,19 @@ if [ ! -s "$DOCS/field.json" ]; then
 fi
 echo "{\"id\":\"$UDID\",\"op\":\"ax\"}" | "$WORK/simulator" > "$WORK/reference.json"
 OUT="${POKI_CHECK_OUT:-}"
-if [ -n "$OUT" ]; then mkdir -p "$OUT"; cp "$DOCS"/field* "$WORK/reference.json" "$OUT/"; xcrun simctl io "$UDID" screenshot "$OUT/screen.png" >/dev/null 2>&1 || true; fi
+if [ -n "$OUT" ]; then
+  mkdir -p "$OUT"
+  cp "$DOCS"/field* "$WORK/reference.json" "$OUT/"
+  if [ "$MODE" = cover-compat ]; then
+    xcrun simctl io "$UDID" screenshot --display=1 "$OUT/screen.png" || true
+  else
+    xcrun simctl io "$UDID" screenshot "$OUT/screen.png" >/dev/null 2>&1 || true
+  fi
+fi
 cat "$DOCS/field.json"
-python3 - "$DOCS/field.json" "$TEXT" "$MODE" <<'PY'
+python3 - "$DOCS/field.json" "$TEXT" "$MODE" "$DOCS/field.xml" <<'PY'
 import json, sys
+import xml.etree.ElementTree as ET
 r = json.load(open(sys.argv[1]))
 assert r["prepare"].get("ok"), f"no session: {r['prepare']}"
 if sys.argv[3] == "cycle":
@@ -171,6 +191,12 @@ if sys.argv[3] == "cycle":
     assert r["front2"].get("bundleId") == "local.pokimcp.fixture", f"front app after reopening: {r['front2']}"
 assert "source_code" not in r, f"no element tree: {r['source_code']}"
 assert r["front"].get("bundleId") == "local.pokimcp.fixture", f"front app: {r['front']}"
+if sys.argv[3] == "cover-compat":
+    assert r["launch_code"] == "", f"launch: {r['launch_code']}"
+    window = ET.parse(sys.argv[4]).find(".//XCUIElementTypeWindow")
+    assert window is not None and (window.get("width"), window.get("height")) == ("386", "678"), "fixture is not in the cover compatibility layout"
+    shot = r["screenshot"]
+    assert shot["bytes"] > 0 and not shot["code"] and (shot["width"], shot["height"]) == (1398, 2034), f"cover screenshot: {shot}"
 assert r.get("tap") == 1 and r.get("type") == 1, f"tap {r.get('tap')} type {r.get('type')}"
 assert r.get("focus", {}).get("value") == sys.argv[2], f"focused field reads {r.get('focus')}"
 PY

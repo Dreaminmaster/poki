@@ -366,6 +366,62 @@ final class ApprovalTests: XCTestCase {
         return wda
     }
 
+    func testPhotosSwipeDoesNotAskToPayForThePhotoLabel() async {
+        let wda = FakeWDA()
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]]) }
+        wda.tree([Node("Image", "Payment receipt", [0, 140, 390, 690])], app: "Photos")
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            wda.tree([Node("Image", "Next photo", [0, 140, 390, 690])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["swipe": "left"]], "full": true])
+
+        XCTAssertNil(core.pendingApproval, result.text)
+        XCTAssertTrue(result.text.contains("Next photo"), result.text)
+    }
+
+    func testAssistiveTouchDragAndBackDoNotAskToPayForThePhotoLabel() async {
+        let wda = FakeWDA()
+        wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]]) }
+        let photo = Node("Image", "Payment receipt", [0, 140, 390, 690])
+        let back = Node("Button", "返回", [8, 50, 60, 40])
+        wda.tree([back, photo, Node("Button", "AssistiveTouch", [325, 775, 50, 50])], app: "Photos")
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            wda.tree([back, photo, Node("Button", "AssistiveTouch", [0, 425, 50, 50])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        wda.set("POST /wda/tap") { [wda] _ in
+            wda.tree([Node("NavigationBar", "Library", [0, 50, 390, 44])], app: "Photos")
+            return (200, ["value": .null])
+        }
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [
+            ["drag": ["from": [350, 800], "to": [24, 450], "ms": 400]], ["wait": 300], ["tap": 1],
+        ], "full": true])
+
+        XCTAssertNil(core.pendingApproval, result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressAndDragWithVelocity").count, 1, result.text)
+        XCTAssertTrue(result.text.contains("Library"), result.text)
+    }
+
+    func testTappingPayRequestsOwnerApprovalBeforeAnyTouch() async throws {
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "Pay $12.00", [16, 380, 358, 120])], app: "Shop")
+        let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.approvalMode = { .off } }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["tap": 1]]])
+
+        XCTAssertTrue(result.text.contains("approval_required"), result.text)
+        XCTAssertEqual(try XCTUnwrap(core.pendingApproval).reason, "a payment (\"pay\")")
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
     func testABatchReportsEverySensitiveActionBeforeOwnerApproval() async throws {
         let wda = FakeWDA()
         wda.source([("Button", "Photo"), ("Button", "Call"), ("Button", "Delete"), ("Button", "Pay")], app: "Photos")
@@ -1230,6 +1286,97 @@ final class ApprovalTests: XCTestCase {
         XCTAssertFalse(nextTask.isError, nextTask.text)
         XCTAssertFalse(nextTask.text.contains("not_sent: a step is handed to the owner"), nextTask.text)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
+    }
+
+    func testOnDeviceVoiceOpensTheRequestedAppAfterUnlocking() async {
+        for ownerMustAuthorize in [false, true] {
+            let (core, wda, host) = makeCore {
+                $0.toolDeadline = 25
+                $0.runnerWait = 0
+            }
+            let locked = LockedBox(true)
+            let authorized = LockedBox(!ownerMustAuthorize)
+            if ownerMustAuthorize {
+                let runnerState = host.state
+                let ready = RunnerState.automationReady(revision: 1)
+                runnerState.value = .awaitingAutomationAuthorization("waiting for the owner to allow automation")
+                host.readRunnerState.value = {
+                    authorized.value = true
+                    runnerState.value = ready
+                    return ready
+                }
+            }
+            wda.set("GET /wda/locked") { _ in (200, ["value": .bool(locked.value)]) }
+            host.unlock.value = { time in
+                guard authorized.value, time >= 11 else { return false }
+                locked.value = false
+                return true
+            }
+            wda.set("POST /wda/apps/activate") { [weak wda] body in
+                guard authorized.value, !locked.value, body?["bundleId"]?.string == "com.apple.mobiletimer" else {
+                    return (500, ["value": ["error": "the app could not open"]])
+                }
+                wda?.set("GET /wda/activeAppInfo") { _ in
+                    (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]])
+                }
+                wda?.source([("Button", "Timer")], app: "Clock")
+                return (200, ["value": nil])
+            }
+            wda.set("POST /wda/tap") { [weak wda] _ in
+                wda?.source([("Button", "Start countdown")], app: "Clock")
+                return (200, ["value": nil])
+            }
+
+            if !ownerMustAuthorize {
+                let external = await core.call("look", [:])
+                XCTAssertTrue(external.text.contains("screen: locked"), external.text)
+            }
+            let result = await core.tool("do", arguments: #"{"actions":[{"launch":{"bundle":"com.apple.mobiletimer"}}]}"#)
+
+            XCTAssertFalse(result.isError, result.text)
+            XCTAssertFalse(result.waitingForOwner, result.text)
+            XCTAssertFalse(result.text.contains("screen: locked"), result.text)
+            XCTAssertFalse(result.text.localizedCaseInsensitiveContains("owner has to unlock"), result.text)
+            XCTAssertTrue(result.text.contains("Timer"), result.text)
+            guard !result.isError, result.text.contains("Timer") else { continue }
+
+            let timer = await core.tool("do", arguments: #"{"actions":[{"tap":1}]}"#)
+
+            XCTAssertFalse(timer.isError, timer.text)
+            XCTAssertFalse(timer.waitingForOwner, timer.text)
+            XCTAssertTrue(timer.text.contains("Start countdown"), timer.text)
+        }
+    }
+
+    func testUnconfirmedAutoUnlockReturnsTheCurrentScreenWithoutSendingTheAction() async {
+        for tool in ["do", "look"] {
+            for remainsLocked in [false, true] {
+                let (core, wda, host) = makeCore()
+                let attempted = LockedBox(false)
+                wda.set("GET /wda/locked") { _ in (200, ["value": .bool(!attempted.value || remainsLocked)]) }
+                let caption = remainsLocked ? "Lock screen after the attempt" : "Home screen after manual unlock"
+                let freshPicture = Data("new screenshot".utf8)
+                host.unlock.value = { [weak wda] _ in
+                    attempted.value = true
+                    wda?.source([("StaticText", caption)])
+                    wda?.set("GET /screenshot") { _ in (200, ["value": .string(freshPicture.base64EncodedString())]) }
+                    return false
+                }
+
+                let arguments = tool == "do" ? #"{"actions":[{"launch":{"bundle":"com.apple.mobiletimer"}}]}"# : "{}"
+                let result = await core.tool(tool, arguments: arguments)
+
+                XCTAssertTrue(result.text.contains(caption), result.text)
+                XCTAssertEqual(result.jpeg, Data("jpeg:\(freshPicture.count)".utf8))
+                XCTAssertEqual(result.waitingForOwner, remainsLocked, result.text)
+                XCTAssertEqual(result.text.contains("screen: locked"), remainsLocked, result.text)
+                if tool == "do" {
+                    XCTAssertTrue(result.isError, result.text)
+                    XCTAssertTrue(result.text.contains("Nothing was sent"), result.text)
+                    XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty, result.text)
+                }
+            }
+        }
     }
 
     func testTheVoiceTabStillTapsWhileAStepIsHandedToTheOwner() async throws {

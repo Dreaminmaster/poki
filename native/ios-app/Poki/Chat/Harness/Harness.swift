@@ -24,11 +24,11 @@ enum Harness {
         // screen text straight to the model, stays for outside agents only.
         // Who Poki is comes first, then the phone's tool rules, then the browser's (#479). The
         // Senses merge (6600edd8) had put the tool rules ahead of the identity.
-        [system, PokiCore.toolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
+        [system, countedScrollInstructions, PokiCore.toolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
-    You are Poki, the owner's personal assistant, completing their task across two visible iPhone Split View apps while Poki stays in the background. Keep replies brief and reply in the owner's language. Publish a short plan with report_plan before acting.
+    You are Poki, the owner's personal assistant, completing their task across two visible iPhone Split View apps while Poki stays in the background. Reply in the owner's language. Start with the result, then give the facts they need and anything you could not verify. Match their tone and length. Keep casual replies short and answer fully when they ask for explanation, comparison, advice, or steps. Use short paragraphs and plain bullets or hyphens for lists. Skip checkboxes and filler. Follow any stated preference for reply length or format. Publish a short plan with report_plan before acting.
     Start with look on pane left or right, and confirm the app identity and screen before acting. Call a fresh look when switching panes or after any layout change; restore both windows with the owner's help if the pair cannot be confirmed. Keep actions within these two apps and leave both windows in place.
     For cross-pane drag, read the destination pane first, then select the source pane with look and send do with {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} using destination-local coordinates. Read the destination again to verify arrival, including the image itself for photos, and report unconfirmed transfers rather than risking duplicates.
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
@@ -42,10 +42,17 @@ enum Harness {
         """
     }
 
+    private static let countedScrollInstructions = """
+    For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools. Use count_messages only for requests measured in individual messages.
+    For a request to scroll back an exact number of messages, open the conversation and take a full read before scrolling. Call count_messages with the requested target and one current ref per distinct message bubble, oldest to newest. Use the screenshot to exclude headers, dates, controls, and duplicate labels or OCR lines in the same bubble. Include every distinguishable message in view, including any overlapping messages. Do not skip a message you cannot identify.
+    Send one vertical drag at a time with full=true, using two explicit screen points with the same x coordinate. Poki bounds the distance and slows the drag before lifting. After each drag, call count_messages with the same target and the new screen's refs. Keep at least one third of the previous messages in view, including at least three consecutive messages, using the same kind of ref for each overlapping bubble. Shorten the drag near the target or the end of the list. If count_messages asks you to reverse the last drag, reverse it and check the resulting page before trying the shorter forward drag. If that cannot be verified, stop. Use the confirmed total from count_messages. Call finish_task with success=true only after it confirms the target on screen. If you cannot continue, call finish_task with success=false and give the specific reason. Poki reports the confirmed count and last verified message.
+    If you need clarification at any point during a counted scroll in the owner's chat, call wait_for_counted_scroll_reply with your question. That pauses the task. When the owner replies, take a fresh read and recheck the messages before scrolling again.
+    """
+
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
     @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
-            var parts = [splitViewInstructions]
+            var parts = [splitViewInstructions, countedScrollInstructions]
             if SensesContext.offered { parts.append(SensesContext.brief) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return (parts.joined(separator: "\n\n"), [])
@@ -57,7 +64,7 @@ enum Harness {
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
         // Poki is in front when a task starts, and finish_task brings Poki back when the task ends,
         // so saving a new skill happens in the same reply as finish_task.
-        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap, and add an intent to a tap whose purpose its label does not say. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
+        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
         if AutomationPath.current == .inProcess, let placement = PKInProcess.shared().duoPlacement() {
             if placement == "fullscreen" {
                 parts.append("Poki is full screen on Duo. Use the normal app task flow without selecting a pane.")
@@ -74,6 +81,7 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
+        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if SensesContext.offered { parts.append(SensesContext.brief) }
         // The usual app for what this asks, learned from Screen History, when the owner named none.
@@ -124,14 +132,14 @@ enum Harness {
     /// The current permission determines which ones are declared for each request.
     static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
         if !inSplitView {
-            return catalogTools(includeScreenHistory: false) + [findApp] + WebTools.specs + [SensesContext.spec, reportPlan, finishTask]
+            return catalogTools(includeScreenHistory: false) + [findApp] + WebTools.specs.map(withActionMemoryIDs) + [SensesContext.spec] + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: false).filter { $0.name == "status" } + [SensesContext.spec, reportPlan, finishTask]
+        ] + catalogTools(includeScreenHistory: false).filter { $0.name == "status" } + [SensesContext.spec] + taskTools
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
@@ -144,13 +152,27 @@ enum Harness {
 
     /// PokiCore's catalog: look, do and status.
     static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
+    static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
+
+    private static func withActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
+        guard memoryUsingActions.contains(tool.name), var properties = tool.schema["properties"] as? [String: Any] else { return tool }
+        var tool = tool
+        properties["used_memory_ids"] = [
+            "type": "array", "items": string, "maxItems": 20,
+            "description": tool.name == "do"
+                ? "For a single action except path and run. Put memory IDs on the specific action, path step, or numbered step in run.step_memory_ids."
+                : "IDs of supplied saved memories that changed this action. Omit memories you only read.",
+        ] as [String: Any]
+        tool.schema["properties"] = properties
+        return tool
+    }
 
     private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            return ToolSpec(name: name, description: description, schema: schema)
+            return withActionMemoryIDs(ToolSpec(name: name, description: description, schema: schema))
         }
     }
 
@@ -158,11 +180,25 @@ enum Harness {
         ["type": "object", "properties": properties, "required": required, "additionalProperties": false]
     }
     private static let string: [String: Any] = ["type": "string"]
+    private static let taskTools = [reportPlan, countMessages, waitForCountedScrollReply, finishTask]
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
         description: "Publish a plan before actions. Update currentStep (1-based) on each step. title names the task in two to four words, as a heading in the user's language (\"Text Mom\", \"Order the usual\"), not the user's sentence; send it with the first plan. When the task sends a message to someone, to is that person as the user named them (\"Mom\"); leave it out otherwise.",
         schema: object(["steps": ["type": "array", "items": string, "minItems": 1, "maxItems": 8], "currentStep": ["type": "integer", "minimum": 1, "maximum": 8], "title": string, "to": string], ["steps", "currentStep"]))
+
+    static let countMessages = ToolSpec(
+        name: "count_messages",
+        description: "Check one screen in a counted message scroll. target is the owner's requested number of older messages. refs are the ordered message bubbles from the latest full screen read. The first screen sets the starting point. Each subsequent screen needs an ordered overlap with the last confirmed screen.",
+        schema: object(["target": ["type": "integer", "minimum": 1],
+                        "refs": ["type": "array", "items": ["type": "integer"], "minItems": 1, "maxItems": 1000]],
+                       ["target", "refs"]))
+
+    static let countedScrollReplyTool = "wait_for_counted_scroll_reply"
+    private static let waitForCountedScrollReply = ToolSpec(
+        name: countedScrollReplyTool,
+        description: "Pause a counted message scroll in the owner's chat and ask for the information you need to continue it. The question is shown to the owner with a reply button.",
+        schema: object(["question": string], ["question"]))
 
     static let finishTask = ToolSpec(
         name: "finish_task",
@@ -170,7 +206,7 @@ enum Harness {
         schema: object([
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
-            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "IDs from the task's saved memories that changed what you did or answered. Omit this when none affected the task. Skill replays are recorded separately."],
+            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],
@@ -183,9 +219,22 @@ enum Harness {
     private static let resultCard: [String: Any] = {
         let action = object(["label": string, "say": string], ["label", "say"])
         let seat = object(["name": string, "left": string], ["name", "left"])
-        let item = object(["id": string, "title": string, "date": string, "from": string, "to": string, "depart": string, "arrive": string,
-                           "duration": string, "price": string, "note": string, "seats": ["type": "array", "items": seat]], ["id", "title"])
-        var card = object(["app": string, "kind": ["type": "string", "enum": [RailwayTrains.kind]],
+        // Every look's fields in one item: each look reads its own (cardDescription names them per kind).
+        let fields = ["date", "from", "to", "depart", "arrive", "duration", "price", "note", "from_city", "to_city", "arrive_day", "stops",
+                      "airline", "cabin", "city", "dates", "subtitle", "stars", "rating", "reviews", "location", "was", "total", "hotel",
+                      "beds", "breakfast", "cancel", "trip", "baggage", "refund", "ticketing", "query", "price_label", "sold", "shop",
+                      "delivery", "category", "area", "distance", "store", "detail", "calories", "heading", "subheading", "value", "value_note"]
+        var properties: [String: Any] = Dictionary(uniqueKeysWithValues: (["id", "title"] + fields).map { ($0, string) })
+        properties["seats"] = ["type": "array", "items": seat]
+        let leg = object(["number": string, "from": string, "to": string, "depart": string, "arrive": string, "arrive_day": string,
+                          "wait": string, "change": string, "seats": ["type": "array", "items": seat]], ["number"])
+        properties["legs"] = ["type": "array", "items": leg, "minItems": 2]
+        properties["image"] = ["type": "array", "items": ["type": "number"], "minItems": 4, "maxItems": 4,
+                               "description": "[x, y, width, height] of the item's whole picture in the screenshot named by image_screenshot"]
+        properties["image_screenshot"] = ["type": "string", "description": "Copy the screenshot_id from the tool answer whose screenshot supplied this item's image coordinates."]
+        let item = object(properties, ["id", "title"])
+        let kinds = [RailwayTrains.kind, RailwayTransfers.kind, Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares, Taobao.kind, Dianping.kind, UberEats.kind, AnyAppList.kind]
+        var card = object(["app": string, "kind": ["type": "string", "enum": kinds],
                            "items": ["type": "array", "items": item, "minItems": 1], "recommended": string,
                            "primary": action, "next": action], ["app", "kind", "items", "recommended", "primary"])
         card["description"] = cardDescription
@@ -198,17 +247,27 @@ enum Harness {
         When the result is items of one app that the owner can pick from or act on (trains, flights, products): those items as a card in the app's own look under the task card, which replaces listing them in the reply. A single result is still a card with one item, such as the one earliest train asked for. Leave it out when the result is not a list of such items. Write its words in the owner's language; the examples are for a Chinese conversation.
         kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Always send it when the owner asked about trains in 12306, for one train or several; never report a train only as details or in the reply. Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
         recommended is the id of the item that best fits the request; the card selects it until the owner taps another. primary and next are the card's buttons for the selected item: in label and say, {field} becomes that item's field. A tap sends say as the owner's message, so say stands alone with the item's key facts, written as {field}s so they follow the selection. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title} 次（{from} {depart} 开）"}. next is the one obvious next step, or left out. To send the train to someone, name the recipient the long-term notes give: {label: "发到公司差旅群", say: "把这趟车发到公司差旅群：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}; when the notes name none: {label: "发送车次", say: "把这趟车发出去：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}. Never offer paying, booking or choosing seats.
+        kind 12306.transfers, Railway 12306's journeys with a change of train (中转): app "cn.12306.rails12306". Each item one journey: id and title its trains ("G84 → G26"), date, from and to its first and last stations, depart and arrive, duration the whole journey ("全程1小时7分"), price, and legs, one per train in order: [{number: "G84", from, to, depart, arrive, wait before it ("2分"), change what the change takes ("车内换座", "同站换乘"), seats [{name, left}] for that train}]. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title}（{from} {depart} 开）"}.
+        kind ctrip.flights, Trip.com's flight list: app "ctrip.com". Each item one flight: id, title its flight numbers ("AA3166 > CX891 > CX356"), depart and arrive ("17:30"), arrive_day when it lands days later ("+2"), from and to airports, from_city and to_city, date, stops ("中转2次"), duration, price as shown ("¥19,852"), airline, cabin, and for a flight with connections the legs as the screen shows them: [{number, from, to, depart, arrive, wait the layover ("5h50m"), change what the connection takes ("不同航站楼转机")}]. primary: {label: "在携程查看", say: "在携程打开 {date} {title}（{depart} 起飞，{price}）"}.
+        kind ctrip.hotels, Trip.com's hotel list: app "ctrip.com". Each item one hotel: title, subtitle its other name, stars ("4钻"), rating ("4.4"), reviews ("102点评"), location, price per night, was (the struck price), total, city and dates on the first item. primary: {label: "在携程查看", say: "在携程打开 {title}（{price}）"}.
+        kind ctrip.rooms, one hotel's room types on Trip.com: app "ctrip.com". Each item one room: title, beds ("1张1.8米特大床 25-32㎡"), breakfast, cancel, price, was, total, hotel and dates on the first item. The hotel name applies to all room types. primary: {label: "在携程查看", say: "在携程打开 {hotel} 的{title}（{price}）"}.
+        kind ctrip.fares, one flight's fares on Trip.com: app "ctrip.com". Each item one fare: title the fare's name ("经济舱"), price, cabin, baggage, refund (the refund and change rule), ticketing, trip and dates on the first item. primary: {label: "在携程查看", say: "在携程打开 {title} {price} 这个票价"}.
+        kind taobao.products, Taobao's search results: app "com.taobao.taobao4iphone". Each item one product: title as listed, price ("¥27.8"), price_label (补贴价, 优惠后), sold ("3000+人付款"), shop, delivery ("后日达 包邮"), query on the first item (what was searched). primary: {label: "在淘宝查看", say: "在淘宝打开 {shop} 的 {title}（{price}）"}.
+        kind dianping.places, Dianping's places: app "com.dianping.dpscope". Each item one place: title, subtitle its other name, rating ("4.5"), reviews ("79条"), price ("¥167/人"), category, area, distance, query on the first item. primary: {label: "在大众点评查看", say: "在大众点评打开 {title}"}.
+        kind ubereats.items, a store's menu items on Uber Eats: app "com.ubercab.UberEats". Each item one menu item: title, price, detail (what comes with it), calories, store on the first item. primary: {label: "View in Uber Eats", say: "Open {title} ({price}) in Uber Eats"}.
+        kind list, for any other app (Meituan, Fliggy, Amazon, a store, a booking site): app its bundle id. Each item: title, subtitle, detail, value the fact that decides the choice on the right ("¥58", "18:30", "4.8"), value_note under it, note, legs for a journey with changes, and heading and subheading on the first item (the search, the date). primary: {label: "在<app>查看", say: "在<app>打开 {title}"}. Use an app's own kind when it has one.
+        For a look whose app shows a picture per item (products, hotels, rooms, places, menu items), give image and image_screenshot together. Use the coordinates of the whole picture and copy screenshot_id from the tool answer that shows those coordinates. Items can use different screenshots. Omit both fields when that answer has no screenshot_id. Never guess either field.
+        Values are copied from the screen as shown; leave out a field the screen does not show.
         """
 
     /// task-runner.mjs's answers to its harness tools.
     static let planPublished = "Plan published. Continue."
-    static let resultRecorded = "Result recorded. Explain it briefly to the user."
+    static let resultRecorded = "Result recorded. Tell the user the outcome, the facts they need, and anything you could not verify."
 
-    /// finish_task's answer. Under a card the reply adds one conclusion; a card that could not be drawn
-    /// leaves the whole result to the reply.
+    /// With a card, the reply adds context for the user's decision. Without a card, the reply gives the whole result.
     static func recorded(_ result: TaskResult, cardShown: Bool) -> String {
         if cardShown {
-            return "Result recorded. The card under the task shows the items and their buttons. Reply with one plain sentence the card does not show: why the recommended item fits, or what to watch for (\"这趟最早到，比其他车次贵 50 元。\", \"只剩这趟还有二等座余票。\", \"这趟最晚发车，到站后能赶上下午的会。\"). Do not repeat the items' numbers, stations, times or prices, or what the buttons do."
+            return "Result recorded. The card under the task shows the items and their buttons. Add what matters for the user's decision, such as why the recommended item fits or what to watch for. Skip details already in the card unless the user needs them in the explanation or asks for them."
         }
         if let problem = result.cardProblem {
             return "Result recorded. The card was not shown (\(problem)), so give the whole result in words, as without a card."

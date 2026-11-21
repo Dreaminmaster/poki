@@ -4,13 +4,17 @@ import XCTest
 
 /// Apps by name, the session's app, and the read that comes as soon as the screen has settled.
 final class AppNamesTests: XCTestCase {
-    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer"]
+    static let names = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer", "com.apple.mobiletimer": "com.apple.mobiletimer",
+                        "com.example.alias": "com.example.other"]
+    static let installedApps = ["clock": "com.apple.mobiletimer", "时钟": "com.apple.mobiletimer",
+                                "com.apple.mobiletimer": "com.apple.mobiletimer", "com.example.shop": "com.example.shop"]
 
     func core(names: Bool = true, quick: Bool = true) -> (PokiCore, FakeWDA) {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
             $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.appNames = { names }
             $0.quickRead = { quick }
         }
@@ -124,18 +128,45 @@ final class AppNamesTests: XCTestCase {
         }
     }
 
-    func testANameWithADotIsANameUnlessItIsShapedLikeABundleID() async {
-        for id in ["com.apple.mobiletimer", "tv.twitch", "com.example.new-app", "net.whatsapp.WhatsApp"] {
-            XCTAssertTrue(Computer.looksLikeBundleID(id), id)
+    func testExplicitLaunchFieldsKeepTheirMeaningInBatchesAndPaths() async {
+        for inPath in [false, true] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let unknown: JSON = ["launch": ["name": "tutti.ch"]]
+            let actions: [JSON] = inPath
+                ? [["path": ["steps": [["tap": "General"], unknown]]]]
+                : [["tap": 1], unknown]
+            let refused = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(refused.isError, refused.text)
+            XCTAssertTrue(refused.text.contains("no app named \"tutti.ch\" is known") && refused.text.contains("nothing was sent"), refused.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, refused.text)
+            XCTAssertEqual(launched(wda), [], refused.text)
+
+            for bundle in ["vendor.app", "com.example.alias"] {
+                let (core, wda) = self.core()
+                _ = await core.call("look", [:])
+                let launch: JSON = ["launch": ["bundle": .string(bundle)]]
+                let actions: [JSON] = inPath ? [["path": ["steps": [launch]]]] : [launch]
+                let opened = await core.call("do", ["actions": .array(actions)])
+                XCTAssertFalse(opened.isError, opened.text)
+                XCTAssertEqual(launched(wda), [bundle], opened.text)
+            }
         }
-        for name in ["Booking.com", "Twitch.tv", "Mail.ru", "A.B.C", "Clock", "Hotels .com", "com..x", "时钟.app"] {
-            XCTAssertFalse(Computer.looksLikeBundleID(name), name)
+    }
+
+    func testAnUnknownDottedLaunchShorthandSendsNothing() async {
+        for actions: [JSON] in [
+            [["tap": 1], ["launch": "tutti.ch"]],
+            [["path": ["steps": [["tap": "General"], ["launch": "tutti.ch"]]]]],
+        ] {
+            let (core, wda) = core()
+            _ = await core.call("look", [:])
+            let result = await core.call("do", ["actions": .array(actions)])
+            XCTAssertTrue(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("tutti.ch") && result.text.contains("nothing was sent"), result.text)
+            XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0, result.text)
+            XCTAssertEqual(launched(wda), [], result.text)
         }
-        let (core, wda) = core()
-        _ = await core.call("look", [:])
-        let result = await core.call("do", ["actions": [["launch": "Booking.com"]]])
-        XCTAssertTrue(result.text.contains("no app named \"Booking.com\" is known"), result.text)
-        XCTAssertEqual(launched(wda), [], "a name the host does not know is not sent to the runner as a bundle id")
     }
 
     func testWithNamesOffTheSessionsAppIsRefusedNotIgnored() async {
@@ -198,7 +229,7 @@ final class AppNamesTests: XCTestCase {
         let wda = FakeWDA()
         wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
         let (core, _, _) = makeCore(wda) {
-            $0.resolveApp = { Self.names[$0.lowercased()] }
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
             $0.toolDeadline = 25
             $0.readTimeout = 4
         }

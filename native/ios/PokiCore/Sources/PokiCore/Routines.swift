@@ -94,6 +94,7 @@ public struct SkillStep: Codable, Equatable, Sendable {
     public var target: SkillTarget?
     /// The app in front when the step was sent.
     public var app: String?
+    var appWasRead: Bool? = nil
     /// A type into a password field: the text was not kept, so a run stops here for the agent.
     public var secret: Bool?
     /// Why the step is taken, in the agent's words ({tap: 4, intent: "open the About page"}): what a
@@ -230,7 +231,7 @@ public struct Skill: Codable, Equatable, Sendable {
 
     public var otherApps: [String] {
         var seen = Set<String>()
-        return steps.compactMap(Self.operatedApp).filter { $0 != app && seen.insert($0).inserted }
+        return Self.operatedApps(from: steps).filter { $0 != app && seen.insert($0).inserted }
     }
 
     var startingApp: String? { Self.normalizedApp(steps.first?.app) ?? app }
@@ -246,17 +247,32 @@ public struct Skill: Codable, Equatable, Sendable {
     }
 
     static func inferredApp(from steps: [SkillStep]) -> String? {
-        steps.reversed().lazy.compactMap(operatedApp).first
+        operatedApps(from: steps).last
     }
 
-    private static func operatedApp(_ step: SkillStep) -> String? {
-        if step.action["launch"] != nil {
-            let launched = step.action["launch"]?.string ?? step.action["launch"]?["bundle"]?.string
-            return normalizedApp(launched)
+    private static func operatedApps(from steps: [SkillStep]) -> [String] {
+        var apps: [String] = []
+        // Older recordings can carry the previous app through Launch or Home without a new read.
+        var staleForeground: String?
+        for step in steps {
+            if let recorded = step.app, step.appWasRead == true || recorded != staleForeground {
+                staleForeground = nil
+            }
+            switch ActionKind(step.action) {
+            case .launch?:
+                let launch = step.action["launch"]
+                let destination = launch?.string ?? launch?["bundle"]?.string
+                if let app = normalizedApp(destination) { apps.append(app) }
+                staleForeground = destination == step.app ? nil : step.app
+            case .button?:
+                if step.action["button"]?.text?.lowercased() == "home" { staleForeground = step.app }
+            case .wait?, .waitUntil?, .handoff?, .run?, .path?, nil:
+                continue
+            default:
+                if step.app != staleForeground, let app = normalizedApp(step.app) { apps.append(app) }
+            }
         }
-        guard step.action["wait"] == nil, step.action["wait_until"] == nil,
-              step.action["button"]?.string != "home" else { return nil }
-        return normalizedApp(step.app)
+        return apps
     }
 }
 
@@ -371,7 +387,9 @@ public typealias RoutineRunLog = SkillRunLog
 /// The file: skills, memory pages and the latest runs. Reads both v1 (`routines`) and v2 (`skills`),
 /// and a file from before pages (a flat `notes` list), whose notes become the lines of their pages.
 struct MemoryFile: Codable {
+    private static let currentAppRule = 1
     var schema = SkillStore.schema
+    var appRule: Int? = MemoryFile.currentAppRule
     var exported: Date?
     var skills: [Skill] = []
     /// The memory: one page per area, About You (no app) and each app.
@@ -408,17 +426,17 @@ struct MemoryFile: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schema, exported, skills, routines, pages, notes, runs, extras, changes
+        case schema, appRule, exported, skills, routines, pages, notes, runs, extras, changes
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schema = try c.decodeIfPresent(String.self, forKey: .schema) ?? SkillStore.schema
+        appRule = try c.decodeIfPresent(Int.self, forKey: .appRule)
         exported = try c.decodeIfPresent(Date.self, forKey: .exported)
-        let loaded = try c.decodeIfPresent([Skill].self, forKey: .skills)
+        skills = try c.decodeIfPresent([Skill].self, forKey: .skills)
             ?? c.decodeIfPresent([Skill].self, forKey: .routines)
             ?? []
-        skills = loaded.map { $0.migrated() }
         if let saved = try c.decodeIfPresent([MemoryPage].self, forKey: .pages) {
             pages = saved
         } else {
@@ -432,6 +450,7 @@ struct MemoryFile: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(schema, forKey: .schema)
+        try c.encodeIfPresent(appRule, forKey: .appRule)
         try c.encodeIfPresent(exported, forKey: .exported)
         try c.encode(skills, forKey: .skills)
         try c.encode(pages, forKey: .pages)
@@ -440,6 +459,19 @@ struct MemoryFile: Codable {
         try c.encode(runs, forKey: .runs)
         try c.encodeIfPresent(extras, forKey: .extras)
         try c.encodeIfPresent(changes, forKey: .changes)
+    }
+
+    @discardableResult
+    mutating func regroupLegacySkills() -> Bool {
+        guard (appRule ?? 0) < Self.currentAppRule else { return false }
+        skills = skills.map { $0.migrated() }
+        changes = changes?.map { change in
+            var migrated = change
+            migrated.routine = change.routine?.migrated()
+            return migrated
+        }
+        appRule = Self.currentAppRule
+        return true
     }
 }
 
@@ -466,7 +498,14 @@ public final class SkillStore: @unchecked Sendable {
         self.url = url
         self.backupDirectory = backupDirectory
         if let url, let data = try? Data(contentsOf: url) {
-            if let saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
+            if var saved = try? Self.decoder.decode(MemoryFile.self, from: data) {
+                if Self.supportedSchemas.contains(saved.schema), saved.regroupLegacySkills() {
+                    saved.schema = Self.schema
+                    // Poki Setup may have left a restore in the backup directory for startup to import.
+                    if let upgraded = try? Self.encoder.encode(saved) {
+                        try? upgraded.write(to: url, options: .atomic)
+                    }
+                }
                 file = saved
             } else {
                 // A file this version cannot read is set aside, not written over with an empty memory.
@@ -608,7 +647,12 @@ public final class SkillStore: @unchecked Sendable {
                 s.locked = old.locked
                 if s.app == nil { s.app = old.app }
                 // A skill saved again after it stopped is the path that worked: its record starts over.
-                if old.steps == s.steps, !old.stale { s.runs = old.runs; s.ok = old.ok; s.failuresInARow = old.failuresInARow; s.lastStop = old.lastStop }
+                let sameSteps = old.steps.elementsEqual(s.steps) { before, after in
+                    var comparable = before
+                    comparable.appWasRead = after.appWasRead
+                    return comparable == after
+                }
+                if sameSteps, !old.stale { s.runs = old.runs; s.ok = old.ok; s.failuresInARow = old.failuresInARow; s.lastStop = old.lastStop }
                 f.skills[i] = s
                 Self.log(&f, MemoryChangeRecord(action: MemoryChangeRecord.edited, id: Self.newID(), at: Date(), by: skill.savedBy,
                                                 routineName: s.name, routineApp: s.app, routine: old))
@@ -825,11 +869,12 @@ public final class SkillStore: @unchecked Sendable {
     /// notes are added unless the same text is there. Accepts both v1 and v2 backups.
     @discardableResult
     public func importData(_ data: Data, by: String) throws -> String {
-        let incoming: MemoryFile
+        var incoming: MemoryFile
         do { incoming = try Self.decoder.decode(MemoryFile.self, from: data) }
         catch { throw ImportError("not a Poki agent backup: \(error)") }
         guard incoming.schema.hasPrefix("poki.agent-backup/") else { throw ImportError("not a Poki agent backup (schema \(incoming.schema))") }
         guard Self.supportedSchemas.contains(incoming.schema) else { throw ImportError("a backup of a newer Poki (\(incoming.schema)); update Poki to import it") }
+        incoming.regroupLegacySkills()
         var added = 0, replaced = 0, kept = 0, notes = 0
         // An agent's import brings what it says, but not the owner's say: nothing comes locked, and
         // nothing claims to be the owner's, an import's or Dream's. A note's "edited" and "heard"
@@ -837,7 +882,6 @@ public final class SkillStore: @unchecked Sendable {
         let agent = !Self.isReserved(by)
         withFile(true) { f in
             for var r in incoming.skills where !r.name.isEmpty {
-                r = r.migrated()
                 if agent { r.locked = nil; if Self.isReserved(r.savedBy) { r.savedBy = by } }
                 if let i = f.skills.firstIndex(where: { $0.name.caseInsensitiveCompare(r.name) == .orderedSame }) {
                     // The owner locked ours: a newer copy from elsewhere does not replace it.
@@ -971,7 +1015,7 @@ public final class SkillStore: @unchecked Sendable {
             within: Self.maxBriefLength / 2
         ) { "- \($0.briefLine)" }
         // Room for the pages' headings and the index of the other pages.
-        let header = "Saved memory, one page per area (About You holds everywhere, an app's page holds in that app). Apply what is relevant and report only the IDs of lines that affected this task in finish_task:"
+        let header = "Saved memory, one page per area (About You holds everywhere, an app's page holds in that app). Apply what is relevant:"
         let (picked, includedNotes) = section(header, Array(eligible), within: max(0, room - 400)) { "- [\($0.id)] \($0.text)" }
         var noteLines: [String] = []
         if !picked.isEmpty {
@@ -997,7 +1041,7 @@ public final class SkillStore: @unchecked Sendable {
             Array(file.notes.reversed().lazy.filter { $0.app?.lowercased() == app }.prefix(8))
         }
         let lines = notes.map { "- [\($0.id)] \($0.text)" }
-        let header = "Saved memories for this app. Apply relevant memories and report IDs that affected this task in finish_task:"
+        let header = "Saved memories for this app. Apply relevant memories:"
         return TaskBrief(text: ([header] + lines).joined(separator: "\n"), notes: notes)
     }
 
@@ -1133,7 +1177,9 @@ extension Computer {
         }
         if case .object(var p) = o["pinch"], let e = element(.object(p)) { p["ref"] = nil; let c = e.frame.centre; p["x"] = .number(c.x.rounded()); p["y"] = .number(c.y.rounded()); o["pinch"] = .object(p) }
         let keys = Set(listed.map(\.element.key))
-        return RecordedStep(step: SkillStep(action: .object(o), target: target, app: lastForeground?.bundleID, secret: secret, intent: intent), typed: typed, keysBefore: keys)
+        var step = SkillStep(action: .object(o), target: target, app: skillStepApp, secret: secret, intent: intent)
+        if skillStepApp != nil { step.appWasRead = true }
+        return RecordedStep(step: step, typed: typed, keysBefore: keys)
     }
 
     /// The task's recorded steps as a skill (nil and why, when they cannot make one).
@@ -1353,7 +1399,10 @@ extension Computer {
         var front = lastForeground
         if let app = skill.startingApp, lastForeground?.bundleID != app, skill.steps.first?.action["launch"] == nil, !config.isPoki(Foreground(bundleID: app, name: nil)) {
             do {
-                _ = try await perform(["launch": .string(app)], until: until)
+                // Bringing up the starting app prepares the replay. The saved steps do the work.
+                _ = try await Runner.$afterInput.withValue(nil) {
+                    try await perform(["launch": .string(app)], until: until)
+                }
                 log.append("launched \(app)")
                 front = Foreground(bundleID: app, name: nil)
             } catch { throw stop(0, "\(app) could not be launched (\(error))") }
@@ -1486,7 +1535,11 @@ extension Computer {
                             refs[Self.runRef] = nil
                             throw stop(index, "\(why); \(element.type) \"\(element.text.prefix(40))\" is in the way and closing it needs the owner's approval (\(reason))")
                         }
-                        do { _ = try await perform(tap, until: min(until, now() + config.actionCap)) }
+                        do {
+                            _ = try await Runner.$afterInput.withValue(nil) {
+                                try await perform(tap, until: min(until, now() + config.actionCap))
+                            }
+                        }
                         catch let failure as ActionFailure { refs[Self.runRef] = nil; throw stop(index, "\(why); closing \(element.type) \"\(element.text.prefix(40))\" failed (\(failure.message))", failure.delivery) }
                         catch { refs[Self.runRef] = nil; throw stop(index, "\(why); closing what was in the way failed (\(error))", .unknown) }
                         refs[Self.runRef] = nil
@@ -1554,6 +1607,7 @@ extension Computer {
                 // Not read for this step: a launch may not have opened what it named, so the runner says.
                 if !read, let info = try? await runner.raw("GET", "/wda/activeAppInfo", timeout: 1.5, countsAsMiss: false), let bundle = info["bundleId"]?.string, !bundle.isEmpty {
                     front = Foreground(bundleID: bundle, name: info["name"]?.string)
+                    read = true
                 }
                 if config.isPoki(front) {
                     refs[Self.runRef] = nil
@@ -1566,7 +1620,13 @@ extension Computer {
             }
             let began = now()
             let kind: String, text: String
-            do { (kind, text) = try await perform(action, until: min(until, now() + actionCap(action))) }
+            do {
+                let deadline = min(until, now() + actionCap(action))
+                let step = Runner.ReplayStep(index: index, skill: saved ? skill.name : nil, deadline: deadline)
+                (kind, text) = try await Runner.$replayStep.withValue(step) {
+                    try await perform(action, until: deadline)
+                }
+            }
             catch let failure as ActionFailure {
                 refs[Self.runRef] = nil
                 throw stop(index, failure.message, failure.delivery)
@@ -1579,10 +1639,11 @@ extension Computer {
             var recorded = step
             if let element = refs[Self.runRef], step.target?.type == SkillTarget.anyType || step.target?.isDescribed == true || learnedForms[index] != nil { recorded.target = SkillTarget(element) }
             refs[Self.runRef] = nil
+            recorded.app = front?.bundleID ?? lastForeground?.bundleID ?? step.app
+            recorded.appWasRead = read && front?.bundleID != nil ? true : nil
             if let spec = action["launch"] { front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil) }
             done = index + 1
             log.append("\(index + 1) \(text.prefix(80)) (\(Int(((now() - began) * 1000).rounded())) ms)")
-            recorded.app = lastForeground?.bundleID ?? step.app
             recorded.also = nil
             recorded.clears = nil
             recorded.check = nil
@@ -1703,6 +1764,7 @@ extension Computer {
         recordingTask = task
         memoryAppsOffered.removeAll()
         trace = []
+        skillStepApp = nil
         skillRanWhole = false
     }
 

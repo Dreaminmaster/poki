@@ -63,13 +63,49 @@ enum DynamicApps {
 }
 
 extension KnownApps {
-    /// The bundle id to launch for an app's name or id (PokiCore's `resolveApp`, from any thread): an
-    /// app Poki knows by the edition this iPhone has (Bilibili's international one, say), else its
-    /// main id; past those, an installed app by its Home Screen name. nil when neither knows it.
-    static func launchID(_ name: String) -> String? {
-        if let known = find(name) { return known.ids.first { DynamicApps.name(forID: $0) != nil } ?? known.id }
-        let given = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Keeps an explicit bundle ID. For a known app with editions, the system's current install
+    /// record takes precedence over the cached app list. Other names use the iPhone's Home Screen names.
+    static func launchID(_ nameOrID: String, isInstalled: (String) -> Bool = isInstalledOnPhone) -> String? {
+        let given = nameOrID.trimmingCharacters(in: .whitespacesAndNewlines)
         if DynamicApps.name(forID: given) != nil { return given }
+        if let known = find(given) {
+            if known.ids.contains(where: { $0.caseInsensitiveCompare(given) == .orderedSame }) { return given }
+            guard !known.otherIDs.isEmpty else { return known.id }
+            return known.ids.first(where: isInstalled)
+                ?? known.ids.first { DynamicApps.name(forID: $0) != nil }
+                ?? known.id
+        }
         return DynamicApps.id(forName: given)
+    }
+
+    static func installedLaunchID(_ given: String) -> String? {
+        let identifier = NSSelectorFromString("bundleIdentifier")
+        if let proxy = installedAppProxy(given), proxy.responds(to: identifier),
+           let installedID = proxy.perform(identifier)?.takeUnretainedValue() as? String, installedID == given {
+            return installedID
+        }
+
+        let name = given.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let id = byName[name.lowercased()], let app = byID[id.lowercased()],
+           let installed = app.ids.first(where: isInstalledOnPhone) {
+            return installed
+        }
+        guard let id = DynamicApps.id(forName: name), isInstalledOnPhone(id) else { return nil }
+        return id
+    }
+
+    private static func isInstalledOnPhone(_ id: String) -> Bool {
+        installedAppProxy(id) != nil
+    }
+
+    private static func installedAppProxy(_ id: String) -> NSObject? {
+        let lookup = NSSelectorFromString("applicationProxyForIdentifier:")
+        let installed = NSSelectorFromString("isInstalled")
+        guard let proxyClass = NSClassFromString("LSApplicationProxy") as? NSObject.Type,
+              proxyClass.responds(to: lookup),
+              let proxy = proxyClass.perform(lookup, with: id)?.takeUnretainedValue() as? NSObject,
+              proxy.responds(to: installed), let getter = proxy.method(for: installed) else { return nil }
+        typealias IsInstalled = @convention(c) (NSObject, Selector) -> ObjCBool
+        return unsafeBitCast(getter, to: IsInstalled.self)(proxy, installed).boolValue ? proxy : nil
     }
 }

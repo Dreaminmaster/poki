@@ -9,18 +9,19 @@ import UIKit
 
 /// How a task's card reads: Poki has the phone (blue), it waits for you (amber), or it is over.
 enum TaskCardState: Equatable {
-    case running, needsYou, yourTurn, done, failed, stopped
+    case running, needsYou, yourTurn, done, failed, stopped, interrupted
 
     /// From a plan's steps: `live` is the task under way; `waiting` and `handedOver` are what holds it.
     /// `succeeded` is how the model said the whole task ended (finish_task), when it said: that, not
     /// one step on the way, decides the card. A step that failed and was then done another way (Poki
     /// ran a skill that was not there, then opened the app itself) does not fail the task.
-    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false, succeeded: Bool? = nil) {
+    init(steps: [PlanStep], live: Bool, waiting: Bool, handedOver: Bool, stopped: Bool = false, saveFailed: Bool = false, interrupted: Bool = false, succeeded: Bool? = nil) {
         if live {
             if handedOver { self = .yourTurn }
             else if waiting || steps.contains(where: { $0.state == .waiting }) { self = .needsYou }
             else { self = .running }
-        } else if stopped { self = .stopped }
+        } else if interrupted { self = .interrupted }
+        else if stopped { self = .stopped }
         else if saveFailed { self = .failed }
         else if let succeeded { self = succeeded ? .done : .failed }
         else if steps.indices.contains(where: { steps[$0].state == .failed && !PlanStep.recovered(steps, at: $0) }) { self = .failed }
@@ -55,6 +56,7 @@ struct TaskCard: View {
     /// second line then says how long it took and out of how many steps it stopped.
     var ended: Date? = nil
     var plannedTotal: Int? = nil
+    var resultSummary: String? = nil
     var memoryUse: TaskMemoryUse? = nil
     /// Nil until you fold or unfold it. A task that tripped starts unfolded, so the step it tripped on
     /// shows; so does one handed back to you. One waiting for your answer folds: the approval card speaks.
@@ -74,7 +76,7 @@ struct TaskCard: View {
     private var soft: Color { blue ? .white.opacity(0.74) : Color(.secondaryLabel) }
     /// Over: the result card (board 定稿 07), the app's icon, what was done, where and how long, and a
     /// mark for how it ended.
-    private var over: Bool { state == .done || state == .failed || state == .stopped }
+    private var over: Bool { state == .done || state == .failed || state == .stopped || state == .interrupted }
     private var usedNotes: [MemoryItem] {
         (memoryUse?.notes ?? []).compactMap { reference in
             guard let item = MemoryLibrary.shared.item(reference.id),
@@ -155,6 +157,7 @@ struct TaskCard: View {
         switch state {
         case .done: endMark("checkmark.circle.fill", Tint.green).accessibilityLabel(Text("Done"))
         case .failed: endMark("exclamationmark.circle.fill", Color(.systemOrange)).accessibilityLabel(Text("Failed"))
+        case .interrupted: endMark("stop.circle.fill", Color(.systemGray)).accessibilityLabel(Text("Task interrupted"))
         default: endMark("stop.circle.fill", Color(.systemGray)).accessibilityLabel(Text("Stopped"))
         }
     }
@@ -174,7 +177,7 @@ struct TaskCard: View {
                 .clipShape(.rect(cornerRadius: 10, style: .continuous))
         case .needsYou: PokiAvatar(size: 34, mood: .needsYou)
         case .yourTurn: PokiAvatar(size: 34, mood: .yourTurn)
-        case .done, .failed, .stopped:
+        case .done, .failed, .stopped, .interrupted:
             if let app, !app.isEmpty {
                 AppIconView(app: app, size: 32)
             } else if usedBrowser {
@@ -204,6 +207,8 @@ struct TaskCard: View {
             if let app, !app.isEmpty { Text("\(app), didn’t finish") } else { Text("Didn’t finish") }
         case .stopped:
             if let app, !app.isEmpty { Text("\(app), stopped") } else { Text("Stopped") }
+        case .interrupted:
+            Text("Task interrupted")
         case .running, .needsYou, .yourTurn:
             if isOpen {
                 HStack(spacing: 0) {
@@ -231,6 +236,12 @@ struct TaskCard: View {
     // MARK: The steps, what Poki sees, and how far it is
 
     @ViewBuilder private var details: some View {
+        if over, let resultSummary {
+            Text(verbatim: resultSummary)
+                .font(.allo(.subheadline))
+                .foregroundStyle(ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         ForEach(memoryUse?.skills ?? [], id: \.self) { name in
             Text("Skill: \(name)").font(.allo(.subheadline)).foregroundStyle(ink)
         }
@@ -241,7 +252,7 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: 7) {
                 ForEach(Array(steps.enumerated()), id: \.element.id) { i, step in
                     TaskStepRow(text: step.text, state: step.state, tone: tone,
-                                stopped: state == .stopped,
+                                stopped: state == .stopped || state == .interrupted,
                                 // A step done another way later, or one the task got past, is not a failure.
                                 retried: step.state == .failed && (state == .done || PlanStep.recovered(steps, at: i)))
                         .transition(PlanMotion.stepTransition)

@@ -83,6 +83,7 @@ final class ScreenHistoryCheckTests: XCTestCase {
     private func core(_ verdict: ScreenHistoryVerdict, wait: Double = 0.3) -> PokiCore {
         let source = ScreenHistorySource(
             isEnabled: { true },
+            accessRevision: { 0 },
             entries: { _, _ in [ScreenHistoryEntry(at: Date().addingTimeInterval(-60), app: "Notes", bundleID: "com.apple.mobilenotes", title: "Trip", text: "Pack the passport")] },
             check: { _, _ in verdict })
         return makeCore { $0.approvalWait = wait; $0.screenHistory = source }.0

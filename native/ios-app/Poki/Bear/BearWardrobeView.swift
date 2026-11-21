@@ -318,7 +318,7 @@ private struct BearMixView: View {
                     Text(piece.name).font(.allo(.caption, .semibold))
                 }
                 Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
+                    .font(.allo(.caption2, .semibold))
                     .foregroundStyle(.secondary)
             }
             .foregroundStyle(.primary)

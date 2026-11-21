@@ -43,6 +43,7 @@
 - (id)value;
 - (id)placeholderValue;
 - (BOOL)hasFocus;
+- (BOOL)isEnabled;
 - (BOOL)hasKeyboardFocus;
 - (BOOL)loadAccessibility:(NSError **)error;
 - (void)_XCT_launchApplicationWithBundleID:(NSString *)bundle arguments:(NSArray *)arguments environment:(NSDictionary *)environment completion:(void (^)(NSError *))completion;
@@ -288,14 +289,16 @@ static CGRect PKScreenFrame(id ax, id system) {
 
 static id PKForegroundElementTimed(id ax, PKDisplayGeometry geometry, CGRect *pane, NSString *(^bundleForPID)(int));
 
-static BOOL PKPhoneLocked(void) {
+static BOOL PKReadPhoneLock(uint64_t *state) {
     static int token = -1;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ if (notify_register_check("com.apple.springboard.lockstate", &token) != NOTIFY_STATUS_OK) token = -1; });
-    if (token == -1) return NO;
+    return token != -1 && notify_get_state(token, state) == NOTIFY_STATUS_OK;
+}
+
+static BOOL PKPhoneLocked(void) {
     uint64_t state = 0;
-    notify_get_state(token, &state);
-    return state != 0;
+    return PKReadPhoneLock(&state) && state != 0;
 }
 
 /// Processes iOS lists as active that show only over the Lock Screen.
@@ -1599,6 +1602,11 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
 }
 
 - (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry {
+    return [self touch:fingers timeout:timeout geometry:geometry session:nil generation:0 lockDisplay:nil check:nil];
+}
+
+- (PKOutcome *)touch:(NSArray<NSArray<PKTouchPoint *> *> *)fingers timeout:(double)timeout geometry:(PKDisplayGeometry)geometry
+             session:(id)session generation:(uint64_t)generation lockDisplay:(NSNumber *)lockDisplay check:(BOOL (^)(void))check {
     NSString *workspaceFailure = [self validateSelectedPane];
     if (workspaceFailure) return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:workspaceFailure];
     PKWorkspace *workspace = self.selectedWorkspace;
@@ -1617,10 +1625,11 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                     return [PKOutcome delivery:PKDeliveryNotSent code:@"outside_target_pane" detail:nil];
     }
     [self forgetFront];
-    PKOutcome *refused;
-    uint64_t generation = 0;
-    id session = [self current:&generation outcome:&refused];
-    if (!session) return refused;
+    if (!session) {
+        PKOutcome *refused;
+        session = [self current:&generation outcome:&refused];
+        if (!session) return refused;
+    }
     Class pathClass = NSClassFromString(@"XCPointerEventPath");
     Class recordClass = NSClassFromString(@"XCSynthesizedEventRecord");
     if (!fingers.count || !PKInstanceSignature(pathClass, @selector(initForTouchAtPoint:offset:), "@", @[@"{CGPoint=dd}", @"d"]) ||
@@ -1635,11 +1644,14 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     id record;
     NSNumber *recordDisplay = nil;
     if (geometry.routesDisplay) {
-        id screen = PKAutomationScreen(geometry);
-        BOOL confirmed;
-        @synchronized (self) {
-            confirmed = [screen respondsToSelector:@selector(displayID)] && [_capturedDisplay isEqual:@([screen displayID])] &&
-                PKSameDisplay(geometry, _capturedGeometry) && CGRectEqualToRect(_viewport, _capturedViewport);
+        id screen = lockDisplay ? PKUniqueAutomationScreen(geometry) : PKAutomationScreen(geometry);
+        if ([screen respondsToSelector:@selector(displayID)]) recordDisplay = @([screen displayID]);
+        BOOL confirmed = [lockDisplay isEqual:recordDisplay];
+        if (!lockDisplay) {
+            @synchronized (self) {
+                confirmed = recordDisplay && [_capturedDisplay isEqual:recordDisplay] &&
+                    PKSameDisplay(geometry, _capturedGeometry) && CGRectEqualToRect(_viewport, _capturedViewport);
+            }
         }
         if (!confirmed) return [PKOutcome delivery:PKDeliveryNotSent code:@"target_display_unavailable" detail:@"look again to confirm the current display"];
         // The orientation-only initializer encodes display 0, even when XCTest now considers
@@ -1649,7 +1661,6 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
             !PKInstanceSignature(recordClass, selector, "@", @[@"@", @"q", @"q"])) {
             return [PKOutcome delivery:PKDeliveryNotSent code:@"target_display_input_unavailable" detail:nil];
         }
-        recordDisplay = @([screen displayID]);
         record = [[recordClass alloc] initWithName:@"Poki touch" displayID:recordDisplay.unsignedLongLongValue interfaceOrientation:geometry.orientation];
     } else {
         record = oriented ? [[recordClass alloc] initWithName:@"Poki touch" interfaceOrientation:geometry.orientation] : [[recordClass alloc] initWithName:@"Poki touch"];
@@ -1669,7 +1680,7 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
     if (!proxy || !PKSignature(proxy, dispatch, "v", @[@"@", @"d", @"@?"])) {
         return [PKOutcome delivery:PKDeliveryNotSent code:@"event_dispatch_abi_mismatch" detail:@"the daemon proxy has no event synthesis with the expected signature"];
     }
-    if (PKIsDuo() && geometry.routesDisplay && !workspace && CGRectIsNull(geometry.peer)) {
+    if (!lockDisplay && PKIsDuo() && geometry.routesDisplay && !workspace && CGRectIsNull(geometry.peer)) {
         NSString *code = nil;
         if (![self refreshDuoFullScreenGeometryForSession:session generation:generation error:&code])
             return [PKOutcome delivery:PKDeliveryNotSent code:code detail:@"look again to confirm the current display"];
@@ -1679,10 +1690,12 @@ static BOOL PKSameWorkspace(PKWorkspace *a, PKWorkspace *b) {
                 return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the captured display changed before dispatch"];
         }
     }
-    if (companionTask != self.duoCompanionTask || (geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry)))
+    if (companionTask != self.duoCompanionTask ||
+        (!lockDisplay && geometry.routesDisplay && !PKSameDisplay(geometry, self.displayGeometry)))
         return [PKOutcome delivery:PKDeliveryNotSent code:@"split_view_changed" detail:@"the display changed before dispatch"];
     SRActionContext *context = [self contextFor:session generation:generation];
     NSError *error;
+    if (check && !check()) return [PKOutcome delivery:PKDeliveryNotSent code:@"lock_input_stopped" detail:nil];
     if (![context commit:&error]) return [PKOutcome delivery:PKDeliveryNotSent code:error.localizedDescription detail:nil];
     NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
     [context beginReply];
@@ -2447,6 +2460,11 @@ static const int PKFrontKey = -1;
     id root = element ? PKRequestSnapshotWithin(1, ax, element, 2, 24, NULL) : nil;
     BOOL hasWindows = NO, conflict = NO, fixedExtent = NO;
     CGRect window = PKDuoWindowObservation(root, &hasWindows, &conflict);
+    if (CGSizeEqualToSize(window.size, CGSizeMake(386, 678))) {
+        // The cover's compatibility window starts at the display origin and leaves
+        // 80 points on the right for the system status area.
+        window.size.width = 466;
+    }
     if (CGRectIsNull(window) && root && !conflict && [PKTypeName([root elementType]) isEqualToString:@"Application"] &&
         PKDuoFullExtent([root frame])) {
         // SpringBoard's home screen and system prompts need not expose a full-size
@@ -2852,7 +2870,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             } while ([by timeIntervalSinceNow] > 0);
             return NO;
         };
-        if (launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; })) {
+        BOOL sent = launch && !PKDaemonReply(15, ^(void (^reply)(NSError *)) { [proxy _XCT_terminateApplicationWithBundleID:bundle completion:reply]; });
+        if (sent) {
             // A launch sent while the old process is still exiting is answered but starts nothing.
             NSDate *by = [NSDate dateWithTimeIntervalSinceNow:5];
             while ([by timeIntervalSinceNow] > 0 && [[self frontApp][@"bundleId"] isEqualToString:bundle]) [NSThread sleepForTimeInterval:0.25];
@@ -2862,7 +2881,8 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
             NSString *code = PKDaemonReply(30, ^(void (^reply)(NSError *)) {
                 [proxy _XCT_launchApplicationWithBundleID:bundle arguments:@[] environment:@{} completion:reply];
             });
-            if (code) return code;
+            if (code) return sent ? @"not_in_front" : code;
+            sent = YES;
             if (inFront(attempt ? 10 : 5)) return nil;
         }
         return @"not_in_front";
@@ -2872,11 +2892,200 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
 }
 
 - (BOOL)screenLocked {
-    static int token = -1;
-    if (token == -1 && notify_register_check("com.apple.springboard.lockstate", &token) != NOTIFY_STATUS_OK) return NO;
-    uint64_t state = 0;
-    notify_get_state(token, &state);
-    return state != 0;
+    return PKPhoneLocked();
+}
+
+- (BOOL)prepareForUnlock {
+#if TARGET_OS_SIMULATOR
+    return NO;
+#else
+    if (!PKPhoneLocked()) return NO;
+    @try { return [_sessions prepare:NULL] != nil; }
+    @catch (__unused NSException *exception) { return NO; }
+#endif
+}
+
+- (id)lockedSpringBoardForSession:(id)session generation:(uint64_t)generation
+                           depth:(NSUInteger)depth count:(NSUInteger)count before:(double)deadline {
+    double remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+    if (remaining <= 0 || !PKPhoneLocked()) return nil;
+    id ax = [self accessibilityFor:generation];
+    if (![ax respondsToSelector:@selector(systemApplication)]) return nil;
+    id board = PKBounded(0, MIN(remaining, 0.35), NULL, ^id { return [ax systemApplication]; });
+    if (!board || ![[self bundleForPID:PKAXPid(board) session:session] isEqualToString:@"com.apple.springboard"]) return nil;
+    remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+    if (remaining <= 0) return nil;
+    return PKRequestSnapshotWithin(MIN(remaining, 0.6), ax, board, depth, count, NULL);
+}
+
+- (NSNumber *)lockedDuoDisplayForSession:(id)session generation:(uint64_t)generation
+                                 before:(double)deadline geometry:(PKDisplayGeometry *)geometry {
+    id root = [self lockedSpringBoardForSession:session generation:generation depth:2 count:24 before:deadline];
+    if (!root || !PKDuoFullExtent([root frame])) return nil;
+    BOOL conflict = NO;
+    CGRect window = PKDuoWindowObservation(root, NULL, &conflict);
+    if (conflict) return nil;
+    if (CGRectIsNull(window)) window = (CGRect){CGPointZero, [root frame].size};
+    NSInteger orientation = UIInterfaceOrientationUnknown;
+    if (PKSignature(session, @selector(getInterfaceOrientationWithReply:), "v", @[@"@?"])) {
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        __block NSInteger reported = UIInterfaceOrientationUnknown;
+        [session getInterfaceOrientationWithReply:^(NSInteger observed, NSError *error) {
+            if (!error) reported = observed;
+            dispatch_semaphore_signal(done);
+        }];
+        double remaining = deadline - NSProcessInfo.processInfo.systemUptime;
+        if (remaining <= 0) return nil;
+        if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, MIN(remaining, 0.4) * NSEC_PER_SEC)) == 0)
+            orientation = reported;
+    }
+    if (orientation == UIInterfaceOrientationUnknown && window.size.width < window.size.height)
+        orientation = UIInterfaceOrientationPortrait;
+    if (UIInterfaceOrientationIsLandscape(orientation) != (window.size.width > window.size.height))
+        window.size = CGSizeMake(window.size.height, window.size.width);
+    PKDisplayGeometry display = {window, CGRectNull, CGSizeZero, CGAffineTransformIdentity, orientation, NO, YES, 0};
+    if (!PKDuoFixedBasis(window.size, orientation, &display.toFixed)) return nil;
+    id screen = PKUniqueAutomationScreen(display);
+    if (![screen respondsToSelector:@selector(displayID)]) return nil;
+    *geometry = display;
+    return @([screen displayID]);
+}
+
+// Like Pinky's WDA unlock, get digit positions from the current system keypad and
+// verify the lock after one submission. The title distinguishes it from Emergency Call.
+// Source: https://github.com/DIYgod/pinky/blob/1d4732045edfc444f449e0834434845cfb754ebe/internal/driver/ios/wda_power.go (Apache-2.0).
+- (NSDictionary<NSNumber *, NSValue *> *)passcodeKeysForSession:(id)session generation:(uint64_t)generation
+                                                       display:(PKDisplayGeometry)display before:(double)deadline {
+    id root = [self lockedSpringBoardForSession:session generation:generation depth:16 count:160 before:deadline];
+    if (!root) return nil;
+    if (display.routesDisplay) {
+        BOOL conflict = NO;
+        CGRect frame = PKDuoWindowObservation(root, NULL, &conflict);
+        if (conflict) return nil;
+        if (CGRectIsNull(frame)) frame = [root frame];
+        CGSize seen = frame.size, expected = display.bounds.size;
+        if (!PKDuoFullExtent(frame) || fabs(seen.width - expected.width) > 2 || fabs(seen.height - expected.height) > 2) return nil;
+    }
+    BOOL title = NO;
+    NSMutableDictionary *digits = [NSMutableDictionary dictionary];
+    NSMutableArray *nodes = [NSMutableArray arrayWithObject:root];
+    while (nodes.count) {
+        id node = nodes.lastObject;
+        [nodes removeLastObject];
+        NSString *type = PKTypeName([node elementType]);
+        NSString *label = [PKText([node label]) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (label.length && [type isEqualToString:@"StaticText"]) {
+            title |= [label caseInsensitiveCompare:@"Enter Passcode"] == NSOrderedSame ||
+                [label isEqualToString:@"输入密码"] || [label isEqualToString:@"輸入密碼"];
+        }
+        BOOL key = [type isEqualToString:@"Button"] || [type isEqualToString:@"Key"];
+        if (label.length && key && [node respondsToSelector:@selector(isEnabled)] && [node isEnabled]) {
+            unichar digit = [label characterAtIndex:0];
+            CGRect frame = [node frame];
+            if (digit >= '0' && digit <= '9' && (label.length == 1 || [label characterAtIndex:1] == ',' || [label characterAtIndex:1] == ' ') &&
+                !CGRectIsEmpty(frame) && CGRectContainsRect(display.bounds, frame)) {
+                if (digits[@(digit)]) return @{};
+                digits[@(digit)] = [NSValue valueWithCGPoint:CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame))];
+            }
+        }
+        NSArray *children = [node children];
+        if (children.count) [nodes addObjectsFromArray:children];
+    }
+    return title && digits.count == 10 ? digits : @{};
+}
+
+- (PKUnlockResult)unlockPhoneWithPasscode:(NSString *)passcode timeout:(double)timeout allowed:(BOOL (^)(void))allowed {
+    if (!allowed() || !PKPhoneLocked()) return PKUnlockResultUnavailable;
+    uint64_t generation = 0;
+    id session = [_sessions enabledSessionWithGeneration:&generation];
+    if (!session) return PKUnlockResultUnavailable;
+    const double deadline = NSProcessInfo.processInfo.systemUptime + timeout;
+    double (^remaining)(void) = ^double { return deadline - NSProcessInfo.processInfo.systemUptime; };
+    BOOL (^canSend)(void) = ^BOOL {
+        uint64_t currentGeneration;
+        return remaining() > 0 && allowed() && PKPhoneLocked() &&
+            [self->_sessions enabledSessionWithGeneration:&currentGeneration] == session && currentGeneration == generation;
+    };
+    void (^wakeLockScreen)(void) = ^{
+        id device = [NSClassFromString(@"XCUIDevice") sharedDevice];
+        id wake = [NSClassFromString(@"XCDeviceEvent") deviceEventWithPage:0x0C usage:0x40 duration:0.1];
+        if (wake && canSend()) [device performDeviceEvent:wake error:NULL];
+    };
+    BOOL mayHaveEnteredDigit = NO;
+    @try {
+        BOOL duo = PKIsDuo();
+        PKDisplayGeometry display = self.displayGeometry;
+        NSNumber *lockDisplay = nil;
+        if (duo) {
+            // SpringBoard replaces Split View at lock. Discard the app pane and confirm which
+            // physical display contains the lock screen before sending a gesture or a digit.
+            [self setWorkspace:nil];
+            lockDisplay = [self lockedDuoDisplayForSession:session generation:generation before:deadline geometry:&display];
+            if (!lockDisplay && canSend()) {
+                wakeLockScreen();
+                [NSThread sleepForTimeInterval:0.35];
+                lockDisplay = [self lockedDuoDisplayForSession:session generation:generation before:deadline geometry:&display];
+            }
+            if (!lockDisplay) return PKUnlockResultUnavailable;
+        }
+        if (!duo && (display.routesDisplay || CGRectGetWidth(display.bounds) >= CGRectGetHeight(display.bounds))) {
+            return PKUnlockResultUnavailable;
+        }
+        NSDictionary *keys = [self passcodeKeysForSession:session generation:generation display:display before:deadline];
+        if (!keys && canSend()) {
+            wakeLockScreen();
+            [NSThread sleepForTimeInterval:0.35];
+            keys = [self passcodeKeysForSession:session generation:generation display:display before:deadline];
+        }
+        // A keypad that was already visible may contain a passcode the owner started entering.
+        if (!keys || keys.count || !canSend()) return PKUnlockResultKeypadUnavailable;
+        CGFloat x = CGRectGetMidX(display.bounds);
+        NSArray *swipe = @[[PKTouchPoint at:CGPointMake(x, CGRectGetMaxY(display.bounds) - 2) offset:0],
+                           [PKTouchPoint at:CGPointMake(x, CGRectGetMidY(display.bounds)) offset:0.3],
+                           [PKTouchPoint at:CGPointMake(x, CGRectGetMidY(display.bounds)) offset:0.35]];
+        if ([self touch:@[swipe] timeout:MIN(1, remaining()) geometry:display session:session generation:generation
+                lockDisplay:lockDisplay check:canSend].delivery != PKDeliverySent)
+            return PKUnlockResultTouchRejected;
+        const double keypadDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + 3);
+        do {
+            keys = [self passcodeKeysForSession:session generation:generation display:display before:keypadDeadline];
+            if (keys.count) break;
+            if (!canSend()) break;
+            [NSThread sleepForTimeInterval:0.15];
+        } while (NSProcessInfo.processInfo.systemUptime < keypadDeadline);
+        if (!keys.count) return PKUnlockResultKeypadUnavailable;
+        BOOL touchRejected = NO;
+        NSUInteger delivered = 0;
+        // The system keypad keeps the same digit positions during entry. Reuse its
+        // confirmed points, with the lock, display and automation session checked for every touch.
+        while (delivered < passcode.length) {
+            NSValue *key = keys[@([passcode characterAtIndex:delivered])];
+            if (!key || !canSend() || (!duo && !PKSameDisplay(display, self.displayGeometry))) break;
+            CGPoint point = key.CGPointValue;
+            NSArray *finger = @[[PKTouchPoint at:point offset:0], [PKTouchPoint at:point offset:0.04]];
+            PKOutcome *outcome = [self touch:@[finger] timeout:MIN(1, remaining()) geometry:display
+                                     session:session generation:generation lockDisplay:lockDisplay check:canSend];
+            mayHaveEnteredDigit |= outcome.delivery != PKDeliveryNotSent;
+            if (outcome.delivery != PKDeliverySent) {
+                touchRejected = outcome.delivery == PKDeliveryNotSent;
+                break;
+            }
+            delivered++;
+        }
+        const BOOL submitted = delivered == passcode.length;
+        const double resultDeadline = MIN(deadline, NSProcessInfo.processInfo.systemUptime + (submitted ? 4 : 0.5));
+        do {
+            uint64_t state;
+            if (PKReadPhoneLock(&state) && state == 0) return PKUnlockResultUnlocked;
+            if (!mayHaveEnteredDigit || !canSend()) break;
+            [NSThread sleepForTimeInterval:0.15];
+        } while (NSProcessInfo.processInfo.systemUptime < resultDeadline);
+        if (touchRejected && !mayHaveEnteredDigit) return PKUnlockResultTouchRejected;
+        if (mayHaveEnteredDigit) return submitted ? PKUnlockResultSubmissionUnconfirmed : PKUnlockResultSubmissionIncomplete;
+    } @catch (__unused NSException *e) {
+        return PKUnlockResultSubmissionIncomplete;
+    }
+    return PKUnlockResultUnavailable;
 }
 
 - (NSDictionary<NSString *, id> *)readProbe {

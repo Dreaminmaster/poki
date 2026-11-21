@@ -30,6 +30,16 @@ public struct RunnerError: Error, CustomStringConvertible, Sendable {
     public var description: String { message }
 }
 
+/// Carries a stop request through all runner requests belonging to one voice tool.
+public final class PhoneOperationCancellation: Sendable {
+    @TaskLocal public static var current: PhoneOperationCancellation?
+
+    private let cancelled = LockedBox(false)
+    public init() {}
+    public var isCancelled: Bool { cancelled.value }
+    public func cancel() { cancelled.value = true }
+}
+
 /// One HTTP exchange. URLSession on the phone; a fake in tests.
 public protocol HTTPTransport: Sendable {
     /// In-process reads may change their coordinate space as the owner moves or resizes a window.
@@ -314,9 +324,38 @@ public final class Runner: @unchecked Sendable {
         _ = try? await session(timeout: timeout)
     }
 
+    struct ReplayStep: Sendable {
+        let index: Int
+        let skill: String?
+        let deadline: Double
+    }
+    typealias AfterInput = @MainActor @Sendable (ReplayStep?) -> Void
+    @TaskLocal static var afterInput: AfterInput?
+    @TaskLocal static var replayStep: ReplayStep?
+
+    /// A step whose effect is confirmed can report its sources through the current action.
+    func confirmInput() async {
+        guard !Task.isCancelled, let afterInput = Self.afterInput else { return }
+        await afterInput(Self.replayStep)
+    }
+
+    /// Send checked device input. Session setup and screen reads use call/raw directly.
+    func input(_ path: String, _ body: JSON, timeout: Double = 4, countsAsMiss: Bool = true,
+               inSession: Bool = true) async throws -> JSON {
+        if inSession {
+            return try await callInSession("POST", path, body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: true)
+        }
+        return try await request("POST", path, body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: true)
+    }
+
     /// One request outside the session. `countsAsMiss: false` for a request that may rightly take long
     /// (a gesture): its timeout is not taken as a sign that the runner is gone.
     public func raw(_ method: String, _ path: String, _ body: JSON? = nil, timeout: Double = 4, countsAsMiss: Bool = true) async throws -> JSON {
+        try await request(method, path, body, timeout: timeout, countsAsMiss: countsAsMiss)
+    }
+
+    private func request(_ method: String, _ path: String, _ body: JSON?, timeout: Double, countsAsMiss: Bool,
+                         sendsInput: Bool = false) async throws -> JSON {
         let target = URL(string: url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!
         let queued = !Self.standalone.contains("\(method) \(Self.short(path))")
         let busyBefore = queued ? busyWith : nil
@@ -324,10 +363,17 @@ public final class Runner: @unchecked Sendable {
         defer { if queued { waitingOn.update { $0 -= 1 } } }
         func busyNote() -> String { busyBefore.map { "; the runner is still finishing an earlier \($0)" } ?? "" }
         let result: (status: Int, body: Data)
+        let receiptDeadline = now() + timeout + 0.5
         do {
             result = try await withDeadline(timeout + 0.5, "the runner's answer to \(method) \(Self.short(path))") { [transport] in
-                try await transport.send(method: method, url: target, body: body?.data(), timeout: timeout)
+                guard PhoneOperationCancellation.current?.isCancelled != true else {
+                    throw RunnerError(message: "The user cancelled the task. This request was not sent.", delivery: .notSent)
+                }
+                let payload = body?.data()
+                return try await transport.send(method: method, url: target, body: payload, timeout: timeout)
             }
+        } catch let error as RunnerError {
+            throw error
         } catch TransportError.refused {
             // A refused connection is a runner process that is gone: what it was finishing went with it.
             stall.value = nil
@@ -358,10 +404,15 @@ public final class Runner: @unchecked Sendable {
         if queued, (transport as? LocalRunner)?.holdsARequest != true { stall.value = nil }
         if let code = value["error"]?.string {
             let message = (value["message"]?.string ?? code).split(separator: "\n").first.map(String.init) ?? code
-            throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: .notSent, status: result.status, code: code)
+            let delivery: Delivery = value["delivery"]?.string == Delivery.unknown.rawValue ? .unknown : .notSent
+            throw RunnerError(message: "the runner refused \(method) \(Self.short(path)): \(message)", delivery: delivery, status: result.status, code: code)
         }
         if !(200..<300).contains(result.status) {
             throw RunnerError(message: "the runner answered HTTP \(result.status) to \(method) \(Self.short(path))", delivery: .notSent, status: result.status)
+        }
+        // Only the response that won the deadline race can attribute an input.
+        if sendsInput, now() <= receiptDeadline {
+            await confirmInput()
         }
         return value
     }
@@ -497,12 +548,17 @@ public final class Runner: @unchecked Sendable {
 
     /// A request inside the session, made again once on a new session when WDA no longer knows it.
     public func call(_ method: String, _ path: String, _ body: JSON? = nil, timeout: Double = 4, countsAsMiss: Bool = true) async throws -> JSON {
+        try await callInSession(method, path, body, timeout: timeout, countsAsMiss: countsAsMiss)
+    }
+
+    private func callInSession(_ method: String, _ path: String, _ body: JSON?, timeout: Double, countsAsMiss: Bool,
+                               sendsInput: Bool = false) async throws -> JSON {
         let id = try await session(timeout: timeout)
         do {
-            return try await raw(method, "/session/\(id)\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss)
+            return try await request(method, "/session/\(id)\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: sendsInput)
         } catch let error as RunnerError where error.code == "invalid session id" || error.message.lowercased().contains("invalid session id") || (error.status == 404 && error.code == nil) {
             state.update { if $0.session == id { $0.session = nil } }
-            return try await raw(method, "/session/\(try await session(timeout: timeout))\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss)
+            return try await request(method, "/session/\(try await session(timeout: timeout))\(path)", body, timeout: timeout, countsAsMiss: countsAsMiss, sendsInput: sendsInput)
         }
     }
 

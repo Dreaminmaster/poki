@@ -184,18 +184,18 @@ extension Computer {
             if shaped {
                 let finger = humanize.drag(from: (path.0, path.1), to: (path.2, path.3), seconds: seconds, hold: hold, rest: rest)
                 do {
-                    _ = try await runner.call("POST", "/actions", Humanize.actions([finger]), timeout: timeout, countsAsMiss: false)
+                    _ = try await runner.input("/actions", Humanize.actions([finger]), timeout: timeout, countsAsMiss: false)
                 } catch let e as RunnerError where e.code == "unknown command" || e.code == "unknown method" {
                     shaped = false
                 }
             }
             if !shaped {
-                _ = try await runner.call("POST", "/wda/pressAndDragWithVelocity", ["fromX": .number(path.0), "fromY": .number(path.1), "toX": .number(path.2), "toY": .number(path.3), "pressDuration": .number(hold), "holdDuration": .number(rest), "velocity": .number(velocity.rounded())], timeout: timeout, countsAsMiss: false)
+                _ = try await runner.input("/wda/pressAndDragWithVelocity", ["fromX": .number(path.0), "fromY": .number(path.1), "toX": .number(path.2), "toY": .number(path.3), "pressDuration": .number(hold), "holdDuration": .number(rest), "velocity": .number(velocity.rounded())], timeout: timeout, countsAsMiss: false)
             }
             swipeUnread = true
         } catch let e as RunnerError where e.code == "unknown command" || e.code == "unknown method" {
             // A runner older than pressAndDragWithVelocity.
-            _ = try await runner.call("POST", "/wda/dragfromtoforduration", ["fromX": .number(path.0), "fromY": .number(path.1), "toX": .number(path.2), "toY": .number(path.3), "duration": .number(max(0.05, hold))], timeout: timeout, countsAsMiss: false)
+            _ = try await runner.input("/wda/dragfromtoforduration", ["fromX": .number(path.0), "fromY": .number(path.1), "toX": .number(path.2), "toY": .number(path.3), "duration": .number(max(0.05, hold))], timeout: timeout, countsAsMiss: false)
             swipeUnread = true
         } catch let e as RunnerError where e.delivery == .unknown {
             // The runner may still carry it out: the screen is read before anything is swiped again.
@@ -211,20 +211,23 @@ extension Computer {
     /// The slow tail is real motion, so the lift finds a finger that all but stopped. Sent as W3C
     /// pointer actions, which both WebDriverAgent and the in-process path take; a runner without
     /// them gets the press-drag.
-    func scrollDrag(_ path: (Double, Double, Double, Double), seconds: Double, rest: Double, until: Double) async throws {
+    func scrollDrag(_ path: (Double, Double, Double, Double), seconds: Double, rest: Double, until: Double,
+                    allowFlickFallback: Bool = true) async throws {
         let distance = max(1, hypot(path.2 - path.0, path.3 - path.1))
         // The slow tail with shaped input too: the shaped resting drag moved the gym's list 392-640 pt
         // per swipe where the slow tail moved a steady 442-471 (run 42435103942), and scroll_to's
         // overshoot check fired on the spread. Shaped input varies the tail's points by a point or
         // two and its times by up to 10 %, so no two swipes are alike.
-        guard distance > 24 else { return try await gesture(path, seconds: seconds, rest: rest, until: until) }
+        if allowFlickFallback, distance <= 24 {
+            return try await gesture(path, seconds: seconds, rest: rest, until: until)
+        }
         var path = path, seconds = seconds, rest = rest
-        if humanize.enabled {
+        if humanize.enabled, allowFlickFallback {
             path = (path.0 + humanize.uniform(-2, 2), path.1 + humanize.uniform(-2, 2), path.2 + humanize.uniform(-2, 2), path.3 + humanize.uniform(-2, 2))
             seconds *= humanize.uniform(0.92, 1.08)
             rest *= humanize.uniform(0.92, 1.08)
         }
-        let tail = 12.0
+        let tail = min(12, distance / 2)
         let near = (x: path.2 - (path.2 - path.0) / distance * tail, y: path.3 - (path.3 - path.1) / distance * tail)
         let expected = seconds + rest
         let timeout = max(expected + 1.5, min(expected + 5, until - now() - 0.2))
@@ -236,9 +239,9 @@ extension Computer {
             ["type": "pointerUp", "button": 0],
         ]]
         do {
-            _ = try await runner.call("POST", "/actions", ["actions": [finger]], timeout: timeout, countsAsMiss: false)
+            _ = try await runner.input("/actions", ["actions": [finger]], timeout: timeout, countsAsMiss: false)
             swipeUnread = true
-        } catch let e as RunnerError where e.code == "unknown command" || e.code == "unknown method" {
+        } catch let e as RunnerError where allowFlickFallback && (e.code == "unknown command" || e.code == "unknown method") {
             try await gesture(path, seconds: seconds, rest: rest, until: until)
         } catch let e as RunnerError where e.delivery == .unknown {
             swipeUnread = true
@@ -260,29 +263,29 @@ extension Computer {
     /// without `/actions` gets WDA's tap.
     func tap(_ p: (x: Double, y: Double), within frame: Rect? = nil) async throws {
         guard humanize.enabled else {
-            _ = try await runner.call("POST", "/wda/tap", ["x": .number(p.x), "y": .number(p.y)], timeout: 3)
+            _ = try await runner.input("/wda/tap", ["x": .number(p.x), "y": .number(p.y)], timeout: 3)
             return
         }
         try await touch([humanize.tap(at: p, within: frame)], timeout: 3) { [self] in
-            _ = try await runner.call("POST", "/wda/tap", ["x": .number(p.x), "y": .number(p.y)], timeout: 3)
+            _ = try await runner.input("/wda/tap", ["x": .number(p.x), "y": .number(p.y)], timeout: 3)
         }
     }
 
     /// A finger held at `p` for `seconds` (shaped as `Humanize.longPress` when on; the hold is exact).
     func longPress(_ p: (x: Double, y: Double), seconds: Double, within frame: Rect? = nil) async throws {
         guard humanize.enabled else {
-            _ = try await runner.call("POST", "/wda/touchAndHold", ["x": .number(p.x), "y": .number(p.y), "duration": .number(seconds)], timeout: 3 + seconds)
+            _ = try await runner.input("/wda/touchAndHold", ["x": .number(p.x), "y": .number(p.y), "duration": .number(seconds)], timeout: 3 + seconds)
             return
         }
         try await touch([humanize.longPress(at: p, seconds: seconds, within: frame)], timeout: 3 + seconds) { [self] in
-            _ = try await runner.call("POST", "/wda/touchAndHold", ["x": .number(p.x), "y": .number(p.y), "duration": .number(seconds)], timeout: 3 + seconds)
+            _ = try await runner.input("/wda/touchAndHold", ["x": .number(p.x), "y": .number(p.y), "duration": .number(seconds)], timeout: 3 + seconds)
         }
     }
 
     /// Fingers as W3C pointer actions; a runner that has no `/actions` gets `legacy` instead.
     func touch(_ fingers: [[Humanize.Sample]], timeout: Double, legacy: () async throws -> Void) async throws {
         do {
-            _ = try await runner.call("POST", "/actions", Humanize.actions(fingers), timeout: timeout)
+            _ = try await runner.input("/actions", Humanize.actions(fingers), timeout: timeout)
         } catch let e as RunnerError where e.code == "unknown command" || e.code == "unknown method" {
             try await legacy()
         }
@@ -314,9 +317,15 @@ extension Computer {
             return ("tap", "tap \(describe(action))\(offCentre(spec, p))\(fillsScreen(spec, p))\(container(spec))")
         case .type:
             guard let text = spec.text else { throw ActionFailure(message: "type takes the text to type", delivery: .notSent) }
+            let via = action["via"]?.string == "paste" ? "pasted" : "typed"
+            guard via == "pasted" || text.count <= 2000 else {
+                throw ActionFailure(message: "at most 2000 characters at a time", delivery: .notSent)
+            }
             let target: Element? = try action["ref"]?.int.map(element)
             if let ref = action["ref"] {
-                try await tap(try point(ref), within: frame(of: ref))
+                try await Runner.$afterInput.withValue(nil) {
+                    try await tap(try point(ref), within: frame(of: ref))
+                }
             }
             // Keys go to the focused field; a tap takes a moment to focus one (seen on the phone:
             // text typed right after the tap went nowhere). Wait for a field to be focused, up to
@@ -327,7 +336,6 @@ extension Computer {
             // field in a navigation bar came after the wait, and the text had landed (gym, Settings).
             func focusNote(_ landed: Bool) -> String { focused || landed ? "" : "; no field was focused when the text went (no keyboard came up in \(Int((focusWait * 1000).rounded())) ms), so it may have gone nowhere" }
             let hidden = describe(action).hasSuffix("(hidden)")
-            let via = action["via"]?.string == "paste" ? "pasted" : "typed"
             let clear = action["clear"]?.bool ?? false
             var note = ""
             if via == "pasted" {
@@ -368,7 +376,7 @@ extension Computer {
                 try await tap(go.frame.centre, within: go.frame)
                 return ("key", "key \(key): tapped the keyboard's \"\(go.text)\" key at [\(Int(go.frame.centre.x)), \(Int(go.frame.centre.y))]")
             }
-            _ = try await runner.call("POST", "/wda/keys", ["value": [.string(text)]], timeout: 3)
+            _ = try await runner.input("/wda/keys", ["value": [.string(text)]], timeout: 3)
             return ("key", "key \(key)\(text == "\n" ? " (sent as a key event; no keyboard key was listed to tap)" : "")")
         case .swipe:
             let direction = spec.string ?? spec["direction"]?.string ?? ""
@@ -396,7 +404,12 @@ extension Computer {
             }
             let ms = min(3000, max(100, spec["ms"]?.double ?? 400))
             let hold = min(3000, max(0, spec["hold_ms"]?.double ?? 0))
-            try await gesture((from.x, from.y, to.x, to.y), seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
+            let path = (from.x, from.y, to.x, to.y)
+            if spec["_counted_scroll"]?.bool == true {
+                try await scrollDrag(path, seconds: ms / 1000, rest: 0.4, until: until, allowFlickFallback: false)
+            } else {
+                try await gesture(path, seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
+            }
             return ("drag", "drag from [\(Int(from.x)), \(Int(from.y))] to [\(Int(to.x)), \(Int(to.y))] in \(Int(ms)) ms\(hold > 0 ? " after holding \(Int(hold)) ms" : "")")
         case .pinch:
             let p = try point(spec)
@@ -406,7 +419,7 @@ extension Computer {
             let a = start / 2, b = start * scale / 2
             // Two fingers either side of the point, each a drag of its own (shaped as a person's when
             // humanize is on), in 500 ms.
-            _ = try await runner.call("POST", "/actions", Humanize.actions(humanize.pinch(at: (p.x.rounded(), p.y.rounded()), from: a, to: b, seconds: 0.5)), timeout: 4)
+            _ = try await runner.input("/actions", Humanize.actions(humanize.pinch(at: (p.x.rounded(), p.y.rounded()), from: a, to: b, seconds: 0.5)), timeout: 4)
             return ("pinch", "pinch \(spec.serialized()) x\(scale)")
         case .button:
             guard let name = spec.text else { throw ActionFailure(message: "button takes home, lock, volume_up or volume_down", delivery: .notSent) }
@@ -414,12 +427,14 @@ extension Computer {
             switch n {
             // WDA waits for SpringBoard after a button (about 3 s on the simulator): these get the time a
             // gesture gets, and a slow answer is not taken as a sign that the runner is gone.
-            case "lock", "power": _ = try await runner.call("POST", "/wda/lock", [:], timeout: 8, countsAsMiss: false)
+            case "lock", "power": _ = try await runner.input("/wda/lock", [:], timeout: 8, countsAsMiss: false)
             // WDA serves the Home button only outside a session ("Unhandled endpoint" inside one).
-            case "home": _ = try await runner.raw("POST", "/wda/homescreen", [:], timeout: 8, countsAsMiss: false)
+            case "home":
+                _ = try await runner.input("/wda/homescreen", [:], timeout: 8, countsAsMiss: false, inSession: false)
+                skillStepApp = nil
             default:
                 guard let wda = Self.buttons[n] else { throw ActionFailure(message: "button \(name) has no equivalent; use home, lock, volume_up or volume_down", delivery: .notSent) }
-                _ = try await runner.call("POST", "/wda/pressButton", ["name": .string(wda)], timeout: 8, countsAsMiss: false)
+                _ = try await runner.input("/wda/pressButton", ["name": .string(wda)], timeout: 8, countsAsMiss: false)
             }
             return ("button", "button \(name)")
         case .launch:
@@ -443,12 +458,13 @@ extension Computer {
                 catch let e as RunnerError where e.delivery == .notSent {}
                 catch let e as RunnerError { note = "; ending the app first did not answer in time (\(e.message)); the launch was sent anyway" }
                 // In-process a launch answers once the app is in front, 9 s for a cold Photos (gym finding 39).
-                do { _ = try await runner.call("POST", "/wda/apps/launch", ["bundleId": .string(bundle)], timeout: max(3, min(10, until - now() - 0.3))) }
+                do { _ = try await runner.input("/wda/apps/launch", ["bundleId": .string(bundle)], timeout: max(3, min(10, until - now() - 0.3))) }
                 catch let e as RunnerError where e.delivery == .notSent { throw Self.launchRefused(bundle, e) }
             } else {
-                do { _ = try await runner.call("POST", "/wda/apps/activate", ["bundleId": .string(bundle)], timeout: max(3, min(10, until - now() - 0.3))) }
+                do { _ = try await runner.input("/wda/apps/activate", ["bundleId": .string(bundle)], timeout: max(3, min(10, until - now() - 0.3))) }
                 catch let e as RunnerError where e.delivery == .notSent { throw Self.launchRefused(bundle, e) }
             }
+            skillStepApp = nil
             return ("launch", "launch \(bundle)\(fresh ? " (fresh)" : "")\(note)")
         case .waitUntil:
             return ("wait_until", try await waitUntil(spec, until: until))
@@ -514,7 +530,7 @@ extension Computer {
         // deletes as the field holds now, and the text again. No element clear: WDA's retries until
         // the value is empty, which some fields never report (Safari's address bar took 25 s).
         let again = Array(repeating: "\u{8}", count: min(400, after.count)) + text.map(String.init)
-        _ = try await runner.call("POST", "/wda/keys", ["value": .array(again.map(JSON.string))], timeout: 3 + 0.06 * Double(again.count))
+        _ = try await runner.input("/wda/keys", ["value": .array(again.map(JSON.string))], timeout: 3 + 0.06 * Double(again.count))
         return "; clear: the field still held \(hidden ? "\(after.count) characters" : "\"\(after.prefix(60))\"") after \(deletes) deletes, so \(min(400, after.count)) more deletes and the text were sent again"
     }
 
@@ -529,22 +545,24 @@ extension Computer {
     func sendKeys(deletes: Int, text: String, until: Double) async throws {
         let backspaces = Array(repeating: "\u{8}", count: deletes)
         let plan = humanize.enabled ? Humanize.merged(humanize.typing(text), into: Self.maxBursts) : []
-        func dispatchKeys(_ body: JSON, timeout: Double) async throws {
-            do {
-                _ = try await runner.call("POST", "/wda/keys", body, timeout: timeout)
-            } catch let error as RunnerError where hasLocalWorkspace && error.delivery == .notSent && error.message.contains("nothing lands late") {
-                // LocalRunner can still be draining a focus read after the keyboard appeared.
-                // Only its explicit not-sent response permits another dispatch.
-                try Task.checkCancellation()
-                let remaining = min(1.5, until - now() - timeout)
-                guard remaining > 0.2 else { throw error }
-                await sleep(seconds: remaining)
-                try Task.checkCancellation()
-                _ = try await runner.call("POST", "/wda/keys", body, timeout: timeout)
+        func dispatchKeys(_ body: JSON, timeout: Double, final: Bool) async throws {
+            try await Runner.$afterInput.withValue(final ? Runner.afterInput : nil) {
+                do {
+                    _ = try await runner.input("/wda/keys", body, timeout: timeout)
+                } catch let error as RunnerError where hasLocalWorkspace && error.delivery == .notSent && error.message.contains("nothing lands late") {
+                    // LocalRunner can still be draining a focus read after the keyboard appeared.
+                    // Only its explicit not-sent response permits another dispatch.
+                    try Task.checkCancellation()
+                    let remaining = min(1.5, until - now() - timeout)
+                    guard remaining > 0.2 else { throw error }
+                    await sleep(seconds: remaining)
+                    try Task.checkCancellation()
+                    _ = try await runner.input("/wda/keys", body, timeout: timeout)
+                }
             }
         }
-        func oneCall(_ keys: [String]) async throws {
-            try await dispatchKeys(["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count))
+        func oneCall(_ keys: [String], final: Bool = true) async throws {
+            try await dispatchKeys(["value": .array(keys.map(JSON.string))], timeout: 3 + 0.06 * Double(keys.count), final: final)
         }
         // Bursts only with room for the plan, a guessed cost per call and the read after.
         let budget = until - now() - 0.8
@@ -553,7 +571,7 @@ extension Computer {
             return
         }
         if deletes > 0 {
-            try await oneCall(backspaces)
+            try await oneCall(backspaces, final: false)
         }
         var overhead = Self.burstCallCost
         for (i, burst) in plan.enumerated() {
@@ -568,7 +586,7 @@ extension Computer {
             let keys: [JSON] = burst.text.map { .string(String($0)) }
             let body: JSON = ["value": .array(keys), "frequency": .number(Double(burst.frequency))]
             let sent = now()
-            try await dispatchKeys(body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency))
+            try await dispatchKeys(body, timeout: 3 + Double(burst.text.count) / Double(burst.frequency), final: i == plan.count - 1)
             let took = now() - sent - Double(burst.text.count) / Double(max(1, burst.frequency))
             overhead = i == 0 ? max(0, took) : max(overhead, took)
         }
@@ -731,6 +749,18 @@ extension Computer {
         }
         // Resolve the field before clearing it: an off-screen target must not lose its old text.
         let holdPoint = try pastePoint(field)
+        func pasteValue(in elements: [Element]) -> String? {
+            let fields = elements.filter { !$0.fromPicture && $0.type == field.type }
+            if let id = field.identifier, !id.isEmpty {
+                let identified = fields.filter { $0.identifier == id }
+                if identified.count == 1, let match = identified.first { return match.value }
+            }
+            let nearby = fields.filter {
+                $0.label == field.label && ($0.frame.contains(field.frame.centre) || field.frame.contains($0.frame.centre))
+            }
+            guard nearby.count == 1, let match = nearby.first else { return nil }
+            return match.value
+        }
         var restored = false
         func restore() async {
             guard !restored else { return }
@@ -748,30 +778,47 @@ extension Computer {
                 await restore()
                 throw ActionFailure(message: "the clipboard could not be set to the text (the runner's write did not take), so nothing was pasted; type the text instead", delivery: .notSent)
             }
-            try await longPress(holdPoint, seconds: 0.7, within: field.frame)
+            try await Runner.$afterInput.withValue(nil) {
+                try await longPress(holdPoint, seconds: 0.7, within: field.frame)
+            }
             var item: Element?
+            var beforeTap: String?
+            var appBeforeTap: String?
             let menuBy = min(until - 0.3, now() + 2)
             while item == nil, now() < menuBy {
                 await sleep(seconds: 0.2)
                 if let seen = try? await runner.tree(timeout: max(0.3, min(1.2, menuBy - now())), format: config.treeFormat) {
                     item = seen.elements.first { e in Self.pasteWords.contains { e.text.lowercased() == $0 } }
+                    if item != nil {
+                        beforeTap = pasteValue(in: seen.elements)
+                        appBeforeTap = seen.foreground.bundleID
+                    }
                 }
             }
             guard let item else {
                 await restore()
                 throw ActionFailure(message: "the field's menu showed no Paste item; the text was not pasted (a long press was sent)", delivery: .sent)
             }
-            try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
-            // The paste has landed when the field shows the text; until then the clipboard stays.
-            let landedBy = min(until - 0.3, now() + 2.5)
-            var landed = false
-            while !landed, now() < landedBy {
-                await sleep(seconds: 0.25)
-                landed = await fieldValue(target: target, holding: text, timeout: 0.8)?.contains(text) == true
+            try await Runner.$afterInput.withValue(nil) {
+                try await tap(try pastePoint(item, delivery: .sent), within: item.frame)
             }
-            if landed {
-                await restore()
-                return ""
+            // Attribution needs a readable value before and after the tap. When a driver reports
+            // the placeholder as the field value and the pasted text matches it, leave the
+            // source unrecorded because the reads cannot establish a change.
+            let landedBy = min(until - 0.3, now() + 2.5)
+            if let beforeTap, !text.isEmpty {
+                while !Task.isCancelled, now() < landedBy {
+                    await sleep(seconds: 0.25)
+                    guard !Task.isCancelled,
+                          let seen = try? await runner.tree(timeout: 0.8, format: config.treeFormat),
+                          appBeforeTap == nil || seen.foreground.bundleID == appBeforeTap,
+                          let value = pasteValue(in: seen.elements) else { break }
+                    if value != beforeTap, value.contains(text) {
+                        if now() <= landedBy { await runner.confirmInput() }
+                        await restore()
+                        return ""
+                    }
+                }
             }
             // iOS may be asking the owner to allow the paste: the owner's clipboard goes back once
             // the text is in the field, or after 45 s, from a task of its own.

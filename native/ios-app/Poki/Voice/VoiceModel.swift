@@ -3,8 +3,8 @@ import Observation
 import PokiCore
 import UIKit
 
-/// The voice bridge on the person's Mac (`bin/voice-bridge.mjs`): it hands out short-lived OpenAI
-/// Realtime credentials, so the phone never holds an API key, and runs the voice tools that move the
+/// The voice bridge on the person's Mac (`bin/voice-bridge.mjs`) exchanges voice offers with OpenAI
+/// without giving the phone the Mac's API key, and runs the voice tools that move the
 /// phone through the Mac's Poki MCP. Entered once, like the relay address.
 struct VoiceBridge: Equatable {
     /// http://<Mac>:47830/voice/<secret>
@@ -26,9 +26,15 @@ struct VoiceBridge: Equatable {
         set { UserDefaults.standard.set(newValue?.base.absoluteString, forKey: "voiceBridge") }
     }
 
-    /// `base`: the Realtime API's address the key is for (a custom provider's); the bridge's keys are
-    /// OpenAI's, and name none.
-    struct Token: Decodable { let value: String; let model: String; let local_tools: [String]; var base: String? = nil }
+    struct Token: Decodable {
+        let value: String?
+        let model: String
+        let local_tools: [String]
+        var live: Bool? = nil
+        var base: String? = nil
+    }
+    private struct SDPAnswer: Decodable { let sdp: String }
+    private struct ScreenDescription: Decodable { let text: String }
     struct ToolResult: Decodable {
         let state: String
         var output = ""
@@ -52,11 +58,46 @@ struct VoiceBridge: Equatable {
     }
 
     /// Poki's interface language goes along: the one the session speaks from its first sentence.
-    func token() async throws -> Token {
-        let url = base.appending(path: "token").appending(queryItems: [URLQueryItem(name: "language", value: AppLocalization.language)])
+    func token(preferLive: Bool = true) async throws -> Token {
+        let url = base.appending(path: "token").appending(queryItems: [
+            URLQueryItem(name: "language", value: AppLocalization.language),
+            URLQueryItem(name: "transport", value: preferLive ? "live" : "realtime"),
+            URLQueryItem(name: "turns", value: "committed"),
+        ])
         let (data, response) = try await URLSession.shared.data(from: url)
         try Self.check(response, data)
         return try JSONDecoder().decode(Token.self, from: data)
+    }
+
+    func exchangeLiveOffer(_ sdp: String) async throws -> String {
+        let url = base.appending(path: "session").appending(queryItems: [URLQueryItem(name: "language", value: AppLocalization.language)])
+        var request = URLRequest(url: url, timeoutInterval: 25)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["sdp": sdp])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.check(response, data)
+        return try JSONDecoder().decode(SDPAnswer.self, from: data).sdp
+    }
+
+    var liveScreenReader: ((String) async throws -> String)? {
+        guard base.scheme == "https" else { return nil }
+        return describeLiveScreen
+    }
+
+    private func describeLiveScreen(_ image: String) async throws -> String {
+        var request = URLRequest(url: base.appending(path: "screen"), timeoutInterval: 25)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["image": image])
+        let (data, response) = try await URLSession.shared.data(for: request, delegate: NoScreenRedirect())
+        try Self.check(response, data)
+        return try JSONDecoder().decode(ScreenDescription.self, from: data).text
+    }
+
+    private final class NoScreenRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? { nil }
     }
 
     /// `checked`: for tap_text, the app and element text the phone cleared; without it tap_text only answers "check".
@@ -170,12 +211,14 @@ struct VoiceCall: Identifiable, Equatable {
     let arguments: String
     /// The connection that asked for it. Only that connection can take a function_call_output for it.
     let session: Int
+    var delegation: String? = nil
     var state = State.running
     var output = ""
     /// The screen when the call finished (look, do, open_app): the model sees it next to the output.
     var screen: Data?
     /// The model has the result (as a function_call_output, or in a reconnect note).
     var delivered = false
+    var silentResult = false
     let started = Date()
     var finished: Date?
 }
@@ -211,10 +254,10 @@ struct TurnClock {
 }
 
 struct VoiceLine: Identifiable, Equatable {
-    enum Role { case you, poki, tool, note }
+    enum Role: Hashable { case you, poki, tool, note }
     let id = UUID()
     let role: Role
-    let text: String
+    var text: String
     var at = Date()
 }
 
@@ -262,18 +305,151 @@ final class VoiceModel {
     var staged: TalkState?
     #endif
     /// Model audio off: for silent test runs. Speech is still transcribed into `lines`.
-    var muted = false { didSet { link?.setRemoteVolume(muted ? 0 : 1) } }
+    var muted = false { didSet { link?.setRemoteVolume(muted || liveSpeechStopped || liveCloseTimeout != nil ? 0 : 1) } }
     /// The last measured turn: from the end of speech to the first audio of the answer that carries a tool result.
     private(set) var lastTurnMS: Int?
     /// Timestamps of the current turn, from the end of the person's speech.
     private(set) var clock = TurnClock()
 
     private var link: VoiceConnection?
-    /// session.created arrived on the current link: it takes events now.
+    private var usesLive = false
+    private var liveCloseTimeout: Task<Void, Never>?
+    private var liveUsageSeconds: Double?
+    private var liveSpeechStopped = false
+    private enum LiveDelegationState: Equatable {
+        case active, cancelled, acknowledgment, duplicate
+        case awaitingFirstTool(audio: Range<Int>, fallback: LiveCallerSpeech.TextReceipt?)
+
+        var canRunTools: Bool {
+            switch self {
+            case .active, .awaitingFirstTool: true
+            case .cancelled, .acknowledgment, .duplicate: false
+            }
+        }
+
+        var refusal: String? {
+            switch self {
+            case .acknowledgment: "The user was acknowledging the conversation. Wait for a request before starting work."
+            case .duplicate: "This request repeats a turn already handled. This step did not run. Do not announce a new result."
+            case .active, .cancelled, .awaitingFirstTool: nil
+            }
+        }
+    }
+    private var liveDelegations: [String: LiveDelegationState] = [:]
+    private var liveHasCancellation = false
+    private struct LiveCallerSpeech {
+        struct Transcript: Equatable {
+            let audio: Range<Int>?
+            let received: Date
+            let inputRevision: Int
+        }
+
+        struct TextReceipt: Equatable {
+            let text: String
+            let transcript: Transcript
+        }
+
+        var text = ""
+        var end = 0
+        var itemID: String?
+        var lastStartEvent: String?
+        var hasSpeechStartEvents = false
+        var handledItems: Set<String> = []
+        var inputRevision = 0
+        var recordedInputs: Set<String> = []
+        var pending: Transcript?
+        var replayWithoutPendingSpeech = false
+        var executedAudio: Set<Range<Int>> = []
+        var lastTranscriptsByText: [String: Transcript] = [:]
+
+        mutating func begin(itemID: String?) {
+            self.itemID = itemID
+            text = ""
+            pending = nil
+            replayWithoutPendingSpeech = false
+        }
+
+        mutating func recordInput(id: String?) {
+            if let id, !recordedInputs.insert(id).inserted { return }
+            inputRevision += 1
+            replayWithoutPendingSpeech = false
+        }
+
+        var normalizedText: String {
+            var normalized = text.precomposedStringWithCanonicalMapping.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            while let last = normalized.last, last.isWhitespace || ".!?。！？".contains(last) { normalized.removeLast() }
+            return normalized
+        }
+
+        func isReplay(itemID: String?, audio: Range<Int>?) -> Bool {
+            if let itemID { return handledItems.contains(itemID) }
+            if let audio { return executedAudio.contains(where: audio.overlaps) }
+            return false
+        }
+
+        var alreadyHandled: Bool {
+            if replayWithoutPendingSpeech { return true }
+            if itemID != nil || pending?.audio != nil { return isReplay(itemID: itemID, audio: pending?.audio) }
+            guard let pending, let previous = lastTranscriptsByText[normalizedText] else { return false }
+            return pending.inputRevision == previous.inputRevision
+                && (0...3).contains(pending.received.timeIntervalSince(previous.received))
+        }
+
+        var pendingTextReceipt: TextReceipt? {
+            guard itemID == nil, let pending else { return nil }
+            return TextReceipt(text: normalizedText, transcript: pending)
+        }
+
+        mutating func discardReplay() {
+            if pending == nil { replayWithoutPendingSpeech = true }
+        }
+
+        mutating func append(_ delta: String, audio: Range<Int>?, received: Date) {
+            replayWithoutPendingSpeech = false
+            text += delta
+            var combined = pending?.audio
+            if let audio {
+                end = max(end, audio.upperBound)
+                let first = min(audio.lowerBound, combined?.lowerBound ?? audio.lowerBound)
+                let last = max(audio.upperBound, combined?.upperBound ?? audio.upperBound)
+                combined = first..<last
+            }
+            pending = Transcript(audio: combined, received: received, inputRevision: inputRevision)
+        }
+
+        mutating func markHandled() {
+            if let itemID {
+                handledItems.insert(itemID)
+            } else if let receipt = pendingTextReceipt, receipt.transcript.audio == nil {
+                remember(receipt)
+            }
+            clearPendingSpeech()
+        }
+
+        mutating func remember(_ receipt: TextReceipt) {
+            if !receipt.text.isEmpty { lastTranscriptsByText[receipt.text] = receipt.transcript }
+        }
+
+        mutating func clearPendingSpeech() {
+            begin(itemID: hasSpeechStartEvents ? itemID : nil)
+        }
+    }
+    private var liveCallerSpeech = LiveCallerSpeech()
+    private var livePhoneOperations: [String: PhoneOperationCancellation] = [:]
+    private var liveScreenDescription: ((String) async throws -> String)?
+    private var liveResultReceipts: [String: String] = [:]
+    private var liveContinuationAfter: String?
+    private var liveAwaitingPlayback = false
+    private var livePlayback: Task<Void, Never>?
+    private var liveCaptions: [VoiceLine.Role: (index: Int, end: Int)] = [:]
+    /// The server opened this session: it takes events now.
     private var ready = false
     private var session = 0
     private var activeResponse: String?
     private var wantsResponse = false
+    private var manualRealtimeTurns = false
+    private var committedRealtimeItems: Set<String> = []
+    private var pendingRealtimeTurns = 0
     /// An answer is expected (the person stopped speaking, or response.create went out) and the server
     /// has not started it yet.
     private var awaitingAnswer = false
@@ -299,6 +475,7 @@ final class VoiceModel {
     /// A conversation opened this soon after the last one ended is told the last turns.
     static let carryOver: TimeInterval = 5 * 60
     static let carriedLines = 6
+    private static let liveNoteByteLimit = 480
     /// How long the conversation waits for something it is owed (the end of the person's speech, an answer,
     /// the end of the audio) while the server says nothing, before it ends. Shorter in the background, where
     /// the microphone should not stay on for an event that never comes.
@@ -315,7 +492,7 @@ final class VoiceModel {
     static let approvalWait: Double = 115
 
     /// look, do and open_app, run by PokiCore on this phone (the relay's tools): name, JSON arguments.
-    private let phoneTool: @MainActor (String, String) async -> PhoneAnswer
+    private let phoneTool: @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer
 
     /// true while a conversation with the microphone is on: Poki's silent keep-alive audio steps aside
     /// (its .playback session cannot record), and the voice-chat session keeps Poki running instead.
@@ -326,7 +503,7 @@ final class VoiceModel {
     private let time: VoiceClock
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
-         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer,
+         phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
          holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock()) {
@@ -360,7 +537,7 @@ final class VoiceModel {
     /// On from the tap: while the key is exchanged and the connection opens (a second or two, longer
     /// while AirPods switch to their microphone) the button and the bar already show it, and a second
     /// tap ends it instead of starting another one.
-    var isOn: Bool { link != nil || dictation != nil || isConnecting }
+    var isOn: Bool { liveCloseTimeout == nil && (link != nil || dictation != nil || isConnecting) }
     private var isConnecting: Bool { if case .connecting = phase { return true }; return false }
 
     /// Voice can start: the OpenAI key on this iPhone (Realtime, no bridge), the Mac's voice bridge, or
@@ -484,9 +661,10 @@ final class VoiceModel {
     }
 
     func start(microphone: Bool = true) async {
+        if let liveCloseTimeout { await liveCloseTimeout.value }
         guard link == nil, dictation == nil, !isConnecting else { return }
-        // The OpenAI key on this iPhone first (no Mac needed), then the bridge, then dictation.
-        let key = VoiceDirect.apiKey
+        let account = VoiceDirect.account
+        let key = VoiceDirect.apiKey(for: account)
         if key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.words) }
             return
@@ -494,42 +672,70 @@ final class VoiceModel {
         phase = .connecting
         session += 1
         let number = session
+        let bridge = self.bridge
+        func configuration() async throws -> VoiceBridge.Token {
+            if rehearsing { return Self.rehearsalToken }
+            if let key, let account {
+                let model = ModelCatalog.voiceModelID(for: account)
+                if microphone, account == .openai, model.hasPrefix("gpt-live-") {
+                    return VoiceBridge.Token(value: nil, model: model, local_tools: VoiceDirect.localTools, live: true)
+                }
+                return try await VoiceDirect.token(apiKey: key, account: account)
+            }
+            guard let bridge else { throw VoiceError.noBridge }
+            return try await bridge.token(preferLive: microphone)
+        }
+        func connect(_ link: VoiceConnection, _ token: VoiceBridge.Token, direct: Bool) async throws {
+            usesLive = token.live == true
+            localTools = Set(token.local_tools)
+            if usesLive {
+                if let key { liveScreenDescription = { try await VoiceDirect.describeLiveScreen($0, apiKey: key) } }
+                else { liveScreenDescription = bridge?.liveScreenReader }
+                try await link.connectLive(microphone: microphone, direct: direct) { sdp in
+                    if let key { return try await VoiceDirect.exchangeLiveOffer(sdp, model: token.model, apiKey: key) }
+                    guard let bridge else { throw VoiceError.noBridge }
+                    return try await bridge.exchangeLiveOffer(sdp)
+                }
+            } else {
+                guard let secret = token.value else { throw VoiceError.noBridge }
+                try await link.connect(secret: secret, base: token.base.flatMap { URL(string: $0) }, microphone: microphone, direct: direct)
+            }
+        }
         do {
-            let token: VoiceBridge.Token
-            if rehearsing { token = Self.rehearsalToken } else if let key { token = try await VoiceDirect.token(apiKey: key) } else { token = try await bridge!.token() }
+            var token = try await configuration()
             // Ended (End, or the button again) while the key was exchanged.
             guard number == session else { return }
-            localTools = Set(token.local_tools)
             var link = connection({ [weak self] event in self?.handle(event, session: number) },
                                   { [weak self] reason in self?.closed(reason, session: number) })
             self.link = link
             transcript = ("voice-\(UUID().uuidString.prefix(8).lowercased())", Date(), lines.count)
             if microphone { holdingMicrophone = true }
             do {
-                try await link.connect(secret: token.value, base: token.base.flatMap { URL(string: $0) }, microphone: microphone, direct: false)
+                try await connect(link, token, direct: false)
             } catch VoiceError.noPath(let ice) {
                 // No path opened (ICE \(ice)): once more, off VPN interfaces (Poki's loopback, a proxy
                 // app) and with a fresh key, before telling the owner.
                 guard number == session else { return }
                 log.add("voice", "no network path opened (ICE \(ice)); trying again off VPN interfaces")
                 link.close()
-                let retry: VoiceBridge.Token
-                if let key { retry = try await VoiceDirect.token(apiKey: key) } else { retry = try await bridge!.token() }
+                token = try await configuration()
                 guard number == session else { return }
                 link = connection({ [weak self] event in self?.handle(event, session: number) },
                                   { [weak self] reason in self?.closed(reason, session: number) })
                 self.link = link
-                try await link.connect(secret: retry.value, base: retry.base.flatMap { URL(string: $0) }, microphone: microphone, direct: true)
+                try await connect(link, token, direct: true)
             }
             guard number == session else { link.close(); return }
+            guard liveCloseTimeout == nil else { return }
             lastActivity = time.now()
             watchForStall(session: number)
-            link.setRemoteVolume(muted ? 0 : 1)
+            link.setRemoteVolume(muted || liveSpeechStopped ? 0 : 1)
+            if usesLive { watchLivePlayback(link, session: number) }
             log.add("voice", "connected (\(token.model)), session \(number)")
             if microphone { link.diagnose { [log] line in log.add("voice", line) } }
         } catch {
             // Ended while connecting: stop() already put everything back.
-            guard number == session else { return }
+            guard number == session, liveCloseTimeout == nil else { return }
             transcript = nil
             link?.close()
             link = nil
@@ -563,11 +769,42 @@ final class VoiceModel {
 
     /// Ends the conversation. Calls already running keep running; the next session hears how they ended.
     func stop() {
+        guard liveCloseTimeout == nil else { return }
         if let dictation {
-            dictation.stopSpeaking()
-            Task { _ = await dictation.finish() }
+            dictation.cancel()
             self.dictation = nil
         }
+        if usesLive, ready, let link {
+            ready = false
+            keepOpen()
+            stallWatch?.cancel()
+            livePlayback?.cancel()
+            link.setRemoteVolume(0)
+            phase = .off
+            liveCloseTimeout = Task { [weak self, time] in
+                await time.sleep(.seconds(3))
+                guard !Task.isCancelled else { return }
+                self?.finishLiveClose("timed out waiting for session.closed")
+            }
+            if !link.send(["type": "session.close"]) {
+                finishLiveClose("could not send session.close")
+            }
+            return
+        }
+        finishStop()
+    }
+
+    private func finishLiveClose(_ reason: String, confirmed: Bool = false) {
+        logLiveClose(reason, confirmed: confirmed)
+        finishStop()
+    }
+
+    private func logLiveClose(_ reason: String, confirmed: Bool) {
+        let usage = liveUsageSeconds.map { "\($0) s" } ?? "unavailable"
+        log.add("voice", "Live finalization \(confirmed ? "confirmed" : "unconfirmed") (\(reason)), usage: \(usage)")
+    }
+
+    private func finishStop() {
         endSession()
         // A start still connecting sees this and stops where it is.
         session += 1
@@ -579,28 +816,46 @@ final class VoiceModel {
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
         keepOpen()
+        livePlayback?.cancel()
+        livePlayback = nil
+        liveCaptions.removeAll()
+        liveSpeechStopped = false
+        liveDelegations.removeAll()
+        liveHasCancellation = false
+        liveCallerSpeech = LiveCallerSpeech()
+        liveUsageSeconds = nil
+        liveScreenDescription = nil
+        liveResultReceipts.removeAll()
+        liveContinuationAfter = nil
+        liveAwaitingPlayback = false
         interruptedLapse?.cancel()
         interrupted = false
         stallWatch?.cancel()
         stallWatch = nil
-        if ready, let from = transcript?.from {
+        if ready || liveCloseTimeout != nil, let from = transcript?.from {
             let said = lines[min(from, lines.count)...].filter { $0.role == .you || $0.role == .poki }
             if !said.isEmpty {
                 lastEnd = time.now()
                 lastLines = said
             }
         }
+        liveCloseTimeout?.cancel()
+        liveCloseTimeout = nil
         if let link {
             link.close()
             // Whether the shared audio session let go of the microphone after WebRTC closed.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [log] in log.add("voice", "1 s after the end: \(VoiceLink.audioSession())") }
         }
         link = nil
+        usesLive = false
         screenItem = nil
         holdingMicrophone = false
         ready = false
         activeResponse = nil
         wantsResponse = false
+        manualRealtimeTurns = false
+        pendingRealtimeTurns = 0
+        committedRealtimeItems.removeAll()
         awaitingAnswer = false
         requestedAnswer = nil
     }
@@ -613,14 +868,15 @@ final class VoiceModel {
     var midTurn: Bool { isOn && (answerDue || phase == .thinking) }
 
     private var answerDue: Bool {
-        awaitingAnswer || activeResponse != nil || wantsResponse
+        awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse || pendingRealtimeTurns > 0
             || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running }
     }
 
     /// The server owes something: the end of the person's speech, an answer, the end of the audio. A step
     /// that is running is not the server's to answer for, and it has its own time limits.
     private var waitingOnServer: Bool {
-        !ready || (awaitingAnswer || activeResponse != nil || wantsResponse || phase == .hearing || phase == .speaking)
+        !ready || (awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse
+            || pendingRealtimeTurns > 0 || phase == .hearing || phase == .speaking)
             && !calls.contains { $0.state == .running }
     }
 
@@ -675,12 +931,70 @@ final class VoiceModel {
         endWindow = nil
     }
 
+    private func watchLivePlayback(_ link: VoiceConnection, session number: Int) {
+        livePlayback = Task { [weak self] in
+            var quiet = 0
+            while !Task.isCancelled {
+                let playing = await link.hasRemoteSpeech()
+                guard let self, number == session, !Task.isCancelled else { return }
+                if ready && playing && !liveSpeechStopped {
+                    quiet = 0
+                    keepOpen()
+                    lastActivity = time.now()
+                    phase = .speaking
+                    if liveAwaitingPlayback, !awaitingAnswer, activeResponse == nil {
+                        liveAwaitingPlayback = false
+                        recordSpokenAnswer(at: lastActivity)
+                    }
+                } else if phase == .speaking {
+                    quiet += 1
+                    if quiet >= 3 {
+                        let working = awaitingAnswer || liveAwaitingPlayback || activeResponse != nil || calls.contains { $0.state == .running }
+                        phase = working ? .thinking : .listening
+                        endIfDone()
+                    }
+                }
+                await time.sleep(.milliseconds(160))
+            }
+        }
+    }
+
     /// A conversation opened soon after the last one hears what was said last, so it goes on from there.
     private func carryOver(_ link: VoiceConnection) {
         guard let lastEnd, time.now().timeIntervalSince(lastEnd) < Self.carryOver else { return }
         let turns = lastLines.suffix(Self.carriedLines)
+        if usesLive {
+            link.send(note(liveCarryOver(turns)))
+            return
+        }
         let said = turns.map { "\($0.role == .you ? "User" : "Poki"): \($0.text)" }.joined(separator: "\n")
-        link.send(Self.note("This continues a conversation from a few minutes ago. What was said, oldest first. Use it only as context for what the user says next; do not answer or repeat it.\n" + said))
+        link.send(note("This continues a conversation from a few minutes ago. What was said, oldest first. Use it only as context for what the user says next; do not answer or repeat it.\n" + said))
+    }
+
+    private func liveCarryOver(_ turns: ArraySlice<VoiceLine>) -> String {
+        let header = "Recent conversation for context only. Do not repeat prior actions or answers."
+        var available = Self.liveNoteByteLimit - header.utf8.count
+        // Preserve the latest request even when Poki's reply is long.
+        var priority = [turns.lastIndex { $0.role == .you }, turns.indices.last].compactMap { $0 }
+        if priority.count == 2 && priority[0] == priority[1] { priority.removeLast() }
+        func label(for index: Int) -> String { turns[index].role == .you ? "\nUser: " : "\nPoki: " }
+        let replyBytes = priority.dropFirst().first.map { label(for: $0).utf8.count + turns[$0].text.utf8.count } ?? 0
+        let replyReserve = min(available / 2, replyBytes)
+        var kept: [Int: String] = [:]
+        for (position, index) in priority.enumerated() {
+            let prefix = label(for: index)
+            let limit = available - prefix.utf8.count - (position == 0 ? replyReserve : 0)
+            let line = prefix + Self.liveExcerpt(turns[index].text, bytes: limit)
+            kept[index] = line
+            available -= line.utf8.count
+        }
+        for index in turns.indices.reversed() where kept[index] == nil {
+            let line = label(for: index) + turns[index].text
+            guard line.utf8.count <= available else { continue }
+            kept[index] = line
+            available -= line.utf8.count
+        }
+        return header + turns.indices.compactMap { kept[$0] }.joined()
     }
 
     // MARK: Dictation
@@ -689,7 +1003,11 @@ final class VoiceModel {
     func press() async {
         if let dictation {
             guard phase != .hearing, phase != .thinking else { return }
-            do { try dictation.listen(); phase = .hearing } catch { phase = .lost(VoiceError.reason(for: error)) }
+            holdingMicrophone = true
+            do { try dictation.listen(); phase = .hearing } catch {
+                holdingMicrophone = false
+                phase = .lost(VoiceError.reason(for: error))
+            }
             return
         }
         if !isOn, canTalk { await start() }
@@ -701,6 +1019,8 @@ final class VoiceModel {
         phase = .thinking
         Task {
             let text = await dictation.finish()
+            guard self.dictation === dictation else { return }
+            holdingMicrophone = false
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
@@ -743,15 +1063,31 @@ final class VoiceModel {
     /// Stops Poki's voice reply. Anything running on the phone keeps running.
     func stopTalking() {
         if let dictation { dictation.stopSpeaking(); if phase == .speaking { phase = .listening }; return }
-        guard let link else { return }
+        guard let link, liveCloseTimeout == nil else { return }
+        if usesLive {
+            stopLivePlayback(on: link, note: "The user stopped playback. Stay silent until they speak again.")
+            return
+        }
         if phase == .speaking { markInterrupted() }
         if activeResponse != nil { link.send(["type": "response.cancel"]) }
         link.send(["type": "output_audio_buffer.clear"])
         // Without this the next answer (say, when a running step finishes) picks the cut-off reply back up.
-        if ready { link.send(Self.note(Self.stoppedNote)) }
+        if ready { link.send(note(Self.stoppedNote)) }
     }
 
     private static let stoppedNote = "The user pressed Stop talking. Drop the reply you were giving; do not continue or repeat it. When a running step finishes, report only its result, in one sentence."
+
+    private func stopLivePlayback(on link: VoiceConnection, note message: String) {
+        guard !liveSpeechStopped else { return }
+        if phase == .speaking { markInterrupted() }
+        liveSpeechStopped = true
+        liveAwaitingPlayback = false
+        for index in calls.indices where !calls[index].delivered { calls[index].silentResult = true }
+        link.setRemoteVolume(0)
+        phase = calls.contains { $0.state == .running } ? .thinking : .listening
+        if ready { link.send(note(message)) }
+        endIfDone()
+    }
 
     #if DEBUG
     /// Recorded speech instead of the microphone, for test runs: 24 kHz mono PCM16, sent as one user turn.
@@ -771,9 +1107,15 @@ final class VoiceModel {
     }
     #endif
 
-    private func closed(_ reason: String, session number: Int) {
+    private func closed(_ reason: String, session number: Int, confirmed: Bool = false) {
         guard number == session, link != nil else { return }
+        if liveCloseTimeout != nil {
+            finishLiveClose(reason, confirmed: confirmed)
+            return
+        }
+        if usesLive && ready { logLiveClose(reason, confirmed: confirmed) }
         endSession()
+        session += 1
         phase = .lost(TalkState.connectionLost)
         lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
@@ -784,9 +1126,24 @@ final class VoiceModel {
 
     private func handle(_ event: [String: Any], session number: Int) {
         guard number == session, let link, let type = event["type"] as? String else { return }
+        if type == "session.usage.updated" || type == "session.closed" {
+            if let seconds = (event["usage"] as? [String: Any])?["seconds"] as? NSNumber {
+                liveUsageSeconds = seconds.doubleValue
+            }
+            if type == "session.closed" {
+                closed(event["reason"] as? String ?? "the Live session ended", session: number, confirmed: true)
+            }
+            return
+        }
+        guard liveCloseTimeout == nil else { return }
         lastActivity = time.now()
         switch type {
-        case "session.created":
+        case "session.created", "session.started":
+            if type == "session.created", !usesLive {
+                let audio = (event["session"] as? [String: Any])?["audio"] as? [String: Any]
+                let detection = (audio?["input"] as? [String: Any])?["turn_detection"] as? [String: Any]
+                manualRealtimeTurns = detection?["create_response"] as? Bool == false
+            }
             log.add("voice", "session created, session \(number)")
             ready = true
             watchForStall(session: number)
@@ -794,29 +1151,136 @@ final class VoiceModel {
             carryOver(link)
             catchUp(link)
             endIfDone()
+        case "session.input_transcript.delta", "session.output_transcript.delta":
+            let role: VoiceLine.Role = type == "session.input_transcript.delta" ? .you : .poki
+            guard let text = event["delta"] as? String, !text.isEmpty else { return }
+            let start = event["start_ms"] as? Int
+            let end = event["end_ms"] as? Int
+            keepOpen()
+            appendLiveCaption(text, role: role, start: start ?? 0, end: end ?? 0)
+            if role == .you {
+                let audio: Range<Int>? = if let start, let end, start >= 0, end > start { start..<end } else { nil }
+                let itemID = event["item_id"] as? String
+                if liveCallerSpeech.isReplay(itemID: itemID ?? liveCallerSpeech.itemID, audio: audio) {
+                    liveCallerSpeech.discardReplay()
+                    endIfDone()
+                    return
+                }
+                appendLiveSpeech(text, audio: audio, itemID: itemID)
+                let utterance = Self.liveSpeechParts(liveCallerSpeech.text).filter { !Self.liveBackchannels.contains($0) }
+                if !liveCallerSpeech.alreadyHandled, Self.liveRequestsStop(utterance) {
+                    cancelLiveTask()
+                    stopLivePlayback(on: link, note: "The user stopped the reply and cancelled the phone task. Drop the reply and stay silent until a new request.")
+                } else if !liveCallerSpeech.alreadyHandled, !utterance.isEmpty {
+                    resumeLiveAudio(link)
+                    if !answerDue, phase != .thinking { clock = TurnClock(said: time.now()) }
+                    else if clock.call == nil { clock.said = time.now() }
+                }
+            } else if clock.delivered != nil {
+                clock.reply += text
+            }
+            endIfDone()
+        case "session.delegation.created":
+            if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
+                if liveCallerSpeech.alreadyHandled {
+                    liveCallerSpeech.clearPendingSpeech()
+                    liveDelegations[id] = .duplicate
+                    return
+                }
+                let parts = Self.liveSpeechParts(liveCallerSpeech.text)
+                let audio = liveCallerSpeech.pending?.audio
+                let fallback = liveCallerSpeech.pendingTextReceipt
+                liveCallerSpeech.markHandled()
+                if !parts.isEmpty, parts.allSatisfy(Self.liveBackchannels.contains) {
+                    liveDelegations[id] = .acknowledgment
+                    return
+                }
+                let request = parts.filter { !Self.liveBackchannels.contains($0) }
+                let newRequest = !request.isEmpty && !Self.liveRequestsStop(request)
+                if liveHasCancellation && !newRequest {
+                    liveDelegations[id] = .cancelled
+                } else if let audio {
+                    liveDelegations[id] = .awaitingFirstTool(audio: audio, fallback: fallback)
+                } else {
+                    liveDelegations[id] = .active
+                }
+            }
+            link.send(["type": "session.thinking.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": ""])
+        case "session.commentary.appended":
+            guard let id = event["client_event_id"] as? String,
+                  let call = liveResultReceipts.removeValue(forKey: id),
+                  let index = calls.firstIndex(where: { $0.id == call }) else { return }
+            calls[index].delivered = true
+            endIfDone()
+        case "response.event":
+            guard var backend = event["event"] as? [String: Any], let kind = backend["type"] as? String else { return }
+            if let state = (event["delegation_id"] as? String).flatMap({ liveDelegations[$0] }),
+               !state.canRunTools,
+               kind != "response.output_item.done" { return }
+            switch kind {
+            case "response.completed", "response.failed", "response.incomplete":
+                backend["type"] = "response.done"
+                backend["live_failed"] = kind != "response.completed"
+            case "response.created", "response.output_item.done":
+                backend["delegation_id"] = event["delegation_id"]
+            default:
+                return
+            }
+            handle(backend, session: number)
         case "input_audio_buffer.speech_started":
             keepOpen()
+            if usesLive {
+                let eventID = event["event_id"] as? String
+                if let eventID {
+                    guard eventID != liveCallerSpeech.lastStartEvent else { return }
+                    liveCallerSpeech.lastStartEvent = eventID
+                }
+                liveCallerSpeech.hasSpeechStartEvents = true
+                let itemID = event["item_id"] as? String
+                liveCallerSpeech.recordInput(id: itemID ?? eventID)
+                liveCallerSpeech.begin(itemID: itemID)
+                endIfDone()
+                return
+            }
             if phase != .hearing { log.add("voice", "speech started") }
             // Spoken over Poki's answer: the server drops the answer's audio, and the talk says so.
             if phase == .speaking { markInterrupted() }
             phase = .hearing
         case "input_audio_buffer.speech_stopped":
+            guard !usesLive else { return }
             phase = .thinking
             awaitingAnswer = true
             clock = TurnClock(said: Date())
+        case "input_audio_buffer.committed":
+            if usesLive {
+                liveCallerSpeech.recordInput(id: (event["item_id"] as? String) ?? (event["event_id"] as? String))
+                return
+            }
+            guard manualRealtimeTurns, let item = event["item_id"] as? String, !item.isEmpty,
+                  committedRealtimeItems.insert(item).inserted else { return }
+            pendingRealtimeTurns += 1
+            flush()
         case "conversation.item.added":
             if (event["item"] as? [String: Any])?["role"] as? String == "user" { clock.heard = clock.heard ?? Date() }
         case "conversation.item.input_audio_transcription.completed":
             if let text = event["transcript"] as? String, !text.isEmpty { lines.append(VoiceLine(role: .you, text: text.trimmingCharacters(in: .whitespacesAndNewlines))) }
         case "response.created":
-            activeResponse = (event["response"] as? [String: Any])?["id"] as? String
+            guard !usesLive || !liveSpeechStopped else { return }
+            let id = (event["response"] as? [String: Any])?["id"] as? String
+            if usesLive, awaitingAnswer, let id, id == liveContinuationAfter { return }
+            activeResponse = id
             keepOpen()
             awaitingAnswer = false
             requestedAnswer = nil
+            liveContinuationAfter = nil
         case "response.done":
             let response = event["response"] as? [String: Any]
             if let usage = response?["usage"] as? [String: Any] { clock.add(usage: usage) }
-            if response?["id"] as? String == activeResponse { activeResponse = nil }
+            if response?["id"] as? String == activeResponse {
+                activeResponse = nil
+                if !awaitingAnswer, event["live_failed"] as? Bool == true { liveAwaitingPlayback = false }
+            }
+            if usesLive, phase == .thinking, !answerDue { phase = .listening }
             flush()
             endIfDone()
         case "response.output_audio_transcript.done":
@@ -825,12 +1289,9 @@ final class VoiceModel {
                 if clock.delivered != nil { clock.reply += text }
             }
         case "output_audio_buffer.started":
+            guard !usesLive || !liveSpeechStopped else { return }
             phase = .speaking
-            if let said = clock.said, let delivered = clock.delivered, clock.spoken == nil {
-                clock.spoken = Date()
-                lastTurnMS = clock.ms(\.spoken)
-                log.add("voice", "turn: end of speech to spoken result \(lastTurnMS!) ms (tool result in \(Int(delivered.timeIntervalSince(said) * 1000)) ms)")
-            }
+            recordSpokenAnswer(at: Date())
         case "output_audio_buffer.stopped", "output_audio_buffer.cleared":
             // Cleared because the person started speaking over the answer: they are still being heard.
             if phase != .hearing { phase = calls.contains { $0.state == .running } ? .thinking : .listening }
@@ -838,27 +1299,143 @@ final class VoiceModel {
         case "response.output_item.done":
             guard let item = event["item"] as? [String: Any], item["type"] as? String == "function_call",
                   let id = item["call_id"] as? String, let name = item["name"] as? String else { return }
-            run(VoiceCall(id: id, name: name, arguments: item["arguments"] as? String ?? "{}", session: number))
+            run(VoiceCall(id: id, name: name, arguments: item["arguments"] as? String ?? "{}", session: number,
+                          delegation: event["delegation_id"] as? String))
         case "error":
             let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "unknown error"
             log.add("voice", "realtime error: \(message)")
             // An error can be all the server sends after the person spoke, or the answer to Poki's own
             // response.create; no answer is coming then. An error about something else, while Poki's
             // request for an answer is out, leaves that answer expected.
-            let about = (event["error"] as? [String: Any])?["event_id"] as? String
-            if requestedAnswer == nil || about == requestedAnswer {
+            let error = event["error"] as? [String: Any]
+            let about = (error?["client_event_id"] ?? error?["event_id"]) as? String
+            if let about, liveResultReceipts.removeValue(forKey: about) != nil {
+                endIfDone()
+                return
+            }
+            if let pending = requestedAnswer, about == pending {
                 awaitingAnswer = false
                 requestedAnswer = nil
+                liveAwaitingPlayback = false
+            } else if requestedAnswer == nil, !usesLive || about == nil {
+                awaitingAnswer = false
             }
+            if manualRealtimeTurns, pendingRealtimeTurns > 0 { flush() }
             endIfDone()
         default:
             break
         }
     }
 
+    private func recordSpokenAnswer(at start: Date) {
+        guard let said = clock.said, let delivered = clock.delivered, clock.spoken == nil else { return }
+        clock.spoken = start
+        let elapsed = Int(start.timeIntervalSince(said) * 1000)
+        lastTurnMS = elapsed
+        log.add("voice", "turn: end of speech to spoken result \(elapsed) ms (tool result in \(Int(delivered.timeIntervalSince(said) * 1000)) ms)")
+    }
+
+    private func appendLiveCaption(_ text: String, role: VoiceLine.Role, start: Int, end: Int) {
+        if let previous = liveCaptions[role], lines.indices.contains(previous.index), start - previous.end < 600 {
+            lines[previous.index].text += text
+            liveCaptions[role] = (previous.index, max(end, previous.end))
+        } else {
+            liveCaptions[role] = (lines.count, end)
+            lines.append(VoiceLine(role: role, text: text))
+        }
+    }
+
+    private func stopped(_ call: VoiceCall) -> Bool {
+        if livePhoneOperations[call.id]?.isCancelled == true { return true }
+        guard usesLive, call.session == session else { return false }
+        // After cancellation, only a tool tied to a new delegation can start.
+        guard let id = call.delegation, let state = liveDelegations[id] else { return liveHasCancellation }
+        return state == .cancelled
+    }
+
+    private static let liveStopPhrases: Set<String> = ["停", "停止", "停一下", "别动", "别做了", "stop", "cancel"]
+    private static let liveBackchannels: Set<String> = ["嗯", "哦", "好的", "好", "uh-huh", "mm-hmm"]
+
+    private func appendLiveSpeech(_ text: String, audio: Range<Int>?, itemID: String?) {
+        if let itemID, itemID != liveCallerSpeech.itemID {
+            liveCallerSpeech.begin(itemID: itemID)
+        } else if !liveCallerSpeech.hasSpeechStartEvents, liveCallerSpeech.itemID == nil, let audio,
+                  liveCallerSpeech.end > 0, audio.lowerBound >= liveCallerSpeech.end {
+            let preceding = Self.liveSpeechParts(liveCallerSpeech.text)
+            let joined = Self.liveSpeechParts(liveCallerSpeech.text + text)
+            let afterAcknowledgment = preceding.allSatisfy(Self.liveBackchannels.contains) && !joined.allSatisfy(Self.liveBackchannels.contains)
+            let afterStop = Self.liveRequestsStop(preceding) && !Self.liveRequestsStop(joined)
+            if preceding.isEmpty || afterAcknowledgment || afterStop || audio.lowerBound - liveCallerSpeech.end >= 600 {
+                liveCallerSpeech.begin(itemID: nil)
+            }
+        }
+        liveCallerSpeech.append(text, audio: audio, received: lastActivity)
+    }
+
+    /// Match whole clauses of the caller's speech since delegation, independent of subtitle grouping.
+    private static func liveSpeechParts(_ text: String) -> [String] {
+        text.lowercased().split { ",，。.!！?？;；".contains($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func liveRequestsStop(_ parts: [String]) -> Bool {
+        guard let first = parts.first, liveStopPhrases.contains(first) else { return false }
+        return parts.dropFirst().allSatisfy { part in liveStopPhrases.contains { $0.hasPrefix(part) } }
+    }
+
+    private func cancelLiveTask() {
+        liveDelegations = liveDelegations.mapValues { $0.canRunTools ? .cancelled : $0 }
+        liveHasCancellation = true
+        for operation in livePhoneOperations.values { operation.cancel() }
+        activeResponse = nil
+        wantsResponse = false
+        awaitingAnswer = false
+        requestedAnswer = nil
+        liveContinuationAfter = nil
+        liveAwaitingPlayback = false
+    }
+
+    private func completeLiveControl(_ call: VoiceCall, state: VoiceCall.State, output: String) {
+        var result = call
+        result.state = state
+        result.output = output
+        result.finished = Date()
+        result.delivered = ready && link?.send(["type": "response.item.create", "item": [
+            "type": "function_call_output", "call_id": call.id, "output": output,
+        ]]) == true
+        if let index = calls.firstIndex(where: { $0.id == call.id }) { calls[index] = result }
+        else { calls.append(result) }
+        if phase == .thinking, !answerDue { phase = .listening }
+        endIfDone()
+    }
+
+    private static let stoppedStep = "The user cancelled the task. This step did not run."
+
+    private func resumeLiveAudio(_ link: VoiceConnection) {
+        guard liveSpeechStopped else { return }
+        liveSpeechStopped = false
+        link.setRemoteVolume(muted ? 0 : 1)
+    }
+
     /// Runs a call once. The same call_id again (a repeated event) is ignored.
     private func run(_ call: VoiceCall) {
         guard !calls.contains(where: { $0.id == call.id }) else { return }
+        if usesLive, let refusal = call.delegation.flatMap({ liveDelegations[$0] })?.refusal {
+            completeLiveControl(call, state: .failed, output: refusal)
+            return
+        }
+        if usesLive, call.name == VoiceDirect.cancelCurrentTask {
+            if call.delegation.flatMap({ liveDelegations[$0] }) != .cancelled { cancelLiveTask() }
+            completeLiveControl(call, state: .done, output: "Cancelled further steps. A phone action already running may finish.")
+            return
+        }
+        if stopped(call) {
+            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+            return
+        }
+        var call = call
+        call.silentResult = usesLive && liveSpeechStopped
         calls.append(call)
         clock.call = clock.call ?? Date()
         clock.callNames.append(call.name)
@@ -867,12 +1444,37 @@ final class VoiceModel {
         log.add("voice", "tool \(call.name) \(call.arguments)")
         let local = localTools.contains(call.name)
         let bridge = bridge
+        let live = usesLive
+        let describeScreen = liveScreenDescription
         Task {
+            if stopped(call) {
+                completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                return
+            }
+            if live, call.session == session, let id = call.delegation {
+                if case .awaitingFirstTool(let audio, let fallback) = liveDelegations[id] {
+                    // Two delegations can arrive before either tool starts.
+                    if fallback != nil && liveCallerSpeech.executedAudio.contains(where: audio.overlaps) {
+                        liveDelegations[id] = .duplicate
+                    } else {
+                        liveCallerSpeech.executedAudio.insert(audio)
+                        if let fallback { liveCallerSpeech.remember(fallback) }
+                        liveDelegations[id] = .active
+                    }
+                }
+                if let refusal = liveDelegations[id]?.refusal {
+                    completeLiveControl(call, state: .failed, output: refusal)
+                    return
+                }
+            }
+            let operation = live ? PhoneOperationCancellation() : nil
+            livePhoneOperations[call.id] = operation
+            defer { livePhoneOperations.removeValue(forKey: call.id) }
             var state = VoiceCall.State.done
             var output: String
             var screen: Data?
             if local, Self.phoneTools.contains(call.name) {
-                let answer = await phoneTool(call.name, call.arguments)
+                let answer = await phoneTool(call.name, call.arguments, operation)
                 output = answer.text.count > 6000 ? String(answer.text.prefix(6000)) + "…" : answer.text
                 screen = answer.screen
                 if answer.failed { state = .failed }
@@ -883,9 +1485,17 @@ final class VoiceModel {
                     var result = try await bridge.run(callID: call.id, name: call.name, arguments: call.arguments)
                     var note = ""
                     if result.state == "check", let target = result.target {
+                        if stopped(call) {
+                            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                            return
+                        }
                         // A tap: Poki's approval rules first, and the owner's OK on the phone when they ask for it.
                         let app = result.app
                         let clearance = await clearTap(target.says, app?.bundle_id, app?.name)
+                        if stopped(call) {
+                            completeLiveControl(call, state: .failed, output: Self.stoppedStep)
+                            return
+                        }
                         if clearance.mayTap {
                             if case .approved(let why) = clearance { note = "The user allowed it on the phone (\(why)). "; log.add("voice", "tap approved: \(why)") }
                             var checked = ["text": target.text]
@@ -907,7 +1517,17 @@ final class VoiceModel {
                 output = "error: no voice bridge"
                 state = .failed
             }
-            finish(call.id, state: state, output: output, screen: screen)
+            if live, let screen {
+                if let describeScreen {
+                    if call.session == session, ready, !stopped(call), let image = VoiceScreen.dataURL(screen),
+                       let description = try? await describeScreen(image) {
+                        output += "\nCurrent screen description: " + description
+                    }
+                } else {
+                    output += "\nScreenshot descriptions require an HTTPS voice bridge. Use the screen elements."
+                }
+            }
+            finish(call.id, state: state, output: output, screen: live ? nil : screen)
         }
     }
 
@@ -919,25 +1539,56 @@ final class VoiceModel {
         calls[index].finished = Date()
         clock.toolDone = Date()
         log.add("voice", "tool \(calls[index].name) \(state == .done ? "done" : "failed")")
+        if calls[index].silentResult {
+            if phase == .thinking, !answerDue { phase = .listening }
+            endIfDone()
+            return
+        }
         deliver(index)
     }
 
     /// Hands a finished call to the model: as its function_call_output in the session that asked, or as a
     /// note in a later session. With no session, it waits for the next one.
     private func deliver(_ index: Int) {
-        guard let link, ready, !calls[index].delivered, calls[index].state != .running else { return }
+        guard let link, ready, !calls[index].delivered, !calls[index].silentResult, calls[index].state != .running else { return }
         let call = calls[index]
-        let sent = call.session == session
-            ? link.send(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": call.id, "output": call.output]])
-            : link.send(Self.note("While the connection was down, \(call.name) \(call.arguments) finished. It already ran; do not run it again. Tell the user in one sentence how it ended. Result: \(call.output)"))
+        let sameSession = call.session == session
+        if usesLive && !sameSession {
+            reportLiveReconnect(call, on: link)
+            return
+        }
+        let itemEvent = usesLive ? "response.item.create" : "conversation.item.create"
+        let reconnect = "While the connection was down, \(call.name) \(call.arguments) finished. It already ran; do not run it again. Tell the user in one sentence how it ended. Result: \(call.output)"
+        let sent = sameSession
+            ? link.send(["type": itemEvent, "item": ["type": "function_call_output", "call_id": call.id, "output": call.output]])
+            : link.send(note(reconnect, spoken: true))
         guard sent else { return }
-        if call.session == session, let screen = call.screen { show(screen, on: link) }
+        if !usesLive, sameSession, let screen = call.screen { show(screen, on: link) }
         calls[index].screen = nil
         calls[index].delivered = true
         lastActivity = time.now()
         clock.delivered = Date()
-        wantsResponse = true
+        if usesLive, stopped(call) {
+            endIfDone()
+            return
+        }
+        wantsResponse = sameSession || !usesLive
         flush()
+    }
+
+    private func reportLiveReconnect(_ call: VoiceCall, on link: VoiceConnection) {
+        let id = "reconnect-\(call.id)"
+        guard liveResultReceipts[id] == nil else { return }
+        let raw = call.output.utf8
+        let result = raw.count <= 360 ? call.output
+            : String(decoding: raw.prefix(176), as: UTF8.self) + " … " + String(decoding: raw.suffix(176), as: UTF8.self)
+        let status = call.state == .done ? "finished" : "failed"
+        var event = note("A previous \(call.name) step \(status). Do not repeat it. Report this result in one sentence: \(result)", spoken: true)
+        event["event_id"] = id
+        guard link.send(event) else { return }
+        liveResultReceipts[id] = call.id
+        lastActivity = time.now()
+        keepOpen()
     }
 
     /// A function_call_output carries text only, so the screenshot behind it follows as an image in a
@@ -956,22 +1607,30 @@ final class VoiceModel {
 
     /// A new session after a drop: say what already ran, so the model reports it instead of asking again.
     private func catchUp(_ link: VoiceConnection) {
-        let running = calls.filter { $0.state == .running }
+        let running = calls.filter { $0.state == .running && !$0.silentResult }
         if !running.isEmpty {
-            link.send(Self.note("Before the connection dropped, these were started and are still running; their results will follow. Do not start them again: " + running.map { "\($0.name) \($0.arguments)" }.joined(separator: "; ")))
+            let steps = running.map { usesLive ? $0.name : "\($0.name) \($0.arguments)" }
+            link.send(note("Before the connection dropped, these were started and are still running. Their results will follow. Do not start them again: " + steps.joined(separator: ", ")))
         }
         for index in calls.indices where calls[index].state != .running && !calls[index].delivered { deliver(index) }
     }
 
     /// Asks for a response once none is active (the API takes one at a time).
     private func flush() {
-        guard wantsResponse, activeResponse == nil, ready, let link else { return }
-        wantsResponse = false
-        awaitingAnswer = true
+        guard wantsResponse || pendingRealtimeTurns > 0,
+              usesLive || (activeResponse == nil && requestedAnswer == nil), ready, let link else { return }
         let id = UUID().uuidString
+        guard link.send(["type": "response.create", "event_id": id]) else { return }
+        wantsResponse = false
+        if pendingRealtimeTurns > 0 { pendingRealtimeTurns -= 1 }
+        awaitingAnswer = true
         requestedAnswer = id
+        if usesLive {
+            liveContinuationAfter = activeResponse
+            liveAwaitingPlayback = true
+            keepOpen()
+        }
         lastActivity = time.now()
-        link.send(["type": "response.create", "event_id": id])
     }
 
     // MARK: Test runs (development builds only)
@@ -1038,8 +1697,32 @@ final class VoiceModel {
         return VoiceBridge.ToolResult(state: "failed", output: output)
     }
 
-    private static func note(_ text: String) -> [String: Any] {
-        ["type": "conversation.item.create", "item": ["type": "message", "role": "system", "content": [["type": "input_text", "text": text]]]]
+    private func note(_ text: String, spoken: Bool = false) -> [String: Any] {
+        if usesLive {
+            // Every token consumes at least one byte.
+            return ["type": spoken ? "session.commentary.append" : "session.instructions.append",
+                    "delegation_id": NSNull(), "content": Self.utf8Prefix(text, bytes: Self.liveNoteByteLimit)]
+        }
+        return ["type": "conversation.item.create", "item": ["type": "message", "role": "system", "content": [["type": "input_text", "text": text]]]]
+    }
+
+    private static func liveExcerpt(_ text: String, bytes limit: Int) -> String {
+        guard text.utf8.count > limit else { return text }
+        let separator = " … "
+        let budget = limit - separator.utf8.count
+        let head = utf8Prefix(text, bytes: budget / 2)
+        let tail = text.utf8.suffix(budget - budget / 2).drop { $0 & 0xC0 == 0x80 }
+        return head + separator + String(decoding: tail, as: UTF8.self)
+    }
+
+    private static func utf8Prefix(_ text: String, bytes limit: Int) -> String {
+        let bytes = text.utf8
+        guard let end = bytes.index(bytes.startIndex, offsetBy: limit, limitedBy: bytes.endIndex) else { return text }
+        var boundary = end
+        while boundary != bytes.endIndex, bytes[boundary] & 0xC0 == 0x80 {
+            bytes.formIndex(before: &boundary)
+        }
+        return String(decoding: bytes[..<boundary], as: UTF8.self)
     }
 
     private static func describe(_ call: VoiceCall) -> String {
