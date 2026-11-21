@@ -37,8 +37,12 @@ final class ModelServerStub: URLProtocol {
     override func startLoading() {
         let body = Self.bodyData(from: request)
         let customResponder = Self.lock.withLock { () -> (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))? in
+            // Only inspect non-secret routing fields in tests: never retain
+            // Authorization, API keys, cookies or other credential headers.
+            let visible: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
             let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into: [String: String]()) { result, field in
-                result[field.key.lowercased()] = field.value
+                let name = field.key.lowercased()
+                if visible.contains(name) { result[name] = field.value }
             }
             Self.recorded.append(Sent(url: request.url, body: body, headers: headers))
             return Self.responder
