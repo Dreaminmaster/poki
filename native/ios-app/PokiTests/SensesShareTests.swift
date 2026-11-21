@@ -16,7 +16,7 @@ final class SensesShareTests: XCTestCase {
 
     func testItemLineBecomesTheItem() {
         let entries = reads("com.xingin.discover", from: Date(), count: 3, every: 60)
-        let name = HistoryNames.app("com.xingin.discover")
+        let name = HistoryAppNames.name("com.xingin.discover")
         let share = SensesShare.parse("A post on \(name).\nITEM: \(name) | “A short proof”", entries: entries)
         XCTAssertEqual(share?.item?.title, "A short proof")
         XCTAssertFalse(share?.answer.contains("ITEM") ?? true)
