@@ -30,20 +30,23 @@ enum AppAudioContext {
         return notes
     }
 
-    static func recent() async -> Self? {
-        guard let directory = AppAudioCapture.directory,
-              let id = AppAudioCapture.currentBroadcast(in: directory) else { return nil }
-        guard let clip = AppAudioCapture.recentClip(in: directory), clip.id == id else { return .unavailable }
-        let text = try? await transcribe(clip.pcm, locale: Locale(identifier: AppLocalization.language))
-        guard AppAudioCapture.currentBroadcast(in: directory) == id,
+    @MainActor static func recent() async -> Self? {
+        #if os(iOS) && canImport(ScreenCaptureKit)
+        guard #available(iOS 27, *), let buffer = AppAudioCapture.shared.buffer,
+              let pcm = buffer.snapshot() else { return nil }
+        let text = try? await transcribe(pcm, locale: Locale(identifier: AppLocalization.language))
+        guard buffer.isActive,
               let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .unavailable }
-        return .transcript(text, stillCapturing: { AppAudioCapture.currentBroadcast(in: directory) == id })
+        return .transcript(text, stillCapturing: { buffer.isActive })
+        #else
+        return nil
+        #endif
     }
 
     static func transcribe(_ pcm: Data, locale: Locale) async throws -> String {
-        guard !pcm.isEmpty, pcm.count <= AppAudioCapture.bytesPerSecond * AppAudioCapture.seconds,
+        guard !pcm.isEmpty, pcm.count <= AppAudioBuffer.capacity,
               pcm.count.isMultiple(of: MemoryLayout<Int16>.size),
-              let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(AppAudioCapture.sampleRate),
+              let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(AppAudioBuffer.sampleRate),
                                          channels: 1, interleaved: true),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)),
               let samples = buffer.int16ChannelData?.pointee else { return "" }

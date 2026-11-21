@@ -238,8 +238,8 @@ Which build to sign depends on the Apple account:
 
 | Apple account | Build | Local connection | Signing |
 |---|---|---|---|
-| Paid Apple Developer Program team | `Poki-unsigned.ipa` (`project.yml`) | Built-in, or an external VPN app | App IDs and development or ad hoc profiles for Poki, `.widgets`, `.app-audio` and `.tunnel`. Enable App Groups on Poki, `.widgets` and `.app-audio`. Enable Network Extensions (packet tunnel) on Poki and `.tunnel`. |
-| Free Apple ID (Personal Team) | `Poki-external-unsigned.ipa` (`project-external.yml`) | An external VPN app or LocalDevVPN only | App IDs and profiles for Poki, `.widgets` and `.app-audio`. Poki Setup rewrites the group for the signing team. Apple limits a Personal Team to ten App IDs per seven days and three apps on a device at a time. [Apple account limits](https://developer.apple.com/help/account/basics/about-your-developer-account/). |
+| Paid Apple Developer Program team | `Poki-unsigned.ipa` (`project.yml`) | Built-in, or an external VPN app | App IDs for Poki, `.widgets` and `.tunnel`; the App Group on Poki and `.widgets`; Network Extensions (packet tunnel) on Poki and `.tunnel`; a development or ad-hoc profile for each of the three. |
+| Free Apple ID (Personal Team) | `Poki-external-unsigned.ipa` (`project-external.yml`) | An external VPN app or LocalDevVPN only | The App Group on Poki and `.widgets` (signing tools rewrite it per Apple ID). Apps signed this way expire after 7 days, and only 3 can be installed at a time; Poki uses one (two with Poki Runner on the Runner path). |
 
 On the Runner path, sign Poki Runner with the same account as Poki in both cases.
 
@@ -250,9 +250,9 @@ app and its extension. CI includes the generated entitlements in `Poki-signing.z
 
 For a team that does not own the default identifiers, set `POKI_BUNDLE_ID`, `POKI_APP_GROUP` and
 optionally `POKI_DISPLAY_NAME` in Xcode or the `xcodebuild` invocation. Register the App Group and
-associate it with the app, widget, and broadcast identifiers in the developer portal before provisioning.
-Each bundle reads that same group from its built Info.plist. Do not reuse another app's group just to
-make signing pass.
+associate it with both the app and widget identifiers in the developer portal before provisioning.
+The app and widget read that same group from their built Info.plist; approval notifications are
+namespaced to it. Do not reuse another app's group just to make signing pass.
 
 `project-external.yml` builds the same app without the tunnel or its Network Extension entitlement:
 
@@ -264,9 +264,6 @@ open native/ios-app/PokiExternal.xcodeproj
 CI produces `Poki-unsigned.ipa` and `Poki-external-unsigned.ipa`. Choose one; on the Runner path,
 also install Poki Runner with the same signing. The external build retains the App Group requirement for approvals and
 thumbnails; it does not solve other free-account signing restrictions.
-
-See [App audio in voice conversations](APP-AUDIO.md) for system capture, playback support, and the
-on-device checks for the broadcast extension.
 
 ## Loopback choices
 

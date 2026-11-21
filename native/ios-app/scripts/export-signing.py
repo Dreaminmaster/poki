@@ -15,7 +15,6 @@ if not group.startswith("group.") or "$" in group:
 templates = {
     "Poki": root / "Poki" / ("PokiLocal.entitlements" if edition == "local" else "Poki.entitlements"),
     "PokiWidgets": root / "PokiWidgets/PokiWidgets.entitlements",
-    "PokiBroadcast": root / "PokiBroadcast/PokiBroadcast.entitlements",
 }
 if edition == "local":
     templates["PokiTunnel"] = root / "PokiTunnel/PokiTunnel.entitlements"
