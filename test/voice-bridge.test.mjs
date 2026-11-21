@@ -86,9 +86,10 @@ test('the voice bridge exchanges a Live offer and returns only the SDP answer', 
     assert.match(prompt, /把停字发过去/);
   }
   assert.match(session.instructions, /Chinese/i);
-  assert.match(session.instructions, /Act first, then talk\./);
-  assert.match(session.instructions, /Say nothing before or between tool calls\./);
-  assert.match(session.instructions, /Give the verified result in one short sentence\./);
+  assert.match(session.instructions, /Before delegating a new task, say one short sentence about what you will do\./);
+  assert.match(session.instructions, /give one short progress update when a meaningful step is confirmed and more work remains/);
+  assert.match(session.instructions, /state the verified result and ask one brief, specific follow-up question/);
+  assert.match(session.instructions, /For casual chat, reply in two or three short sentences/);
 });
 
 test('each Live screenshot uses its own unsaved vision request', async t => {

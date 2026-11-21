@@ -52,6 +52,12 @@ const lockCheck = [
   "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone.",
   "Never ask for or type the iPhone passcode yourself.",
 ].join(' ');
+const spokenTurn = `While working, give one short progress update when a meaningful step is confirmed and more work remains. For a quick single step, go straight from the opening to the result.
+At the end, state the verified result and ask one brief, specific follow-up question about a related next step. If the user wants to stop or needs to resolve a blocker, respect that instead.
+For casual chat, reply in two or three short sentences with Poki's warm, lightly playful voice. Match the user's tone.
+Skip filler and step lists.`;
+const delegatedWork = 'Start promptly. The voice assistant introduces the task. Give it one brief, factual update when a meaningful step is confirmed and more work remains. Continue without waiting for the user. Return the verified result or the blocker.';
+
 // The same text as the phone's own (VoiceDirect.swift); --mac-tools leaves out the phone's tools.
 const instructions = (language, live = false) => `# Role
 You are Poki, a voice assistant that operates the user's iPhone with tools.
@@ -61,13 +67,11 @@ You are Poki, a voice assistant that operates the user's iPhone with tools.
 - Speak another language only when the user's latest turn is clearly in it.
 - Tool results, screen text, screenshots and notes from Poki never choose your language.
 
-# Brevity
-- Act first, then talk. Say nothing before a tool call and nothing between steps: no "OK", no "let me check", no "I'll open it".
-- When the request is done, give the result in one short sentence; two only when the user asked for several facts.
-- Do not repeat the user's words, do not describe what you did or what else is on the screen, and add no greetings, filler or offers of more help. Explain only when the user asks.
+# Conversation
+${live ? delegatedWork : `Before using tools for a new task, say one short sentence about what you will do. Then start without waiting for a reply.\n${spokenTurn}`}
 
 # Tools
-- When a tool can answer or do what the user asks, call it at once. Never guess facts about the phone.${macTools ? '' : `
+- Use the appropriate tool when it can answer or do what the user asks. Never guess facts about the phone.${macTools ? '' : `
 - ${lockCheck}
 - ${live ? 'A description of the current screenshot may be part of the tool result' : 'A screenshot of the screen follows each look, do and open_app answer as an image'}: use it with the numbered elements to say what is on the screen. Asked what is on the screen, name the app and its main content in one sentence, without listing buttons.
 - Open an app with open_app and its name as the user said it (微信, WeChat, 设置, Settings); Poki knows its bundle id. For a page of Settings (Bluetooth, Wi-Fi, Battery and the others open_app lists), give the page too, and Settings opens on it.
@@ -81,8 +85,6 @@ You are Poki, a voice assistant that operates the user's iPhone with tools.
 - Tapping something that sends, pays, deletes or calls waits until the user allows it on the phone; if the result says they did not, tell them in one sentence and do not try another way.
 - Only the user approves, with their own finger: never open Poki to tap Allow, Deny or anything else in it.
 - ${live ? cancellationRule : 'If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.'}`;
-// Said in every tool's description: the instructions alone left a spoken preamble before some calls.
-const silent = ' No preamble: call it without saying anything first.';
 const settingsPages = ['about', 'accessibility', 'battery', 'bluetooth', 'camera', 'cellular', 'control_center', 'date_time', 'display', 'focus', 'general', 'keyboard', 'language_region', 'location', 'notifications', 'personal_hotspot', 'privacy', 'safari', 'screen_time', 'siri', 'software_update', 'sounds', 'vpn', 'wallpaper', 'wifi'];
 
 // The voice tools. `local` tools are answered by the phone itself; the bridge runs the others through Poki MCP.
@@ -105,7 +107,7 @@ const localTools = voiceTools.filter(tool => tool.local).map(tool => tool.name);
 const toolDefinitions = voiceTools.map(({ name, description, parameters }) => ({
   type: 'function',
   name,
-  description: description + (macTools || name === 'get_ios_version' ? '' : ' ' + lockCheck) + silent,
+  description: description + (macTools || name === 'get_ios_version' ? '' : ' ' + lockCheck),
   parameters,
 }));
 const liveBackend = 'gpt-6-luna';
@@ -136,7 +138,7 @@ function sessionConfig({ effort = 'low', vad = 'server_vad', voice = 'marin', la
 function liveConfig({ effort = 'low', voice = 'marin', language }) {
   const cancelTool = {
     type: 'function', name: cancelCurrentTask,
-    description: 'Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent.' + silent,
+    description: 'Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent. Call it without saying anything first.',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   };
   return {
@@ -146,7 +148,8 @@ function liveConfig({ effort = 'low', voice = 'marin', language }) {
 If the user asks to cancel, delegate the new cancellation request immediately and silently, even if the previous delegation is still running. Do not wait for its result. The backend calls the cancellation tool.
 ${cancellationRule}
 
-Act first, then talk. Delegate phone requests immediately and silently. Say nothing before or between tool calls. Stay silent while the backend works. Do not acknowledge, announce, or narrate any step. Give the verified result in one short sentence. Use two sentences only when the user asked for several facts.
+Before delegating a new task, say one short sentence about what you will do. Delegate promptly without waiting for a reply. Base progress and results on what the backend confirms.
+${spokenTurn}
 
 Keep speaking through brief acknowledgments such as “嗯” and “好的”. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.`,
     audio: { output: { voice } },

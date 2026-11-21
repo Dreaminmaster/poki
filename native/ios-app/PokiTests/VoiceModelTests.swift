@@ -1021,13 +1021,18 @@ final class OpenAIStub: URLProtocol {
 }
 
 final class VoiceLanguageTests: XCTestCase {
-    func testDirectLiveVoiceInstructionsAskForTheResultOnly() async throws {
+    func testDirectLiveVoiceInstructionsCoverTaskStagesAndCasualChat() async throws {
         URLProtocol.registerClass(OpenAIStub.self)
         defer { URLProtocol.unregisterClass(OpenAIStub.self) }
         let answer = try await VoiceDirect.exchangeLiveOffer("offer", model: "gpt-live-1.1", apiKey: "sk-test")
         XCTAssertEqual(answer, "sdp-answer")
         let prompt = try XCTUnwrap(OpenAIStub.session?["instructions"] as? String)
-        for rule in ["Act first, then talk.", "Say nothing before or between tool calls.", "Give the verified result in one short sentence."] {
+        for rule in [
+            "Before delegating a new task, say one short sentence about what you will do.",
+            "give one short progress update when a meaningful step is confirmed and more work remains",
+            "state the verified result and ask one brief, specific follow-up question",
+            "For casual chat, reply in two or three short sentences",
+        ] {
             XCTAssertTrue(prompt.contains(rule), rule)
         }
     }

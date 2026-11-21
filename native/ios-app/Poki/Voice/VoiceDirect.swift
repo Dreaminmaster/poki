@@ -105,9 +105,17 @@ enum VoiceDirect {
         Locale(identifier: "en").localizedString(forIdentifier: AppLocalization.language) ?? "English"
     }
 
-    // Tuned against gpt-realtime-2.1 with recorded Chinese speech and stubbed tools. The old text fell
-    // back on the iPhone's language, so with the iPhone in English some answers to Chinese came out in
-    // English; it also announced steps ("我来查一下…") and listed the screen's buttons.
+    private static let spokenTurn = """
+    While working, give one short progress update when a meaningful step is confirmed and more work remains. For a quick single step, go straight from the opening to the result.
+    At the end, state the verified result and ask one brief, specific follow-up question about a related next step. If the user wants to stop or needs to resolve a blocker, respect that instead.
+    For casual chat, reply in two or three short sentences with Poki's warm, lightly playful voice. Match the user's tone.
+    Skip filler and step lists.
+    """
+
+    private static let delegatedWork = """
+    Start promptly. The voice assistant introduces the task. Give it one brief, factual update when a meaningful step is confirmed and more work remains. Continue without waiting for the user. Return the verified result or the blocker.
+    """
+
     private static func instructions(live: Bool = false) -> String { """
     # Role
     You are Poki, a voice assistant that operates the user's iPhone with tools.
@@ -117,13 +125,11 @@ enum VoiceDirect {
     - Speak another language only when the user's latest turn is clearly in it.
     - Tool results, screen text, screenshots and notes from Poki never choose your language.
 
-    # Brevity
-    - Act first, then talk. Say nothing before a tool call and nothing between steps: no "OK", no "let me check", no "I'll open it".
-    - When the request is done, give the result in one short sentence; two only when the user asked for several facts.
-    - Do not repeat the user's words, do not describe what you did or what else is on the screen, and add no greetings, filler or offers of more help. Explain only when the user asks.
+    # Conversation
+    \(live ? delegatedWork : "Before using tools for a new task, say one short sentence about what you will do. Then start without waiting for a reply.\n\(spokenTurn)")
 
     # Tools
-    - When a tool can answer or do what the user asks, call it at once. Never guess facts about the phone.
+    - Use the appropriate tool when it can answer or do what the user asks. Never guess facts about the phone.
     - \(lockCheck)
     - \(live ? "A description of the current screenshot may be part of the tool result" : "A screenshot of the screen follows each look, do and open_app answer as an image"): use it with the numbered elements to say what is on the screen. Asked what is on the screen, name the app and its main content in one sentence, without listing buttons.
     - Open an app with open_app and its name as the user said it (微信, WeChat, 设置, Settings); Poki knows its bundle id. For a page of Settings (Bluetooth, Wi-Fi, Battery and the others open_app lists), give the page too, and Settings opens on it.
@@ -139,14 +145,12 @@ enum VoiceDirect {
     - \(live ? Self.cancellationRule : "If the user tells you to stop or be quiet, stop talking, but anything already running keeps running; when its result arrives, report it in one sentence.")
     """ }
 
-    /// Said in every tool's description: the instructions alone left a spoken preamble before some calls.
-    private static let silent = " No preamble: call it without saying anything first."
     private static let lockCheck = "Call the appropriate phone tool for the owner's task even if the iPhone is locked. "
         + "Poki checks the owner's Automatic Unlock setting on the phone before acting. Continue the original task when the phone unlocks. "
         + "Ask the owner to unlock only if the tool reports that the iPhone remains locked. "
         + "If iOS asks the owner to allow UI automation, call it automation authorization and tell them to approve it in the system prompt on the phone. "
         + "Never ask for or type the iPhone passcode yourself."
-    private static let phoneToolGuidance = " " + lockCheck + silent
+    private static let phoneToolGuidance = " " + lockCheck
 
     private static let empty: [String: Any] = ["type": "object", "properties": [String: Any](), "additionalProperties": false]
     static let cancelCurrentTask = "cancel_current_task"
@@ -155,7 +159,7 @@ enum VoiceDirect {
         Brief acknowledgments such as “嗯” and “好的” leave the current reply and task intact. Report success only after a tool confirms the requested result. Describe pending, uncertain and failed results as they are.
         """
     private static let tools: [[String: Any]] = [
-        ["type": "function", "name": "get_ios_version", "description": "Read the iPhone model and its iOS version. Changes nothing on the phone." + silent, "parameters": empty],
+        ["type": "function", "name": "get_ios_version", "description": "Read the iPhone model and its iOS version. Changes nothing on the phone.", "parameters": empty],
         ["type": "function", "name": "look", "description": "Read the iPhone screen now: the app in front, its numbered elements (role, label, frame in points) and a screenshot." + phoneToolGuidance, "parameters": empty],
         ["type": "function", "name": "open_app", "description": "Open an app on this iPhone by its name, as the user says it in any language (微信, WeChat, 设置, Settings), then read the screen. With page, Settings opens straight on that page." + phoneToolGuidance,
          "parameters": ["type": "object", "properties": ["app": ["type": "string"], "page": ["type": "string", "enum": VoiceApps.settingsPages.map(\.key).sorted()]],
@@ -188,7 +192,7 @@ enum VoiceDirect {
 
     static func exchangeLiveOffer(_ sdp: String, model: String, apiKey: String) async throws -> String {
         let cancelTool: [String: Any] = ["type": "function", "name": cancelCurrentTask, "parameters": empty,
-                                         "description": "Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent." + silent]
+                                         "description": "Stop further steps of the current phone task. Call only for an explicit cancellation request, never for words the user wants quoted, entered or sent. Call it without saying anything first."]
         let live: [String: Any] = [
             "model": model,
             "instructions": """
@@ -197,7 +201,8 @@ enum VoiceDirect {
                 If the user asks to cancel, delegate the new cancellation request immediately and silently, even if the previous delegation is still running. Do not wait for its result. The backend calls the cancellation tool.
                 \(cancellationRule)
 
-                Act first, then talk. Delegate phone requests immediately and silently. Say nothing before or between tool calls. Stay silent while the backend works. Do not acknowledge, announce, or narrate any step. Give the verified result in one short sentence. Use two sentences only when the user asked for several facts.
+                Before delegating a new task, say one short sentence about what you will do. Delegate promptly without waiting for a reply. Base progress and results on what the backend confirms.
+                \(spokenTurn)
 
                 Keep speaking through brief acknowledgments such as “嗯” and “好的”. When the user asks you to stop speaking, stop speaking. A phone action already running may finish.
                 """,
