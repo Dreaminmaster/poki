@@ -1145,13 +1145,14 @@ final class Computer: @unchecked Sendable {
         let matchingScope = sensitive.map { approvalScope(Array(actions[$0.at...]), afterPrefix: Array(actions[..<$0.at])) }
         // Any other actions withdraw an unconsumed request or grant so stale approvals never carry over.
         // The owner's voice leaves the agent's unused grant in place.
-        approvals.withdrawMismatching(scope: matchingScope, workspaceSession: workspaceSession, keepingGrant: byOwnersVoice)
+        approvals.withdrawMismatching(scope: matchingScope, workspaceSession: workspaceSession,
+                                      sourceSession: local ? nil : session, keepingGrant: byOwnersVoice)
         // The gated actions on their own, on the screen the model saw, before anything is sent.
         let gatedAlone = sensitive.map { approvalScope(Array(actions[$0.at...])) }
         if let (at, reason) = sensitive {
             let tail = Array(actions[at...])
             let scope = matchingScope!
-            if approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil {
+            if approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession, sourceSession: local ? nil : session) != nil {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
@@ -1160,7 +1161,7 @@ final class Computer: @unchecked Sendable {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
                 }
-                let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
+                let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession, sourceSession: local ? nil : session) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
                                            stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
                                            sourceSession: local ? nil : session)
@@ -1189,7 +1190,7 @@ final class Computer: @unchecked Sendable {
                     // the model would send them again. The approval stays; the same actions sent again run at once.
                     return await refusedAwaitingResend(approval, tail: tail, before: gatedAlone!, at: at, until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner approved on the phone, but too late for this call to send the actions and read the screen before the relay gives up on it.\(sentFirst) The approval is kept: \(again) and they run at once (within \(Int(approvals.lifetime / 60)) minutes).")
                 case .approved?:
-                    guard approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil else {
+                    guard approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession, sourceSession: local ? nil : session) != nil else {
                         return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The approval went to another call with the same actions, so nothing was sent from this one.\(sentFirst) To run them, \(again) and ask again.")
                     }
                     approvedNote = "approval: approved on the phone after \(Int(waited.rounded())) s (\(reason))"
