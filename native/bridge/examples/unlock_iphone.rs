@@ -154,59 +154,108 @@ fn lock_screen(tree: &Json) -> std::result::Result<Screen, &'static str> {
     if width < 2.0 || height < 2.0 {
         return Err("no screen size");
     }
-    let mut title = false;
-    let mut digits: [Option<(f64, f64)>; 10] = [None; 10];
+    // The lock screen's own parts share a container below SpringBoard's root; a notification's text
+    // that reads "Enter Passcode" sits in another one and does not count as the title.
+    let ancestors = |mut i: usize| {
+        let mut up = vec![];
+        for _ in 0..elements.len() {
+            let Some(parent) = elements[i].get("parent").and_then(Json::as_u64) else {
+                break;
+            };
+            let parent = parent as usize;
+            if parent >= elements.len() {
+                break;
+            }
+            if elements[parent]
+                .get("depth")
+                .and_then(Json::as_u64)
+                .unwrap_or(0)
+                > 0
+            {
+                up.push(parent);
+            }
+            i = parent;
+        }
+        up
+    };
+    let mut titles = vec![];
+    let mut digits: [Option<(f64, f64, usize)>; 10] = [None; 10];
     let mut duplicate = false;
     let mut submit = None;
     let mut fields = vec![];
-    for e in elements {
+    for (i, e) in elements.iter().enumerate() {
         let role = text(e, "role");
         let label = text(e, "label");
         let enabled = e.get("enabled").and_then(Json::as_bool) != Some(false);
         if role == "StaticText" && TITLES.iter().any(|t| label.eq_ignore_ascii_case(t)) {
-            title = true;
+            titles.push(i);
         }
         if (role == "Button" || role == "Key") && enabled {
             let mut chars = label.chars();
             if let (Some(d @ '0'..='9'), next) = (chars.next(), chars.next()) {
                 if matches!(next, None | Some(',') | Some(' ')) {
-                    if let Some(point) = on_screen(e, width, height) {
+                    if let Some((x, y)) = on_screen(e, width, height) {
                         let slot = &mut digits[d as usize - '0' as usize];
                         duplicate |= slot.is_some();
-                        *slot = Some(point);
+                        *slot = Some((x, y, i));
                     }
                 }
             } else if SUBMIT.contains(&label) {
-                submit = submit.or(on_screen(e, width, height));
+                submit = submit.or(on_screen(e, width, height).map(|(x, y)| (x, y, i)));
             }
         }
         if role == "SecureTextField" && on_screen(e, width, height).is_some() {
             let value = text(e, "value");
-            fields.push(value.is_empty() || value == text(e, "placeholder"));
+            let empty = value.is_empty() || value == text(e, "placeholder");
+            let focused = e.get("focused").and_then(Json::as_bool) == Some(true);
+            fields.push((i, empty, focused));
         }
     }
-    if !title {
-        return Err("the lock screen's passcode entry is not shown");
-    }
-    if fields.iter().any(|empty| !empty) {
+    if fields.iter().any(|&(_, empty, _)| !empty) {
         return Err("the passcode field already holds text");
     }
+    if titles.is_empty() {
+        return Err("the lock screen's passcode entry is not shown");
+    }
+    let with_title = |i: usize| {
+        let mine = ancestors(i);
+        titles
+            .iter()
+            .any(|&t| ancestors(t).iter().any(|a| mine.contains(a)))
+    };
     if !duplicate && digits.iter().all(Option::is_some) {
         let digits = digits.map(|d| d.unwrap());
+        if !digits.iter().all(|&(_, _, i)| with_title(i)) {
+            return Err("the keypad is not part of the lock screen's passcode entry");
+        }
+        let submit = submit
+            .filter(|&(_, _, i)| with_title(i))
+            .map(|(x, y, _)| (x, y));
         return Ok(Screen {
             width,
             height,
-            entry: Entry::Keypad { digits, submit },
+            entry: Entry::Keypad {
+                digits: digits.map(|(x, y, _)| (x, y)),
+                submit,
+            },
         });
     }
-    if fields.len() == 1 {
-        return Ok(Screen {
-            width,
-            height,
-            entry: Entry::EmptyField,
-        });
+    match fields.as_slice() {
+        [(i, _, focused)] => {
+            if !with_title(*i) {
+                return Err("the passcode field is not part of the lock screen's passcode entry");
+            }
+            if !focused {
+                return Err("the passcode field does not have the keyboard");
+            }
+            Ok(Screen {
+                width,
+                height,
+                entry: Entry::EmptyField,
+            })
+        }
+        _ => Err("no empty passcode entry is on screen"),
     }
-    Err("no empty passcode entry is on screen")
 }
 
 /// How a passcode goes in on the screen read, or why it cannot.
@@ -321,21 +370,24 @@ async fn unlock_checked(udid: &str, pin: &str) -> Result<()> {
     let read = Duration::from_secs(8);
     // A passcode entry already up before the wake may hold digits the owner started typing: the
     // tree cannot show keypad dots, so only an empty field is accepted then.
-    if let Ok(before) = ax::read_tree_with_timeout(&mut adapter, &rsd, false, read).await {
-        match lock_screen(&before) {
+    // Whether the tree read before the wake showed for certain that no keypad was up: only then may
+    // the keypad be used, since its dots are not in the tree.
+    let keypad_was_down = match ax::read_tree_with_timeout(&mut adapter, &rsd, false, read).await {
+        Ok(before) => match lock_screen(&before) {
             Ok(Screen {
                 entry: Entry::EmptyField,
                 ..
-            }) => {}
+            }) => true,
             Ok(_) => {
                 return Err(refused(
                     "the keypad was already up and may hold the owner's digits",
                 ));
             }
             Err(why @ "the passcode field already holds text") => return Err(refused(why)),
-            Err(_) => {}
-        }
-    }
+            Err(_) => true,
+        },
+        Err(_) => false,
+    };
     let mut media = stream::start_screen_media_stream(&mut adapter, &mut rsd, 1).await?;
     let outcome: Result<u128> = async {
         tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -358,6 +410,9 @@ async fn unlock_checked(udid: &str, pin: &str) -> Result<()> {
             return Err(refused(
                 "the lock screen changed while it was being checked",
             ));
+        }
+        if matches!(again.entry, Entry::Keypad { .. }) && !keypad_was_down {
+            return Err(refused("the screen before the wake could not be read, so the keypad may hold the owner's digits"));
         }
         let start = std::time::Instant::now();
         match &again.entry {
@@ -391,6 +446,13 @@ async fn unlock_checked(udid: &str, pin: &str) -> Result<()> {
                     }
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
+                // Submit only if the lock screen is still in front: typed text in a field is not
+                // sent anywhere until Return.
+                let still = ax::read_tree_with_timeout(&mut adapter, &rsd, false, read).await;
+                let front = still.as_ref().ok().and_then(|t| t.get("foreground_app"));
+                if front.and_then(|f| f.get("bundle_id")).and_then(Json::as_str) != Some(SPRINGBOARD) {
+                    return Err(refused("the lock screen was not confirmed in front after typing, so Return was not pressed"));
+                }
                 press(&mut buttons, RETURN).await?;
                 tokio::time::sleep(Duration::from_millis(1000)).await;
             }
@@ -415,12 +477,22 @@ mod unlock_tests {
     use super::*;
     use serde_json::json;
 
+    // SpringBoard's root (0), the passcode entry's container (1) with its title, and `extra` in it.
     fn tree(front: &str, extra: Vec<Json>) -> Json {
         let mut elements = vec![
-            json!({"role":"Application","label":"SpringBoard","frame":{"x":0,"y":0,"width":402,"height":874}}),
-            json!({"role":"StaticText","label":"Enter Passcode","frame":{"x":100,"y":150,"width":200,"height":30}}),
+            json!({"role":"Application","label":"SpringBoard","depth":0,"parent":null,
+                "frame":{"x":0,"y":0,"width":402,"height":874}}),
+            json!({"role":"Other","depth":1,"parent":0,"frame":{"x":0,"y":0,"width":402,"height":874}}),
+            json!({"role":"StaticText","label":"Enter Passcode","depth":2,"parent":1,
+                "frame":{"x":100,"y":150,"width":200,"height":30}}),
         ];
-        elements.extend(extra);
+        for mut e in extra {
+            if e.get("parent").is_none() {
+                e["parent"] = json!(1);
+                e["depth"] = json!(2);
+            }
+            elements.push(e);
+        }
         json!({"foreground_app":{"bundle_id":front},"elements":elements})
     }
 
@@ -436,7 +508,21 @@ mod unlock_tests {
     }
 
     fn field(value: &str) -> Json {
-        json!({"role":"SecureTextField","value":value,"placeholder":"Passcode","frame":{"x":50,"y":250,"width":300,"height":44}})
+        json!({"role":"SecureTextField","value":value,"placeholder":"Passcode","focused":true,
+            "frame":{"x":50,"y":250,"width":300,"height":44}})
+    }
+
+    /// A notification banner: its own container (index 3 once added first) and a child in it.
+    fn banner(child: Json) -> Vec<Json> {
+        let mut child = child;
+        child["parent"] = json!(3);
+        child["depth"] = json!(2);
+        vec![
+            json!({"role":"Other","depth":1,"parent":0,"frame":{"x":0,"y":0,"width":402,"height":120}}),
+            json!({"role":"StaticText","label":"Enter Passcode","depth":2,"parent":3,
+                "frame":{"x":10,"y":10,"width":200,"height":30}}),
+            child,
+        ]
     }
 
     #[test]
@@ -489,8 +575,26 @@ mod unlock_tests {
         );
         // No passcode title: SpringBoard's Home Screen or a notification.
         let mut no_title = tree(SPRINGBOARD, vec![field("")]);
-        no_title["elements"].as_array_mut().unwrap().remove(1);
+        no_title["elements"][2]["label"] = json!("Swipe up to open");
         assert!(lock_screen(&no_title).is_err());
+        // A field without the keyboard: keys would go elsewhere.
+        let mut unfocused = field("");
+        unfocused["focused"] = json!(false);
+        assert!(lock_screen(&tree(SPRINGBOARD, vec![unfocused])).is_err());
+        // The title only in a notification, next to a field outside the passcode entry.
+        let message = json!({"role":"StaticText","label":"Your code","frame":{"x":10,"y":50,"width":200,"height":30}});
+        let mut fake = tree(SPRINGBOARD, [banner(message), vec![field("")]].concat());
+        fake["elements"][2]["label"] = json!("Face ID");
+        assert!(lock_screen(&fake).is_err());
+        // A field in a notification while the real title shows: not the passcode entry's field.
+        let mut elsewhere = tree(SPRINGBOARD, vec![]);
+        let mut banner_parts = banner(field(""));
+        banner_parts[1]["label"] = json!("Messages");
+        elsewhere["elements"]
+            .as_array_mut()
+            .unwrap()
+            .extend(banner_parts);
+        assert!(lock_screen(&elsewhere).is_err());
         // A field off the screen does not count.
         let off = json!({"role":"SecureTextField","value":"","frame":{"x":50,"y":900,"width":300,"height":44}});
         assert!(lock_screen(&tree(SPRINGBOARD, vec![off])).is_err());
