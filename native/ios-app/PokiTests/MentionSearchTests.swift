@@ -51,6 +51,18 @@ final class MentionSearchTests: XCTestCase {
         XCTAssertTrue(ids("淘").contains(taobao))
     }
 
+    /// 大 is in both 大众点评 and 大眾點評: what goes in is the name in Poki's language.
+    func testATieGoesToTheNameInPokisLanguage() {
+        let saved = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = saved }
+        let dianping = "com.dianping.dpscope"
+        for (language, expected) in [("zh-Hant", "大眾點評"), ("zh-Hans", "大众点评"), ("en", "大众点评")] {
+            AppLocalization.shared.preference = language
+            let match = MentionSearch.matches("大", pending: false, explicit: false).first { $0.capsule.id == dianping }
+            XCTAssertEqual(match?.insert, expected, language)
+        }
+    }
+
     func testAtStartsAnExplicitQuery() {
         let found = MentionSearch.query(before: "ask @No", pendingStart: nil)
         XCTAssertEqual(found?.text, "No")

@@ -408,7 +408,10 @@ struct ConnectionView: View {
         List {
             Section {
                 Toggle(isOn: Binding(get: { on }, set: set)) {
-                    SettingsRow(title: "Automation", symbol: "hand.tap")
+                    // Poki itself, on or off. Not the "UI Automation" step below, which is the iOS
+                    // setting (Settings › Developer) Poki needs once; the same name and hand made the
+                    // two look like one thing (Nov 20 2026).
+                    SettingsRow(title: "Let Poki Act", symbol: "power")
                 }
                 .accessibilityIdentifier("hands.on")
                 if model.passcodeConfirmationPending {

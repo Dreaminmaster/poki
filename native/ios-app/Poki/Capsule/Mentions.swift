@@ -114,7 +114,10 @@ enum MentionSearch {
                 var keys = spelling ? [] : [fold(name)]
                 if chinese { keys += Pinyin.keys(name) }
                 for key in keys {
-                    if let s = score(key, typed), s > (best ?? -1) { best = s; matched = name }
+                    // A tie goes to the name in Poki's language: 大 is in 大众点评 and 大眾點評 alike, and
+                    // with Poki in Traditional Chinese it is 大眾點評 that goes in, not the first listed.
+                    guard let s = score(key, typed) else { continue }
+                    if s > (best ?? -1) || (s == best && name == capsule.name) { best = s; matched = name }
                 }
             }
             if let best {

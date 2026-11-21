@@ -266,8 +266,12 @@ struct SigningSection: View {
         }
 
         Section {
-            NavigationLink { AppleAccountPage() } label: {
-                AppleAccountRow(appleID: signer.signedIn ? signer.status?.apple_id : nil, signedIn: signer.signedIn)
+            // While the update asks for the sign-in, its row above opens this same page: a second
+            // "Not Signed In" here said it twice (Nov 20 2026).
+            if signer.updateStep != .signIn {
+                NavigationLink { AppleAccountPage() } label: {
+                    AppleAccountRow(appleID: signer.signedIn ? signer.status?.apple_id : nil, signedIn: signer.signedIn)
+                }
             }
             NavigationLink { SigningOptionsPage() } label: {
                 SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")

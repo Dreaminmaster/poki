@@ -11,7 +11,11 @@ struct SensesUseSection: View {
             Toggle("Suggestions on Home", isOn: $use.suggests)
             Toggle("Poki Can Ask Screen History", isOn: $use.agentAsks)
             Picker("Insights Model", selection: $use.insightModel) {
-                Text("On This iPhone").tag(SensesInsightModel.onDevice)
+                // The local model's own name, as Settings › Models names it: Apple Intelligence or the
+                // downloaded model (BacktapeWriter runs on SensesLocalModel). "On This iPhone" only when
+                // there is none yet.
+                Text(verbatim: SensesLocalModel.current?.name ?? AppLocalization.text(LocalizedStringResource("On This iPhone")))
+                    .tag(SensesInsightModel.onDevice)
                 Text("Chat Model").tag(SensesInsightModel.chat)
             }
         } header: {
