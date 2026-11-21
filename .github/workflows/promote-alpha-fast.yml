@@ -11,6 +11,11 @@ on:
         type: string
         required: false
         default: ''
+      hotfix:
+        description: "Promote a versioned hotfix Pre-alpha (also provide its tag)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: promote-alpha
@@ -22,19 +27,27 @@ permissions:
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       sha: ${{ steps.r.outputs.sha }}
       version: ${{ steps.r.outputs.version }}
       build: ${{ steps.r.outputs.build }}
       run: ${{ steps.r.outputs.run }}
+      ipa_sha256: ${{ steps.r.outputs.ipa_sha256 }}
     steps:
       - id: r
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           WANT: ${{ inputs.prealpha }}
+          HOTFIX: ${{ inputs.hotfix }}
         run: |
           set -euo pipefail
+          if [ "$HOTFIX" = true ] && [ -z "$WANT" ]; then
+            echo "::error::a hotfix promotion requires its explicit Pre-alpha tag"; exit 1
+          fi
           if [ -z "$WANT" ]; then
             ipa="$(gh release view app-prealpha-latest --json assets --jq '.assets[].name' | grep -E '^Poki-external-.*\.ipa$' | head -1)"
             stem="${ipa#Poki-external-}"; stem="${stem%.ipa}"
@@ -43,14 +56,38 @@ jobs:
           [[ "$WANT" =~ ^app-([0-9]+\.[0-9]+\.[0-9]+)-prealpha\.([0-9]+)$ ]] || { echo "::error::$WANT is not app-X.Y.Z-prealpha.N"; exit 1; }
           version="${BASH_REMATCH[1]}" build="${BASH_REMATCH[2]}"
           sha="$(gh api "repos/$GH_REPO/commits/$WANT" --jq .sha)"
-          # The pre-alpha run that built this commit; its artifact is the file to promote.
-          run="$(gh run list --workflow prealpha.yml --branch main --event push --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')"
-          [ -n "$run" ] || { echo "::error::no successful Pre-alpha run built $sha (artifacts are kept 90 days)"; exit 1; }
+          ipa_sha=""
+          if [ "$HOTFIX" = true ]; then
+            # The run title narrows the search. The source artifact proves what it built.
+            candidates="$(gh api --paginate "repos/$GH_REPO/actions/workflows/prealpha.yml/runs?branch=main&event=workflow_dispatch&status=success&per_page=100" |
+              jq -sr --arg title "Hotfix Pre-alpha $version ($build)" '
+                [.[].workflow_runs[] | select(.head_branch == "main" and .event == "workflow_dispatch"
+                  and .conclusion == "success" and .display_title == $title)]
+                | sort_by(.run_number) | reverse | .[].id
+              ')"
+            run=""
+            while IFS= read -r candidate; do
+              [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || continue
+              gh run download "$candidate" --repo "$GH_REPO" --name Poki-hotfix-source --dir "provenance/$candidate"
+              if ipa_sha="$(jq -er --arg sha "$sha" --arg version "$version" --arg build "$build" '
+                  select(.sha == $sha and .version == $version and .build == $build)
+                  | .ipa_sha256 | select(test("^[0-9a-f]{64}$"))
+                ' "provenance/$candidate/poki-hotfix-source.json")"; then
+                run="$candidate"
+                break
+              fi
+            done <<< "$candidates"
+            [ -n "$run" ] || { echo "::error::no successful hotfix Pre-alpha run matches $WANT ($sha)"; exit 1; }
+          else
+            # The pre-alpha run that built this commit; its artifact is the file to promote.
+            run="$(gh run list --workflow prealpha.yml --branch main --event push --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')"
+            [ -n "$run" ] || { echo "::error::no successful Pre-alpha run built $sha (artifacts are kept 90 days)"; exit 1; }
+          fi
           if gh api "repos/$GH_REPO/git/ref/tags/app-$version-alpha.$build" >/dev/null 2>&1; then
             echo "::error::app-$version-alpha.$build already exists"; exit 1
           fi
           echo "Promoting $WANT ($sha), Pre-alpha run $run"
-          { echo "sha=$sha"; echo "version=$version"; echo "build=$build"; echo "run=$run"; } >> "$GITHUB_OUTPUT"
+          { echo "sha=$sha"; echo "version=$version"; echo "build=$build"; echo "run=$run"; echo "ipa_sha256=$ipa_sha"; } >> "$GITHUB_OUTPUT"
           echo "## Promote $WANT to Alpha" >> "$GITHUB_STEP_SUMMARY"
 
   publish:
@@ -70,11 +107,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ needs.resolve.outputs.run }}
+          IPA_SHA: ${{ needs.resolve.outputs.ipa_sha256 }}
           VERSION: ${{ needs.resolve.outputs.version }}
           BUILD: ${{ needs.resolve.outputs.build }}
         run: |
           set -euo pipefail
           gh run download "$RUN_ID" --name Poki-unsigned --dir app
+          if [ -n "$IPA_SHA" ]; then
+            printf '%s  %s\n' "$IPA_SHA" app/Poki-external-unsigned.ipa | sha256sum -c -
+          fi
           python3 pipeline/.github/scripts/verify-ipa-version.py app/Poki-external-unsigned.ipa "$VERSION" "$BUILD"
       - name: Publish to app-alpha-latest
         env:
