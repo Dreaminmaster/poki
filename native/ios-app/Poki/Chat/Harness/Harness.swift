@@ -213,7 +213,7 @@ enum Harness {
                           "wait": string, "change": string, "seats": ["type": "array", "items": seat]], ["number"])
         properties["legs"] = ["type": "array", "items": leg, "minItems": 2]
         properties["image"] = ["type": "array", "items": ["type": "number"], "minItems": 4, "maxItems": 4,
-                               "description": "[x, y, width, height] of the item's whole picture in the screenshot named by image_screenshot"]
+                               "description": "[x, y, width, height] of the complete photo itself in the screenshot named by image_screenshot. The bounds exclude the row, text, and controls."]
         properties["image_screenshot"] = ["type": "string", "description": "Copy the screenshot_id from the tool answer whose screenshot supplied this item's image coordinates."]
         let item = object(properties, ["id", "title"])
         let kinds = [RailwayTrains.kind, RailwayTransfers.kind, Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares, Taobao.kind, Dianping.kind, UberEats.kind, AnyAppList.kind]
@@ -225,22 +225,22 @@ enum Harness {
     }()
 
     private static let cardDescription = """
-        Use a result card for one or more selectable items from one app, even if the owner asks for only one. The card replaces the reply's list. Omit it for other results. Use the owner's language. Copy values as shown and omit fields the screen does not show.
+        Use a result card for one or more selectable items from one app, even if the owner asks for only one. The card replaces the reply's list. Omit it for other results. Use the owner's language. Copy values as shown and omit fields the screen does not show. Use note for a fact that affects the choice.
 
-        Fields below are per item. Use the kind and app ID listed. Select the best item with recommended (its id). primary and optional next have label (shown on the button) and say (sent as the owner's next message). The card fills {field} from the selected item. Make each say stand alone with the selected item's key facts. Omit next when no clear follow-up exists.
+        Fields below are per item unless stated. Use the kind and app ID listed. Select the best item with recommended (its id). primary and optional next have label (shown on the button) and say (sent as the owner's next message). The card fills {field} from the selected item. Use fields available to that item so the message stands alone with its key facts. Omit next when no clear follow-up exists.
 
-        12306.trains (cn.12306.rails12306): Always use this card for direct train results in 12306. id and title are the train number, date is the displayed date, from/to are stations, depart/arrive are times. Include duration, price, seats [{name, left}] and a note only for a relevant fact. primary: 在 12306 查看 / 在 12306 打开 {date} {title} 次（{from} {depart} 开）. For sending a train, put the recipient from long-term notes in label and say, using {date} and {title} in say. If no note names a recipient, use label 发送车次 and leave the recipient for the owner. Never offer paying, booking or choosing seats.
+        12306.trains (cn.12306.rails12306): Always use this card for direct train results in 12306. id and title are the train number, date is the displayed date, from/to are stations, depart/arrive are times. Include duration, price and seats [{name, left}]. primary: 在 12306 查看 / 在 12306 打开 {date} {title} 次（{from} {depart} 开）. For sending a train, put the recipient from long-term notes in label and say, using {date} and {title} in say. If no note names a recipient, use label 发送车次 and leave the recipient for the owner. Never offer paying, booking or choosing seats for 12306.
         12306.transfers (cn.12306.rails12306): title is the trains joined by →. Include date, from/to, depart/arrive, total duration, price and ordered legs [{number, from, to, depart, arrive, wait, change, seats: [{name, left}]}]. wait is the layover, change describes the transfer shown. primary: 在 12306 查看 / 在 12306 打开 {date} {title}（{from} {depart} 开）.
-        ctrip.flights (ctrip.com): title is the flight numbers joined by >. Include depart, arrive, arrive_day (next-day label), from/to airports, from_city/to_city, date, duration, stops, airline, cabin, price and, for connections, ordered legs [{number, from, to, depart, arrive, wait, change}]. primary: 在携程查看 / 在携程打开 {date} {title}（{depart} 起飞，{from} → {to}）.
-        ctrip.hotels (ctrip.com): title is the hotel name. Include subtitle (other name), stars, rating, reviews, location, price, was (struck price), total, city and dates. primary: 在携程查看 / 在携程打开 {title}（{city} {dates}）.
-        ctrip.rooms (ctrip.com): title is the room type. Include hotel (same name for each room), beds, breakfast, cancel, price (per night), total (all nights), date and note for relevant conditions. primary: 在携程查看 / 在携程打开 {hotel} 的 {title}（{date}）.
-        ctrip.fares (ctrip.com): title is the fare name. Include price, cabin, baggage, refund, change and ticketing. Put trip and dates on the first item. primary: 在携程查看 / 在携程打开 {title} 这个票价.
+        ctrip.flights (ctrip.com): title is the flight numbers joined by >. Include depart, arrive, arrive_day (arrival day offset), from/to airports, from_city/to_city, date, duration, stops, airline, cabin, price and, for connections, ordered legs [{number, from, to, depart, arrive, wait, change}]. primary: 在携程查看 / 在携程打开 {date} {title}（{depart} 起飞，{price}）.
+        ctrip.hotels (ctrip.com): title is the hotel name. Include subtitle (other name), stars, rating, reviews, location, price (per night), was (original price) and total (stay total). Put city and dates on the first item. primary: 在携程查看 / 在携程打开 {title}（{price}）.
+        ctrip.rooms (ctrip.com): title is the room type. Include beds, breakfast, cancel, price (per night), was (original price) and total (stay total). Put the shared hotel on the first item and dates (stay dates) on every room for the heading and selected button. primary: 在携程查看 / 在携程打开 {hotel} 的 {title}（{dates}，{price}）.
+        ctrip.fares (ctrip.com): title is the fare name. Include price, cabin, baggage, refund (refund and change rules) and ticketing. Put trip and dates on the first item. primary: 在携程查看 / 在携程打开 {title} {price} 这个票价.
         taobao.products (com.taobao.taobao4iphone): Include title, price, price_label (e.g. 补贴价), sold, shop and delivery. Put query on the first item. primary: 在淘宝查看 / 在淘宝打开 {shop} 的 {title}（{price}）.
-        dianping.places (com.dianping.dpscope): Include title, subtitle, rating, reviews, price, category, area and distance. Put query on the first item. primary: 在大众点评查看 / 在大众点评打开 {title}（{area}）.
+        dianping.places (com.dianping.dpscope): Include title, subtitle, rating, reviews, price, category, area and distance. Put query on the first item. primary: 在大众点评查看 / 在大众点评打开 {title}.
         ubereats.items (com.ubercab.UberEats): Include title, price, detail (what comes with it) and calories. Put store on the first item. primary: View in Uber Eats / Open {title} ({price}) in Uber Eats.
-        list (any other app, with its own bundle ID): Include title, subtitle, detail, value (the deciding price, time or rating), value_note and note. Add legs for journeys. Put heading and subheading on the first item. Use a dedicated kind where one exists. primary: 在<app>查看 / 在<app>打开 {title}（{value}）.
+        list (any other app, with its own bundle ID): Include title, subtitle, detail, value (the deciding price, time or rating) and value_note. For a journey with connections, use ordered legs as in flights. Put heading and subheading on the first item. Use a dedicated kind where one exists. primary: 在<app>查看 / 在<app>打开 {title}.
 
-        For pictured items, send image (whole-item bounds) and image_screenshot (screenshot_id from the same observation) together. Items may use different screenshots. Omit both fields when the observation has no screenshot_id. Never guess.
+        For pictured items, send image (bounds of the complete photo itself) and image_screenshot (screenshot_id from the same observation) together. The bounds exclude the row, text, and controls. Items may use different screenshots. Omit both fields if the full photo is clipped or there is no screenshot_id. Never guess.
         """
 
     /// task-runner.mjs's answers to its harness tools.
