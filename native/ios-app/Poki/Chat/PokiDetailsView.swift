@@ -412,7 +412,7 @@ struct ConnectionView: View {
                 }
             }
 
-            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+            if model.supportsAutoUnlock {
                 AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
                                   showsPasscode: $showsAutoUnlockPasscode)
             }
