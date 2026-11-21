@@ -273,6 +273,11 @@ enum ModelKeys {
         saved += 1
     }
 
+    static func removeChatGPTSignIn() throws {
+        try Keychain.remove(account(.chatgpt))
+        saved += 1
+    }
+
     /// The first address of the custom provider the chat uses now (not a secret: kept in the app's
     /// settings). Setting it changes that address, or adds a provider when there is none.
     static var customURL: String {

@@ -15932,6 +15932,18 @@
         }
       }
     },
+    "Could not sign in to ChatGPT. Try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法登录 ChatGPT。请重试。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "無法登入 ChatGPT。請重試。" } }
+      }
+    },
+    "Could not sign out of ChatGPT. Try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法退出 ChatGPT。请重试。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "無法登出 ChatGPT。請重試。" } }
+      }
+    },
     "The latest screen" : {
       "localizations" : {
         "zh-Hans" : {

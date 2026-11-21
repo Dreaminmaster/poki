@@ -219,6 +219,7 @@ private struct AccountDetail: View {
     var provider: ModelProvider
     @State private var editing = false
     @State private var signingIn = false
+    @State private var signOutFailed = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
@@ -257,7 +258,14 @@ private struct AccountDetail: View {
 
             Section {
                 Button(provider.signsIn ? "Sign Out" : "Delete Account", role: .destructive) {
-                    if provider == .custom, let current = CustomProviders.current { CustomProviders.remove(current.id) } else { ModelKeys.remove(provider) }
+                    if provider.signsIn {
+                        do { try ChatGPTAccount.signOut() }
+                        catch { signOutFailed = true; return }
+                    } else if provider == .custom, let current = CustomProviders.current {
+                        CustomProviders.remove(current.id)
+                    } else {
+                        ModelKeys.remove(provider)
+                    }
                     if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
                         ModelKeys.selectedProvider = other
                     }
@@ -274,6 +282,9 @@ private struct AccountDetail: View {
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { KeyEntry(provider: provider) }
         .sheet(isPresented: $signingIn, onDismiss: { version = ModelKeys.saved }) { ChatGPTSignIn() }
+        .alert("Could not sign out of ChatGPT. Try again.", isPresented: $signOutFailed) {
+            Button("OK", role: .cancel) {}
+        }
     }
 }
 
