@@ -545,7 +545,7 @@ final class Computer: @unchecked Sendable {
         lines += did.map { "did: \($0)" }
         if let error { lines.append("error: \(error)") }
         lines += extra
-        lines.append("poki: Poki is in front. The owner's chat is private, so this read has no screenshot or element numbers. Open the task's app with do {launch: \"bundle id\"}, or send {button: \"home\"} by itself to read the Home Screen. Run a saved skill after reaching a readable screen.")
+        lines.append("poki: Poki is in front. The owner's chat is private, so this read has no screenshot or element numbers. Start the task in its app: do {launch: \"bundle id\"}, or do {run: \"name\"} for a saved skill. To search for an app, send {button: \"home\"} by itself to read the Home Screen.")
         return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil, isError: error != nil, screen: "poki", waitingForOwner: handoffWaiting, screenEvidence: [])
     }
 
