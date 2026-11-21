@@ -218,7 +218,7 @@ jobs:
             -resultBundlePath out/baseline.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee out/baseline.log
-          code=\${PIPESTATUS[0]}
+          code=${PIPESTATUS[0]}
           if [ "$code" -eq 0 ]; then echo 'Baseline unexpectedly passed both session routing regressions'; exit 1; fi
           xcrun xcresulttool get test-results summary --path out/baseline.xcresult | tee out/baseline.json || exit 1
           python3 - <<'PY'
