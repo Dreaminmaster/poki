@@ -16730,7 +16730,7 @@
         }
       }
     },
-    "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : {
+    "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -16752,7 +16752,7 @@
         }
       }
     },
-    "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : {
+    "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -16763,7 +16763,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it."
+            "value" : "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it."
           }
         },
         "zh-Hant" : {
