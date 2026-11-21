@@ -109,7 +109,9 @@ enum SensesContext {
 
         // The pills' own rule first: money, codes, passwords, messages and quoted words are never
         // the model's to wave through.
-        if HomeShortcuts.isPrivate(parsed.answer + " " + (parsed.item?.title ?? "")) {
+        // Checked on the exact text that is shared, and on the model's raw answer too, so quotes the
+        // parse strips from the item's title still count.
+        if HomeShortcuts.isPrivate(answer + " " + raw) {
             return .summary(answer, share: false, reason: "It may hold something private.", shown: parsed)
         }
         // Ask for Everything means what it says.
