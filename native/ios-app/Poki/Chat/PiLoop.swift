@@ -55,7 +55,7 @@ final class PiLoop {
         self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
-        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model, sessionID: sessionID) : nil
         self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
