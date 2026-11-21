@@ -104,7 +104,7 @@ struct BearWardrobeSheet: View {
 
     private func destinationLabel(_ title: LocalizedStringResource, icon: String) -> some View {
         HStack(spacing: 12) {
-            Label { Text(title) } icon: {
+            Label { Text(title).font(.allo(.body)) } icon: {
                 Image(systemName: icon).foregroundStyle(Color.accentColor)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
