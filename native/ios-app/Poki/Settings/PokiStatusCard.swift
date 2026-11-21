@@ -126,7 +126,7 @@ struct PokiMenu<Face: View>: View {
                 Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
             }
             .id(modelVersion)
-            if model.supportsAutoUnlock || model.autoUnlock.enabled {
+            if model.supportsAutoUnlock {
                 Button { showsAutoUnlock = true } label: {
                     Label("Automatic Unlock", systemImage: "lock.open")
                 }
