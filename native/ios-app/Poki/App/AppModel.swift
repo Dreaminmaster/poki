@@ -1843,7 +1843,8 @@ final class AppModel {
             if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
             closeAfterTalk()
         case .approvalRequested(let approval):
-            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
+            let origin = ApprovalClassifier.origin(voiceOn: voice.isOn)
+            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn, origin: origin) {
             case .allow:
                 // The rules were on when Poki started and asking has been turned off since.
                 checking.append(approval)
@@ -1854,7 +1855,8 @@ final class AppModel {
                 checking.append(approval)
                 log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
                 Task { [weak self] in
-                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
+                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved,
+                                                                  voice: self?.voice.lines ?? [], origin: origin)
                     guard let self, self.checking.contains(where: { $0.id == approval.id }) else { return }
                     self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
                     if verdict.allowed || reply {
