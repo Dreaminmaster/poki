@@ -688,11 +688,6 @@ final class SessionStore {
             let failed = delivery.hasPrefix("failed")
             let stepID = pendingAgentSteps[id]?.isEmpty == false ? pendingAgentSteps[id]?.removeFirst() : nil
             if pendingAgentSteps[id]?.isEmpty == true { pendingAgentSteps.removeValue(forKey: id) }
-            // The completed outside tool no longer owns future approvals. Preserve a
-            // different in-flight session if its tool started after this one.
-            if currentSession == (conversations[id] ?? id), pendingAgentSteps[id] == nil {
-                currentSession = nil
-            }
             update(agent: id) { session in
                 // Match by the original MCP session's step ID. Several sessions can share a
                 // conversation and finish in a different order from the starts.
