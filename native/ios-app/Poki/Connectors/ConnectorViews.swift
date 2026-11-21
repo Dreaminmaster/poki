@@ -71,6 +71,8 @@ enum ConnectorRoute: Hashable {
 /// A connector's picture: its brand icon from the asset catalogue, else the icon its server publishes
 /// (custom connectors, cached), else its symbol on Poki's soft ground.
 struct ConnectorIcon: View {
+    /// Marks that already are a tile of their own.
+    static let tiles: Set<String> = ["Connector-stripe"]
     let connector: MCPConnector
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 29
     @State private var fetched: UIImage?
@@ -79,7 +81,17 @@ struct ConnectorIcon: View {
         let size = min(side, 40)
         Group {
             if let name = connector.iconAsset, let image = UIImage(named: name) {
-                Image(uiImage: image).resizable().scaledToFit()
+                if Self.tiles.contains(name) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else {
+                    // A mark on its own goes on a plain tile, as on a Home Screen.
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .padding(size * 0.2)
+                        .frame(width: size, height: size)
+                        .background(Color(.tertiarySystemBackground))
+                        .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                            .strokeBorder(Color(.separator).opacity(0.6), lineWidth: 0.5))
+                }
             } else if let image = fetched ?? ConnectorIconCache.cached(connector.id) {
                 Image(uiImage: image).resizable().scaledToFit()
             } else {

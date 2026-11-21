@@ -40,6 +40,21 @@ logos() {
   done
 }
 logos "$APP"
+# Connectors' own marks (Poki/ConnectorIcons) in their colours, as vectors: name.svg, with
+# name-dark.svg for Dark Mode where the company draws the mark for a dark ground.
+for svg in "$HERE"/Poki/ConnectorIcons/*.svg; do
+  base="$(basename "$svg" .svg)"
+  case "$base" in *-dark) continue ;; esac
+  set="$APP/Connector-$base.imageset"
+  mkdir -p "$set"
+  cp "$svg" "$set/mark.svg"
+  if [ -f "$HERE/Poki/ConnectorIcons/$base-dark.svg" ]; then
+    cp "$HERE/Poki/ConnectorIcons/$base-dark.svg" "$set/mark-dark.svg"
+    echo '{"images":[{"filename":"mark.svg","idiom":"universal"},{"appearances":[{"appearance":"luminosity","value":"dark"}],"filename":"mark-dark.svg","idiom":"universal"}],"info":{"version":1,"author":"poki"},"properties":{"preserves-vector-representation":true,"template-rendering-intent":"original"}}' > "$set/Contents.json"
+  else
+    echo '{"images":[{"filename":"mark.svg","idiom":"universal"}],"info":{"version":1,"author":"poki"},"properties":{"preserves-vector-representation":true,"template-rendering-intent":"original"}}' > "$set/Contents.json"
+  fi
+done
 # Proxy apps' own App Store icons (Poki/ProxyIcons, see its README) beside their names in Setup.
 for png in "$HERE"/Poki/ProxyIcons/*.png; do
   name="Proxy-$(basename "$png" .png)"
