@@ -3020,7 +3020,7 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
         if ([PKTypeName([node elementType]) isEqualToString:@"SecureTextField"]) {
             CGRect frame = [node frame];
             if (!CGRectIsEmpty(frame) && CGRectContainsRect(display.bounds, frame)) {
-                NSString *value = [node respondsToSelector:@selector(value)] ? PKText([node value]) : nil;
+                NSString *value = [node respondsToSelector:@selector(value)] ? PKText([(NSObject *)node valueForKey:@"value"]) : nil;
                 NSString *placeholder = [node respondsToSelector:@selector(placeholderValue)] ? PKText([node placeholderValue]) : nil;
                 if (empty) *empty = value.length == 0 || [value isEqualToString:placeholder];
                 return YES;

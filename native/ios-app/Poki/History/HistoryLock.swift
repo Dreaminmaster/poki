@@ -412,7 +412,11 @@ struct UnlockLink<Label: View>: View {
         Button {
             Task {
                 // No passcode at all, or the warning to read first: the page itself says so.
-                if (whenOff && !capture.enabled) || lock.unavailable || lock.needsRiskAcknowledgement || await lock.open() { go() }
+                if (whenOff && !capture.enabled) || lock.unavailable || lock.needsRiskAcknowledgement {
+                    go()
+                } else if await lock.open() {
+                    go()
+                }
             }
         } label: {
             HStack(spacing: 8) {
