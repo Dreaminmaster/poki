@@ -168,7 +168,7 @@ extension SetupStep {
         switch self {
         case .runner: "The helper app that taps and types for your agent. Poki starts it; you never open it."
         case .developerMode: SetupStep.inProcess ? "Allows Poki to use this iPhone’s developer services." : "Allows this iPhone to run Poki Runner."
-        case .loopback: "Allows Poki to reach this iPhone’s developer services through your proxy app."
+        case .loopback: "Poki needs one helper app to reach this iPhone. Pick one, do its steps, and watch it turn green."
         case .pairing: "Gives Poki its own key to this iPhone. The key stays on this device."
         case .automation: SetupStep.inProcess ? "Allows Poki to control other apps." : "Allows Poki Runner to control other apps."
         case .background: "Keeps Poki connected in the background and shows its activity on the Lock Screen."
@@ -287,25 +287,76 @@ private struct NoteLine: View {
 
 // MARK: 3, loopback
 
-/// The loopback, checked live, and the proxy apps that can provide it. Sections of the step's Form.
+/// The loopback in three parts a child can follow (the owner, Nov 21 2026: "pick just ONE proxy app and
+/// follow its guidance"): pick one app, do what it says, see it turn green. Installed apps come first;
+/// LocalDevVPN is the free one for people with none. The chosen app's steps and its button sit right
+/// under the list, so nobody opens two apps' pages and mixes them up. Sections of the step's Form.
 private struct LoopbackPage: View {
     @Environment(AppModel.self) private var model
-    @State private var copied: String?
+    /// In the start flow the Poki Loopback Shortcut has a page of its own after this one.
+    var hero = false
+    @State private var showsAll = false
+    @State private var copied = false
 
     var body: some View {
         let monitor = model.loopback
         let localReady = model.hasOpenInProcessSession && !monitor.isWorking
-        let detail = LocalizedStringKey(monitor.detail)
+        let chosen = LoopbackChoice.chosen(model.setup.proxyApp)
+
+        Section {
+            ForEach(listed(chosen: chosen)) { choice in
+                Button { pick(choice) } label: { choiceRow(choice, chosen: chosen?.id == choice.id) }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("loopback.pick.\(choice.id)")
+            }
+            if !showsAll && LoopbackChoice.all.count > listed(chosen: chosen).count {
+                Button("Show All Apps") { withAnimation { showsAll = true } }
+                    .accessibilityIdentifier("loopback.showAll")
+            }
+        } header: {
+            Group {
+                Text("1. Pick One App")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Just one. If you already use one of these apps, pick it. No app yet? Pick LocalDevVPN, it is free.")
+            }
+            .settingsFooter()
+        }
+        .disabled(externalLocked)
+
+        if let chosen {
+            Section {
+                ForEach(Array(chosen.steps.enumerated()), id: \.offset) { i, line in
+                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }
+                        .font(.allo(.subheadline))
+                }
+                actions(chosen)
+            } header: {
+                Group {
+                    Text("2. Do What It Says")
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    if !chosen.documented {
+                        Text("Other people say this works in \(chosen.name). Step 3 tells you if it works for you.")
+                    } else if !chosen.minimumVersion.isEmpty {
+                        Text("\(chosen.name) \(chosen.minimumVersion) or later.")
+                    }
+                }
+                .settingsFooter()
+            }
+            .disabled(externalLocked)
+        }
+
         Section {
             LabeledContent {
                 if monitor.state == .checking && !localReady { ProgressView() }
             } label: {
                 Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(localReady ? "Local automation ready" : headline(monitor))
-                        Text(localReady && monitor.state != .checking ? "The network loopback is unavailable." : detail)
-                            .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
-                    }
+                    Text(localReady ? "Local automation ready" : headline(monitor))
                 } icon: {
                     if localReady {
                         Image(systemName: "iphone").foregroundStyle(.secondary)
@@ -315,46 +366,32 @@ private struct LoopbackPage: View {
                     }
                 }
             }
+            .accessibilityIdentifier("loopback.check")
         } header: {
             Group {
-                Text("Status")
+                Text(chosen == nil ? LocalizedStringKey("Check") : LocalizedStringKey("3. Check"))
             }
             .settingsHeader()
         } footer: {
             Group {
                 if model.servicesSilent, monitor.isWorking {
-                    Text("10.7.0.1 takes the connection, but the phone's remote pairing service does not answer through it, so this page can show Working while Poki cannot connect. Reconnect your proxy app or LocalDevVPN, then pair again in Setup › Pairing.")
+                    Text("The loopback is on, but this iPhone does not answer through it yet. Turn \(chosen?.name ?? "your app") off and on again, then pair again.")
+                } else if monitor.isWorking {
+                    Text("It works. You are done with this step.")
+                } else if localReady {
+                    Text("The network loopback is unavailable.")
+                } else if let chosen {
+                    Text("Not yet. Finish step 2 in \(chosen.name), then come back. This turns green by itself.")
+                } else {
+                    Text("Pick an app first.")
                 }
             }
             .settingsFooter()
         }
 
-        // The external app is the way (ESP-168): every app's steps can be read at any time.
-        Section {
-            // The free one first: a new person usually has no proxy app.
-            NavigationLink { LocalDevVPNPage() } label: { proxyLabel("LocalDevVPN", id: "localdevvpn", installed: false, sub: "Free on the App Store") }
-            ForEach(ProxyApps.all) { app in
-                NavigationLink { ProxyAppPage(app: app) } label: { proxyLabel(app.name, id: app.id, installed: app.isInstalled) }
-            }
-        } header: {
-            Group {
-                Text("Use Your Proxy App")
-            }
-            .settingsHeader()
-        } footer: {
-            Group {
-                if let chosen = model.setup.proxyApp, !monitor.isWorking, !localReady, model.setup.loopback == .proxy {
-                    let name = ProxyApps.all.first { $0.id == chosen }?.name ?? "LocalDevVPN"
-                    Text("\(name) is chosen, but nothing answers at 10.7.0.1 right now. Open \(name), make sure it is connected with the loopback on, then come back; this page updates by itself.")
-                }
-            }
-            .settingsFooter()
-        }
-        .disabled(externalLocked)
-
-        // The loopback on cellular is set up with the loopback itself, once the loopback is chosen
-        // above: optional but strongly encouraged, and Screen History turns on only after it has run.
-        CellularShortcutSection()
+        // Settings keeps the shortcut on the same page (the owner's rule, Nov 19 2026); the start flow
+        // walks through it on the next page.
+        if !hero { CellularShortcutSection() }
 
         // Poki's own connection is no longer offered (the owner, Nov 19 2026). Only an iPhone that
         // still uses it from before sees its state, and the way to the proxy app.
@@ -389,28 +426,70 @@ private struct LoopbackPage: View {
         }
     }
 
-    private func proxyLabel(_ name: String, id: String, installed: Bool, sub: LocalizedStringKey? = nil) -> some View {
-        let chosen = model.setup.proxyApp == id
-        let working = chosen && model.loopback.isWorking
-        return LabeledContent {
-            if working { Text("Working").foregroundStyle(.green) }
-            else if chosen { Text("Not Answering").foregroundStyle(.orange) }
-            else if installed { Text("Installed") }
-        } label: {
+    /// The apps on this iPhone, then LocalDevVPN, and the chosen one whatever it is. The rest come with
+    /// Show All Apps, so a new person sees two or three rows, not ten.
+    private func listed(chosen: LoopbackChoice?) -> [LoopbackChoice] {
+        let all = LoopbackChoice.all
+        let installed = all.filter(\.isInstalled)
+        let rest = all.filter { !$0.isInstalled && $0.id != LoopbackChoice.free.id }
+        if showsAll { return installed + [LoopbackChoice.free] + rest }
+        var out = installed + [LoopbackChoice.free]
+        if let chosen, !out.contains(where: { $0.id == chosen.id }) { out.append(chosen) }
+        return out
+    }
+
+    private func choiceRow(_ choice: LoopbackChoice, chosen: Bool) -> some View {
+        HStack(spacing: 12) {
             // The app's own icon, the size and corners of Settings' app rows.
-            HStack(spacing: 12) {
-                Image("Proxy-\(id)")
-                    .resizable()
-                    .frame(width: 29, height: 29)
-                    .clipShape(.rect(cornerRadius: 6.5, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 6.5, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: name)
-                    if let sub { Text(sub).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
+            Image("Proxy-\(choice.id)")
+                .resizable()
+                .frame(width: 29, height: 29)
+                .clipShape(.rect(cornerRadius: 6.5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6.5, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: choice.name).foregroundStyle(Color(.label))
+                if choice.isInstalled {
+                    Text("On This iPhone").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+                } else if choice.id == LoopbackChoice.free.id {
+                    Text("Free on the App Store").font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                 }
             }
+            Spacer()
+            if chosen { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.tint) }
         }
+        .contentShape(.rect)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    @ViewBuilder private func actions(_ choice: LoopbackChoice) -> some View {
+        switch choice.install {
+        case .url(let url):
+            Button(choice.id == "surge" ? LocalizedStringKey("Install Module") : LocalizedStringKey("Install Plugin")) { start(); UIApplication.shared.open(url) }
+        case .appStore(let url):
+            Button("Get LocalDevVPN") { start(); UIApplication.shared.open(url) }
+        case .toggle:
+            Button("Open \(choice.name)") { start(); open(choice) }
+        case .snippet(let line):
+            Text(verbatim: line).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+            Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                start(); UIPasteboard.general.string = line; copied = true
+            }
+            Button("Open \(choice.name)") { open(choice) }
+        }
+    }
+
+    private func pick(_ choice: LoopbackChoice) {
+        copied = false
+        model.chooseConnection(.proxy)
+        model.setup.proxyApp = choice.id
+    }
+
+    /// The owner goes to the app: the Live Activity keeps the step while they are away.
+    private func start() { model.guide(.loopback) }
+
+    private func open(_ choice: LoopbackChoice) {
+        if let url = URL(string: "\(choice.scheme)://") { UIApplication.shared.open(url) }
     }
 
     private var connectionLocked: Bool { model.connectionInUse || model.tunnel.busy }
@@ -423,88 +502,6 @@ private struct LoopbackPage: View {
         case .checking: "Checking…"
         case .off: "Off"
         }
-    }
-}
-
-/// One proxy app's steps and its install action.
-private struct ProxyAppPage: View {
-    @Environment(AppModel.self) private var model
-    var app: ProxyApp
-    @State private var copied = false
-
-    var body: some View {
-        Form {
-            Section {
-                ForEach(Array(app.steps.enumerated()), id: \.offset) { i, line in
-                    Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }.font(.allo(.subheadline))
-                }
-            } header: {
-                Group {
-                    Text("How To")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    if !app.documented {
-                        Text("As reported by users of \(app.name); not checked against its documentation. The status on the Loopback page tells whether it works.")
-                    } else if !app.minimumVersion.isEmpty {
-                        Text("\(app.name) \(app.minimumVersion) or later.")
-                    }
-                }
-                .settingsFooter()
-            }
-            Section {
-                switch app.install {
-                case .url(let url):
-                    Button(app.id == "surge" ? "Install Poki Module" : "Install Poki Plugin") { choose(); UIApplication.shared.open(url) }
-                case .toggle:
-                    Button("Open \(app.name)") { choose(); openApp() }
-                case .snippet(let line):
-                    Text(verbatim: line).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
-                    Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                        choose(); UIPasteboard.general.string = line; copied = true
-                    }
-                    Button("Open \(app.name)") { openApp() }
-                }
-            }
-            Section { LoopbackStatusRow() }
-        }
-        .navigationTitle(Text(verbatim: app.name))
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func openApp() { if let url = URL(string: "\(app.scheme)://") { UIApplication.shared.open(url) } }
-
-    private func choose() {
-        model.chooseConnection(.proxy)
-        model.setup.proxyApp = app.id
-        model.guide(.loopback)
-    }
-}
-
-private struct LocalDevVPNPage: View {
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        Form {
-            Section {
-                Label("No proxy app? Install LocalDevVPN, a free loopback app built for this.", systemImage: "1.circle").font(.allo(.subheadline))
-                Label("Open it and tap Connect, then return to Poki. It may disconnect another VPN app.", systemImage: "2.circle").font(.allo(.subheadline))
-            } header: {
-                Group {
-     Text("How To") 
-                }
-                .settingsHeader()
-            }
-            Section {
-                Button("Get LocalDevVPN on the App Store") {
-                    model.chooseConnection(.proxy); model.setup.proxyApp = "localdevvpn"; model.guide(.loopback)
-                    UIApplication.shared.open(URL(string: "https://apps.apple.com/app/id6755608044")!)
-                }
-            }
-            Section { LoopbackStatusRow() }
-        }
-        .navigationTitle(Text(verbatim: "LocalDevVPN"))
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -986,7 +983,7 @@ struct SetupStepPage: View {
                 "After restarting, unlock this iPhone and tap **Turn On**.",
             ])
             ConfirmCard(step: .developerMode, title: "Developer Mode is on", isOn: binding(\.developerMode))
-        case .loopback: LoopbackPage()
+        case .loopback: LoopbackPage(hero: hero)
         case .pairing: PairingPage()
         case .automation:
             InstructionsCard(lines: [

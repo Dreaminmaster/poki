@@ -352,27 +352,21 @@ struct ScreenHistorySettingsView: View {
     }
 }
 
-/// The shortcut that keeps the loopback on cellular: its link, the same automation by hand, and when
-/// it last ran. Shown where the loopback is set up (the owner, 2026-11-19: asked for in the same
-/// step) and in Screen History's settings.
+/// The Poki Loopback Shortcut where the loopback is set up in Settings and in Screen History's settings:
+/// the way to the step by step page, Run, and when it last ran.
 struct CellularShortcutSection: View {
     @ObservedObject private var reconnect = HistoryReconnect.shared
     @Environment(\.openURL) private var openURL
 
-    private var lastRun: String {
-        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
-        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
-        return at.formatted(.relative(presentation: .named))
-    }
-
     var body: some View {
         Section {
-            Button {
-                openURL(reconnect.take())
+            NavigationLink {
+                LoopbackShortcutPage().settingsPage()
             } label: {
-                SettingsRow(title: "Get the Shortcut", symbol: "square.2.layers.3d", accessory: .leaves)
+                SettingsRow(title: reconnect.isSetUp ? "How It Is Set Up" : "Set It Up Step by Step", symbol: "list.number",
+                            accessory: reconnect.isSetUp ? .done : nil)
             }
-            .accessibilityIdentifier("cellularShortcut.get")
+            .accessibilityIdentifier("cellularShortcut.guide")
             if reconnect.canRun {
                 // It asks Poki first and changes nothing while the connection is fine, so it can
                 // be run whenever the loopback is off (the owner, 2026-11-20).
@@ -383,13 +377,7 @@ struct CellularShortcutSection: View {
                 }
                 .accessibilityIdentifier("cellularShortcut.run")
             }
-            NavigationLink {
-                HistoryShortcutGuide().settingsPage().onAppear { reconnect.asked = true }
-            } label: {
-                SettingsRow(title: "Set Up by Hand", symbol: "list.number")
-            }
-            SettingsRow(title: "Last Run", symbol: "clock", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
-                .accessibilityIdentifier("cellularShortcut.lastRun")
+            LoopbackShortcutLastRun()
         } header: {
             Group {
                 SettingsHeader("Poki Loopback Shortcut")
@@ -397,40 +385,143 @@ struct CellularShortcutSection: View {
             .settingsHeader()
         } footer: {
             Group {
-                Text("It checks the loopback and repairs it when it is down, on Wi-Fi or cellular.")
+                Text("It turns the loopback back on by itself when it stops, on Wi-Fi or cellular. Set it up once.")
             }
             .settingsFooter()
         }
     }
 }
 
+/// When the shortcut last asked Poki, one row.
+struct LoopbackShortcutLastRun: View {
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+
+    private var lastRun: String {
+        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
+        if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
+        return at.formatted(.relative(presentation: .named))
+    }
+
+    var body: some View {
+        SettingsRow(title: "Last Run", symbol: "clock", value: lastRun, warns: reconnect.lastAt != nil && !reconnect.lastWorked)
+            .accessibilityIdentifier("cellularShortcut.lastRun")
+    }
+}
+
+/// Setting up the Poki Loopback Shortcut, one small step at a time with the button for it right there
+/// (the owner, Nov 21 2026: "step by step, simple and easy"). Sections of a Form: the start flow's page
+/// puts its hero on top, Settings' page its title.
+struct LoopbackShortcutSteps: View {
+    @Environment(AppModel.self) private var model
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+    @Environment(\.openURL) private var openURL
+
+    /// The app picked on the loopback page, which the shortcut has to turn on.
+    private var appName: String? { LoopbackChoice.chosen(model.setup.proxyApp)?.name }
+
+    var body: some View {
+        Section {
+            GuideLine(number: 1, text: "Tap Get the Shortcut below.")
+            GuideLine(number: 2, text: "Tap Add Shortcut.")
+            if let appName {
+                GuideLine(number: 3, text: "When it asks for a VPN, pick \(appName).")
+            } else {
+                GuideLine(number: 3, text: "When it asks for a VPN, pick the app from the loopback step.")
+            }
+            GuideLine(number: 4, text: "When it asks about the automation, turn it on. Leave Ask Before Running off.")
+            Button("Get the Shortcut", systemImage: "square.2.layers.3d") { openURL(reconnect.take()) }
+                .accessibilityIdentifier("cellularShortcut.get")
+        } header: {
+            Group {
+                Text("1. Add the Shortcut")
+            }
+            .settingsHeader()
+        }
+
+        Section {
+            if reconnect.canRun {
+                Button("Run the Shortcut", systemImage: "play") { openURL(HistoryReconnect.run) }
+                    .accessibilityIdentifier("cellularShortcut.runOnce")
+            }
+            LoopbackShortcutLastRun()
+        } header: {
+            Group {
+                Text("2. Try It Once")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                if reconnect.isSetUp && reconnect.lastWorked {
+                    Text("It works. From now on it fixes the loopback by itself.")
+                } else if reconnect.isSetUp {
+                    Text("It ran but the loopback did not come on. Check step 2 of the loopback, then run it again.")
+                } else {
+                    Text("Run it once. When Last Run shows a time, it works.")
+                }
+            }
+            .settingsFooter()
+        }
+
+        Section {
+            NavigationLink {
+                HistoryShortcutGuide().settingsPage().onAppear { reconnect.asked = true }
+            } label: {
+                Text("No Automation? Add It by Hand")
+            }
+            .accessibilityIdentifier("cellularShortcut.byHand")
+        } footer: {
+            Group {
+                Text("Only if Shortcuts did not ask about an automation.")
+            }
+            .settingsFooter()
+        }
+    }
+}
+
+/// Settings' page for the shortcut: the same steps as the start flow.
+struct LoopbackShortcutPage: View {
+    var body: some View {
+        Form { LoopbackShortcutSteps() }
+            .navigationTitle(AppLocalization.text("Poki Loopback Shortcut"))
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A numbered line of a walk-through: the number in a circle, then one short thing to do.
+struct GuideLine: View {
+    var number: Int
+    var text: LocalizedStringKey
+    var body: some View {
+        Label { Text(text) } icon: { Image(systemName: "\(number).circle") }
+            .font(.allo(.subheadline))
+    }
+}
+
 /// The Wi-Fi automation added by hand, for an iPhone where the shared shortcut arrives without it.
-/// The shortcut itself comes from the link there too, so the automation only has to run it.
+/// The shortcut itself comes from the link, so the automation only has to run it.
 struct HistoryShortcutGuide: View {
-    private let steps: [LocalizedStringKey] = [
-        "Add Poki Loopback with Get the Shortcut on the page before, and choose your VPN app when it asks.",
-        "Open Shortcuts and go to Automation.",
-        "Add an automation for Wi-Fi, choose Disconnects From Network, and choose Run Immediately.",
-        "Choose Poki Loopback as the shortcut to run.",
-    ]
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         List {
             Section {
-                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(verbatim: "\(index + 1)").font(.body.monospacedDigit().weight(.semibold)).foregroundStyle(.secondary)
-                        Text(step)
-                    }
+                GuideLine(number: 1, text: "Open Shortcuts and tap Automation.")
+                GuideLine(number: 2, text: "Tap the plus button, then tap Wi-Fi.")
+                GuideLine(number: 3, text: "Pick Any Network, and pick the choice for when this iPhone leaves Wi-Fi.")
+                GuideLine(number: 4, text: "Pick Run Immediately, then tap Next.")
+                GuideLine(number: 5, text: "Pick Poki Loopback, then tap Done.")
+                Button("Open Shortcuts", systemImage: "arrow.up.forward.app") {
+                    if let url = URL(string: "shortcuts://") { openURL(url) }
                 }
+                .accessibilityIdentifier("cellularShortcut.openShortcuts")
             } footer: {
                 Group {
-                    Text("On older versions of iOS, automations are a separate tab in Shortcuts and do not come with a shared shortcut. These steps add the automation that runs it.")
+                    Text("On older iOS, Automation is a tab at the bottom of Shortcuts.")
                 }
                 .settingsFooter()
             }
         }
-        .navigationTitle(AppLocalization.text("Set Up by Hand"))
+        .navigationTitle(AppLocalization.text("Add It by Hand"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }

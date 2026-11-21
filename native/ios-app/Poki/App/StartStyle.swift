@@ -246,11 +246,16 @@ struct StartHero: View {
 /// of everything at the end.
 enum StartRoute: Hashable {
     case step(SetupStep)
+    /// The Poki Loopback Shortcut, on its own page right after the loopback (the owner, Nov 21 2026).
+    case shortcut
     case models
     case features
     case summary
 
-    static var order: [StartRoute] { SetupStep.shown.map(StartRoute.step) + [.models, .features, .summary] }
+    static var order: [StartRoute] {
+        SetupStep.shown.flatMap { $0 == .loopback ? [StartRoute.step($0), .shortcut] : [StartRoute.step($0)] }
+            + [.models, .features, .summary]
+    }
 
     var next: StartRoute? {
         let all = Self.order
@@ -266,7 +271,6 @@ struct StartFlowPage: View {
     var kind: FirstRun.Kind
     @Binding var path: NavigationPath
     var finish: () -> Void
-    @State private var hasModel = ModelKeys.hasUsableKey
 
     var body: some View {
         switch route {
@@ -274,28 +278,10 @@ struct StartFlowPage: View {
             SetupStepPage(step: step, hero: true)
                 .settingsPage()
                 .bottomBar(softEdge: true) { stepButtons(step) }
+        case .shortcut:
+            StartShortcutPage(goOn: goOn)
         case .models:
-            Form {
-                StartHero(symbol: "sparkles", title: "Models",
-                          line: "Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.",
-                          done: hasModel)
-                Section {
-                    NavigationLink(value: DetailsRoute.model) {
-                        SettingsRow(title: "Accounts", symbol: "person.crop.circle",
-                                    value: hasModel ? ModelKeys.selectedModelName : nil, accessory: hasModel ? .done : nil)
-                    }
-                    .accessibilityIdentifier("firstRun.models")
-                    WelcomeLocalModels()
-                }
-            }
-            .navigationTitle(Text(verbatim: ""))
-            .navigationBarTitleDisplayMode(.inline)
-            .settingsPage()
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in hasModel = ModelKeys.hasUsableKey }
-            .onAppear { hasModel = ModelKeys.hasUsableKey }
-            .bottomBar(softEdge: true) {
-                StartButtons(primary: "Continue", action: goOn, secondary: hasModel ? nil : "Set Up Later", secondaryAction: goOn)
-            }
+            StartModelsPage(goOn: goOn)
         case .features:
             Form {
                 StartHero(symbol: "square.stack.3d.up", title: "Features",
@@ -351,4 +337,106 @@ extension EnvironmentValues {
 extension View {
     /// The primary button waits until the page's step is done; Set Up Later goes on without it.
     func disabledPrimary() -> some View { environment(\.startPrimaryDisabled, true) }
+}
+
+/// The start flow's page for the Poki Loopback Shortcut: what it does in one line, then the steps.
+struct StartShortcutPage: View {
+    var goOn: () -> Void
+    @ObservedObject private var reconnect = HistoryReconnect.shared
+
+    var body: some View {
+        Form {
+            StartHero(symbol: "square.2.layers.3d", title: "Poki Loopback Shortcut",
+                      line: "If the loopback stops, this shortcut turns it back on by itself. Set it up once.",
+                      done: reconnect.isSetUp && reconnect.lastWorked)
+            LoopbackShortcutSteps()
+        }
+        .navigationTitle(Text(verbatim: ""))
+        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage()
+        .bottomBar(softEdge: true) {
+            StartButtons(primary: "Continue", action: goOn, secondary: reconnect.isSetUp ? nil : "Set Up Later", secondaryAction: goOn)
+        }
+    }
+}
+
+/// The start flow's models page, as one question (the owner, Nov 21 2026: "simplify to the dumbest
+/// possible"): sign in with ChatGPT, or paste a key from another provider. One is enough. The model on
+/// this iPhone is a separate, optional part under it. Settings' Models page keeps every choice.
+struct StartModelsPage: View {
+    var goOn: () -> Void
+    @State private var hasModel = ModelKeys.hasUsableKey
+    @State private var modelName = ModelKeys.selectedModelName
+    @State private var signingIn = false
+    @State private var adding = false
+
+    var body: some View {
+        Form {
+            StartHero(symbol: "sparkles", title: "Connect a Model",
+                      line: "Poki needs an AI account to think. Pick one way below. One is enough.",
+                      done: hasModel)
+            Section {
+                if hasModel {
+                    SettingsRow(title: "Connected", symbol: "checkmark.seal", value: modelName, accessory: .done)
+                        .accessibilityIdentifier("firstRun.models.connected")
+                    NavigationLink(value: DetailsRoute.model) {
+                        SettingsRow(title: "Change or Add Another", symbol: "arrow.left.arrow.right")
+                    }
+                    .accessibilityIdentifier("firstRun.models")
+                } else {
+                    Button { signingIn = true } label: {
+                        SettingsRow(title: "Sign In with ChatGPT", caption: "Use your ChatGPT plan. No key to copy.", symbol: "person.crop.circle")
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("firstRun.models.chatgpt")
+                    Button { adding = true } label: {
+                        SettingsRow(title: "Paste an API Key", caption: "Anthropic, OpenAI, Gemini and more", symbol: "key")
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("firstRun.models.key")
+                }
+            } header: {
+                Group {
+                    Text(hasModel ? LocalizedStringKey("Your Model") : LocalizedStringKey("Pick One Way"))
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Your sign in or key stays on this iPhone.")
+                }
+                .settingsFooter()
+            }
+            Section {
+                WelcomeLocalModels()
+                if LocalModels.recommends { LocalRecommendation() }
+            } header: {
+                Group {
+                    Text("On This iPhone")
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Optional. A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone.")
+                }
+                .settingsFooter()
+            }
+        }
+        .navigationTitle(Text(verbatim: ""))
+        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage()
+        .sheet(isPresented: $signingIn, onDismiss: refresh) { ChatGPTSignIn() }
+        .sheet(isPresented: $adding, onDismiss: refresh) { AddAccount() }
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
+        .onAppear(perform: refresh)
+        .bottomBar(softEdge: true) {
+            StartButtons(primary: "Continue", action: goOn, secondary: hasModel ? nil : "Set Up Later", secondaryAction: goOn)
+        }
+    }
+
+    private func refresh() {
+        hasModel = ModelKeys.hasUsableKey
+        modelName = ModelKeys.selectedModelName
+    }
 }
