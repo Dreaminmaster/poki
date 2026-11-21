@@ -39540,23 +39540,6 @@
         }
       }
     },
-    "Each list offers the models ticked under the providers below. Senses only runs on local models. Dictation in the message field needs no model." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每个列表提供下方各提供商中勾选的模型。感知只在本地模型上运行。消息栏中的听写不需要模型。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每個列表提供下方各供應商中勾選的模型。感知只在本機模型上執行。訊息欄中的聽寫不需要模型。"
-          }
-        }
-      }
-    },
     "Enter the model’s ID as the service names it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39621,23 +39604,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機"
-          }
-        }
-      }
-    },
-    "Local models can be used for decisions and for Senses. Senses only runs on local models." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地模型可用于决定和感知。感知只在本地模型上运行。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本機模型可用於決定和感知。感知只在本機模型上執行。"
           }
         }
       }
@@ -42822,6 +42788,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 無法載入開發者工具。請將這台 iPhone 連接到電腦，在 Poki Setup 中重新準備，然後重新開啟 Poki 並開啟「允許 Poki 操作」。"
+          }
+        }
+      }
+    },
+    "Each list offers the models ticked under the providers below. Senses reads the screen and checks privacy on this iPhone; its insights use the model picked on the Senses page. Dictation in the message field needs no model." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个列表提供下方各提供商中勾选的模型。感知在这台 iPhone 上读取屏幕并检查隐私，洞察使用“感知”页面中选择的模型。消息栏中的听写不需要模型。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每個列表提供下方各供應商中勾選的模型。感知在這部 iPhone 上讀取螢幕並檢查隱私，洞察使用「感知」頁面中選擇的模型。訊息欄中的聽寫不需要模型。"
+          }
+        }
+      }
+    },
+    "Local models can be used for decisions and for Senses, which reads the screen and checks privacy on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地模型可用于决定和感知。感知在这台 iPhone 上读取屏幕并检查隐私。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機模型可用於決定和感知。感知在這部 iPhone 上讀取螢幕並檢查隱私。"
           }
         }
       }

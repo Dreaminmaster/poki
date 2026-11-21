@@ -80,6 +80,35 @@ final class ScreenHistoryTests: XCTestCase {
         ["ok": true, "app": app, "title": "", "text": text, "changed": true]
     }
 
+    /// Insights may use the chat model (the owner, 2026-11-20), but what leaves for an agent is still
+    /// checked by the model on this iPhone first, whichever Insights Model is picked.
+    func testThePrivacyCheckRunsOnThisIPhoneWithEitherInsightsModel() async {
+        let use = SensesUse.shared
+        let savedModel = use.insightModel
+        let defaults = UserDefaults.standard
+        let approvalKeys = [ApprovalChoice.modeKey, "approvals.classifier.level", "approvals.ask"]
+        let savedApprovals = approvalKeys.map { defaults.object(forKey: $0) }
+        // Not Ask All, which asks the owner before any check runs.
+        defaults.set("reply", forKey: ApprovalChoice.modeKey)
+        defaults.set("balanced", forKey: "approvals.classifier.level")
+        defaults.removeObject(forKey: "approvals.ask")
+        SensesContext.checksOutside = true
+        defer {
+            for (key, value) in zip(approvalKeys, savedApprovals) { defaults.set(value, forKey: key) }
+            use.insightModel = savedModel
+            BacktapeWriter.testModel = nil
+            SensesContext.checksOutside = false
+        }
+        for model in [SensesInsightModel.onDevice, .chat] {
+            use.insightModel = model
+            var asked: [String] = []
+            BacktapeWriter.testModel = { _, instructions in asked.append(instructions); return "ASK | where the person is" }
+            let verdict = await SensesContext.checkOutside("Coffee at the corner shop at 9", arguments: "{\"question\":\"morning\"}")
+            XCTAssertEqual(verdict, .ask(reason: "where the person is"), "\(model)")
+            XCTAssertTrue(asked.contains { $0.contains("You guard a person's privacy") }, "the check did not run with \(model)")
+        }
+    }
+
     func testALeftOutAppAndTheHomeScreenLeaveNothingInTheStore() async {
         let capture = HistoryCapture()
         capture.exclude("com.example.bank")

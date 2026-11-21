@@ -68,7 +68,7 @@ struct LocalProviderDetail: View {
                 .settingsHeader()
             } footer: {
                 Group {
-                    Text("Local models can be used for decisions and for Senses. Senses only runs on local models.")
+                    Text("Local models can be used for decisions and for Senses, which reads the screen and checks privacy on this iPhone.")
                 }
                 .settingsFooter()
             }

@@ -26,7 +26,10 @@ enum BacktapeWriter {
     /// The model picked under Settings › Models › Senses: Apple's first, the downloaded one where
     /// Apple's is missing, unless the owner picked otherwise or turned it off.
     @MainActor
-    static var available: Bool { SensesLocalModel.current != nil }
+    static var available: Bool { testModel != nil || SensesLocalModel.current != nil }
+
+    /// Tests only: stands in for the model on this iPhone, so a test can see what it is asked.
+    @MainActor static var testModel: ((_ text: String, _ instructions: String) -> String?)?
 
     @MainActor
     static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
@@ -79,6 +82,7 @@ enum BacktapeWriter {
     /// nothing is sent anywhere.
     @MainActor
     static func ask(_ text: String, instructions: String) async -> String? {
+        if let testModel { return testModel(text, instructions) }
         guard available else { return nil }
         return await answer(to: text, instructions: instructions)
     }
