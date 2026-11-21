@@ -32,9 +32,9 @@ enum AppAudioContext {
 
     @MainActor static func recent() async -> Self? {
         #if os(iOS) && canImport(ScreenCaptureKit)
-        guard #available(iOS 27, *), let buffer = AppAudioCapture.shared.buffer,
-              let pcm = buffer.snapshot() else { return nil }
-        let text = try? await transcribe(pcm, locale: Locale(identifier: AppLocalization.language))
+        guard #available(iOS 27, *), let buffer = AppAudioCapture.shared.buffer else { return nil }
+        let locale = Locale(identifier: AppLocalization.language)
+        let text = try? await buffer.transcribe { input in try await transcribe(input, locale: locale) }
         guard buffer.isActive,
               let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .unavailable }
         return .transcript(text, stillCapturing: { buffer.isActive })
@@ -43,31 +43,31 @@ enum AppAudioContext {
         #endif
     }
 
-    static func transcribe(_ pcm: Data, locale: Locale) async throws -> String {
-        guard !pcm.isEmpty, pcm.count <= AppAudioBuffer.capacity,
-              pcm.count.isMultiple(of: MemoryLayout<Int16>.size),
-              let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(AppAudioBuffer.sampleRate),
-                                         channels: 1, interleaved: true),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)),
-              let samples = buffer.int16ChannelData?.pointee else { return "" }
-        buffer.frameLength = buffer.frameCapacity
-        pcm.copyBytes(to: UnsafeMutableRawBufferPointer(start: samples, count: pcm.count))
-
+    static func transcribe(_ audio: AppAudioInput, locale: Locale) async throws -> String {
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(AppAudioBuffer.sampleRate),
+                                         channels: 1, interleaved: true) else { throw AudioError.conversion }
+        try Task.checkCancellation()
         if #available(iOS 26, *), let language = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
             let transcriber = DictationTranscriber(locale: language, preset: .longDictation)
             if await AssetInventory.status(forModules: [transcriber]) == .supported,
                let request = try? await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                try Task.checkCancellation()
                 try? await request.downloadAndInstall()
             }
+            try Task.checkCancellation()
             if await AssetInventory.status(forModules: [transcriber]) == .installed,
                let target = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber], considering: format) {
-                let input = try convert(buffer, to: target)
+                try Task.checkCancellation()
                 let analyzer = SpeechAnalyzer(modules: [transcriber])
+                audio.onCancel { Task { await analyzer.cancelAndFinishNow() } }
                 async let text: String = collect(transcriber)
-                let stream = AsyncStream<AnalyzerInput> { continuation in
-                    continuation.yield(AnalyzerInput(buffer: input))
-                    continuation.finish()
-                }
+                let stream = AsyncThrowingStream<AnalyzerInput, Error>(unfolding: {
+                    try Task.checkCancellation()
+                    return try audio.next { pcm in
+                        let input = try makeBuffer(pcm, format: format)
+                        return AnalyzerInput(buffer: try convert(input, to: target))
+                    }
+                })
                 do {
                     if let end = try await analyzer.analyzeSequence(stream) { try await analyzer.finalizeAndFinish(through: end) }
                     else { await analyzer.cancelAndFinishNow() }
@@ -79,6 +79,7 @@ enum AppAudioContext {
             }
         }
 
+        try Task.checkCancellation()
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.supportsOnDeviceRecognition,
               recognizer.isAvailable else { return "" }
         #if os(iOS)
@@ -88,6 +89,7 @@ enum AppAudioContext {
             }
         }
         #endif
+        try Task.checkCancellation()
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return "" }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
@@ -100,10 +102,27 @@ enum AppAudioContext {
                 } else if let error { continuation.finish(throwing: error) }
             }
             continuation.onTermination = { _ in task.cancel() }
-            request.append(buffer)
-            request.endAudio()
+            audio.onCancel {
+                task.cancel()
+                continuation.finish(throwing: CancellationError())
+            }
+            do {
+                while try audio.next({ pcm in request.append(try makeBuffer(pcm, format: format)) }) != nil {}
+                request.endAudio()
+            } catch {
+                continuation.finish(throwing: error)
+            }
         }
         return try await results.first(where: { _ in true }) ?? ""
+    }
+
+    private static func makeBuffer(_ pcm: Data, format: AVAudioFormat) throws -> AVAudioPCMBuffer {
+        guard pcm.count.isMultiple(of: MemoryLayout<Int16>.size),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(pcm.count / MemoryLayout<Int16>.size)),
+              let samples = buffer.int16ChannelData?.pointee else { throw AudioError.conversion }
+        buffer.frameLength = buffer.frameCapacity
+        pcm.copyBytes(to: UnsafeMutableRawBufferPointer(start: samples, count: pcm.count))
+        return buffer
     }
 
     @available(iOS 26, *)

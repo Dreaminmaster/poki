@@ -14,7 +14,7 @@ On iOS 27 or later, open Poki's **Dictation & Mute** settings and tap **Listen t
 
 ## Audio and voice
 
-Poki keeps at most a minute of 16 kHz mono PCM in memory. Stopping or losing the stream clears the buffer. Poki transcribes the snapshot locally using the selected Poki language. Apple may need to download the language asset on first use. Poki sends the transcript to the existing voice connection as quoted material. Phone tools are disabled in that conversation.
+Poki keeps at most a minute of 16 kHz mono PCM in memory. Old audio expires even when playback pauses. Stopping or losing the stream clears captured and queued audio and cancels any active transcription. Poki transcribes locally using the selected Poki language. Apple may need to download the language asset on first use. Poki sends the transcript to the existing voice connection as quoted material. Phone tools are disabled in that conversation.
 
 The simulator can verify the rolling buffer and voice tool guard with recorded inputs. The iOS 27.0 and 27.3 simulator SDKs lack ScreenCaptureKit. On the iOS 27.2 simulator tested here, DictationTranscriber installed the English and Simplified Chinese assets, but SpeechAnalyzer returned no compatible audio format for either. SpeechTranscriber reported unavailable. SFSpeechRecognizer reported support for local recognition, but the simulator audio probe produced no transcript. The same recorded clip produced a transcript on macOS.
 
