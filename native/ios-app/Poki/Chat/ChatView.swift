@@ -165,6 +165,7 @@ struct ChatView: View {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
                            newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: showPokiStatus)
+                    .logStartupAppearance(.topBar)
             }
         }
         .bottomBar(softEdge: true) {
@@ -177,6 +178,7 @@ struct ChatView: View {
                 ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
+                    .logStartupAppearance(.composer)
             }
             .padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 10)
             .frame(maxWidth: 720) }
@@ -323,7 +325,7 @@ extension View {
     /// under it, as under the system's bars), an inset before it.
     @ViewBuilder func bottomBar<Bar: View>(softEdge: Bool = false, @ViewBuilder _ bar: () -> Bar) -> some View {
         if #available(iOS 26.0, *) {
-            safeAreaBar(edge: .bottom, spacing: 0) { GlassEffectContainer(spacing: 8) { bar() } }
+            safeAreaBar(edge: .bottom, spacing: 0) { bar().glassGroup(spacing: 8) }
                 .scrollEdgeEffectStyle(softEdge ? .soft : .automatic, for: .bottom)
         } else {
             safeAreaInset(edge: .bottom, spacing: 0) { bar() }

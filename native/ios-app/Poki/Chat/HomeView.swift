@@ -570,6 +570,7 @@ struct HomePage<Footer: View>: View {
                     }
                 }
                 .padding(.top, 2)
+                .logStartupAppearance(.suggestions)
                 .padding(.horizontal, typeSize.isAccessibilitySize ? 18 : 0)
                 // A sideways drag on the rows scrolls them; it does not pull the drawer out.
                 .scrollsSideways(home && !typeSize.isAccessibilitySize)
