@@ -53,6 +53,36 @@ final class ModelSessionMetadataTests: XCTestCase {
         XCTAssertNil(plainBackup.value(forHTTPHeaderField: "x-opencode-session"))
     }
 
+    /// Exercise the production fallback HTTP transport, not just the header helper:
+    /// a 503 response moves the same request to a second, unrelated gateway.
+    func testActualHTTPFallbackDoesNotLeakOpenCodeSessionToBackup() async throws {
+        let primary = try FakeCompletions(replies: [FakeCompletions.text("Primary unavailable")],
+                                          responseStatuses: [503])
+        let backup = try FakeCompletions(replies: [FakeCompletions.text("Backup answer")])
+        let originalBase = "http://127.0.0.1:\(primary.port)/v1"
+        let backupBase = "http://127.0.0.1:\(backup.port)/v1"
+        let client = CustomEndpointClient(primary: originalBase, backups: [backupBase],
+                                          conversationSessionID: "own-saved-chat")
+        var request = URLRequest(url: try XCTUnwrap(URL(string: originalBase + "/chat/completions")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("stale-other-chat", forHTTPHeaderField: "x-opencode-session")
+        request.setValue("Poki", forHTTPHeaderField: "x-opencode-client")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "fixture", "messages": [["role": "user", "content": "Hello"]], "stream": true
+        ])
+
+        let response = try await client.send(request)
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(primary.requests.count, 1)
+        XCTAssertEqual(backup.requests.count, 1, "A real HTTP 503 must reach the fallback endpoint")
+        XCTAssertEqual(primary.requestHeaders.first?["x-opencode-session"], "stale-other-chat")
+        XCTAssertNil(backup.requestHeaders.first?["x-opencode-session"])
+        XCTAssertNil(backup.requestHeaders.first?["x-opencode-client"])
+        XCTAssertEqual(backup.requests.first?["model"] as? String, "fixture")
+    }
+
     func testRequestIdentityUsesTheRealPokiProductName() {
         let identity = PiLoop.clientIdentity(version: "0.4.0")
         XCTAssertEqual(formatUserAgent(identity: identity), "Poki/0.4.0")
