@@ -17682,6 +17682,22 @@
         }
       }
     },
+    "Use a Device Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用设备码登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用裝置代碼登入"
+          }
+        }
+      }
+    },
     "Use a Code Instead" : {
       "localizations" : {
         "zh-Hans" : {
@@ -26788,6 +26804,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 內建通道"
+          }
+        }
+      }
+    },
+    "Other Sign-In Methods" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他登录方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他登入方式"
           }
         }
       }

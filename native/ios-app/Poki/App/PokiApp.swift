@@ -260,7 +260,7 @@ struct RootView: View {
                     openLiveVoice()
                 }
             }) {
-                ChatGPTSignIn(startImmediately: true) { resumeVoiceAfterSignIn = true }
+                ChatGPTSignIn { resumeVoiceAfterSignIn = true }
             }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
             .onChange(of: scenePhase) { takeEntry() }

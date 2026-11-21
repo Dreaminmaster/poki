@@ -158,7 +158,10 @@ async fn serve(
                 }
                 let method = message.get("method").and_then(Value::as_str).unwrap_or_default();
                 if !matches!(method, "account/read" | "account/login/start" | "account/login/cancel" | "account/logout" | "thread/start" | "thread/realtime/start" | "thread/realtime/stop")
-                    || method == "account/login/start" && message.pointer("/params/type").and_then(Value::as_str) != Some("chatgptDeviceCode")
+                    || method == "account/login/start" && !matches!(
+                        message.pointer("/params/type").and_then(Value::as_str),
+                        Some("chatgpt" | "chatgptDeviceCode")
+                    )
                 {
                     publish(emit, json!({"id": id, "error": {"code": -32601}}));
                     continue;

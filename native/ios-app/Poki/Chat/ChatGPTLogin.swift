@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Foundation
 import PiSwiftAI
 import SwiftUI
@@ -79,10 +80,10 @@ enum ChatGPTAccount {
 
 struct ChatGPTSignIn: View {
     @Environment(\.dismiss) private var dismiss
-    var startImmediately = false
     var onSignedIn: () -> Void = {}
     @State private var working = false
     @State private var problem: String?
+    @State private var browser: ChatGPTBrowserSession?
 
     var body: some View {
         NavigationStack {
@@ -100,9 +101,19 @@ struct ChatGPTSignIn: View {
                     }
                 } else {
                     Section {
-                        Button("Continue with ChatGPT", action: authorize).disabled(working)
+                        Button("Continue with ChatGPT") { authorize(.browser(openBrowser)) }
+                            .disabled(working)
+                            .accessibilityIdentifier("chatgpt.sign-in.browser")
                     } footer: {
                         Text("Use your ChatGPT subscription for text chat and live voice. Your sign-in stays in this iPhone’s Keychain.")
+                    }
+                    Section {
+                        DisclosureGroup("Other Sign-In Methods") {
+                            Button("Use a Device Code") { authorize(.deviceCode) }
+                                .accessibilityIdentifier("chatgpt.sign-in.device-code")
+                        }
+                        .disabled(working)
+                        .accessibilityIdentifier("chatgpt.sign-in.other")
                     }
                 }
                 if let problem { Text(verbatim: problem).foregroundStyle(Color(.systemRed)) }
@@ -115,25 +126,29 @@ struct ChatGPTSignIn: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { cancel() } } }
             .interactiveDismissDisabled(working)
         }
-        .task { if startImmediately { authorize() } }
     }
 
     private func cancel() {
-        CodexVoice.shared.stop()
+        closeBrowser()
+        CodexVoice.shared.cancelLogin()
         dismiss()
     }
 
-    private func authorize() {
+    private func authorize(_ method: CodexVoice.LoginMethod) {
         guard !working else { return }
         problem = nil
         working = true
         Task {
-            defer { working = false }
+            defer {
+                closeBrowser()
+                working = false
+            }
             do {
-                try await CodexVoice.shared.authorize()
+                try await CodexVoice.shared.authorize(method)
                 guard CodexAccount.accessToken != nil else { throw CodexVoice.Failure.signIn }
                 try? ChatGPTAccount.signOut()
                 ModelKeys.selectedProvider = .chatgpt
+                closeBrowser()
                 onSignedIn()
                 dismiss()
             } catch is CancellationError {
@@ -142,6 +157,22 @@ struct ChatGPTSignIn: View {
                 problem = AppLocalization.text("Could not sign in to ChatGPT. Try again.")
             }
         }
+    }
+
+    private func openBrowser(_ url: URL) throws {
+        guard let anchor = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows).first(where: \.isKeyWindow) else { throw CodexVoice.Failure.signIn }
+        let next = ChatGPTBrowserSession(anchor: anchor)
+        browser = next
+        try next.open(url) { cancelled in
+            CodexVoice.shared.cancelLogin()
+            if !cancelled { problem = AppLocalization.text("Could not sign in to ChatGPT. Try again.") }
+        }
+    }
+
+    private func closeBrowser() {
+        browser?.close()
+        browser = nil
     }
 
     private func signOut() {
@@ -155,6 +186,41 @@ struct ChatGPTSignIn: View {
                 problem = AppLocalization.text("Could not sign out of ChatGPT. Try again.")
             }
         }
+    }
+}
+
+@MainActor
+private final class ChatGPTBrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let anchor: ASPresentationAnchor
+    private var session: ASWebAuthenticationSession?
+
+    init(anchor: ASPresentationAnchor) { self.anchor = anchor }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { anchor }
+
+    func open(_ url: URL, onClose: @escaping @MainActor (Bool) -> Void) throws {
+        // The browser follows the HTTP redirect. Codex's loopback server receives the code
+        // and reports completion after saving the account.
+        let next = ASWebAuthenticationSession(url: url, callbackURLScheme: nil) { [weak self] _, error in
+            let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+            Task { @MainActor in
+                guard let self, self.session != nil else { return }
+                self.session = nil
+                onClose(cancelled)
+            }
+        }
+        next.presentationContextProvider = self
+        session = next
+        guard next.start() else {
+            session = nil
+            throw CodexVoice.Failure.signIn
+        }
+    }
+
+    func close() {
+        let closing = session
+        session = nil
+        closing?.cancel()
     }
 }
 

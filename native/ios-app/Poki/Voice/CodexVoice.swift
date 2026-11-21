@@ -13,10 +13,21 @@ final class CodexVoice: SubscriptionVoice {
     static let shared = CodexVoice()
     static let model = "gpt-live-1-codex"
 
-    struct Authorization: Identifiable {
-        let id: String
+    struct Authorization {
         let url: URL
         let code: String
+    }
+
+    enum LoginMethod {
+        case browser((URL) throws -> Void)
+        case deviceCode
+
+        var type: String {
+            switch self {
+            case .browser: "chatgpt"
+            case .deviceCode: "chatgptDeviceCode"
+            }
+        }
     }
 
     enum Failure: LocalizedError, Equatable {
@@ -43,6 +54,8 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var completed: [String: Result<JSON, any Error>] = [:]
     @ObservationIgnored private var running = false
     @ObservationIgnored private var active: UUID?
+    @ObservationIgnored private var loginAttempt: UUID?
+    @ObservationIgnored private var loginID: String?
     @ObservationIgnored private var thread: String?
     @ObservationIgnored private var nextRequest = 0
     @ObservationIgnored private var onEvent: ((String, JSON) -> Void)?
@@ -84,11 +97,7 @@ final class CodexVoice: SubscriptionVoice {
         active = nil
         onEvent = nil
         onTool = nil
-        if let authorization {
-            self.authorization = nil
-            finish("login:\(authorization.id)", .failure(CancellationError()))
-            sendWithoutWaiting("account/login/cancel", ["loginId": authorization.id])
-        }
+        cancelLogin()
         if let thread {
             self.thread = nil
             finish("sdp:\(thread)", .failure(CancellationError()))
@@ -115,27 +124,54 @@ final class CodexVoice: SubscriptionVoice {
         guard (account["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
     }
 
-    func authorize() async throws {
-        let generation = UUID()
-        active = generation
+    func cancelLogin() {
+        loginAttempt = nil
+        authorization = nil
+        guard let id = loginID else { return }
+        loginID = nil
+        completed.removeValue(forKey: "login:\(id)")
+        finish("login:\(id)", .failure(CancellationError()))
+        sendWithoutWaiting("account/login/cancel", ["loginId": id])
+    }
 
-        let code = try await request("account/login/start", ["type": "chatgptDeviceCode"])
-        guard let id = code["loginId"] as? String, let userCode = code["userCode"] as? String,
-              let address = code["verificationUrl"] as? String, let url = URL(string: address),
-              url.scheme == "https", url.host() == "auth.openai.com", url.path() == "/codex/device" else {
-            throw Failure.signIn
-        }
-        guard generation == active else {
+    func authorize(_ method: LoginMethod) async throws {
+        guard loginAttempt == nil else { throw Failure.signIn }
+        let attempt = UUID()
+        loginAttempt = attempt
+        defer { if loginAttempt == attempt { cancelLogin() } }
+
+        let response = try await request("account/login/start", ["type": method.type])
+        guard let id = response["loginId"] as? String else { throw Failure.signIn }
+        guard loginAttempt == attempt else {
             sendWithoutWaiting("account/login/cancel", ["loginId": id])
             throw CancellationError()
         }
-        authorization = Authorization(id: id, url: url, code: userCode)
-        defer { if authorization?.id == id { authorization = nil } }
+        loginID = id
+        switch method {
+        case .browser(let open):
+            guard let address = response["authUrl"] as? String,
+                  var url = URLComponents(string: address), url.scheme == "https", url.host == "auth.openai.com",
+                  url.path == "/oauth/authorize",
+                  url.queryItems?.first(where: { $0.name == "redirect_uri" })?.value == "http://127.0.0.1:1455/auth/callback",
+                  var parameters = url.percentEncodedQueryItems,
+                  let originator = parameters.firstIndex(where: { $0.name == "originator" }) else { throw Failure.signIn }
+            // The embedded server uses its host's name. This sign-in opens the CLI's browser flow.
+            parameters[originator].value = "codex_cli_rs"
+            url.percentEncodedQueryItems = parameters
+            guard let destination = url.url else { throw Failure.signIn }
+            try open(destination)
+        case .deviceCode:
+            guard let userCode = response["userCode"] as? String,
+                  let address = response["verificationUrl"] as? String, let url = URL(string: address),
+                  url.scheme == "https", url.host() == "auth.openai.com", url.path() == "/codex/device" else { throw Failure.signIn }
+            authorization = Authorization(url: url, code: userCode)
+        }
         let login = try await awaitMessage("login:\(id)", timeout: .seconds(900))
-        try check(generation)
+        guard loginAttempt == attempt else { throw CancellationError() }
+        loginID = nil
         guard login["success"] as? Bool == true else { throw Failure.signIn }
         let authorized = try await request("account/read", ["refreshToken": false])
-        try check(generation)
+        guard loginAttempt == attempt else { throw CancellationError() }
         guard (authorized["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
     }
 
@@ -226,8 +262,8 @@ final class CodexVoice: SubscriptionVoice {
             onEvent?("thread/realtime/error", [:])
             return
         }
-        if method == "account/login/completed", let id = params["loginId"] as? String, authorization?.id == id {
-            finish("login:\(id)", .success(params))
+        if method == "account/login/completed", let id = params["loginId"] as? String, loginID == id {
+            finish("login:\(id)", .success(params), retain: true)
             return
         }
         guard let thread, params["threadId"] as? String == thread else { return }
