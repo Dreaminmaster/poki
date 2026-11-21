@@ -64,7 +64,7 @@ enum ApprovalClassifier {
         }
     }
 
-    static func origin(voiceOn: Bool, outsideSession: String? = SessionStore.shared.activeSessionID) -> Origin {
+    static func origin(voiceOn: Bool, outsideSession: String?) -> Origin {
         if let outsideSession { return .outsideAgent(outsideSession) }
         if let delegatedID = AskPoki.liveSessionID { return .outsideAgent(delegatedID) }
         if let chat = AskPoki.chat, chat.running { return .chat(chat.sessionID) }
