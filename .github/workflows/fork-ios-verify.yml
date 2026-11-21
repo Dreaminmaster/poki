@@ -20,8 +20,8 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: 8e93245fe40fcb465962055f1a37664513e6ff18
-            tests: 'ModelSessionMetadataTests:11 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
+            ref: 8ccebea7ebad255137d8f5eea802028780a6581a
+            tests: 'ModelSessionMetadataTests:12 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
     timeout-minutes: 90
@@ -108,6 +108,13 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b 2>&1 | tee out/simulator-boot.log
+      - name: Verify core approval origin and cross-session isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testSensitiveToolApprovalCarriesExactExternalCallerAndLocalSourceIsNil 2>&1 | tee out/core-approval-origin.log
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testApprovedSensitiveActionCannotBeReusedByAnotherMCPCaller 2>&1 | tee out/core-approval-cross-session.log
       - name: Build simulator launcher and assets
         shell: bash
         run: |
