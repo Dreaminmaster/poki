@@ -29,7 +29,8 @@ final class ConnectorTests: XCTestCase {
         let resource = Data(#"{"resource":"https://example.com/mcp","authorization_servers":["https://auth.example.com"]}"#.utf8)
         XCTAssertEqual(ConnectorProbe.authorizationServer(fromResourceMetadata: resource)?.absoluteString, "https://auth.example.com")
         XCTAssertEqual(ConnectorProbe.registration(fromAuthorizationServerMetadata: Data(#"{"registration_endpoint":"https://auth.example.com/register"}"#.utf8)), .dynamic)
-        XCTAssertEqual(ConnectorProbe.registration(fromAuthorizationServerMetadata: Data(#"{"client_id_metadata_document_supported":true,"registration_endpoint":"https://a/r"}"#.utf8)), .metadataDocument)
+        XCTAssertEqual(ConnectorProbe.registration(fromAuthorizationServerMetadata: Data(#"{"client_id_metadata_document_supported":true,"registration_endpoint":"https://a/r"}"#.utf8)), .dynamic, "what Poki speaks comes first")
+        XCTAssertEqual(ConnectorProbe.registration(fromAuthorizationServerMetadata: Data(#"{"client_id_metadata_document_supported":true}"#.utf8)), .metadataDocument)
         XCTAssertEqual(ConnectorProbe.registration(fromAuthorizationServerMetadata: Data(#"{"issuer":"https://a"}"#.utf8)), .none)
     }
 
