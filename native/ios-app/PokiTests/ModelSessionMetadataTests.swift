@@ -99,6 +99,34 @@ final class ModelSessionMetadataTests: XCTestCase {
                        [sessionID, sessionID])
     }
 
+    /// A strict OpenAI-compatible Responses gateway rejects unknown JSON fields.
+    /// The SDK's sessionId normally injects prompt_cache_key into its payload.
+    /// The actual PiLoop request must still succeed, just as Test Connection did.
+    func testStrictCustomResponsesEndpointDoesNotReceivePromptCacheKey() async throws {
+        let payload = [
+            #"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_strict","role":"assistant"}}"#,
+            #"data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"OK"}"#,
+            #"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_strict","role":"assistant","content":[{"type":"output_text","text":"OK"}]}}"#,
+            #"data: {"type":"response.completed","response":{"status":"completed"}}"#
+        ].joined(separator: "\n\n") + "\n\n"
+        let server = try FakeCompletions(replies: [payload], rejectUnknownCacheField: true)
+        let model = Model(id: "strict-custom", name: "Strict custom", api: .openAIResponses,
+                          provider: "poki-custom", baseUrl: "http://127.0.0.1:\(server.port)/v1",
+                          reasoning: false, input: [.text],
+                          cost: ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
+                          contextWindow: 1_000, maxTokens: 100)
+        let loop = PiLoop(provider: .custom, model: model,
+                          sessionID: "saved-strict-provider-123", tools: []) { _ in
+            .init(text: "No tools", jpeg: nil, isError: true)
+        }
+        let answer = await loop.run("Hello", instructions: "Be brief.", maxTurns: 2) { _ in }
+        XCTAssertEqual(answer, .done, "A valid custom Responses endpoint must not fail on cache fields")
+        XCTAssertEqual(server.requests.count, 1)
+        XCTAssertNil(server.requests.first?["prompt_cache_key"])
+        XCTAssertNil(server.requests.first?["prompt_cache_retention"])
+        XCTAssertNil(server.requestHeaders.first?["x-opencode-session"])
+    }
+
     func testOtherProviderNeverReceivesOpenCodeSessionHeader() async throws {
         let server = try FakeCompletions(replies: [FakeCompletions.text("OK")])
         let model = syntheticModel(baseURL: "http://127.0.0.1:\(server.port)/v1")
