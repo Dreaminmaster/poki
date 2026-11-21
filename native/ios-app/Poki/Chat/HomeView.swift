@@ -160,7 +160,7 @@ struct PokiFlight: View {
     var pokes: Int
     var tap: () -> Void
     var openModel: () -> Void = {}
-    var openOutfits: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     /// How far the picture rises from over the greeting to the top bar, for the greeting to rise with it.
     var travel: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -172,18 +172,21 @@ struct PokiFlight: View {
                 .accessibilityHidden(true)
                 .overlay {
                     if home {
-                        PokiMenu(openModel: openModel, tapped: tap, openOutfits: openOutfits) {
+                        PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization) {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
                         .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
                         .accessibilityIdentifier("home.poki")
-                    } else {
-                        Button(action: openOutfits) {
+                    } else if let openCustomization {
+                        Button {
+                            tap()
+                            openCustomization()
+                        } label: {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(Text("Outfits"))
-                        .accessibilityIdentifier("chat.header.outfits")
+                        .accessibilityLabel(Text("Customize Poki"))
+                        .accessibilityIdentifier("chat.header.avatar")
                     }
                 }
                 .position(x: place.midX, y: place.midY)
@@ -213,6 +216,7 @@ struct PokiHead: View {
     var openModel: () -> Void = {}
     /// A tap on the pill: the bear says hi while the menu opens.
     var openDetails: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -225,7 +229,7 @@ struct PokiHead: View {
                     // The menu is the name pill alone: the system draws its own glass around a menu's
                     // label in a glass group, and a label that held the picture's place too put the
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
-                    PokiMenu(openModel: openModel, tapped: openDetails) {
+                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
                         Text(verbatim: "Poki")
                             .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
                             .padding(.horizontal, 12).frame(minHeight: 24)
@@ -271,6 +275,7 @@ struct ChatTopBar: View {
     var openDetails: () -> Void
     /// Settings › Models, for the menu's Add Model.
     var openModel: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Taps on New Conversation on the home page, for a light tap in the hand.
     @State private var homeTaps = 0
@@ -306,7 +311,8 @@ struct ChatTopBar: View {
                 }
             }
             .padding(.top, (sizes.avatar - sizes.button) / 2)
-            PokiHead(status: status, home: home, openModel: openModel, openDetails: openDetails)
+            PokiHead(status: status, home: home, openModel: openModel, openDetails: openDetails,
+                     openCustomization: openCustomization)
                 .allowsHitTesting(!home)
                 .accessibilityHidden(home)
                 .padding(.horizontal, sizes.button + 12)

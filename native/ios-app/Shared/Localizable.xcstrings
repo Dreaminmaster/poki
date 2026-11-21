@@ -38114,13 +38114,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "装扮"
+            "value": "套装"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "裝扮"
+            "value": "套裝"
           }
         }
       }
@@ -38142,36 +38142,19 @@
         }
       }
     },
-    "Current outfit: %@": {
+    "Customize Poki": {
       "extractionState": "manual",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前装扮：%@"
+            "value": "自定义 Poki"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "目前裝扮：%@"
-          }
-        }
-      }
-    },
-    "Mix and Match": {
-      "extractionState": "manual",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自由搭配"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自由搭配"
+            "value": "自訂 Poki"
           }
         }
       }
@@ -38244,19 +38227,19 @@
         }
       }
     },
-    "Outfit pieces": {
+    "Outfit categories": {
       "extractionState": "manual",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "装扮部件"
+            "value": "装扮分类"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "裝扮部件"
+            "value": "裝扮分類"
           }
         }
       }

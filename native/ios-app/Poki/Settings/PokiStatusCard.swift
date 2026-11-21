@@ -1,9 +1,7 @@
 import SwiftUI
 
-// Tapping Poki, on the home page, in the conversation or on the voice page, opens Poki's menu in place
-// (the owner, 2026-11-15: a native menu, not a drawn card; it grows out of Poki's picture before a chat
-// has begun and out of the glass pill with Poki's name after). It is the system's own menu, so on
-// iOS 26 it is Liquid Glass and opens from the control that was tapped. The model that answers
+// The home avatar, conversation name pill, and voice header open Poki's native status menu.
+// On iOS 26 the menu uses Liquid Glass and opens from the control that was tapped. The model that answers
 // and how Poki asks before a sensitive step each show their choice and open to change it. These
 // live only here: Settings keeps the accounts. Settings opens from the bottom of the conversations
 // (SettingsEntryButton). Pause is not on it (the owner, 2026-11-13): it only stopped the task, which the
@@ -61,7 +59,7 @@ struct PokiMenu<Face: View>: View {
     var openModel: () -> Void
     /// The tap that opens the menu, for the bear to answer.
     var tapped: () -> Void = {}
-    var openOutfits: (() -> Void)? = nil
+    var openCustomization: (() -> Void)? = nil
     @ViewBuilder var face: () -> Face
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -132,8 +130,9 @@ struct PokiMenu<Face: View>: View {
                 }
                 .accessibilityIdentifier("status.autoUnlock")
             }
-            if let openOutfits {
-                Button("Outfits", systemImage: "tshirt", action: openOutfits)
+            if let openCustomization {
+                Button("Customize Poki", systemImage: "hanger", action: openCustomization)
+                    .accessibilityIdentifier("status.customizePoki")
             }
         } label: {
             face()
