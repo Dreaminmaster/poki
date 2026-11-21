@@ -140,7 +140,6 @@ final class ChatModel {
     let isSample = UserDefaults.standard.string(forKey: "pokiChat") != nil
     private let app: AppModel
     private let store: SessionStore
-    private let resolveModel: (ModelProvider, String) -> Model?
     /// The model's side of the conversation: pi's loop (ESP-177), or for Anthropic and OpenAI with
     /// `-chatEngine direct`, the provider's own API in its own form.
     private var loop: PiLoop?
@@ -191,11 +190,10 @@ final class ChatModel {
     static let maxTurns = 500
 
     init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil,
-         store: SessionStore? = nil, resolveModel: @escaping (ModelProvider, String) -> Model? = { $0.piModel($1) }) {
+         store: SessionStore? = nil) {
         let store = store ?? .shared
         self.app = app
         self.store = store
-        self.resolveModel = resolveModel
         if let sessionID { self.sessionID = sessionID }
         self.kind = kind
         self.requester = requester
@@ -540,7 +538,7 @@ final class ChatModel {
         let model = ModelKeys.selectedModel
         // The first message names the chat: a few words from the chat's own model, in the background.
         if kind == .poki, !again, entries.filter({ if case .you = $0.kind { return true }; return false }).count == 1,
-           let piModel = resolveModel(provider, model) {
+           let piModel = provider.piModel(model) {
             let id = sessionID
             let store = self.store
             Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel, sessionID: id) { store.setAutoName(id, name) } }
@@ -563,7 +561,7 @@ final class ChatModel {
                                 resumedTask: resumedTask, inSplitView: inSplitView, images: images, namedApps: namedApps,
                                 engine: .direct(client, instructions))
         }
-        guard let piModel = resolveModel(provider, model) else {
+        guard let piModel = provider.piModel(model) else {
             add(.note(.problem(AppLocalization.text(LocalizedStringResource("pi has no model \(model) for \(provider.name).")))))
             return nil
         }
