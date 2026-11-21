@@ -34,7 +34,7 @@ struct ModelSettingsView: View {
                 .settingsHeader()
             } footer: {
                 Group {
-                    Text("Each list offers the models ticked under the providers below. Senses reads the screen and checks privacy on this iPhone; its insights use the model picked on the Senses page. Dictation in the message field needs no model.")
+                    Text("Each list offers the models ticked under the providers below. Senses reads the screen and checks privacy on this iPhone. Its insights use the model picked on the Senses page. Dictation in the message field needs no model.")
                 }
                 .settingsFooter()
             }
