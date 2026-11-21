@@ -81,7 +81,7 @@ struct ScreenshotCompanion: Sendable {
     let pokiPane: String
 }
 
-private struct ScreenCapture: Sendable {
+struct ScreenCapture: Sendable {
     let data: Data
     let companion: ScreenshotCompanion?
 }
@@ -239,11 +239,13 @@ extension Runner {
         return (flatten(root), Foreground(bundleID: bundleID, name: name, pokiPane: pokiPane))
     }
 
+    static let pictureLagLimit = 0.6
+
     func screenshot(timeout: Double) async throws -> Data {
         try await captureScreen(timeout: timeout).data
     }
 
-    private func captureScreen(timeout: Double) async throws -> ScreenCapture {
+    func captureScreen(timeout: Double) async throws -> ScreenCapture {
         let value = try await raw("GET", "/screenshot", timeout: timeout)
         guard let base64 = value.string ?? value["image"]?.string,
               let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
@@ -389,7 +391,7 @@ extension Runner {
         // The tree and the picture are one moment: when the tree came well after the picture (a slow
         // snapshot while the screen moved on), the picture is taken again so the frames and the
         // pixels agree (seen on the phone: a tree of the inside of a chat with a picture of the list).
-        if treeCame, reading.png != nil, let at = pictureAt.value, treeAt - at > 0.6, started + timeout - now() > 0.4 {
+        if treeCame, reading.png != nil, let at = pictureAt.value, treeAt - at > Self.pictureLagLimit, started + timeout - now() > 0.4 {
             if let first = reading.png, let again = try? await captureScreen(timeout: min(1.5, started + timeout - now())) {
                 reading.use(again)
                 reading.notes.append("the picture was taken again after the tree, which came \(Int(((treeAt - at) * 1000).rounded())) ms later than the first picture")

@@ -768,7 +768,124 @@ final class LookDoTests: XCTestCase {
         XCTAssertEqual(taps.value, 1)
     }
 
-    private func numberDisplayPicture(_ digit: String, transitioning: Bool = false) -> Data {
+    func testNumberKeyRetakesPictureWhenConfirmationTreeLagsBehindFirstPicture() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let firstSeven = numberDisplayPicture("7")
+        let transition = numberDisplayPicture("0", transitioning: true)
+        let settledSeven = numberDisplayPicture("7", xOffset: 8)
+        XCTAssertNotEqual(firstSeven.count, settledSeven.count)
+        let taps = LockedBox(0)
+        let sourcesAfterTap = LockedBox(0)
+        let screenshotsAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        let beforeNodes = [Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        let afterNodes = [Node("StaticText", "7", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        @Sendable func treeJSON(_ nodes: [Node]) -> JSON {
+            let children: [JSON] = nodes.map { n in
+                ["type": .string("XCUIElementType\(n.type)"), "label": n.label.map(JSON.string) ?? .null,
+                 "rect": ["x": .number(n.frame[0]), "y": .number(n.frame[1]), "width": .number(n.frame[2]), "height": .number(n.frame[3])],
+                 "children": []]
+            }
+            return ["type": "XCUIElementTypeApplication", "label": "Calculator",
+                    "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]
+        }
+        wda.set("GET /source") { _ in
+            guard taps.value > 0 else { return (200, ["value": treeJSON(beforeNodes)]) }
+            let call = sourcesAfterTap.update { $0 += 1; return $0 }
+            if call == 1 {
+                try await Task.sleep(nanoseconds: 150_000_000)
+            } else if call == 2 {
+                try await Task.sleep(nanoseconds: 550_000_000)
+            }
+            return (200, ["value": treeJSON(afterNodes)])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard taps.value > 0 else { return (200, ["value": .string(before.base64EncodedString())]) }
+            let count = screenshotsAfterTap.update { $0 += 1; return $0 }
+            let picture = count == 1 ? firstSeven : (count <= 3 ? transition : settledSeven)
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertGreaterThanOrEqual(screenshotsAfterTap.value, 2, result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledSeven.count)".utf8), result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyRespectsDisabledQuickReadWhenTapHasNoEffect() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }
+        let before = numberDisplayPicture("0")
+        let taps = LockedBox(0)
+        let screenshotsAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            if taps.value > 0 { screenshotsAfterTap.update { $0 += 1 } }
+            return (200, ["value": .string(before.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let started = Date()
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("paused 450 ms before reading"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertEqual(screenshotsAfterTap.value, 1, result.text)
+        XCTAssertLessThan(elapsed, 1.0, result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyStopsObservingWithinTapPauseWhenScreenDoesNotChange() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let taps = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(before.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let started = Date()
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"0\" [16,130,358,70]"), result.text)
+        XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(before.count)".utf8), result.text)
+        XCTAssertLessThan(elapsed, 1.0, result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    private func numberDisplayPicture(_ digit: String, transitioning: Bool = false, xOffset: CGFloat = 0) -> Data {
         PictureSketchTests.png { context in
             if transitioning {
                 context.setFillColor(CGColor(gray: 0.8, alpha: 1))
@@ -778,7 +895,7 @@ final class LookDoTests: XCTestCase {
                 NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, 60, nil),
                 NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
             ])
-            context.textPosition = CGPoint(x: 169, y: 681)
+            context.textPosition = CGPoint(x: 169 + xOffset, y: 681)
             CTLineDraw(CTLineCreateWithAttributedString(glyph), context)
         }
     }

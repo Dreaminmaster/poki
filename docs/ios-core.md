@@ -390,8 +390,12 @@ on the phone; the next first `look` of a task in that app names the saved skills
   Options). After a launch, a button, a swipe or a pinch (pauses of 0.6 s and up) the read comes as
   soon as the tree has changed from what it was before the action, lists something, and two reads in
   a row agree, bounded by the old fixed pause (each read gets only the time left, so a slow tree
-  never makes the pause longer); the answer says "read after N ms". A tap keeps its fixed 0.45 s,
-  since two tree reads cost about as much.
+  never makes the pause longer); the answer says "read after N ms". After a single local number-key
+  tap on an identified numeric display, reading starts immediately and reuses a verified screenshot
+  once a second tree confirms the app, layout, and value (retaking the screenshot if the confirming
+  tree arrives more than 0.6 s after the picture); if nothing changes within the 0.45 s tap pause,
+  observation stops instead of waiting longer. Other taps keep the fixed 0.45 s pause, and turning
+  `quickRead` off restores the fixed pause for number-key taps too.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
   The owner locks a note or a skill: no agent forgets, edits, renames or saves over a locked one

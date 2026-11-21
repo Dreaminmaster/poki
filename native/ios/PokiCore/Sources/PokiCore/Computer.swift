@@ -1308,7 +1308,7 @@ final class Computer: @unchecked Sendable {
             }
         }
 
-        let numberTap = local && !finish && sensitive == nil ? numberTapTarget(actions) : nil
+        let numberTap = local && !finish && sensitive == nil && config.quickRead() ? numberTapTarget(actions) : nil
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
@@ -1321,9 +1321,11 @@ final class Computer: @unchecked Sendable {
         var tapRead: TapRead?
         if error == nil, moreKind == ActionKind.tap.rawValue, let numberTap {
             tapRead = await readNumberTap(numberTap, started: readStarted, until: until)
-            if let tapRead, tapRead.reading == nil {
-                lastPNG = nil
-                lastPNGAt = nil
+            if let tapRead, !tapRead.confirmed {
+                if tapRead.reading?.png == nil {
+                    lastPNG = nil
+                    lastPNGAt = nil
+                }
                 extra.append("touch effect: unconfirmed (\(tapRead.reason)). Recheck the display with look before continuing. The tap was sent once.")
             }
         }
@@ -1724,6 +1726,7 @@ final class Computer: @unchecked Sendable {
         let expected: String
         let before: PictureSketch
 
+        var beforeValue: String { elements[display].text }
         var frame: Rect { elements[display].frame }
         var pictureRegion: Rect {
             Rect(x: frame.x / screen.width, y: frame.y / screen.height,
@@ -1747,7 +1750,7 @@ final class Computer: @unchecked Sendable {
               selectedPane == nil, let front = lastForeground, front.pokiPane == nil, let app = front.bundleID,
               app != "com.apple.springboard", let screen = size, let picture = lastPicture, picture.hash == nil,
               let readAt = lastTreeAt, let pictureAt = lastPNGAt, now() - min(readAt, pictureAt) < 5,
-              abs(readAt - pictureAt) < 0.6, !lastAll.contains(where: \.isSecure) else { return nil }
+              abs(readAt - pictureAt) < Runner.pictureLagLimit, !lastAll.contains(where: \.isSecure) else { return nil }
         let elements = listable(lastAll, screen)
         let buttons = lastAll.filter { $0.type == "Button" || $0.type == "Key" }
         let displays = elements.indices.filter { index in
@@ -1763,6 +1766,7 @@ final class Computer: @unchecked Sendable {
 
     private struct TapRead {
         var reading: Reading?
+        var confirmed = false
         var firstPictureAt: Double?
         var targetAt: Double?
         var samples = 0
@@ -1771,9 +1775,11 @@ final class Computer: @unchecked Sendable {
 
     private func readNumberTap(_ target: NumberTapTarget, started: Double, until: Double) async -> TapRead {
         let deadline = min(started + Self.settleWindow, until - config.readTimeout - 0.3)
+        let idleDeadline = min(started + (Self.settle[ActionKind.tap.rawValue] ?? 0.45), deadline)
         var result = TapRead()
         var prior: (picture: PictureSketch, at: Double)?
         var triedFirstPicture = false
+        var sawChange = false
         while deadline - now() > 0.15, !Task.isCancelled {
             let sampleAt = now()
             let reading = await runner.read(timeout: min(config.readTimeout, deadline - sampleAt), format: config.treeFormat,
@@ -1790,20 +1796,28 @@ final class Computer: @unchecked Sendable {
             }
             if value == target.expected, result.targetAt == nil { result.targetAt = reading.treeAt }
             guard reading.notes.isEmpty, reading.screenshotCompanion == nil, let png = reading.png,
-                  let pictureAt = reading.firstPictureAt else {
+                  let pictureAt = reading.firstPictureAt, let treeAt = reading.treeAt,
+                  treeAt - pictureAt <= Runner.pictureLagLimit else {
                 result.reason = "no fresh picture paired with the tree"
                 break
             }
             let picture = PictureSketch(png: png)
-            if value == target.expected, picture.differs(from: target.before, inside: target.frame, on: target.screen) == true {
+            let displayChanged = picture.differs(from: target.before, inside: target.frame, on: target.screen) == true
+            if value != target.beforeValue || displayChanged { sawChange = true }
+            if value == target.expected, displayChanged {
                 if !triedFirstPicture, let change = picture.change(from: target.before), change.share < 0.08 {
                     triedFirstPicture = true
-                    result.samples += 1
-                    if let settled = await confirmTapPicture(reading, target: target, until: deadline) {
+                    let confirmation = await confirmTapPicture(reading, target: target, until: deadline)
+                    result.samples += confirmation.attempts
+                    if let settled = confirmation.reading {
                         result.reading = settled
+                        result.confirmed = true
                         result.reason = "display and picture settled"
                         return result
                     }
+                    prior = nil
+                    await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+                    continue
                 }
                 if let previous = prior, !picture.differs(from: previous.picture),
                    picture.differs(from: previous.picture, inside: target.frame, on: target.screen) == false {
@@ -1820,6 +1834,7 @@ final class Computer: @unchecked Sendable {
                             }
                         }
                         result.reading = reading
+                        result.confirmed = true
                         result.reason = "display and picture settled"
                         return result
                     }
@@ -1827,31 +1842,77 @@ final class Computer: @unchecked Sendable {
                 prior = (picture, pictureAt)
             } else {
                 prior = nil
+                if !sawChange, now() >= idleDeadline {
+                    result.reading = reading
+                    result.reason = "no change before settle pause"
+                    return result
+                }
             }
-            await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+            let nextSample = sawChange ? min(deadline, sampleAt + 0.12) : min(idleDeadline, sampleAt + 0.12)
+            await sleep(seconds: max(0, nextSample - now()))
         }
         return result
     }
 
-    private func confirmTapPicture(_ reading: Reading, target: NumberTapTarget, until: Double) async -> Reading? {
-        guard let png = reading.png, let pictureAt = reading.firstPictureAt, until - now() > 0.2 else { return nil }
+    private func confirmTapPicture(_ reading: Reading, target: NumberTapTarget, until: Double) async -> (reading: Reading?, attempts: Int) {
+        guard let png = reading.png, let pictureAt = reading.firstPictureAt, until - now() > 0.2 else {
+            return (nil, 0)
+        }
         async let pictureMatches = pictureShowsTapValue(png, target: target, until: until)
-        let remaining = until - now()
-        guard remaining > 0.1, !Task.isCancelled else { return nil }
-        async let tree = try? runner.tree(timeout: min(config.readTimeout, remaining), format: config.treeFormat,
-                                          countsAsMiss: false, appAfterSource: true)
-        guard let latest = await tree, latest.foreground.bundleID == target.app, latest.foreground.pokiPane == nil,
-              now() >= pictureAt + 0.12,
-              target.displayValue(in: latest.elements) == target.expected,
-              await pictureMatches else { return nil }
-        if runner.transport.usesDynamicScreenSize {
-            let left = until - now()
-            guard left > 0.1, (try? await runner.screenSize(timeout: left)) == target.screen else { return nil }
+        var attempts = 1
+        guard var latest = await confirmationTree(target: target, until: until) else {
+            return (nil, attempts)
+        }
+        guard await pictureMatches else { return (nil, attempts) }
+        if latest.at < pictureAt + 0.12 {
+            let wait = min(until, pictureAt + 0.12) - now()
+            if wait > 0 { await sleep(seconds: wait) }
+            attempts += 1
+            guard let second = await confirmationTree(target: target, until: until),
+                  second.at >= pictureAt + 0.12 else {
+                return (nil, attempts)
+            }
+            latest = second
         }
         var settled = reading
         settled.elements = latest.elements
         settled.foreground = latest.foreground
-        return settled
+        settled.treeAt = latest.at
+        if latest.at - pictureAt > Runner.pictureLagLimit {
+            let retakeBudget = until - now()
+            guard retakeBudget > 0.4,
+                  let capture = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
+                  capture.companion == nil else {
+                return (nil, attempts)
+            }
+            let first = PictureSketch(png: png)
+            let retaken = PictureSketch(png: capture.data)
+            guard !retaken.differs(from: first),
+                  retaken.differs(from: first, inside: target.frame, on: target.screen) == false,
+                  await pictureShowsTapValue(capture.data, target: target, until: until) else {
+                return (nil, attempts)
+            }
+            settled.png = capture.data
+            settled.notes.append("the picture was taken again after the tree, which came \(Int(((latest.at - pictureAt) * 1000).rounded())) ms later than the first picture")
+        }
+        if runner.transport.usesDynamicScreenSize {
+            let left = until - now()
+            guard left > 0.1, (try? await runner.screenSize(timeout: left)) == target.screen else {
+                return (nil, attempts)
+            }
+        }
+        return (settled, attempts)
+    }
+
+    private func confirmationTree(target: NumberTapTarget, until: Double) async -> (elements: [Element], foreground: Foreground, at: Double)? {
+        let remaining = until - now()
+        guard remaining > 0.1, !Task.isCancelled,
+              let tree = try? await runner.tree(timeout: min(config.readTimeout, remaining), format: config.treeFormat,
+                                                countsAsMiss: false, appAfterSource: true) else { return nil }
+        let treeAt = now()
+        guard tree.foreground.bundleID == target.app, tree.foreground.pokiPane == nil,
+              target.displayValue(in: tree.elements) == target.expected else { return nil }
+        return (tree.elements, tree.foreground, treeAt)
     }
 
     private func pictureShowsTapValue(_ png: Data, target: NumberTapTarget, until: Double) async -> Bool {
