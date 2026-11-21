@@ -1,3 +1,4 @@
+import ActivityKit
 import PokiCore
 import XCTest
 @testable import Poki
@@ -1075,6 +1076,7 @@ extension VoiceModelTests {
     func testLiveActivityWaitsForTheNextResponseAndMeasuresThePlayedAnswer() async {
         let h = Harness(phoneTool: { _, _ in ("Screen is open", false, nil) })
         let (activity, watcher) = following(h)
+        let priorActivityLog = Set(AppLog.shared.lines)
         activity.finishAfter = .seconds(60)
         await h.liveTalk()
         h.link.play(["type": "session.input_transcript.delta", "delta": "打开微信。", "start_ms": 0, "end_ms": 400],
@@ -1088,6 +1090,7 @@ extension VoiceModelTests {
         h.link.backend("response.completed", ["response": ["id": "r1"]])
         await h.time.settle()
         XCTAssertEqual(activity.state.phase, .working, "The first response finished, but the continuation is still queued.")
+        XCTAssertTrue(activity.isRunning, activity.lastError ?? "A Live Activity must be active to observe a completion alert.")
 
         h.link.backend("response.created", ["response": ["id": "r2"]])
         h.link.backend("response.completed", ["response": ["id": "r2"]])
@@ -1102,9 +1105,13 @@ extension VoiceModelTests {
         for _ in 0..<3 { await h.time.advance(0.2) }
         XCTAssertEqual(activity.state.phase, .done)
         XCTAssertEqual(activity.state.face.content, "微信已打开。")
+        await activity.end(dismissalPolicy: .immediate)?.value
+        let completionAlerts = AppLog.shared.lines.filter {
+            !priorActivityLog.contains($0) && $0.contains("[activity] alert sent with done ")
+        }
+        XCTAssertTrue(completionAlerts.isEmpty, "A spoken completion must not request an ActivityKit alert: \(completionAlerts)")
         h.voice.stop()
         withExtendedLifetime(watcher) {}
-        activity.end()
     }
 
     /// ESP-954: a talk's run of steps finishes when the talk's turn is over, not by the quiet wait while
