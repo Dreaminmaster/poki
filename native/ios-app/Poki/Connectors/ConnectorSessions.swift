@@ -19,7 +19,11 @@ actor MCPSessions {
         clients[account.id] = nil
         guard let url = URL(string: connector.url) else { throw MCPConnectorError.badAddress }
         let auth: (any McpAuthProvider)?
+        // A custom connector's own request headers, their values from the keychain.
         var headers: [String: String] = [:]
+        for name in connector.headerNames ?? [] {
+            if let value = MCPCredentials.header(name, connector: connector.id) { headers[name] = value }
+        }
         switch connector.sign {
         case .none: auth = nil
         case .token:
@@ -30,6 +34,7 @@ actor MCPSessions {
             guard MCPCredentials.oauth(account.id)?.tokens != nil else { throw MCPConnectorError.signedOut }
             // Refreshes run without a sheet; a sign-in that ran out says so, and the owner signs in again.
             let provider = McpOAuthProvider(serverURL: url, redirectURL: Self.redirect, clientMetadata: Self.metadata,
+                                            clientID: connector.clientID, clientSecret: connector.clientID.flatMap { _ in MCPCredentials.clientSecret(connector.id) },
                                             store: MCPKeychainOAuthStore(account.id),
                                             onRedirect: { _ in throw MCPConnectorError.signedOut })
             auth = McpOAuthAuthAdapter(provider: provider)
@@ -135,9 +140,12 @@ struct MCPSheetPresenter: McpSignInPresenter {
 enum MCPSignIn {
     /// A new account: signed in (or its token saved), reached once, and added.
     @MainActor
-    static func add(_ connector: MCPConnector, label: String, token: String? = nil) async throws -> MCPConnectorAccount {
-        let account = MCPConnectorAccount(id: UUID(), connector: connector.id, label: label)
+    static func add(_ connector: MCPConnector, label: String = "", token: String? = nil) async throws -> MCPConnectorAccount {
+        var account = MCPConnectorAccount(id: UUID(), connector: connector.id, label: label)
         try await signIn(account, connector: connector, token: token)
+        // Named by who signed in, when the sign-in says (the owner, Nov 21 2026: no name field).
+        let tokens = MCPCredentials.oauth(account.id)?.tokens
+        account.identity = MCPConnectors.identity(idToken: tokens?.idToken, accessToken: tokens?.accessToken)
         MCPConnectors.shared.add(account)
         await MCPSessions.shared.refresh(account, connector: connector)
         return account
@@ -156,7 +164,9 @@ enum MCPSignIn {
         case .oauth:
             let sheet = MCPSignInSheet()
             _ = try await McpOAuthSignIn.signIn(serverURL: url, presenter: MCPSheetPresenter(sheet: sheet),
-                                                clientMetadata: MCPSessions.metadata, store: MCPKeychainOAuthStore(account.id))
+                                                clientMetadata: MCPSessions.metadata, clientID: connector.clientID,
+                                                clientSecret: connector.clientID.flatMap { _ in MCPCredentials.clientSecret(connector.id) },
+                                                store: MCPKeychainOAuthStore(account.id))
         }
         await MCPSessions.shared.close(account.id)
     }
