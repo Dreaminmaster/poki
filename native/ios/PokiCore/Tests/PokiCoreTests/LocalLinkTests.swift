@@ -16,6 +16,11 @@ final class LocalLinkTests: XCTestCase {
         func trust(computer: LocalClient) { trusted.update { _ = $0.insert(computer.id) } }
     }
 
+    func expectSoon(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        let ok = await eventually(2, condition)
+        XCTAssertTrue(ok, file: file, line: line)
+    }
+
     let computerKey = Data((100..<132).map { UInt8($0) })
 
     func hello(for challenge: String, transport: String = "usb", tamper: Bool = false) throws -> String {
@@ -39,9 +44,9 @@ final class LocalLinkTests: XCTestCase {
     func testAFirstComputerWaitsForTheOwnerThenItsRequestsAreAnsweredAndMarkedLocal() async throws {
         let host = Host(), seen = LockedBox<[RelayRequest]>([]), socket = FakeSocket()
         let served = Task { await link(host, seen).serve(socket, transport: .usb) }
-        XCTAssertTrue(await eventually { socket.sent.count == 1 })
+        await expectSoon { socket.sent.count == 1 }
         socket.push(try hello(for: socket.sent[0]))
-        XCTAssertTrue(await eventually { socket.sent.contains { $0.contains("\"ready\"") } }, "\(socket.sent)")
+        await expectSoon { socket.sent.contains { $0.contains("\"ready\"") } }
         XCTAssertEqual(host.asked.value.map(\.describe), ["Test Mac over USB"])
         XCTAssertTrue(host.trusted.value.contains(base32(computerKey)))
         // The phone proves itself back: its key signs the computer's nonce.
@@ -50,11 +55,11 @@ final class LocalLinkTests: XCTestCase {
         XCTAssertEqual(Data(base64Encoded: ready["sig"]!.string!), Data(expected.reversed()))
 
         socket.push((["t": "req", "id": "r1", "method": "POST", "headers": ["x-poki-connector": "forged", "content-type": "application/json"], "body": "{}"] as JSON).serialized())
-        XCTAssertTrue(await eventually { socket.sent.contains { $0.contains("\"res\"") } })
+        await expectSoon { socket.sent.contains { $0.contains("\"res\"") } }
         XCTAssertEqual(seen.value.first?.headers[PokiCore.connectorHeader], "local:\(base32(computerKey))", "set by the handshake, never by the computer")
         XCTAssertEqual(seen.value.first?.headers[PokiCore.transportHeader], "usb")
         socket.push("ping")
-        XCTAssertTrue(await eventually { socket.sent.last == "pong" })
+        await expectSoon { socket.sent.last == "pong" }
         socket.close(code: 1000, reason: "")
         await served.value
     }
@@ -63,9 +68,9 @@ final class LocalLinkTests: XCTestCase {
         let host = Host(), socket = FakeSocket()
         host.trusted.value = [base32(computerKey)]
         let served = Task { await link(host, LockedBox([])).serve(socket, transport: .wifi) }
-        XCTAssertTrue(await eventually { socket.sent.count == 1 })
+        await expectSoon { socket.sent.count == 1 }
         socket.push(try hello(for: socket.sent[0], transport: "wifi"))
-        XCTAssertTrue(await eventually { socket.sent.contains { $0.contains("\"ready\"") } })
+        await expectSoon { socket.sent.contains { $0.contains("\"ready\"") } }
         XCTAssertTrue(host.asked.value.isEmpty)
         socket.close(code: 1000, reason: "")
         await served.value
@@ -76,7 +81,7 @@ final class LocalLinkTests: XCTestCase {
             let host = Host(), seen = LockedBox<[RelayRequest]>([]), socket = FakeSocket()
             host.answer.value = answer
             let served = Task { await link(host, seen).serve(socket, transport: .usb) }
-            XCTAssertTrue(await eventually { socket.sent.count == 1 })
+            await expectSoon { socket.sent.count == 1 }
             socket.push(try hello(for: socket.sent[0], transport: transport, tamper: tamper))
             socket.push((["t": "req", "id": "r1", "body": "{}"] as JSON).serialized())
             await served.value

@@ -216,7 +216,12 @@ enum McpCmd {
     Snippets { url: String },
     /// Poki MCP for agents on this computer (stdio): the phone over USB, else Wi-Fi, else the
     /// relay, plus Poki Setup's own steps as a tool. Add it to an agent with `mcp connect`.
-    Serve,
+    Serve {
+        /// An iOS Simulator with WebDriverAgent at POKI_WDA_URL instead of a phone, through
+        /// PokiCore on this Mac (poki-core-mac).
+        #[arg(long)]
+        simulator: bool,
+    },
     /// How to add Poki MCP to Claude Code, Codex, Cursor and other agents on this computer.
     Connect,
 }
@@ -698,8 +703,10 @@ async fn run() -> Result<()> {
                 }
                 Ok(())
             }
-            McpCmd::Serve => {
-                let server = std::sync::Arc::new(poki_setup_core::mcpserve::Server::new(agent::cli_path()));
+            McpCmd::Serve { simulator } => {
+                let mut server = poki_setup_core::mcpserve::Server::new(agent::cli_path());
+                server.simulator = simulator;
+                let server = std::sync::Arc::new(server);
                 server.serve_stdio().await?;
                 Ok(())
             }

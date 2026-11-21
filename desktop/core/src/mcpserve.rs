@@ -26,6 +26,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(200);
 enum Way {
     Local(Link),
     Relay { url: String, token: String },
+    /// PokiCore on this Mac for an iOS Simulator (`poki-core-mac`, one JSON-RPC message per line).
+    Simulator { io: Mutex<(tokio::process::ChildStdin, tokio::io::Lines<BufReader<tokio::process::ChildStdout>>)>, _child: tokio::process::Child },
 }
 
 #[derive(Clone)]
@@ -40,6 +42,8 @@ pub struct Server {
     phone: Mutex<Option<Phone>>,
     agent: Mutex<String>,
     setup_cli: Option<PathBuf>,
+    /// `mcp serve --simulator`: the Simulator through PokiCore on this Mac instead of a phone.
+    pub simulator: bool,
     /// For the tests: no USB, no Wi-Fi, no relay.
     offline: bool,
 }
@@ -91,12 +95,12 @@ fn with_save(mut tool: Value) -> Value {
 
 impl Server {
     pub fn new(setup_cli: Option<PathBuf>) -> Self {
-        Server { phone: Mutex::new(None), agent: Mutex::new(String::new()), setup_cli, offline: false }
+        Server { phone: Mutex::new(None), agent: Mutex::new(String::new()), setup_cli, simulator: false, offline: false }
     }
 
     #[cfg(test)]
     fn offline() -> Self {
-        Server { phone: Mutex::new(None), agent: Mutex::new(String::new()), setup_cli: None, offline: true }
+        Server { phone: Mutex::new(None), agent: Mutex::new(String::new()), setup_cli: None, simulator: false, offline: true }
     }
 
     /// Serves MCP over stdin and stdout, one JSON-RPC message per line, until stdin closes.
@@ -232,13 +236,15 @@ impl Server {
         }
         let agent = self.agent.lock().await.clone();
         let hello = Hello { name: computer_name(), version: crate::VERSION.into(), agent };
-        let way = match link::connect(&hello, || eprintln!("poki-mcp: waiting for the owner to allow this computer on the phone")).await {
+        let way = if self.simulator {
+            simulator_way()?
+        } else { match link::connect(&hello, || eprintln!("poki-mcp: waiting for the owner to allow this computer on the phone")).await {
             Ok(l) => Way::Local(l),
             Err(local) => match relay_way().await {
                 Ok(w) => w,
                 Err(relay) => return Err(Error::msg(format!("{local} The relay did not work either: {relay}"))),
             },
-        };
+        } };
         let mut phone = Phone { way: Arc::new(way), session: None, tools: vec![], instructions: None };
         let init = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": if hello.agent.is_empty() { "poki-mcp".to_string() } else { format!("{} via poki-mcp", hello.agent) }, "version": crate::VERSION}}});
         let (reply, session) = send_on(&phone, &init).await.map_err(|(_, e)| e)?;
@@ -266,6 +272,7 @@ impl Server {
                 match guard.as_ref().map(|p| p.way.as_ref()) {
                     Some(Way::Local(l)) => json!({"connected": true, "transport": l.transport, "phone": l.phone}),
                     Some(Way::Relay { url, .. }) => json!({"connected": true, "transport": Transport::Relay, "link": mcp::redact(url)}),
+                    Some(Way::Simulator { .. }) => json!({"connected": true, "transport": "simulator", "wda": std::env::var("POKI_WDA_URL").unwrap_or_else(|_| "http://127.0.0.1:8100".into())}),
                     None => json!({"connected": false}),
                 }
             }
@@ -368,9 +375,31 @@ async fn send_on(phone: &Phone, body: &Value) -> std::result::Result<(Value, Opt
             if status == 503 { return Err((false, Error::msg("The relay says the phone is offline."))); }
             (status, session, res.text().await.map_err(|e| (true, e.into()))?)
         }
+        Way::Simulator { io, .. } => {
+            let mut io = io.lock().await;
+            io.0.write_all(format!("{body}\n").as_bytes()).await.map_err(|e| (false, e.into()))?;
+            io.0.flush().await.map_err(|e| (false, e.into()))?;
+            let line = tokio::time::timeout(CALL_TIMEOUT, io.1.next_line()).await
+                .map_err(|_| (true, Error::msg("PokiCore on this Mac did not answer in time.")))?
+                .map_err(|e| (true, e.into()))?
+                .ok_or((true, Error::msg("PokiCore on this Mac stopped.")))?;
+            (200, None, line)
+        }
     };
     let value: Value = serde_json::from_str(&text).map_err(|_| (true, Error::msg(format!("The phone answered HTTP {status} with no JSON."))))?;
     Ok((value, session))
+}
+
+/// `poki-core-mac` next to poki-setup (or at POKI_CORE_MAC), for the Simulator at POKI_WDA_URL.
+fn simulator_way() -> Result<Way> {
+    let path = std::env::var_os("POKI_CORE_MAC").map(PathBuf::from)
+        .or_else(|| crate::agent::cli_path().and_then(|p| p.parent().map(|d| d.join("poki-core-mac"))))
+        .filter(|p| p.exists())
+        .ok_or_else(|| Error::msg("poki-core-mac is not next to poki-setup; set POKI_CORE_MAC to its path."))?;
+    let mut child = tokio::process::Command::new(path).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).kill_on_drop(true).spawn()?;
+    let stdin = child.stdin.take().ok_or_else(|| Error::msg("no stdin"))?;
+    let stdout = child.stdout.take().ok_or_else(|| Error::msg("no stdout"))?;
+    Ok(Way::Simulator { io: Mutex::new((stdin, BufReader::new(stdout).lines())), _child: child })
 }
 
 /// The relay, through the first connector link the person added, signed in as Poki Setup does in
