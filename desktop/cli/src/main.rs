@@ -214,6 +214,11 @@ enum McpCmd {
     Check { url: String },
     /// Client setups for the link.
     Snippets { url: String },
+    /// Poki MCP for agents on this computer (stdio): the phone over USB, else Wi-Fi, else the
+    /// relay, plus Poki Setup's own steps as a tool. Add it to an agent with `mcp connect`.
+    Serve,
+    /// How to add Poki MCP to Claude Code, Codex, Cursor and other agents on this computer.
+    Connect,
 }
 
 fn qr_text(text: &str) -> String {
@@ -692,6 +697,20 @@ async fn run() -> Result<()> {
                     println!("## {title}\n{body}\n");
                 }
                 Ok(())
+            }
+            McpCmd::Serve => {
+                let server = std::sync::Arc::new(poki_setup_core::mcpserve::Server::new(agent::cli_path()));
+                server.serve_stdio().await?;
+                Ok(())
+            }
+            McpCmd::Connect => {
+                let cli_path = agent::cli_path().map(|p| p.display().to_string()).unwrap_or_else(|| "poki-setup".into());
+                let snippets = mcp::local_snippets(&cli_path);
+                out(cli.json, &serde_json::json!({ "command": cli_path, "args": ["mcp", "serve"], "snippets": snippets.iter().map(|(t, b)| serde_json::json!({"client": t, "setup": b})).collect::<Vec<_>>() }), |_| {
+                    for (title, body) in &snippets {
+                        println!("## {title}\n{body}\n");
+                    }
+                })
             }
         },
         Cmd::Release { all: false } => {
