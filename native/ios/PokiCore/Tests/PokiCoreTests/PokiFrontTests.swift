@@ -43,4 +43,35 @@ final class PokiFrontTests: XCTestCase {
         XCTAssertTrue(opened.text.contains("New Note"), opened.text)
         XCTAssertNotNil(opened.jpeg, opened.text)
     }
+
+    func testMissingAppCanRecoverThroughHomeScreenSearch() async {
+        let wda = pokiInFront()
+        let (core, _, host) = makeCore(wda) { $0.appNames = { true } }
+        host.state.value = .automationReady(revision: 1)
+        let missing = await core.callTool("do", arguments: #"{"actions":[{"launch":"com.dianping.dpscope"}]}"#, localTask: "open-app")
+        XCTAssertTrue(missing.isError)
+        XCTAssertTrue(missing.text.contains("no app named"), missing.text)
+
+        let batch = await core.callTool("do", arguments: #"{"actions":[{"button":"home"},{"swipe":"down"},{"type":"WeChat"}]}"#, localTask: "open-app")
+        XCTAssertTrue(batch.isError)
+        XCTAssertTrue(batch.text.contains("Send {button: \"home\"} by itself"), batch.text)
+        XCTAssertTrue(wda.bodies("POST /wda/homescreen").isEmpty)
+
+        wda.set("POST /wda/homescreen") { _ in
+            wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.springboard", "name": "SpringBoard"]]) }
+            wda.source([("Icon", "WeChat")], app: "SpringBoard")
+            return (200, ["value": .null])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { _ in
+            wda.source([("SearchField", "Search")], app: "SpringBoard")
+            return (200, ["value": .null])
+        }
+        let home = await core.callTool("do", arguments: #"{"actions":[{"button":"home"}]}"#, localTask: "open-app")
+        XCTAssertFalse(home.isError, home.text)
+        XCTAssertTrue(home.text.contains("WeChat"), home.text)
+
+        let search = await core.callTool("do", arguments: #"{"actions":[{"swipe":"down"}]}"#, localTask: "open-app")
+        XCTAssertFalse(search.isError, search.text)
+        XCTAssertTrue(search.text.contains("Search"), search.text)
+    }
 }
