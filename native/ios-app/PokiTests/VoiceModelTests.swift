@@ -82,7 +82,10 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var liveAnswer: String?
     private(set) var remoteVolume = 1.0
     @MainActor var remoteSpeech = false
-    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {}
+    @MainActor var failNetworkPath = false
+    @MainActor func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {
+        if failNetworkPath { throw VoiceError.noPath("failed") }
+    }
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }
@@ -156,6 +159,25 @@ private actor VoiceRunnerTransport: HTTPTransport {
 
 @MainActor
 final class VoiceModelTests: XCTestCase {
+    func testAnEventFromTheFailedNetworkAttemptCannotInterruptTheRetrysReply() async throws {
+        let h = Harness(failFirstNetworkPath: true)
+        await h.talk()
+        XCTAssertEqual(h.links.count, 2)
+        let failed = try XCTUnwrap(h.links.first)
+        XCTAssertTrue(failed.closed)
+        h.link.play(["type": "response.created", "response": ["id": "first"]],
+                    ["type": "output_audio_buffer.started"])
+        XCTAssertEqual(h.voice.talkState, .speaking)
+
+        // A data channel delegate can have queued a delivery before its peer was closed.
+        failed.play(["type": "input_audio_buffer.speech_started"])
+        XCTAssertEqual(h.voice.talkState, .speaking)
+
+        h.link.play(["type": "input_audio_buffer.speech_started"])
+        XCTAssertEqual(h.voice.talkState, .interrupted)
+        h.voice.stop()
+    }
+
     func testAConnectionWhoseSessionNeverStartsEndsAfterSixtySeconds() async {
         let h = Harness()
         await h.connect()
@@ -718,7 +740,8 @@ final class VoiceModelTests: XCTestCase {
         private(set) var microphone: [Bool] = []
         var link: FakeConnection { links.last! }
 
-        @MainActor init(time: FakeTime? = nil, phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
+        @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false,
+                        phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = time ?? FakeTime()
             self.time = time
             var made: (() -> FakeConnection)!
@@ -727,7 +750,12 @@ final class VoiceModelTests: XCTestCase {
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link }, time: time.clock)
-            made = { [unowned self] in let link = FakeConnection(); self.links.append(link); return link }
+            made = { [unowned self] in
+                let link = FakeConnection()
+                link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
+                self.links.append(link)
+                return link
+            }
             held = { [unowned self] in self.microphone.append($0) }
             _ = voice.setBridge(BridgeStub.address)
             // As in the app: an ended conversation goes into the chat, and its lines leave the voice model.
