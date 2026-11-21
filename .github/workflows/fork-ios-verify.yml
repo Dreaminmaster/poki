@@ -19,11 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: 322
-            ref: f1e1e4c5c7154a93db7d580a21a26c1b8dda7614
-            tests: 'ModelSessionMetadataTests:10 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
           - pr: 249
-            ref: 706e1ae73e1fe9dedb6eb79711f83e0149cd5b4e
+            ref: ffa5a7f9979dbd2d5fa41d1abff895ba34b02f5c
             tests: 'ConversationSearchTests:17 ChatScrollTests:9'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
