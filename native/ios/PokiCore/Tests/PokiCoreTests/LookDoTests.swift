@@ -686,8 +686,8 @@ final class LookDoTests: XCTestCase {
         let (core, wda, _) = makeCore()
         let taps = LockedBox(0)
         let sawOldDisplayAfterTap = LockedBox(false)
-        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 696, width: 24, height: 35)) }
-        let newPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 716, width: 24, height: 15)) }
+        let oldPicture = numberDisplayPicture("0")
+        let newPicture = numberDisplayPicture("7")
         wda.set("GET /wda/activeAppInfo") { _ in
             (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
         }
@@ -721,9 +721,66 @@ final class LookDoTests: XCTestCase {
         let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
 
         XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
         XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
         XCTAssertEqual(result.jpeg, Data("jpeg:\(newPicture.count)".utf8))
         XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyWaitsForThePictureToShowTheNewDigitDuringATransition() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let transition = numberDisplayPicture("0", transitioning: true)
+        let settled = numberDisplayPicture("7")
+        XCTAssertNotEqual(transition.count, settled.count)
+        let taps = LockedBox(0)
+        let picturesAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        let key = Node("Button", "7", [16, 280, 70, 70])
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), key], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            let picture: Data
+            if taps.value == 0 {
+                picture = before
+            } else {
+                picture = picturesAfterTap.update { count in
+                    count += 1
+                    return count <= 3 ? transition : settled
+                }
+            }
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            wda.tree([Node("StaticText", "7", [16, 130, 358, 70]), key], app: "Calculator")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settled.count)".utf8), result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    private func numberDisplayPicture(_ digit: String, transitioning: Bool = false) -> Data {
+        PictureSketchTests.png { context in
+            if transitioning {
+                context.setFillColor(CGColor(gray: 0.8, alpha: 1))
+                context.fill(CGRect(x: 17, y: 674, width: 368, height: 66))
+            }
+            let glyph = NSAttributedString(string: digit, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, 60, nil),
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
+            ])
+            context.textPosition = CGPoint(x: 169, y: 681)
+            CTLineDraw(CTLineCreateWithAttributedString(glyph), context)
+        }
     }
 
     func testNumberKeyDoesNotConfirmAChangedValueWithoutANewPicture() async {

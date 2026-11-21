@@ -1725,6 +1725,10 @@ final class Computer: @unchecked Sendable {
         let before: PictureSketch
 
         var frame: Rect { elements[display].frame }
+        var pictureRegion: Rect {
+            Rect(x: frame.x / screen.width, y: frame.y / screen.height,
+                 width: frame.width / screen.width, height: frame.height / screen.height)
+        }
 
         func displayValue(in observed: [Element]) -> String? {
             var visible = listable(observed, screen)
@@ -1807,16 +1811,18 @@ final class Computer: @unchecked Sendable {
                         await sleep(seconds: min(deadline, previous.at + 0.12) - now())
                         continue
                     }
-                    if runner.transport.usesDynamicScreenSize {
-                        let available = deadline - now()
-                        guard available > 0.1, (try? await runner.screenSize(timeout: available)) == target.screen else {
-                            result.reason = "screen size changed or is unknown"
-                            break
+                    if await pictureShowsTapValue(png, target: target, until: deadline) {
+                        if runner.transport.usesDynamicScreenSize {
+                            let available = deadline - now()
+                            guard available > 0.1, (try? await runner.screenSize(timeout: available)) == target.screen else {
+                                result.reason = "screen size changed or is unknown"
+                                break
+                            }
                         }
+                        result.reading = reading
+                        result.reason = "display and picture settled"
+                        return result
                     }
-                    result.reading = reading
-                    result.reason = "display and picture settled"
-                    return result
                 }
                 prior = (picture, pictureAt)
             } else {
@@ -1829,12 +1835,7 @@ final class Computer: @unchecked Sendable {
 
     private func confirmTapPicture(_ reading: Reading, target: NumberTapTarget, until: Double) async -> Reading? {
         guard let png = reading.png, let pictureAt = reading.firstPictureAt, until - now() > 0.2 else { return nil }
-        let frame = target.frame
-        let region = Rect(x: frame.x / target.screen.width, y: frame.y / target.screen.height,
-                          width: frame.width / target.screen.width, height: frame.height / target.screen.height)
-        async let text = try? withDeadline(min(0.25, until - now()), "confirming the display in the screenshot") {
-            TextRecognizer.recognize(png: png, in: region)
-        }
+        async let pictureMatches = pictureShowsTapValue(png, target: target, until: until)
         let remaining = until - now()
         guard remaining > 0.1, !Task.isCancelled else { return nil }
         async let tree = try? runner.tree(timeout: min(config.readTimeout, remaining), format: config.treeFormat,
@@ -1842,8 +1843,7 @@ final class Computer: @unchecked Sendable {
         guard let latest = await tree, latest.foreground.bundleID == target.app, latest.foreground.pokiPane == nil,
               now() >= pictureAt + 0.12,
               target.displayValue(in: latest.elements) == target.expected,
-              let text = await text, text.count == 1, text.first?.text == target.expected,
-              let box = text.first?.box, region.contains(box.centre) else { return nil }
+              await pictureMatches else { return nil }
         if runner.transport.usesDynamicScreenSize {
             let left = until - now()
             guard left > 0.1, (try? await runner.screenSize(timeout: left)) == target.screen else { return nil }
@@ -1852,6 +1852,16 @@ final class Computer: @unchecked Sendable {
         settled.elements = latest.elements
         settled.foreground = latest.foreground
         return settled
+    }
+
+    private func pictureShowsTapValue(_ png: Data, target: NumberTapTarget, until: Double) async -> Bool {
+        let remaining = until - now()
+        guard remaining > 0, !Task.isCancelled else { return false }
+        let region = target.pictureRegion
+        guard let text = try? await withDeadline(min(0.25, remaining), "confirming the display in the screenshot", {
+            TextRecognizer.recognize(png: png, in: region)
+        }), text.count == 1, let digit = text.first else { return false }
+        return digit.text == target.expected && region.contains(digit.box.centre)
     }
 
     /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
