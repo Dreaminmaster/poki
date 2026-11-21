@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: 93178eb2da195ab8e948fb58426ad95a1bcdc009
+            ref: 23bd952bcb194722df921933c4feee32007ec4ca
             tests: 'ModelSessionMetadataTests:12 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
           - pr: 322-baseline
             ref: 32aa5346c9a4c72bb03baa3306c5eb093da5696a
