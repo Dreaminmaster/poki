@@ -883,7 +883,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
-        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { _ in received.fulfill() }
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { received.fulfill() }
         ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
         let restored = ChatModel(app: app)
         restored.restore(saved)
@@ -909,7 +909,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task received")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { received.fulfill() }
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -959,7 +959,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task reached model")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0) { received.fulfill() }
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
