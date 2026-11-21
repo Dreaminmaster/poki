@@ -888,6 +888,7 @@ final class AppModel {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
         case .toggle(let setting): return "In \(app.name), set \(setting), and keep \(app.name) connected."
         case .snippet: return "In Poki, open Setup > Connect to this iPhone > \(app.name) and add the lines it shows to \(app.name)."
+        case .appStore: return "In \(app.name), tap Connect, and keep \(app.name) connected."
         }
     }
 
