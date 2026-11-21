@@ -38,8 +38,7 @@ Compatibility depends on the build, not just the 0.2.2 version label: revision `
 661, already recognizes both schemes. This is a source check, not a check of the shipped binary. Pre-alpha and Alpha continue to publish those compatibility
 copies. New Betas use `app-*`; the independently numbered `ios-beta-*` compatibility records below remain available to installed clients.
 
-N is the commit count of the built commit on `main`, so it only goes up while `main` is never
-rewritten. New Beta IPA filenames retain the numeric build, which must match `CFBundleVersion` inside the app. Stable filenames still omit it.
+N is the number of commits reachable from the source commit, on `main` or the hotfix branch. New Beta IPA filenames retain the numeric build, which must match `CFBundleVersion` inside the app. Stable filenames still omit it.
 
 ## One build, promoted
 
@@ -50,9 +49,9 @@ testers on Alpha run the file that was tried on Pre-alpha, and Beta runs the fil
    macOS job builds the external IPA, tags `app-<VERSION>-prealpha.<N>` and replaces the files of
    `app-prealpha-latest`. Its artifact is kept 90 days for later promotions.
    Re-run a failed main build from its existing Actions run.
-   To build a hotfix, dispatch Pre-alpha from `main` with a `hotfix/` branch, version, and build
-   number. Its files go to the versioned Pre-alpha release. If publishing stops at a draft,
-   retry with the same branch, version, and build number. The successful run publishes its
+   To build a hotfix, dispatch Pre-alpha from `main` with a `hotfix/` branch and version.
+   Its files go to the versioned Pre-alpha release. If publishing stops at a draft,
+   retry with the same version and keep the branch at the original source commit. The successful run publishes its
    files and notes together. Ordinary promotions continue to use
    the rolling `app-prealpha-latest` release and look up artifacts from pushes to `main`.
 2. **Alpha, after approval.** Actions > Promote to Alpha > Run workflow (`promote-alpha.yml`), with a

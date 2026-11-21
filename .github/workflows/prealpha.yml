@@ -4,11 +4,11 @@
 # every later run can read; a run from a tag could only read main's caches, and main had none, so
 # every release build used to start cold (about 20 minutes, 9 of them in PiSwiftAI).
 #
-# The build number is the commit count of main, so it only goes up while main is never rewritten.
+# The build number is the commit count of the source commit, on main or the hotfix branch.
 # Tag: app-<VERSION>-prealpha.<count>; release: the rolling app-prealpha-latest, mirrored to the old
 # ios-prealpha-latest for Poki Setup 0.2.2 and earlier (docs/release-channels.md).
 name: Pre-alpha
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('Hotfix Pre-alpha {0} ({1})', inputs.version, inputs.build) || '' }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Hotfix Pre-alpha {0}', inputs.version) || '' }}
 
 on:
   push:
@@ -23,10 +23,6 @@ on:
         required: true
       version:
         description: "App version (X.Y.Z)"
-        type: string
-        required: true
-      build:
-        description: "App build number"
         type: string
         required: true
 
@@ -112,30 +108,29 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       version: ${{ steps.source.outputs.version }}
-      build: ${{ steps.source.outputs.build }}
     steps:
       - id: source
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_REF: ${{ inputs.ref }}
           VERSION: ${{ inputs.version }}
-          BUILD: ${{ inputs.build }}
         run: |
           set -euo pipefail
           if [[ "$SOURCE_REF" != hotfix/?* ]] || ! git check-ref-format "refs/heads/$SOURCE_REF"; then
             echo "::error::ref must be a hotfix/ branch"; exit 1
           fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
-          [[ "$BUILD" =~ ^[1-9][0-9]*$ ]] || { echo "::error::build must be a positive integer"; exit 1; }
           encoded_ref="$(jq -nr --arg ref "$SOURCE_REF" '$ref | split("/") | map(@uri) | join("/")')"
           sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$encoded_ref" |
             jq -er --arg ref "refs/heads/$SOURCE_REF" 'select(.ref == $ref and .object.type == "commit") | .object.sha')"
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::hotfix branch did not resolve to a commit"; exit 1; }
-          { echo "sha=$sha"; echo "version=$VERSION"; echo "build=$BUILD"; } >> "$GITHUB_OUTPUT"
-          printf '## Poki v%s (%s) Pre-alpha from %s at `%s`\n' "$VERSION" "$BUILD" "$SOURCE_REF" "$sha" >> "$GITHUB_STEP_SUMMARY"
+          { echo "sha=$sha"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+          printf '## Poki v%s Pre-alpha from %s at `%s`\n' "$VERSION" "$SOURCE_REF" "$sha" >> "$GITHUB_STEP_SUMMARY"
 
   build-hotfix:
     needs: resolve-hotfix
+    outputs:
+      build: ${{ steps.number.outputs.build }}
     runs-on: xcode-27
     timeout-minutes: 60
     permissions:
@@ -144,11 +139,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.resolve-hotfix.outputs.sha }}
+          fetch-depth: 0
+          filter: 'tree:0'
           persist-credentials: false
+      - name: Count hotfix commits
+        id: number
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+            echo "::error::Hotfix build numbering requires full Git history."
+            exit 1
+          fi
+          build="$(git rev-list --count HEAD)"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Hotfix build: $build" >> "$GITHUB_STEP_SUMMARY"
       - uses: ./.github/actions/build-ipa
         with:
           version: ${{ needs.resolve-hotfix.outputs.version }}
-          build: ${{ needs.resolve-hotfix.outputs.build }}
+          build: ${{ steps.number.outputs.build }}
           editions: external
       - uses: actions/upload-artifact@v4
         with:
@@ -185,7 +193,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ needs.resolve-hotfix.outputs.sha }}
           VERSION: ${{ needs.resolve-hotfix.outputs.version }}
-          BUILD: ${{ needs.resolve-hotfix.outputs.build }}
+          BUILD: ${{ needs.build-hotfix.outputs.build }}
         run: |
           set -euo pipefail
           (cd ../source && test "$(git rev-parse HEAD)" = "$SOURCE_SHA")
@@ -206,5 +214,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.resolve-hotfix.outputs.version }}
-          BUILD: ${{ needs.resolve-hotfix.outputs.build }}
+          BUILD: ${{ needs.build-hotfix.outputs.build }}
         run: ../pipeline/.github/scripts/publish-rolling.sh prealpha "$VERSION" "$BUILD" ../app --versioned

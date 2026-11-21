@@ -13,6 +13,7 @@ const tag = 'app-0.4.7-prealpha.9969';
 const gh = [
   '#!/usr/bin/env node',
   'const { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");',
+  'const { execFileSync } = require("node:child_process");',
   'const a = process.argv.slice(2);',
   'const { RELEASE_STATE } = process.env;',
   'const records = JSON.parse(process.env.RUN_RECORDS || "[]");',
@@ -23,6 +24,11 @@ const gh = [
   '  console.log(JSON.stringify({ workflow_runs: records.slice(2) }));',
   '} else if (a[0] === "api" && endpoint.endsWith("/actions/workflows/prealpha.yml")) console.log(123);',
   'else if (a[0] === "api" && endpoint.includes("/actions/runs/")) console.log(JSON.stringify(records.find(run => run.id === Number(endpoint.split("/").pop()))));',
+  'else if (a[0] === "api" && endpoint.includes("/git/ref/heads/")) {',
+  '  const ref = "refs/heads/" + endpoint.split("/git/ref/heads/")[1].split("/").map(decodeURIComponent).join("/");',
+  '  const sha = execFileSync("git", ["-C", process.env.HOTFIX_REPO, "rev-parse", "--verify", ref], { encoding: "utf8" }).trim();',
+  '  console.log(JSON.stringify({ ref, object: { type: "commit", sha } }));',
+  '}',
   'else if (a[0] === "api" && endpoint.includes("/commits/")) console.log(process.env.SOURCE_SHA);',
   'else if (a[0] === "api" && a[1].includes("/releases/tags/")) console.log(process.env.SIGNING_DIGEST);',
   'else if (a[0] === "api") process.exit(1);',
@@ -67,11 +73,11 @@ const git = [
   'esac',
 ].join('\n');
 
-function mock(t) {
+function mock(t, { realGit = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'poki-hotfix-release-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, 'bin'));
-  for (const [name, contents] of Object.entries({ gh, git })) {
+  for (const [name, contents] of Object.entries(realGit ? { gh } : { gh, git })) {
     const path = join(dir, 'bin', name);
     writeFileSync(path, contents);
     chmodSync(path, 0o755);
@@ -125,6 +131,88 @@ function hotfixPublisher(dir) {
   return commands(publishJob.slice(publishJob.lastIndexOf('\n      - name: Publish')));
 }
 
+function jobSteps(source, id) {
+  const job = source.split(`\n  ${id}:\n`)[1]?.split(/\n  \S/, 1)[0];
+  assert.ok(job, `Missing workflow job ${id}`);
+  return job.split('\n      - ').slice(1);
+}
+
+function checkoutInput(step, key) {
+  return step.match(new RegExp(`^          ${key}: (.+)$`, 'm'))?.[1].replace(/^(['"])(.*)\1$/, '$2');
+}
+
+test('the hotfix build checks out the resolved commit with full history', async t => {
+  const { dir, run, outputs } = mock(t, { realGit: true });
+  const source = join(dir, 'source');
+  const build = join(dir, 'build');
+  mkdirSync(source);
+  mkdirSync(build);
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+  const commit = message => git(source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+    '-c', 'commit.gpgSign=false', 'commit', '--allow-empty', '-qm', message);
+  git(source, 'init', '-q', '-b', 'main');
+  commit('common ancestor');
+  const sourceRef = 'hotfix/candidate';
+  git(source, 'branch', sourceRef);
+  commit('main change');
+  const main = git(source, 'rev-parse', 'HEAD');
+  git(source, 'switch', '-q', sourceRef);
+  commit('candidate');
+  const pinned = git(source, 'rev-parse', 'HEAD');
+
+  const prealpha = workflow('prealpha');
+  const [resolveSource] = jobSteps(prealpha, 'resolve-hotfix');
+  const resolution = run(commands(resolveSource), { env: { SOURCE_REF: sourceRef, HOTFIX_REPO: source } });
+  assert.equal(resolution.status, 0, resolution.stdout + resolution.stderr);
+  const resolved = Object.fromEntries(readFileSync(outputs, 'utf8').trim().split('\n').map(line => line.split('=')));
+  commit('branch moves after resolution');
+
+  const steps = jobSteps(prealpha, 'build-hotfix');
+  const checkout = steps.find(step => /^(?: {8})?uses: actions\/checkout@/m.test(step));
+  assert.ok(checkout, 'The build job checks out its source');
+  const refInput = checkoutInput(checkout, 'ref');
+  const expression = refInput?.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1];
+  const context = {
+    'needs.resolve-hotfix.outputs.sha': resolved.sha,
+    'github.sha': main,
+    'github.ref': 'refs/heads/main',
+    'inputs.ref': sourceRef,
+  };
+  const ref = expression ? context[expression] : (refInput ?? main);
+  assert.ok(ref, `Cannot resolve checkout ref ${refInput}`);
+  const depth = checkoutInput(checkout, 'fetch-depth') ?? '1';
+
+  // Replay the checkout inputs against a real Git repository without a hosted runner.
+  git(build, 'init', '-q');
+  git(build, 'fetch', '--quiet', '--no-tags', ...(depth === '0' ? [] : [`--depth=${depth}`]), source, ref);
+  git(build, 'switch', '-q', '--detach', 'FETCH_HEAD');
+  assert.equal(git(build, 'rev-parse', 'HEAD'), pinned, 'The build uses the commit selected before the branch moved');
+
+  const count = steps.find(step => /^(?: {8})?id: number$/m.test(step));
+  assert.ok(count, 'The build job supplies its build number');
+  writeFileSync(outputs, '');
+  const result = run(commands(count), { cwd: build });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(readFileSync(outputs, 'utf8').trim(), 'build=2');
+
+  await t.test('rejects depth 2 even when the visible count matches', () => {
+    const shallow = join(dir, 'shallow');
+    mkdirSync(shallow);
+    git(shallow, 'init', '-q');
+    git(shallow, 'fetch', '--quiet', '--no-tags', '--depth=2', source, pinned);
+    git(shallow, 'switch', '-q', '--detach', 'FETCH_HEAD');
+    assert.equal(git(shallow, 'rev-parse', 'HEAD'), pinned);
+    assert.equal(git(shallow, 'rev-parse', '--is-shallow-repository'), 'true');
+    assert.equal(git(shallow, 'rev-list', '--count', 'HEAD'), '2');
+
+    writeFileSync(outputs, '');
+    const rejected = run(commands(count), { cwd: shallow });
+    assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+    assert.match(rejected.stdout, /requires full Git history/);
+    assert.equal(readFileSync(outputs, 'utf8'), '');
+  });
+});
+
 test('a hotfix publishes only its versioned pre-alpha and leaves both rolling releases alone', t => {
   const { dir, run, calls } = mock(t);
   const result = run(hotfixPublisher(dir), { cwd: join(dir, 'source') });
@@ -153,28 +241,38 @@ test('a hotfix retry publishes its own run in the notes and Alpha selects the ne
 
   const ipaHash = createHash('sha256').update(retryIpa).digest('hex');
   const provenance = { sha, version: '0.4.7', build: '9969', ipa_sha256: ipaHash };
-  const workflowRun = (id, conclusion, record = provenance) => ({
+  const workflowRun = (id, conclusion, record = provenance, title = 'Hotfix Pre-alpha 0.4.7') => ({
     id, conclusion, run_number: id, head_branch: 'main', event: 'workflow_dispatch',
-    workflow_id: 123, display_title: 'Hotfix Pre-alpha 0.4.7 (9969)', provenance: record,
+    workflow_id: 123, display_title: title, provenance: record,
   });
   const records = [
-    workflowRun(860, 'success', { ...provenance, ipa_sha256: 'a'.repeat(64) }),
+    workflowRun(860, 'success', { ...provenance, ipa_sha256: 'a'.repeat(64) }, 'Hotfix Pre-alpha 0.4.7 (9969)'),
     workflowRun(861, 'failure'),
     workflowRun(864, 'success', { ...provenance, sha: 'f'.repeat(40) }),
     workflowRun(862, 'success'),
     workflowRun(863, 'failure'),
     workflowRun(865, 'success', { ...provenance, build: '9970' }),
     workflowRun(866, 'success', { ...provenance, version: '0.4.6' }),
+    workflowRun(867, 'success', null),
   ];
   const notedRun = release.notes.match(/actions\/runs\/(\d+)/)[1];
-  const step = workflow('promote-alpha').split('\n      - id: r\n')[1].split('\n  # The alpha tests')[0];
-  const selected = run(commands(step), {
-    env: { WANT: tag, HOTFIX: 'true', HOTFIX_RUN: '861', RUN_RECORDS: JSON.stringify(records) },
-  });
-  assert.deepEqual({ notedRun, alphaStatus: selected.status }, { notedRun: '862', alphaStatus: 0 },
-    selected.stdout + selected.stderr);
-  assert.match(readFileSync(outputs, 'utf8'), /^run=862$/m);
-  assert.ok(readFileSync(outputs, 'utf8').includes('ipa_sha256=' + ipaHash));
+  assert.equal(notedRun, '862');
+  for (const name of ['promote-alpha', 'promote-alpha-fast']) {
+    const step = workflow(name).split('\n      - id: r\n')[1].split(/\n  (?:# The alpha tests|publish:)/)[0];
+    for (const candidate of [
+      { records, id: 862, hash: ipaHash },
+      { records: records.slice(0, 1), id: 860, hash: 'a'.repeat(64) },
+    ]) {
+      writeFileSync(outputs, '');
+      const selected = run(commands(step), {
+        env: { WANT: tag, HOTFIX: 'true', RUN_RECORDS: JSON.stringify(candidate.records) },
+      });
+      assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+      const result = Object.fromEntries(readFileSync(outputs, 'utf8').trim().split('\n').map(line => line.split('=')));
+      assert.equal(result.run, String(candidate.id), name);
+      assert.equal(result.ipa_sha256, candidate.hash, name);
+    }
+  }
 });
 
 test('ordinary Alpha defaults to the main push artifact when a hotfix dispatch has the same workflow head', t => {

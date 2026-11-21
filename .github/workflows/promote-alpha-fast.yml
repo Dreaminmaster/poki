@@ -60,15 +60,15 @@ jobs:
           if [ "$HOTFIX" = true ]; then
             # The run title narrows the search. The source artifact proves what it built.
             candidates="$(gh api --paginate "repos/$GH_REPO/actions/workflows/prealpha.yml/runs?branch=main&event=workflow_dispatch&status=success&per_page=100" |
-              jq -sr --arg title "Hotfix Pre-alpha $version ($build)" '
+              jq -sr --arg title "Hotfix Pre-alpha $version" --arg legacy "Hotfix Pre-alpha $version ($build)" '
                 [.[].workflow_runs[] | select(.head_branch == "main" and .event == "workflow_dispatch"
-                  and .conclusion == "success" and .display_title == $title)]
+                  and .conclusion == "success" and (.display_title == $title or .display_title == $legacy))]
                 | sort_by(.run_number) | reverse | .[].id
               ')"
             run=""
             while IFS= read -r candidate; do
               [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || continue
-              gh run download "$candidate" --repo "$GH_REPO" --name Poki-hotfix-source --dir "provenance/$candidate"
+              gh run download "$candidate" --repo "$GH_REPO" --name Poki-hotfix-source --dir "provenance/$candidate" || continue
               if ipa_sha="$(jq -er --arg sha "$sha" --arg version "$version" --arg build "$build" '
                   select(.sha == $sha and .version == $version and .build == $build)
                   | .ipa_sha256 | select(test("^[0-9a-f]{64}$"))
