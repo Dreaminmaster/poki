@@ -461,6 +461,7 @@ final class ApprovalTests: XCTestCase {
             .scrollTo: [["scroll_to": ["text": "Nowhere", "max_swipes": 1]], ["scroll_to": ["text": "Nowhere", "in": 1, "max_swipes": 1]]],
             .longPress: [["long_press": 1]],
             .drag: [["drag": ["from": 1, "to": 1]], ["drag": ["from": 2, "to": 2]], ["drag": [100, 110, 300, 130]], ["drag": ["from": [100, 110], "to": [300, 130]]]],
+            .adjust: [["adjust": ["ref": 1, "value": "50%"]], ["adjust": ["ref": 2, "value": 1, "from": [195, 122]]], ["adjust": ["ref": 1, "value": 0.2, "from": [30, 64]]]],
             .pinch: [["pinch": 1]],
             .button: [["button": "volume_up"]],
             .launch: [["launch": "com.apple.Preferences"]],

@@ -28,7 +28,9 @@ pub mod devbuilds;
 pub mod device;
 pub mod error;
 pub mod keeper;
+pub mod link;
 pub mod mcp;
+pub mod mcpserve;
 #[cfg(feature = "device")]
 pub mod pairshare;
 pub mod paths;

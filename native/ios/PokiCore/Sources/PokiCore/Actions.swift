@@ -7,6 +7,7 @@ import Foundation
 //   {key: "return" | "delete" | ...}           {swipe: dir | {direction, in?, distance?}}
 //   {scroll_to: "text" | {text | ref, in?, direction?, max_swipes?}}
 //   {long_press: n | [x, y] | {ref | x, y, ms?}}   {drag: {from, to, ms?} | [x1, y1, x2, y2]}
+//   {adjust: {ref, value, from?}}              sets a slider: value 0 to 1, "40%", or a number with min and max
 //   {pinch: {ref | x, y, scale}}               {button: "home" | "lock" | "volume_up" | "volume_down"}
 //   {launch: "bundle" | {bundle, fresh?}}      {wait: ms}       {back: true}
 //   {handoff: {kind, text}} hands a step to the owner on the phone (no input until Done, or {handoff: false})
@@ -18,7 +19,7 @@ import Foundation
 /// this order: `perform` sends it as that and the approval check (`Computer.sensitive`) judges it as
 /// that, so a new kind of action is not sent before both say what it does.
 enum ActionKind: String, CaseIterable {
-    case run, path, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, pinch, button, launch, waitUntil = "wait_until", wait
+    case run, path, tap, type, back, handoff, key, swipe, scrollTo = "scroll_to", longPress = "long_press", drag, adjust, pinch, button, launch, waitUntil = "wait_until", wait
 
     init?(_ action: JSON) {
         guard let kind = Self.allCases.first(where: { action[$0.rawValue] != nil }) else { return nil }
@@ -28,7 +29,7 @@ enum ActionKind: String, CaseIterable {
     /// It sends touches or keys to the app in front, so the screen may change.
     var movesScreen: Bool {
         switch self {
-        case .tap, .type, .back, .key, .swipe, .scrollTo, .longPress, .drag, .pinch: true
+        case .tap, .type, .back, .key, .swipe, .scrollTo, .longPress, .drag, .adjust, .pinch: true
         case .run, .path, .handoff, .button, .launch, .waitUntil, .wait: false
         }
     }
@@ -47,7 +48,7 @@ enum ActionKind: String, CaseIterable {
     /// have changed the screen in the same do, it is judged again on a read of the screen it lands on.
     func presses(_ action: JSON) -> Bool {
         switch self {
-        case .tap, .back, .swipe, .scrollTo, .longPress, .drag, .pinch: true
+        case .tap, .back, .swipe, .scrollTo, .longPress, .drag, .adjust, .pinch: true
         case .type: action["ref"] != nil
         case .run, .path, .handoff, .key, .button, .launch, .waitUntil, .wait: false
         }
@@ -411,6 +412,8 @@ extension Computer {
                 try await gesture(path, seconds: ms / 1000, hold: hold / 1000, rest: 0.15, until: until)
             }
             return ("drag", "drag from [\(Int(from.x)), \(Int(from.y))] to [\(Int(to.x)), \(Int(to.y))] in \(Int(ms)) ms\(hold > 0 ? " after holding \(Int(hold)) ms" : "")")
+        case .adjust:
+            return ("adjust", try await adjust(spec, until: until))
         case .pinch:
             let p = try point(spec)
             let screen = try await screenSize(until: until)
@@ -1043,7 +1046,7 @@ extension Computer {
         let limit = Swift.min(started + Swift.min(10, Swift.max(0.2, (spec["ms"]?.double ?? 3000) / 1000)), until)
         let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
         let what = settled && text == nil ? "the screen held still" : "\"\(text!.prefix(40))\" \(gone ? "was gone" : "appeared")"
-        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";") }
         // "Settled" compares two reads. The latest read, when it is fresh (the call before ended
         // within 5 s), is the first: on a slow runner (the CI simulator read in 4.5 s) two reads
         // do not fit an action's time, and the screen that matches the read before held still.
@@ -1073,5 +1076,84 @@ extension Computer {
             if now() < limit { await sleep(seconds: Swift.min(0.25, Swift.max(0, limit - now()))) }
         }
         return "wait_until: not seen within \(Int(((limit - started) * 1000).rounded())) ms that \(what) (\(reads) reads)"
+    }
+}
+
+// MARK: adjust
+
+extension Computer {
+    /// Where a value sits on a control, from 0 to 1: "40%" is 0.4, a plain number from 0 to 1 is
+    /// itself, and any number with `min` and `max` is placed between them ("+0.7" from -2 to 2 is
+    /// 0.675). nil when the text holds no number, or the number cannot be placed.
+    static func sliderFraction(_ text: String?, min lo: Double? = nil, max hi: Double? = nil) -> Double? {
+        guard let text else { return nil }
+        let cleaned = text.replacingOccurrences(of: "\u{2212}", with: "-").replacingOccurrences(of: ",", with: ".")
+        guard let range = cleaned.range(of: #"[-+]?\d+(?:\.\d+)?"#, options: .regularExpression), let n = Double(cleaned[range].replacingOccurrences(of: "+", with: "")) else { return nil }
+        let percent = cleaned[range.upperBound...].trimmingCharacters(in: .whitespaces).hasPrefix("%")
+        if let lo, let hi, hi > lo, !percent { return Swift.min(1, Swift.max(0, (n - lo) / (hi - lo))) }
+        if percent { return Swift.min(1, Swift.max(0, n / 100)) }
+        // A signed reading ("+0.0" on an exposure dial) is on a scale of its own, never a fraction.
+        let signed = cleaned[range].hasPrefix("+") || cleaned[range].hasPrefix("-")
+        return !signed && (0...1).contains(n) ? n : nil
+    }
+
+    /// The finger's line along a slider: the track runs inside the frame, a thumb's half-width in from
+    /// each end, horizontal unless the frame is much taller than wide (then 0 is at the bottom).
+    static func sliderPoint(_ frame: Rect, _ fraction: Double) -> (x: Double, y: Double) {
+        let f = Swift.min(1, Swift.max(0, fraction))
+        if frame.height > frame.width * 2 {
+            let inset = Swift.min(16, frame.height / 6)
+            return (frame.centre.x, frame.maxY - inset - f * (frame.height - 2 * inset))
+        }
+        let inset = Swift.min(16, frame.width / 6)
+        return (frame.x + inset + f * (frame.width - 2 * inset), frame.centre.y)
+    }
+
+    /// {adjust: {ref, value, min?, max?, from?: [x, y]}}: drags the slider's thumb from where its value
+    /// puts it (or `from`, a point on the picture, when the value says nothing) to where `value` goes,
+    /// reads the control again and says the value it landed on, with one corrective drag when that
+    /// value can be read and is off by more than 3 %. Issue #609: a drag started off the knob moved
+    /// nothing, and nothing said so.
+    func adjust(_ spec: JSON, until: Double) async throws -> String {
+        guard let ref = spec["ref"]?.int ?? spec.int else {
+            throw ActionFailure(message: "adjust takes {ref, value}: value from 0 to 1, a percentage such as \"40%\", or a number with min and max", delivery: .notSent)
+        }
+        let e = try element(ref)
+        let lo = spec["min"]?.double, hi = spec["max"]?.double
+        let wantedText = spec["value"]?.string ?? spec["value"]?.double.map { String($0) }
+        guard let target = Self.sliderFraction(wantedText, min: lo, max: hi) else {
+            throw ActionFailure(message: "adjust: value must be from 0 to 1, a percentage such as \"40%\", or a number with min and max (the control's range)", delivery: .notSent)
+        }
+        let current = Self.sliderFraction(e.value, min: lo, max: hi)
+        let given = spec["from"].flatMap { try? point($0) }
+        guard let start = given ?? current.map({ Self.sliderPoint(e.frame, $0) }) else {
+            throw ActionFailure(message: "adjust: element \(ref) says no value Poki can place (\(e.value.map { "\"\($0)\"" } ?? "none")); give min and max for its range, or from: [x, y], the thumb's point on the screenshot", delivery: .notSent)
+        }
+        _ = try onScreen(start)
+        var end = try onScreen(Self.sliderPoint(e.frame, target))
+        // Hold first, so the thumb is picked up rather than the track scrolled; rest at the end, so it
+        // stays where the finger stopped.
+        try await gesture((start.x, start.y, end.x, end.y), seconds: 0.5, hold: 0.25, rest: 0.15, until: until)
+        var landed = await readValue(of: e, until: until)
+        var note = ""
+        if let value = landed, let got = Self.sliderFraction(value, min: lo, max: hi), abs(got - target) > 0.03, until - now() > 2.5 {
+            let from = Self.sliderPoint(e.frame, got)
+            end = Self.sliderPoint(e.frame, Swift.min(1, Swift.max(0, target + (target - got))))
+            try await gesture((from.x, from.y, end.x, end.y), seconds: 0.4, hold: 0.25, rest: 0.15, until: until)
+            landed = await readValue(of: e, until: until)
+            note = " after one correction"
+        }
+        let was = e.value.map { "\"\($0)\"" } ?? "unknown"
+        let now = landed.map { "\"\($0)\"" } ?? "unknown (the control was not found in the read after)"
+        return "adjust \(ref) from \(was) toward \(wantedText ?? "?"): value now \(now)\(note)"
+    }
+
+    /// The control's value in a fresh tree, found by type and place (its number may change).
+    func readValue(of e: Element, until: Double) async -> String? {
+        let room = until - now() - 0.6
+        guard room > 0.3, let seen = try? await runner.tree(timeout: Swift.min(config.readTimeout, room), format: config.treeFormat) else { return nil }
+        let same = seen.elements.filter { $0.type == e.type && $0.frame.intersects(e.frame) }
+        let best = same.max { $0.frame.intersection(e.frame).area < $1.frame.intersection(e.frame).area }
+        return best?.value
     }
 }

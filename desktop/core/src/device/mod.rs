@@ -74,6 +74,26 @@ impl Phone {
         Ok(one_per_phone(phones))
     }
 
+    /// Every way usbmuxd reaches each phone, with its usbmuxd id: cables first, then Wi-Fi sync.
+    /// poki-mcp tries them in that order (issue #609).
+    pub async fn list_all_links() -> Result<Vec<(Phone, u32)>> {
+        let mut mux = UsbmuxdConnection::default().await?;
+        let mut all: Vec<(Phone, u32)> = mux
+            .get_devices()
+            .await?
+            .into_iter()
+            .map(|d| {
+                let link = match d.connection_type {
+                    Connection::Network(ip) => Link::Muxed { address: ip },
+                    _ => Link::Usb,
+                };
+                (Phone { udid: d.udid, link, mux_id: Some(d.device_id) }, d.device_id)
+            })
+            .collect();
+        all.sort_by_key(|(p, _)| !matches!(p.link, Link::Usb));
+        Ok(all)
+    }
+
     /// A phone on the same Wi-Fi, reached with the pairing record this computer saved for it.
     pub fn over_wifi(udid: impl Into<String>, address: IpAddr) -> Phone {
         Phone { udid: udid.into(), link: Link::Wifi { address }, mux_id: None }
