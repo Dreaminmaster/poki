@@ -54,13 +54,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要一个 AI 账户来思考。在下面添加一个提供商，一个就够。"
+            "value" : "Poki 需要 AI 账户来思考，添加一个就够。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 需要一個 AI 帳號來思考。在下面新增一個供應商，一個就夠。"
+            "value" : "Poki 需要 AI 帳號來思考，新增一個就夠。"
           }
         }
       }
