@@ -1,130 +1,18 @@
 import SwiftUI
 
-struct BearWardrobeSheet: View {
-    @Binding var mixing: Bool
-    let showSettings: () -> Void
+private enum BearWardrobeTab: Int, CaseIterable {
+    case headwear, clothes, outfits
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent
-    @State private var rootDetent = Self.quick
-    @State private var navigationTask: Task<Void, Never>?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private static var quick: PresentationDetent { .fraction(0.68) }
-
-    init(mixing: Binding<Bool>, showSettings: @escaping () -> Void) {
-        _mixing = mixing
-        self.showSettings = showSettings
-        _detent = State(initialValue: mixing.wrappedValue ? .large : Self.quick)
+    var slot: BearOutfitSlot? {
+        switch self {
+        case .headwear: .headwear
+        case .clothes: .clothes
+        case .outfits: nil
+        }
     }
 
-    var body: some View {
-        NavigationStack {
-            quickOutfits
-                .navigationTitle(AppLocalization.text("Outfits"))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close", systemImage: "xmark") { dismiss() }
-                            .labelStyle(.iconOnly)
-                            .accessibilityIdentifier("wardrobe.close")
-                    }
-                }
-                .navigationDestination(isPresented: $mixing) {
-                    BearMixView()
-                        .navigationTitle(AppLocalization.text("Customize Poki"))
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .primaryAction) {
-                                Button("Remove All", role: .destructive) {
-                                    BearWardrobe.shared.selection = .bare
-                                }
-                                .tint(.red)
-                                .disabled(BearWardrobe.shared.selection == .bare)
-                                .accessibilityIdentifier("wardrobe.removeAll")
-                            }
-                        }
-                }
-        }
-        .presentationDetents([Self.quick, .large], selection: $detent)
-        .presentationContentInteraction(.scrolls)
-        .presentationDragIndicator(.visible)
-        .onChange(of: mixing) { _, showing in
-            guard !showing else { return }
-            navigationTask?.cancel()
-            navigationTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 300))
-                guard !Task.isCancelled, !mixing else { return }
-                detent = rootDetent
-            }
-        }
-        .onDisappear { navigationTask?.cancel() }
-    }
-
-    private var quickOutfits: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Current outfit: \(BearWardrobe.shared.selection.displayName)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("wardrobe.current")
-
-                WardrobeGrid(slot: nil)
-
-                VStack(spacing: 0) {
-                    Button {
-                        rootDetent = detent
-                        navigationTask?.cancel()
-                        if detent == .large {
-                            mixing = true
-                        } else {
-                            detent = .large
-                            navigationTask = Task { @MainActor in
-                                try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 100))
-                                guard !Task.isCancelled, !mixing else { return }
-                                mixing = true
-                            }
-                        }
-                    } label: {
-                        destinationLabel("Customize Poki", icon: "hanger")
-                    }
-                    .accessibilityIdentifier("wardrobe.mix")
-
-                    Divider().padding(.leading, 44)
-
-                    Button(action: showSettings) {
-                        destinationLabel("Settings", icon: "gearshape")
-                    }
-                    .accessibilityIdentifier("wardrobe.settings")
-                }
-                .buttonStyle(.plain)
-                .background(.fill.tertiary, in: .rect(cornerRadius: 16))
-            }
-            .frame(maxWidth: 520)
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity)
-        }
-        .softTopEdge()
-    }
-
-    private func destinationLabel(_ title: LocalizedStringResource, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Label { Text(title) } icon: {
-                Image(systemName: icon).foregroundStyle(Color.accentColor)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.forward")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(minHeight: 48)
-        .contentShape(.rect)
-    }
+    var name: LocalizedStringResource { slot?.name ?? "Outfits" }
+    var identifier: String { slot?.rawValue ?? "set" }
 }
 
 private struct WardrobeGrid: View {
@@ -172,10 +60,10 @@ private struct WardrobeGrid: View {
     }
 
     private func tile(image: String, none: Bool, selected: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: slot == nil ? 99 : 15)
+        let shape = RoundedRectangle(cornerRadius: 15)
         return ZStack {
-            shape.fill(none && slot != nil ? Color(.secondarySystemFill) : Tint.portrait)
-            if none, slot != nil {
+            shape.fill(none ? Color(.secondarySystemFill) : Tint.portrait)
+            if none {
                 Image(systemName: "nosign").foregroundStyle(.secondary)
             } else if let thumbnail = BearWardrobe.shared.thumbnail(image) {
                 Image(uiImage: thumbnail).resizable().scaledToFit().padding(.horizontal, 3).offset(y: 3)
@@ -202,8 +90,9 @@ private struct WardrobeGrid: View {
     }
 }
 
-private struct BearMixView: View {
-    @State private var slot = BearOutfitSlot.headwear
+struct BearCustomizationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = BearWardrobeTab.headwear
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -214,6 +103,31 @@ private struct BearMixView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            editor
+                .navigationTitle(AppLocalization.text("Customize Poki"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", systemImage: "xmark") { dismiss() }
+                            .labelStyle(.iconOnly)
+                            .accessibilityIdentifier("wardrobe.close")
+                    }
+                    if tab != .outfits {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button("Remove All", role: .destructive) {
+                                BearWardrobe.shared.selection = .bare
+                            }
+                            .tint(.red)
+                            .disabled(BearWardrobe.shared.selection == .bare)
+                            .accessibilityIdentifier("wardrobe.removeAll")
+                        }
+                    }
+                }
+        }
+    }
+
+    private var editor: some View {
         VStack(spacing: 12) {
             PokiPortrait(mood: .ready, side: previewSize)
                 .accessibilityHidden(true)
@@ -221,13 +135,14 @@ private struct BearMixView: View {
             equippedItems
                 .clipped()
 
-            BearPieceSwitch(selection: $slot)
+            BearWardrobeTabs(selection: $tab)
                 .frame(maxWidth: 520)
                 .padding(.horizontal, 16)
 
-            TabView(selection: $slot) {
-                BearPiecesPage(slot: .headwear, isActive: slot == .headwear).tag(BearOutfitSlot.headwear)
-                BearPiecesPage(slot: .clothes, isActive: slot == .clothes).tag(BearOutfitSlot.clothes)
+            TabView(selection: $tab) {
+                ForEach(BearWardrobeTab.allCases, id: \.self) { category in
+                    BearWardrobeGridPage(tab: category, isActive: tab == category).tag(category)
+                }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
@@ -298,26 +213,28 @@ private struct BearMixView: View {
 
 }
 
-private struct BearPieceSwitch: View {
-    @Binding var selection: BearOutfitSlot
+private struct BearWardrobeTabs: View {
+    @Binding var selection: BearWardrobeTab
     @Environment(\.layoutDirection) private var layoutDirection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .footnote) private var height: CGFloat = 32
 
     var body: some View {
         HStack(spacing: 0) {
-            segment(.headwear)
-            segment(.clothes)
+            ForEach(BearWardrobeTab.allCases, id: \.self) { tab in
+                segment(tab)
+            }
         }
         .frame(height: height)
         .background {
             GeometryReader { geometry in
-                let width = geometry.size.width / 2
-                let selectedOnLeft = (selection == .headwear) == (layoutDirection == .leftToRight)
+                let count = BearWardrobeTab.allCases.count
+                let width = geometry.size.width / CGFloat(count)
+                let column = layoutDirection == .leftToRight ? selection.rawValue : count - 1 - selection.rawValue
                 Color.clear
                     .frame(width: max(0, width - 8), height: max(0, geometry.size.height - 8))
                     .glassSurface(in: Capsule())
-                    .position(x: selectedOnLeft ? width / 2 : width * 1.5, y: geometry.size.height / 2)
+                    .position(x: width * (CGFloat(column) + 0.5), y: geometry.size.height / 2)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selection)
             }
             .allowsHitTesting(false)
@@ -326,28 +243,29 @@ private struct BearPieceSwitch: View {
         .background(.fill.tertiary, in: Capsule())
         .clipShape(Capsule())
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Outfit pieces"))
+        .accessibilityLabel(Text("Outfit categories"))
         .accessibilityIdentifier("wardrobe.pieces")
     }
 
-    private func segment(_ slot: BearOutfitSlot) -> some View {
+    private func segment(_ tab: BearWardrobeTab) -> some View {
         Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { selection = slot }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { selection = tab }
         } label: {
-            Text(slot.name)
-                .font(.footnote.weight(selection == slot ? .semibold : .regular))
+            Text(tab.name)
+                .font(.footnote.weight(selection == tab ? .semibold : .regular))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selection == slot ? .isSelected : [])
+        .accessibilityAddTraits(selection == tab ? .isSelected : [])
+        .accessibilityIdentifier("wardrobe.tab.\(tab.identifier)")
     }
 }
 
-private struct BearPiecesPage: View {
-    let slot: BearOutfitSlot
+private struct BearWardrobeGridPage: View {
+    let tab: BearWardrobeTab
     let isActive: Bool
     @State private var scrollPosition = ScrollPosition()
     @State private var headwearPalette: (outfit: BearOutfit, colors: [BearOutfitColorChannel: UIColor])?
@@ -355,40 +273,40 @@ private struct BearPiecesPage: View {
 
     var body: some View {
         let wardrobe = BearWardrobe.shared
-        let outfit = wardrobe.selection[slot]
+        let outfit = tab.slot.flatMap { wardrobe.selection[$0] }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                WardrobeGrid(slot: slot)
+                WardrobeGrid(slot: tab.slot)
 
-                if let outfit, let colors = palette(for: outfit), !colors.isEmpty {
+                if let slot = tab.slot, let outfit, let colors = palette(for: outfit, slot: slot), !colors.isEmpty {
                     VStack(spacing: 12) {
                         Divider()
                         BearPieceColors(outfit: outfit, slot: slot, isActive: isActive,
                                         palette: colors, scrollPosition: $scrollPosition)
                     }
-                        .id(outfit)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                    .id(outfit)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(12)
             .frame(maxWidth: 520)
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
             .clipShape(.rect(cornerRadius: 16))
-            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: wardrobe.selection[slot])
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: outfit)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
         }
         .scrollPosition($scrollPosition)
-        .accessibilityIdentifier("wardrobe.page.\(slot.rawValue)")
+        .accessibilityIdentifier("wardrobe.page.\(tab.identifier)")
         .task(id: outfit) {
-            guard slot == .headwear, let outfit,
-                  let template = await wardrobe.load(outfit, for: slot), !Task.isCancelled else { return }
+            guard tab == .headwear, let outfit,
+                  let template = await wardrobe.load(outfit, for: .headwear), !Task.isCancelled else { return }
             headwearPalette = (outfit, BearDressing.originalHeadwearColors(in: template))
         }
     }
 
-    private func palette(for outfit: BearOutfit) -> [BearOutfitColorChannel: UIColor]? {
+    private func palette(for outfit: BearOutfit, slot: BearOutfitSlot) -> [BearOutfitColorChannel: UIColor]? {
         if slot == .headwear { return headwearPalette?.outfit == outfit ? headwearPalette?.colors : nil }
         return Dictionary(uniqueKeysWithValues: BearOutfitColorChannel.allCases.compactMap { channel in
             outfit.defaultColors[keyPath: channel.storage].map { (channel, UIColor(hex: $0)) }

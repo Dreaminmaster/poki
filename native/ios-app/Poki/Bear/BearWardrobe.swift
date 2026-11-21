@@ -109,19 +109,6 @@ struct BearOutfitSelection: Codable, Equatable {
             }
         }
     }
-
-    var matchingSet: BearOutfit? { headwear == clothes ? headwear : nil }
-
-    var displayName: String {
-        if let matchingSet { return AppLocalization.text(matchingSet.name) }
-        let names = [BearOutfitSlot.headwear, .clothes].compactMap { slot in
-            self[slot].map { AppLocalization.text($0.piece(slot).name) }
-        }
-        if names.isEmpty { return AppLocalization.text("No Outfit") }
-        let formatter = ListFormatter()
-        formatter.locale = AppLocalization.locale
-        return formatter.string(from: names) ?? names.joined(separator: ", ")
-    }
 }
 
 struct BearOutfitColors: Codable, Equatable {

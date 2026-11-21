@@ -1,9 +1,7 @@
 import SwiftUI
 
-// Tapping Poki, on the home page, in the conversation or on the voice page, opens Poki's menu in place
-// (the owner, 2026-11-15: a native menu, not a drawn card; it grows out of Poki's picture before a chat
-// has begun and out of the glass pill with Poki's name after). It is the system's own menu, so on
-// iOS 26 it is Liquid Glass and opens from the control that was tapped. The model that answers
+// The home avatar, conversation name pill, and voice header open Poki's native status menu.
+// On iOS 26 the menu uses Liquid Glass and opens from the control that was tapped. The model that answers
 // and how Poki asks before a sensitive step each show their choice and open to change it. These
 // live only here: Settings keeps the accounts. Settings opens from the bottom of the conversations
 // (SettingsEntryButton). Pause is not on it (the owner, 2026-11-13): it only stopped the task, which the

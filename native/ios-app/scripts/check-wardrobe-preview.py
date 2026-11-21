@@ -39,14 +39,14 @@ def pixels(image, box):
 
 
 def exercise(device, helper, output, strain):
-    def element(identifier):
+    def screen_elements():
         raw = subprocess.check_output([helper], input=json.dumps({"id": device, "op": "ax"}),
                                       text=True, timeout=15)
         screen = json.loads(raw)
-        if screen.get("bundle_id") != BUNDLE:
-            return None
-        # AX reports the set sheet's controls as offscreen after its entrance animation.
-        return next((e for e in screen["elements"] if e.get("identifier") == identifier
+        return screen["elements"] if screen.get("bundle_id") == BUNDLE else []
+
+    def element(identifier):
+        return next((e for e in screen_elements() if e.get("identifier") == identifier
                      and e["width"] > 1 and 0 <= e["x"] <= WIDTH - e["width"]
                      and 0 <= e["y"] < HEIGHT), None)
 
@@ -57,9 +57,9 @@ def exercise(device, helper, output, strain):
         until(f"{identifier} was not selected", lambda: element(identifier),
               lambda e: e and e["selected"])
 
-    def tap(identifier, fraction=0.5):
+    def tap(identifier):
         e = control(identifier)
-        x = e["x"] + e["width"] * fraction
+        x = e["x"] + e["width"] / 2
         y = e["y"] + e["height"] / 2
         subprocess.run(["axe", "tap", "--udid", device, "--tap-style", "physical", "-x", str(x), "-y", str(y)],
                        check=True, timeout=20)
@@ -74,57 +74,51 @@ def exercise(device, helper, output, strain):
         with Image.open(path) as image:
             return image.convert("RGB").resize((WIDTH, HEIGHT), Image.Resampling.BOX)
 
-    def gold(image, box=(163, 145, 239, 208)):
+    simctl(device, "launch", BUNDLE, "-pokiChat", "working", "-uiLanguage", "en",
+           "-AppleLanguages", "(en)", "-pokiStrain", strain)
+    tap_button("chat.header.avatar")
+    control("wardrobe.pieces")
+    navigation = control("Customize Poki")
+    portrait_top = round(navigation["y"] + navigation["height"] + 8)
+
+    def gold(image):
         return sum(r > 120 and r > 1.08 * g and g > 1.24 * b
-                   for r, g, b in pixels(image, box))
+                   for r, g, b in pixels(image, (140, portrait_top, 262, portrait_top + 78)))
+
+    def cape(image):
+        return sum(r > 85 and r > 1.35 * g and r > 1.30 * b
+                   for r, g, b in pixels(image, (141, portrait_top + 111, 261, portrait_top + 176)))
 
     def cardigan(image):
         return sum(b > 1.3 * r and b > 1.1 * g and r < 95
-                   for r, g, b in pixels(image, (141, 282, 261, 328)))
+                   for r, g, b in pixels(image, (141, portrait_top + 136, 261, portrait_top + 176)))
 
-    simctl(device, "launch", BUNDLE, "-pokiChat", "working", "-uiLanguage", "en",
-           "-AppleLanguages", "(en)", "-pokiStrain", strain)
-    avatar = control("chat.header.avatar")
-    def avatar_region(top, bottom):
-        x, y, width, height = (avatar[key] for key in ("x", "y", "width", "height"))
-        return tuple(map(round, (x + width * 0.18, y + height * top, x + width * 0.82, y + height * bottom)))
-
-    crown_region = avatar_region(0.04, 0.45)
-    cape_region = avatar_region(0.68, 1)
-
-    def cape(image):
-        return sum(r > 85 and r > 1.35 * g and r > 1.30 * b for r, g, b in pixels(image, cape_region))
-
-    tap_button("chat.header.avatar")
-    control("status.autoUnlock")
-    tap("status.customizePoki")
-    control("wardrobe.pieces")
-    preview("customize-from-menu")
-    tap_button("BackButton")
-    until("Outfits did not return to the compact sheet", lambda: element("wardrobe.close"),
-          lambda close: close and close["y"] > HEIGHT * 0.3)
+    tap_button("wardrobe.tab.set")
+    expected_tiles = {f"wardrobe.set.{number}" for number in range(13)}
+    until("Outfits must keep all thirteen tiles", screen_elements,
+          lambda elements: expected_tiles <= {e.get("identifier") for e in elements})
     tap("wardrobe.set.0")
     selected("wardrobe.set.0")
-    bare_avatar = preview("set-bare")
+    bare_set = preview("set-bare")
     tap("wardrobe.set.7")
     selected("wardrobe.set.7")
-    until("Little King is selected but its crown or cape is missing from the chat avatar",
+    assert control("wardrobe.equipped.headwear")["label"] == "Remove Crown"
+    assert control("wardrobe.equipped.clothes")["label"] == "Remove Royal Cape"
+    until("Little King is selected but its crown or cape is missing from the preview",
           lambda: preview("set-king"),
-          lambda image: gold(image, crown_region) > gold(bare_avatar, crown_region) + 5
-          and cape(image) > cape(bare_avatar) + 15)
+          lambda image: gold(image) > gold(bare_set) + 50 and cape(image) > cape(bare_set) + 50)
     tap("wardrobe.set.0")
     selected("wardrobe.set.0")
-    until("The chat avatar still wears Little King after selecting No Outfit", lambda: preview("set-removed"),
-          lambda image: gold(image, crown_region) <= gold(bare_avatar, crown_region) + 3
-          and cape(image) <= cape(bare_avatar) + 5)
-    tap("wardrobe.mix")
+    until("The preview still wears Little King after selecting No Outfit", lambda: preview("set-removed"),
+          lambda image: gold(image) <= gold(bare_set) + 10 and cape(image) <= cape(bare_set) + 10)
+    tap_button("wardrobe.tab.headwear")
     selected("wardrobe.headwear.0")
     bare = preview("bare")
     tap("wardrobe.headwear.7")
     selected("wardrobe.headwear.7")
     crown = until("Crown is selected but missing from the preview", lambda: preview("crown"),
                   lambda image: gold(image) > gold(bare) + 50)
-    tap("wardrobe.pieces", 0.75)
+    tap_button("wardrobe.tab.clothes")
     tap("wardrobe.clothes.4")
     selected("wardrobe.clothes.4")
     until("Mixed preview does not show both the crown and the cardigan", lambda: preview("mixed"),
@@ -133,7 +127,9 @@ def exercise(device, helper, output, strain):
     selected("wardrobe.clothes.0")
     until("The preview still shows an outfit after Remove All", lambda: preview("removed"),
           lambda image: gold(image) <= gold(bare) + 10 and cardigan(image) <= cardigan(crown) + 10)
-    print(f"PASS ({strain}). The status menu opens Customize Poki. The avatar previews Little King and both mixed pieces.")
+    tap_button("wardrobe.close")
+    control("chat.header.avatar")
+    print(f"PASS ({strain}). The avatar opens Customize Poki. A preset applies both pieces, and mixed pieces still render.")
 
 
 if __name__ == "__main__":

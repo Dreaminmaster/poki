@@ -31,10 +31,7 @@ struct ChatView: View {
     @State private var pokes = 0
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
-    @State private var wardrobeOpen = false
-    @State private var wardrobeMixing = false
-    @State private var wardrobeOpensSettings = false
-    @Environment(\.openPokiSettings) private var openPokiSettings
+    @State private var customizationOpen = false
     @Environment(\.bearCovered) private var bearCovered
 
     private func tapPoki() {
@@ -44,8 +41,7 @@ struct ChatView: View {
     }
 
     private func openCustomization() {
-        wardrobeMixing = true
-        wardrobeOpen = true
+        customizationOpen = true
     }
 
     /// The message field has the keyboard.
@@ -119,23 +115,11 @@ struct ChatView: View {
 
     var body: some View {
         chatContent
-            .environment(\.bearOutfitPreview, wardrobeOpen)
-            .environment(\.bearCovered, bearCovered || wardrobeMixing)
-            .sheet(isPresented: $wardrobeOpen, onDismiss: wardrobeDismissed) {
-                BearWardrobeSheet(mixing: $wardrobeMixing) {
-                    wardrobeOpensSettings = true
-                    wardrobeOpen = false
-                }
-                .environment(\.bearOutfitPreview, true)
+            .environment(\.bearCovered, bearCovered || customizationOpen)
+            .fullScreenCover(isPresented: $customizationOpen) {
+                BearCustomizationView()
+                    .environment(\.bearOutfitPreview, true)
             }
-    }
-
-    private func wardrobeDismissed() {
-        wardrobeMixing = false
-        if wardrobeOpensSettings {
-            wardrobeOpensSettings = false
-            openPokiSettings?()
-        }
     }
 
     @ViewBuilder private var chatContent: some View {
@@ -226,8 +210,6 @@ struct ChatView: View {
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
                                tap: tapPoki, openModel: openModel, openCustomization: openCustomization, travel: { flightRise = $0 })
-                        .offset(y: home && wardrobeOpen ? -46 : 0)
-                        .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
                 }
             }
         }

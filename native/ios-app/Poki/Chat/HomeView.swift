@@ -171,11 +171,23 @@ struct PokiFlight: View {
             PokiPicture(mood: status.mood, side: side, pokes: pokes)
                 .accessibilityHidden(true)
                 .overlay {
-                    PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization) {
-                        Color.clear.frame(width: side, height: side).contentShape(.circle)
+                    if home {
+                        PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization) {
+                            Color.clear.frame(width: side, height: side).contentShape(.circle)
+                        }
+                        .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
+                        .accessibilityIdentifier("home.poki")
+                    } else if let openCustomization {
+                        Button {
+                            tap()
+                            openCustomization()
+                        } label: {
+                            Color.clear.frame(width: side, height: side).contentShape(.circle)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("Customize Poki"))
+                        .accessibilityIdentifier("chat.header.avatar")
                     }
-                    .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-                    .accessibilityIdentifier(home ? "home.poki" : "chat.header.avatar")
                 }
                 .position(x: place.midX, y: place.midY)
                 // The greeting's own animations, so the two move as one. A place that moves for any other
