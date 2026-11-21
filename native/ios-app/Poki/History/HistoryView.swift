@@ -114,7 +114,7 @@ struct HistoryPage: View {
                     }
                 }
             } else {
-                BacktapeLibrary(layout: layout, askText: asSenses ? $asking : nil)
+                BacktapeLibrary(layout: layout)
             }
         }
         // History: the timeline. As Senses, its settings are one button away; from the settings
@@ -138,7 +138,8 @@ struct HistoryPage: View {
         }
         // With nothing kept yet the ask bar still sits at the foot (BacktapeLibrary has its own).
         .bottomBar(softEdge: true) {
-            if asSenses && !locked && layout.isEmpty { PokiAskBar(text: $asking, scope: .senses).padding(.bottom, 4) }
+            // No Ask Poki bar on Senses (the owner, Nov 21 2026): the timeline is the whole page.
+            EmptyView()
         }
         .task(id: "\(capture.changes) \(capture.enabled)") { await load() }
     }
