@@ -18,13 +18,17 @@ public struct RecognizedText: Sendable, Equatable {
 /// Text recognition on the phone (Vision). Nil where Vision is missing (Linux) or the picture cannot
 /// be read.
 enum TextRecognizer {
-    static func recognize(png: Data) -> [RecognizedText]? {
+    static func recognize(png: Data, in region: Rect? = nil) -> [RecognizedText]? {
         #if canImport(Vision) && canImport(ImageIO)
         guard let source = CGImageSourceCreateWithData(png as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
+        request.recognitionLevel = region == nil ? .accurate : .fast
         request.usesLanguageCorrection = false
-        if #available(iOS 16, macOS 13, *) { request.automaticallyDetectsLanguage = true }
+        if let region {
+            request.regionOfInterest = CGRect(x: region.x, y: 1 - region.maxY, width: region.width, height: region.height)
+        } else if #available(iOS 16, macOS 13, *) {
+            request.automaticallyDetectsLanguage = true
+        }
         do { try VNImageRequestHandler(cgImage: image, options: [:]).perform([request]) } catch { return nil }
         return (request.results ?? []).compactMap { observation in
             guard let best = observation.topCandidates(1).first, !best.string.isEmpty else { return nil }

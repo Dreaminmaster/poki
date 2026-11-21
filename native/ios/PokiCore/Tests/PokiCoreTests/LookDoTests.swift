@@ -681,6 +681,81 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(picture.text.contains("screen_changed: true (only the picture changed"), picture.text)
     }
 
+    #if canImport(CoreGraphics)
+    func testNumberKeyReturnsTheNewDisplayAndPictureEvenWhenTheFirstReadIsOld() async {
+        let (core, wda, _) = makeCore()
+        let taps = LockedBox(0)
+        let sawOldDisplayAfterTap = LockedBox(false)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 696, width: 24, height: 35)) }
+        let newPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 716, width: 24, height: 15)) }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.set("GET /source") { _ in
+            let value: JSON
+            if taps.value == 0 {
+                value = "0"
+            } else {
+                value = sawOldDisplayAfterTap.update { sawOld in
+                    defer { sawOld = true }
+                    return sawOld ? "7" : "0"
+                }
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "children": [
+                ["type": "XCUIElementTypeStaticText", "name": "display", "label": value,
+                 "rect": ["x": 16, "y": 130, "width": 358, "height": 70]],
+                ["type": "XCUIElementTypeButton", "label": "7",
+                 "rect": ["x": 16, "y": 280, "width": 70, "height": 70]],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            let picture = sawOldDisplayAfterTap.value ? newPicture : oldPicture
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(newPicture.count)".utf8))
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyDoesNotConfirmAChangedValueWithoutANewPicture() async {
+        let (core, wda, _) = makeCore()
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 696, width: 24, height: 35)) }
+        let taps = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.source([("StaticText", "0"), ("Button", "7")], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            if taps.value == 0 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            return (500, ["value": ["error": "unable to capture screen", "message": "no new screenshot"]])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            wda.source([("StaticText", "7"), ("Button", "7")], app: "Calculator")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,100,358,44]"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertNil(result.jpeg)
+        XCTAssertEqual(taps.value, 1)
+    }
+    #endif
+
     func testCoordinatePauseExplainsWhyEvenWhenScreenDidNotChange() async {
         let (core, wda, _) = makeCore()
         wda.source([("Button", "Already selected")])
