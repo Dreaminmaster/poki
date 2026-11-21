@@ -49,8 +49,16 @@ testers on Alpha run the file that was tried on Pre-alpha, and Beta runs the fil
 1. **Pre-alpha, automatic.** Every merge into `main` runs `.github/workflows/prealpha.yml`: one
    macOS job builds the external IPA, tags `app-<VERSION>-prealpha.<N>` and replaces the files of
    `app-prealpha-latest`. Its artifact is kept 90 days for later promotions.
+   Re-run a failed main build from its existing Actions run.
+   To build a hotfix, dispatch Pre-alpha from `main` with a `hotfix/` branch, version, and build
+   number. Its files go to the versioned Pre-alpha release. If publishing stops at a draft,
+   retry with the same branch, version, and build number. The successful run publishes its
+   files and notes together. Ordinary promotions continue to use
+   the rolling `app-prealpha-latest` release and look up artifacts from pushes to `main`.
 2. **Alpha, after approval.** Actions > Promote to Alpha > Run workflow (`promote-alpha.yml`), with a
-   pre-alpha tag or empty for the current one. It runs the alpha tests on that commit (`ios-app.yml`:
+   pre-alpha tag or empty for the current main build. For a hotfix, provide its versioned
+   pre-alpha tag and enable **Promote a versioned hotfix Pre-alpha**. The workflow selects the
+   newest successful run for that commit, version, and build. It runs the alpha tests on that commit (`ios-app.yml`:
    PokiCore and loopback tests, in-process field, apps and idle-cycle checks, simulator smoke test,
    agent chat end to end; Poki Setup's core tests), then waits for approval in `alpha`, tags `app-<VERSION>-alpha.<N>` and puts the
    pre-alpha's IPA and Poki Setup files into `app-alpha-latest`.
@@ -108,7 +116,7 @@ Both carry `Poki-external-X.Y.Z-N.ipa`, `Poki-signing.zip`, `poki-relay-worker.j
 1. `check` (the default) downloads the Pre-alpha run's files and verifies them. Run it before
    Promote to Alpha too: it prints the digest of the entitlements in `Poki-signing.zip`, and a
    changed digest has to be known before a rolling tag hands the new build to clients that cached
-   the old zip.
+   the old zip. For a hotfix, the same command checks the files from its versioned Pre-alpha release.
 2. `draft` uploads a draft release, which no client can see.
 3. `public --confirm <tag>` checks the draft again, file by file, against the same Pre-alpha files,
    and only then makes it public. A draft with a file missing, a file from another build or another

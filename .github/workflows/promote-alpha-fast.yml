@@ -44,7 +44,7 @@ jobs:
           version="${BASH_REMATCH[1]}" build="${BASH_REMATCH[2]}"
           sha="$(gh api "repos/$GH_REPO/commits/$WANT" --jq .sha)"
           # The pre-alpha run that built this commit; its artifact is the file to promote.
-          run="$(gh run list --workflow prealpha.yml --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')"
+          run="$(gh run list --workflow prealpha.yml --branch main --event push --commit "$sha" --status success --json databaseId --jq '.[0].databaseId')"
           [ -n "$run" ] || { echo "::error::no successful Pre-alpha run built $sha (artifacts are kept 90 days)"; exit 1; }
           if gh api "repos/$GH_REPO/git/ref/tags/app-$version-alpha.$build" >/dev/null 2>&1; then
             echo "::error::app-$version-alpha.$build already exists"; exit 1
@@ -69,7 +69,13 @@ jobs:
       - name: The pre-alpha's IPA
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download "${{ needs.resolve.outputs.run }}" --name Poki-unsigned --dir app
+          RUN_ID: ${{ needs.resolve.outputs.run }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          BUILD: ${{ needs.resolve.outputs.build }}
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" --name Poki-unsigned --dir app
+          python3 pipeline/.github/scripts/verify-ipa-version.py app/Poki-external-unsigned.ipa "$VERSION" "$BUILD"
       - name: Publish to app-alpha-latest
         env:
           GH_TOKEN: ${{ github.token }}
