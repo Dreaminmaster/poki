@@ -22,6 +22,7 @@ import SwiftUI
 import UIKit
 
 struct Marquee<Content: View>: UIViewRepresentable {
+    @Environment(\.pokiGlassDeferred) private var glassDeferred
     /// Points a second: positive moves the row to the left, negative to the right.
     var speed: Double
     var spacing: CGFloat = 8
@@ -50,7 +51,7 @@ struct Marquee<Content: View>: UIViewRepresentable {
     func updateUIView(_ view: MarqueeScrollView, context: Context) { apply(to: view) }
 
     private func apply(to view: MarqueeScrollView) {
-        let content = content, spacing = spacing, loops = loops
+        let content = content, spacing = spacing, loops = loops, glassDeferred = glassDeferred
         view.configure(spacing: spacing, loops: loops) { copies in
             AnyView(HStack(spacing: spacing) {
                 ForEach(0..<copies, id: \.self) { _ in
@@ -58,11 +59,12 @@ struct Marquee<Content: View>: UIViewRepresentable {
                 }
             }
             .padding(.horizontal, loops ? 0 : 20)
-            .fixedSize())
+            .fixedSize()
+            .environment(\.pokiGlassDeferred, glassDeferred))
         }
         view.speed = speed
         view.edgeFade = edgeFade
-        view.running = running
+        view.running = running && !glassDeferred
         view.active = active
         view.stopped = stopped
     }
