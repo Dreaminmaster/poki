@@ -251,6 +251,26 @@ struct RootView: View {
             .sheet(isPresented: Binding(get: { detailsOpen && showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
             }
+            .sheet(item: Binding(get: { CodexVoice.shared.authorization }, set: { _ in })) { authorization in
+                NavigationStack {
+                    Form {
+                        Section {
+                            Text(verbatim: authorization.code)
+                                .font(.title2.monospaced())
+                                .textSelection(.enabled)
+                            Link("Continue to ChatGPT", destination: authorization.url)
+                        } header: {
+                            Text("Device Code")
+                        } footer: {
+                            Text("Enter this code on the ChatGPT page. Poki will start voice when sign-in is complete.")
+                        }
+                    }
+                    .navigationTitle("Sign In for ChatGPT Voice")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.voice.stop() } } }
+                }
+                .interactiveDismissDisabled()
+            }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
             .onChange(of: scenePhase) { takeEntry() }
     }

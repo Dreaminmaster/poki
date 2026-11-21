@@ -24,8 +24,12 @@ struct VoiceView: View {
                 // beside it for dictation). This page only says how it runs and keeps its options.
                 Section {
                     LabeledContent {
-                        Text(voice.canTalkLive ? (VoiceDirect.account == .openai ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
-                            .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
+                        if voice.usesChatGPTSubscription {
+                            Text("ChatGPT").foregroundStyle(Color.secondary)
+                        } else {
+                            Text(voice.canTalkLive ? (VoiceDirect.account == .openai ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
+                                .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
+                        }
                     } label: {
                         SettingsLabel("Live Voice", systemImage: "waveform")
                     }

@@ -6,6 +6,11 @@ target=${2:?Usage: build.sh check|build aarch64-apple-ios[-sim]}
 case "$mode" in check|build) ;; *) exit 2 ;; esac
 case "$target" in aarch64-apple-ios|aarch64-apple-ios-sim) ;; *) exit 2 ;; esac
 
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
+if ! rustup target list --toolchain stable --installed | grep -Fxq "$target"; then
+    rustup target add --toolchain stable "$target"
+fi
+
 adapter_dir=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$adapter_dir/../.." && pwd)
 revision=6aaac694803004a63c6f393d153c96d22521a6b9

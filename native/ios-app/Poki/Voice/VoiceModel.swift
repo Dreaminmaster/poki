@@ -313,6 +313,7 @@ final class VoiceModel {
 
     private var link: VoiceConnection?
     private var usesLive = false
+    private var usesCodexLive = false
     private var liveCloseTimeout: Task<Void, Never>?
     private var liveUsageSeconds: Double?
     private var liveSpeechStopped = false
@@ -544,11 +545,13 @@ final class VoiceModel {
 
     /// Voice can start: the OpenAI key on this iPhone (Realtime, no bridge), the Mac's voice bridge, or
     /// dictation into the chat with whichever model Poki uses.
-    var canTalk: Bool { VoiceDirect.apiKey != nil || bridge != nil || VoiceDirect.canDictate }
+    var canTalk: Bool { usesChatGPTSubscription || VoiceDirect.apiKey != nil || bridge != nil || VoiceDirect.canDictate }
 
     /// A live (Realtime) conversation can start: the OpenAI key on this iPhone or the voice bridge.
     /// Without one, voice is dictation into the message field, turn by turn.
-    var canTalkLive: Bool { VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
+    var canTalkLive: Bool { usesChatGPTSubscription || VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
+
+    var usesChatGPTSubscription: Bool { ModelKeys.selectedProvider == .chatgpt && ChatGPTAccount.signedIn }
 
     /// Talk with Poki was asked for with no live voice (no OpenAI key, no voice bridge), from the message
     /// field's button, Poki's profile or `poki://voice`: the message field says what is missing, with
@@ -667,7 +670,8 @@ final class VoiceModel {
         guard link == nil, dictation == nil, !isConnecting else { return }
         let account = VoiceDirect.account
         let key = VoiceDirect.apiKey(for: account)
-        if key == nil, bridge == nil, !rehearsing {
+        let subscription = usesChatGPTSubscription && microphone && !rehearsing
+        if !subscription, key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone { await startDictation() } else { phase = .lost(VoiceError.noBridge.words) }
             return
         }
@@ -677,6 +681,18 @@ final class VoiceModel {
         let bridge = self.bridge
         func configuration() async throws -> VoiceBridge.Token {
             if rehearsing { return Self.rehearsalToken }
+            if subscription {
+                usesCodexLive = true
+                try await CodexVoice.shared.prepare(onEvent: { [weak self] method, params in
+                    self?.handleCodex(method, params: params, session: number)
+                }, onTool: { [weak self] name, arguments in
+                    guard let self, number == session, VoiceDirect.localTools.contains(name) else {
+                        return ("This voice session has ended or cannot run that tool.", true, nil)
+                    }
+                    return await phoneTool(name, arguments, nil)
+                })
+                return VoiceBridge.Token(value: nil, model: CodexVoice.model, local_tools: [], live: true)
+            }
             if let key, let account {
                 let model = ModelCatalog.voiceModelID(for: account)
                 if microphone, account == .openai, model.hasPrefix("gpt-live-") {
@@ -690,7 +706,7 @@ final class VoiceModel {
         func connect(_ token: VoiceBridge.Token, attempt: Int, direct: Bool) async throws {
             connectionAttempt = attempt
             let link = connection({ [weak self] event in
-                guard let self, self.session == number, self.connectionAttempt == attempt else { return }
+                guard !subscription, let self, self.session == number, self.connectionAttempt == attempt else { return }
                 self.handle(event, session: number)
             }, { [weak self] reason in
                 guard let self, self.session == number, self.connectionAttempt == attempt else { return }
@@ -703,7 +719,11 @@ final class VoiceModel {
             }
             usesLive = token.live == true
             localTools = Set(token.local_tools)
-            if usesLive {
+            if subscription {
+                try await link.connectLive(microphone: microphone, direct: direct) { sdp in
+                    try await CodexVoice.shared.start(offer: sdp)
+                }
+            } else if usesLive {
                 if let key { liveScreenDescription = { try await VoiceDirect.describeLiveScreen($0, apiKey: key) } }
                 else { liveScreenDescription = bridge?.liveScreenReader }
                 try await link.connectLive(microphone: microphone, direct: direct) { sdp in
@@ -729,12 +749,14 @@ final class VoiceModel {
                 // app) and with a fresh key, before telling the owner.
                 guard number == session else { return }
                 closeConnection("network path failed; retrying without VPN interfaces")
+                if subscription { CodexVoice.shared.stop() }
                 token = try await configuration()
                 guard number == session else { return }
                 try await connect(token, attempt: 2, direct: true)
             }
             guard number == session, liveCloseTimeout == nil, let link else { return }
             lastActivity = time.now()
+            if subscription { ready = true; phase = .listening }
             watchForStall(session: number)
             link.setRemoteVolume(muted || liveSpeechStopped ? 0 : 1)
             if usesLive { watchLivePlayback(link, session: number) }
@@ -744,6 +766,7 @@ final class VoiceModel {
             guard number == session, liveCloseTimeout == nil else { return }
             transcript = nil
             closeConnection("could not connect")
+            if subscription { CodexVoice.shared.stop(); usesCodexLive = false }
             holdingMicrophone = false
             phase = .lost(VoiceError.reason(for: error))
             log.add("voice", "could not connect: \(error.localizedDescription)")
@@ -793,7 +816,7 @@ final class VoiceModel {
             dictation.cancel()
             self.dictation = nil
         }
-        if usesLive, ready, let link {
+        if usesLive, !usesCodexLive, ready, let link {
             ready = false
             keepOpen()
             stallWatch?.cancel()
@@ -834,6 +857,10 @@ final class VoiceModel {
     /// Drops the connection and the state of its turns; calls already running keep running. The lines of
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
+        if usesCodexLive {
+            CodexVoice.shared.stop()
+            usesCodexLive = false
+        }
         keepOpen()
         livePlayback?.cancel()
         livePlayback = nil
@@ -1151,6 +1178,23 @@ final class VoiceModel {
     }
 
     // MARK: Events
+
+    private func handleCodex(_ method: String, params: CodexVoice.JSON, session number: Int) {
+        guard number == session, usesCodexLive, link != nil else { return }
+        if method == "thread/realtime/closed" || method == "thread/realtime/error" {
+            closed("the ChatGPT voice session ended", session: number, confirmed: method == "thread/realtime/closed")
+            return
+        }
+        guard method == "thread/realtime/transcript/done", let text = params["text"] as? String,
+              !text.isEmpty, let role = params["role"] as? String else { return }
+        lastActivity = time.now()
+        keepOpen()
+        if role == "user" {
+            lines.append(VoiceLine(role: .you, text: text))
+        } else if role == "assistant" {
+            lines.append(VoiceLine(role: .poki, text: text))
+        }
+    }
 
     private func handle(_ event: [String: Any], session number: Int) {
         guard number == session, let link, let type = event["type"] as? String else { return }

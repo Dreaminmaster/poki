@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

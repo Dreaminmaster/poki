@@ -168,6 +168,14 @@ enum VoiceDirect {
          "parameters": ["type": "object", "properties": ["actions": ["type": "array", "items": ["type": "object"]]], "required": ["actions"], "additionalProperties": false]],
     ]
 
+    static var codexTools: [[String: Any]] {
+        tools.compactMap { tool in
+            guard let name = tool["name"] as? String, localTools.contains(name),
+                  let description = tool["description"], let schema = tool["parameters"] else { return nil }
+            return ["type": "function", "name": name, "description": description, "inputSchema": schema]
+        }
+    }
+
     /// PokiCore's own description of do (the text chat's), so voice knows every action the chat knows:
     /// launch any app, scroll_to, back, long_press, handoff and the rest.
     private static let doDescription: String = Harness.phoneTools.first { $0.name == "do" }?.description
