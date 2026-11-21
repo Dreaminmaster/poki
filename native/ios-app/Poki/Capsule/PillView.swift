@@ -24,11 +24,12 @@ struct PillMetrics {
     }
     var leading: CGFloat { inset }
     var gap: CGFloat { 6 }
-    var trailing: CGFloat { (height * 0.38).rounded() }
-    /// The ground's corners before the icon follow the icon's own (its radius plus the space around
-    /// it), so the icon sits evenly inside; a capsule's round end there pinched the icon's corners
-    /// against the edge. After the name the end stays round.
-    var leadingRadius: CGFloat { iconRadius + inset }
+    /// After the name: as much room as the icon has before it, plus the gap the name keeps from it.
+    var trailing: CGFloat { inset + gap }
+    /// Every corner of the ground follows the icon's own (its radius plus the space around it), so
+    /// the shape is the same at both ends (the owner, Nov 21 2026: one round end and one square end
+    /// read as uneven).
+    var radius: CGFloat { iconRadius + inset }
 
     func size(for text: String) -> CGSize {
         let label = (text as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up)
@@ -76,9 +77,7 @@ struct PillView: View {
         .frame(height: metrics.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08),
-                    in: UnevenRoundedRectangle(topLeadingRadius: metrics.leadingRadius, bottomLeadingRadius: metrics.leadingRadius,
-                                               bottomTrailingRadius: metrics.height / 2, topTrailingRadius: metrics.height / 2,
-                                               style: .continuous))
+                    in: RoundedRectangle(cornerRadius: metrics.radius, style: .continuous))
         .accessibilityLabel(Text(verbatim: data.label))
     }
 

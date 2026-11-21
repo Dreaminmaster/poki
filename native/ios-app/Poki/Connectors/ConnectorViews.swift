@@ -71,6 +71,8 @@ enum ConnectorRoute: Hashable {
 /// A connector's picture: its brand icon from the asset catalogue, else the icon its server publishes
 /// (custom connectors, cached), else its symbol on Poki's soft ground.
 struct ConnectorIcon: View {
+    /// Marks that already are a tile of their own.
+    static let tiles: Set<String> = ["Connector-stripe"]
     let connector: MCPConnector
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 29
     @State private var fetched: UIImage?
@@ -79,7 +81,17 @@ struct ConnectorIcon: View {
         let size = min(side, 40)
         Group {
             if let name = connector.iconAsset, let image = UIImage(named: name) {
-                Image(uiImage: image).resizable().scaledToFit()
+                if Self.tiles.contains(name) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else {
+                    // A mark on its own goes on a plain tile, as on a Home Screen.
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .padding(size * 0.2)
+                        .frame(width: size, height: size)
+                        .background(Color(.tertiarySystemBackground))
+                        .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                            .strokeBorder(Color(.separator).opacity(0.6), lineWidth: 0.5))
+                }
             } else if let image = fetched ?? ConnectorIconCache.cached(connector.id) {
                 Image(uiImage: image).resizable().scaledToFit()
             } else {
@@ -375,16 +387,19 @@ extension MCPConnectorAccount.Asks {
 }
 
 
-/// Add Custom Connector: a name and an address, a live check of the server, and Connect. Everything
-/// the check finds (sign-in, client registration, transport) is preselected and marked as detected;
-/// the owner's own client, request headers and the transport are under Advanced, closed.
+/// Add Custom Connector, in two steps. Step 1: a name and the server's address, and a live check of
+/// the server that shows each step and what the server answered. Step 2: how Poki signs in, which
+/// OAuth client it uses, request headers and the transport, every choice explained in a line, and
+/// what the check found preselected and marked Detected.
 struct AddCustomConnectorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var address = "https://"
     @State private var checking = false
-    @State private var done: Set<ConnectorProbe.Step> = []
+    @State private var done: [ConnectorProbe.Step: Int] = [:]
     @State private var failure: String?
+    /// What the check found: the steps stay on screen with it, and Next goes on to step 2.
+    @State private var found: ConnectorProbe?
     @State private var probe: ConnectorProbe?
 
     private var url: URL? {
@@ -396,21 +411,46 @@ struct AddCustomConnectorView: View {
             Form {
                 Section {
                     TextField(AppLocalization.text("Name"), text: $name)
+                        .onChange(of: name) { if !checking, found != nil { found = nil; done = [:] } }
                         .textInputAutocapitalization(.words)
                         .accessibilityIdentifier("customConnector.name")
+                } header: {
+                    Group {
+                        SettingsHeader("Step 1 of 2")
+                    }
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        Text("Shown in the connectors list.")
+                    }
+                    .settingsFooter()
+                }
+                Section {
                     TextField(AppLocalization.text("Server Address"), text: $address)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("customConnector.address")
+                        .onChange(of: address) { if !checking { found = nil; done = [:]; failure = nil } }
+                } footer: {
+                    Group {
+                        // Verbatim, so the example address is not a link.
+                        Text(verbatim: AppLocalization.text(LocalizedStringResource("The HTTPS address where the server takes MCP requests, for example https://mcp.example.com/mcp.")))
+                    }
+                    .settingsFooter()
                 }
                 if checking || !done.isEmpty || failure != nil {
                     Section {
                         stepRow(.server, "Connecting to the Server")
                         stepRow(.signInSettings, "Looking Up Sign-In Settings")
                         stepRow(.provider, "Checking the Sign-In Provider")
+                    } header: {
+                        Group {
+                            SettingsHeader(checking ? "Checking the Server" : "Server Check")
+                        }
+                        .settingsHeader()
                     } footer: {
                         Group {
                             if let failure { Text(verbatim: failure).foregroundStyle(Tint.red) }
-                            else if probe != nil { Text("Server found.") }
+                            else if found != nil { Text("Server found.") }
                         }
                         .settingsFooter()
                     }
@@ -424,7 +464,9 @@ struct AddCustomConnectorView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                StartButtons(primary: "Continue", action: { Task { await check() } }, primaryID: "customConnector.continue")
+                StartButtons(primary: found == nil ? "Continue" : "Next", action: {
+                    if let found { probe = found } else { Task { await check() } }
+                }, primaryID: "customConnector.continue")
                     .disabled(url == nil || checking)
             }
             .navigationDestination(item: $probe) { found in
@@ -435,30 +477,44 @@ struct AddCustomConnectorView: View {
         .presentationDetents([.large])
     }
 
+    /// A step of the check: Done and the status the server answered, a spinner, or a cross.
     @ViewBuilder private func stepRow(_ step: ConnectorProbe.Step, _ title: LocalizedStringKey) -> some View {
-        HStack {
-            Text(title)
+        HStack(spacing: 10) {
+            Group {
+                if done[step] != nil {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color(.systemGreen))
+                } else if checking {
+                    ProgressView()
+                } else {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Color(.systemRed))
+                }
+            }
+            .frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.allo(.body))
+                if done[step] != nil { Text("Done").font(.allo(.footnote)).foregroundStyle(.secondary) }
+            }
             Spacer()
-            if done.contains(step) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color(.systemGreen))
-            } else if checking {
-                ProgressView()
-            } else if failure != nil {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(Color(.systemRed))
+            if let code = done[step], code > 0 {
+                Text(verbatim: String(code)).font(.allo(.subheadline)).monospacedDigit().foregroundStyle(.secondary)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func check() async {
         guard let url else { return }
+        // The keyboard goes down, so the check's steps are in sight.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         checking = true
         failure = nil
-        done = []
+        done = [:]
+        found = nil
         defer { checking = false }
         do {
-            let found = try await ConnectorProbe.run(url) { step in done.insert(step) }
-            if name.trimmingCharacters(in: .whitespaces).isEmpty, let serverName = found.serverName { name = serverName }
-            probe = found
+            let result = try await ConnectorProbe.run(url) { step, code in done[step] = code }
+            if name.trimmingCharacters(in: .whitespaces).isEmpty, let serverName = result.serverName { name = serverName }
+            found = result
         } catch let error as ConnectorProbe.Failure {
             failure = error.words
         } catch {
@@ -472,9 +528,44 @@ extension ConnectorProbe: Hashable, Identifiable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// The second step: only what matters, each choice the check made preselected and marked.
+/// One choice of a group: a tick, its name with Detected when the check chose it, and a line on what it does.
+private struct ConnectorChoice: View {
+    let title: LocalizedStringKey
+    let about: LocalizedStringKey
+    var detected = false
+    let chosen: Bool
+    var pick: () -> Void
+
+    var body: some View {
+        Button(action: pick) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                    .font(.allo(.body)).foregroundStyle(chosen ? Tint.blue : Color(.tertiaryLabel))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title).font(.allo(.body)).foregroundStyle(Color(.label))
+                        if detected {
+                            Text("Detected").font(.allo(.caption, .semibold)).foregroundStyle(Tint.blue)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Tint.blue.opacity(0.12), in: .capsule)
+                        }
+                    }
+                    Text(about).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+}
+
+/// The second step: how Poki signs in, which OAuth client it uses, request headers and the transport.
 struct CustomConnectorDetails: View {
     enum SignIn: Hashable { case now, whenNeeded, none }
+    enum Client: Hashable { case automatic, own }
 
     let name: String
     let address: String
@@ -482,8 +573,7 @@ struct CustomConnectorDetails: View {
     var finish: () -> Void
 
     @State private var signIn: SignIn = .now
-    @State private var advanced = false
-    @State private var ownClient = false
+    @State private var client: Client = .automatic
     @State private var clientID = ""
     @State private var clientSecret = ""
     @State private var headers: [(name: String, value: String)] = []
@@ -492,6 +582,10 @@ struct CustomConnectorDetails: View {
     @State private var problem: String?
 
     private var detectedSignIn: SignIn { probe.needsSignIn ? .now : .none }
+    private var detectedClient: Client? {
+        guard probe.needsSignIn else { return nil }
+        return probe.registration == .dynamic ? .automatic : .own
+    }
 
     var body: some View {
         Form {
@@ -500,60 +594,92 @@ struct CustomConnectorDetails: View {
                 LabeledContent(AppLocalization.text("Server Address")) {
                     Text(verbatim: address).lineLimit(1).truncationMode(.middle)
                 }
+            } header: {
+                Group {
+                    SettingsHeader("Step 2 of 2")
+                }
+                .settingsHeader()
             }
             Section {
-                Picker(selection: $signIn) {
-                    choice("Sign In Now", .now)
-                    choice("Sign In When Needed", .whenNeeded)
-                    choice("No Sign-In", .none)
-                } label: {
-                    Label("Sign-In", systemImage: "person.badge.key")
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
+                ConnectorChoice(title: "Sign In Now", about: "You sign in through the server’s own sign-in before Poki uses any of its tools.",
+                                detected: detectedSignIn == .now, chosen: signIn == .now) { signIn = .now }
+                ConnectorChoice(title: "Sign In When Needed", about: "Poki connects without signing in and asks you to sign in when the server wants it. For servers with some tools open to everyone.",
+                                chosen: signIn == .whenNeeded) { signIn = .whenNeeded }
+                ConnectorChoice(title: "No Sign-In", about: "For servers with open access, or ones that take an API key in a request header instead.",
+                                detected: detectedSignIn == .none, chosen: signIn == .none) { signIn = .none }
             } header: {
                 Group {
                     SettingsHeader("Sign-In")
                 }
                 .settingsHeader()
-            } footer: {
-                Group {
-                    if probe.needsSignIn {
-                        switch probe.registration {
-                        case .dynamic: Text("Detected. Poki registers itself with the server’s sign-in.")
-                        case .metadataDocument: Text("Detected. The server takes a client ID document. If signing in fails, use your own client under Advanced.")
-                        case .none: Text("Detected. The server needs your own client, under Advanced.")
+            }
+            if signIn != .none {
+                Section {
+                    ConnectorChoice(title: "Register Automatically", about: "Poki registers itself with the server’s sign-in as you connect. Works with most servers.",
+                                    detected: detectedClient == .automatic, chosen: client == .automatic) { client = .automatic }
+                    ConnectorChoice(title: "Use Your Own OAuth Client", about: "A client ID you registered with the server yourself. Leave the secret empty unless the server asks for one.",
+                                    detected: detectedClient == .own, chosen: client == .own) { client = .own }
+                    if client == .own {
+                        TextField(AppLocalization.text("Client ID"), text: $clientID)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("customConnector.clientID")
+                        SecureField(AppLocalization.text("Client Secret, Optional"), text: $clientSecret)
+                    }
+                } header: {
+                    Group {
+                        SettingsHeader("OAuth Client")
+                    }
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        if probe.registration == .metadataDocument {
+                            Text("This server takes a client ID document, which Poki does not publish yet. Use your own client.")
                         }
                     }
+                    .settingsFooter()
+                }
+            }
+            Section {
+                ForEach(headers.indices, id: \.self) { index in
+                    TextField(AppLocalization.text("Header Name"), text: $headers[index].name)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField(AppLocalization.text("Header Value"), text: $headers[index].value)
+                }
+                if headers.count < 4 {
+                    Button("Add Request Header", systemImage: "plus") { headers.append(("", "")) }
+                }
+            } header: {
+                Group {
+                    SettingsHeader("Request Headers")
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Sent with every request, beside the sign-in. Values stay in the keychain and are never shown again. Up to four.")
                 }
                 .settingsFooter()
             }
             Section {
-                DisclosureGroup("Advanced", isExpanded: $advanced) {
-                    Toggle("Use Your Own Client", isOn: $ownClient)
-                    if ownClient {
-                        TextField(AppLocalization.text("Client ID"), text: $clientID)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        SecureField(AppLocalization.text("Client Secret, Optional"), text: $clientSecret)
-                    }
-                    ForEach(headers.indices, id: \.self) { index in
-                        TextField(AppLocalization.text("Header Name"), text: $headers[index].name)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        SecureField(AppLocalization.text("Header Value"), text: $headers[index].value)
-                    }
-                    if headers.count < 4 {
-                        Button("Add Request Header", systemImage: "plus") { headers.append(("", "")) }
-                    }
-                    Picker(AppLocalization.text("Transport"), selection: $transport) {
-                        Text("Streamable HTTP").tag(ConnectorProbe.Transport.streamableHTTP)
-                        Text("SSE, Legacy").tag(ConnectorProbe.Transport.sseLegacy)
-                    }
+                ConnectorChoice(title: "Streamable HTTP", about: "The current MCP transport. Use this unless the server only offers SSE.",
+                                detected: probe.transport == .streamableHTTP, chosen: transport == .streamableHTTP) { transport = .streamableHTTP }
+                ConnectorChoice(title: "SSE, Legacy", about: "An older transport, chosen by itself when the address ends in /sse. Poki can’t use it yet.",
+                                detected: probe.transport == .sseLegacy, chosen: transport == .sseLegacy) { transport = .sseLegacy }
+            } header: {
+                Group {
+                    SettingsHeader("Transport")
                 }
+                .settingsHeader()
             } footer: {
                 Group {
-                    if transport == .sseLegacy { Text("Poki can’t use the older SSE transport yet. Ask the server for its Streamable HTTP address.") }
-                    else if let problem { Text(verbatim: problem).foregroundStyle(Tint.red) }
-                    else { Text("Only add connectors from developers you trust.") }
+                    if let problem { Text(verbatim: problem).foregroundStyle(Tint.red) }
+                    else if transport == .sseLegacy { Text("Ask the server for its Streamable HTTP address.") }
+                    else { Text("Set from the address. Change it only if the server’s documentation says so.") }
+                }
+                .settingsFooter()
+            }
+            Section {} footer: {
+                Group {
+                    Text("Only add connectors from developers you trust. Poki can’t check what a server’s tools do, or whether they change.")
                 }
                 .settingsFooter()
             }
@@ -563,23 +689,13 @@ struct CustomConnectorDetails: View {
         .onAppear {
             signIn = detectedSignIn
             transport = probe.transport
-            ownClient = probe.needsSignIn && probe.registration == .none
-            advanced = ownClient
+            client = detectedClient ?? .automatic
         }
         .safeAreaInset(edge: .bottom) {
             StartButtons(primary: "Connect", action: { Task { await connect() } }, primaryID: "customConnector.connect")
-                .disabled(working || transport == .sseLegacy || (ownClient && clientID.trimmingCharacters(in: .whitespaces).isEmpty))
+                .disabled(working || transport == .sseLegacy
+                          || (signIn != .none && client == .own && clientID.trimmingCharacters(in: .whitespaces).isEmpty))
         }
-    }
-
-    @ViewBuilder private func choice(_ title: LocalizedStringKey, _ value: SignIn) -> some View {
-        HStack {
-            Text(title)
-            if value == detectedSignIn {
-                Text("Detected").font(.allo(.footnote)).foregroundStyle(.secondary)
-            }
-        }
-        .tag(value)
     }
 
     private func connect() async {
@@ -594,7 +710,7 @@ struct CustomConnectorDetails: View {
         connector.iconURL = URL(string: address).flatMap(ConnectorIconCache.address(for:))
         let kept = headers.filter { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty && !$0.value.isEmpty }
         connector.headerNames = kept.isEmpty ? nil : kept.map { $0.name.trimmingCharacters(in: .whitespaces) }
-        if ownClient, !clientID.trimmingCharacters(in: .whitespaces).isEmpty {
+        if signIn != .none, client == .own, !clientID.trimmingCharacters(in: .whitespaces).isEmpty {
             connector.clientID = clientID.trimmingCharacters(in: .whitespaces)
             if !clientSecret.isEmpty { MCPCredentials.save(clientSecret: clientSecret, for: connector.id) }
         }

@@ -25583,6 +25583,422 @@
         }
       }
     },
+    "Dictation Can’t Start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法开始听写"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開始聽寫"
+          }
+        }
+      }
+    },
+    "Turn it on in Settings. Dictate works without it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在设置中打开。听写无需它也能用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在設定中開啟。聽寫無需它也能用。"
+          }
+        }
+      }
+    },
+    "Talk needs an OpenAI key. Dictate works without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对话需要 OpenAI 密钥。听写无需密钥也能用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "對話需要 OpenAI 密鑰。聽寫無需密鑰也能用。"
+          }
+        }
+      }
+    },
+    "Step 1 of 2" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 1 步，共 2 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 1 步，共 2 步"
+          }
+        }
+      }
+    },
+    "Step 2 of 2" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 2 步，共 2 步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 2 步，共 2 步"
+          }
+        }
+      }
+    },
+    "Shown in the connectors list." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示在连接器列表中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示在連接器列表中。"
+          }
+        }
+      }
+    },
+    "The HTTPS address where the server takes MCP requests, for example https://mcp.example.com/mcp." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器接收 MCP 请求的 HTTPS 地址，例如 https://mcp.example.com/mcp。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器接收 MCP 請求的 HTTPS 位址，例如 https://mcp.example.com/mcp。"
+          }
+        }
+      }
+    },
+    "Checking the Server" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查服务器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在檢查伺服器"
+          }
+        }
+      }
+    },
+    "Server Check" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器检查"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器檢查"
+          }
+        }
+      }
+    },
+    "You sign in through the server’s own sign-in before Poki uses any of its tools." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 使用其任何工具之前，你需要通过服务器自己的登录方式登录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Poki 使用其任何工具之前，你需要透過伺服器自己的登入方式登入。"
+          }
+        }
+      }
+    },
+    "Poki connects without signing in and asks you to sign in when the server wants it. For servers with some tools open to everyone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 先不登录直接连接，服务器要求时再请你登录。适合部分工具对所有人开放的服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 先不登入直接連接，伺服器要求時再請你登入。適合部分工具對所有人開放的伺服器。"
+          }
+        }
+      }
+    },
+    "For servers with open access, or ones that take an API key in a request header instead." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适合开放访问的服务器，或改用请求标头中 API 密钥的服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "適合開放存取的伺服器，或改用請求標頭中 API 密鑰的伺服器。"
+          }
+        }
+      }
+    },
+    "OAuth Client" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OAuth 客户端"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OAuth 用戶端"
+          }
+        }
+      }
+    },
+    "Register Automatically" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动注册"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動註冊"
+          }
+        }
+      }
+    },
+    "Poki registers itself with the server’s sign-in as you connect. Works with most servers." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接时 Poki 会在服务器的登录服务中自动注册。适用于大多数服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接時 Poki 會在伺服器的登入服務中自動註冊。適用於大多數伺服器。"
+          }
+        }
+      }
+    },
+    "Use Your Own OAuth Client" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你自己的 OAuth 客户端"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你自己的 OAuth 用戶端"
+          }
+        }
+      }
+    },
+    "A client ID you registered with the server yourself. Leave the secret empty unless the server asks for one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你自己在服务器上注册的客户端 ID。除非服务器要求，否则密钥留空。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你自己在伺服器上註冊的用戶端 ID。除非伺服器要求，否則密鑰留空。"
+          }
+        }
+      }
+    },
+    "This server takes a client ID document, which Poki does not publish yet. Use your own client." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此服务器使用客户端 ID 文档，Poki 暂未发布。请使用你自己的客户端。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此伺服器使用用戶端 ID 文件，Poki 暫未發佈。請使用你自己的用戶端。"
+          }
+        }
+      }
+    },
+    "Request Headers" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求标头"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請求標頭"
+          }
+        }
+      }
+    },
+    "Sent with every request, beside the sign-in. Values stay in the keychain and are never shown again. Up to four." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随每个请求与登录凭证一同发送。值保存在钥匙串中，不会再次显示。最多四个。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隨每個請求與登入憑證一同傳送。值儲存在鑰匙圈中，不會再次顯示。最多四個。"
+          }
+        }
+      }
+    },
+    "The current MCP transport. Use this unless the server only offers SSE." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前的 MCP 传输方式。除非服务器只提供 SSE，否则请使用它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前的 MCP 傳輸方式。除非伺服器只提供 SSE，否則請使用它。"
+          }
+        }
+      }
+    },
+    "An older transport, chosen by itself when the address ends in /sse. Poki can’t use it yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "较旧的传输方式，地址以 /sse 结尾时会自动选择。Poki 暂不支持。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "較舊的傳輸方式，位址以 /sse 結尾時會自動選擇。Poki 暫不支援。"
+          }
+        }
+      }
+    },
+    "Ask the server for its Streamable HTTP address." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请向服务器索取它的 Streamable HTTP 地址。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請向伺服器索取它的 Streamable HTTP 位址。"
+          }
+        }
+      }
+    },
+    "Set from the address. Change it only if the server’s documentation says so." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据地址自动设置。仅在服务器文档要求时更改。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根據位址自動設定。僅在伺服器文件要求時更改。"
+          }
+        }
+      }
+    },
+    "Only add connectors from developers you trust. Poki can’t check what a server’s tools do, or whether they change." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只添加你信任的开发者提供的连接器。Poki 无法核实服务器工具的作用，也无法知道它们是否会改变。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只加入你信任的開發者提供的連接器。Poki 無法核實伺服器工具的作用，也無法知道它們是否會改變。"
+          }
+        }
+      }
+    },
+    "Search Apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜尋 App"
+          }
+        }
+      }
+    },
     "Search Sessions" : {
       "localizations" : {
         "zh-Hans" : {

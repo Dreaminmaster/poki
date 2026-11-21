@@ -110,6 +110,33 @@ call at a time; 4 in flight is plenty), body size, and connections per label (on
 nothing: no KV, no D1, no Durable Object storage writes, and no logs of headers, bodies or IPs. The
 Durable Object keeps only the hello's `access` list and label in the WebSocket attachment.
 
+### Local frames, v1 (USB and Wi-Fi, issue #609)
+
+Poki Setup's `poki-mcp` reaches the phone without the relay when it can: over the USB cable first
+(usbmuxd forwards TCP port 47100 to the phone, as iproxy does), then over the same Wi-Fi (the app's
+Bonjour service `_poki._tcp`, port 47100), then the relay. The phone listens while Poki is on
+(`LocalListener` in the app; `LocalLink` in PokiCore). Messages are UTF-8 lines (one JSON object per
+line, or the bare words `ping` and `pong`), at most 16 MB each.
+
+The computer has its own Ed25519 key, made once by Poki Setup; `id` = base32 of its public key, as a
+phone's `label` is. The phone listens, so the handshake runs the other way round from the relay's:
+
+1. Phone → `{"t":"challenge","v":1,"nonce":"<base64 32 bytes>","phone":"<phone label>"}`.
+2. Computer → `{"t":"hello","v":1,"key":"<base64 computer public key>","sig":"<base64>","cnonce":"<base64 32 bytes>","client":{"kind":"computer","id":"<base32 of key>","name":"<computer name>","app":"poki-mcp","version":"<version>","transport":"usb"|"wifi","agent":"<MCP clientInfo.name>"}}`.
+   `sig` signs `poki-local-v1:<phone label>:<transport>:` followed by the raw nonce bytes, so a hello
+   made for Wi-Fi is refused over USB and the other way round.
+3. A computer the owner has not allowed yet gets `{"t":"waiting"}` and the owner is asked on the phone
+   (up to 120 s). Allowed once, its key is remembered; the owner can forget it.
+4. Phone → `{"t":"ready","v":1,"phone":"<label>","key":"<base64 phone public key>","sig":"<base64>","max_body":16777216}`,
+   `sig` signing `poki-local-v1-phone:<computer id>:` followed by the raw cnonce bytes. The computer
+   checks that base32(key) is the label it paired with (Poki Setup keeps it), so it never talks to
+   another phone. Any failure is `{"t":"close","reason":"..."}` and the connection ends.
+
+After `ready`, the frames are the relay's: `req`, `res` and `cancel` as above, with no `s` field. The
+phone sets the connector header to `local:<computer id>` and `x-poki-transport` to `usb` or `wifi`
+from the handshake, never from the computer's headers. The computer sends `ping` at least every 60 s;
+the phone closes a connection that is silent for 90 s.
+
 ## 2. PokiCore Swift API, v1
 
 A Swift package (`native/ios/PokiCore`) with no UIKit or SwiftUI dependency. It builds and tests on

@@ -104,7 +104,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # _remotepairing._tcp: Poki reads this iPhone's own remote pairing port from it (iOS moves the port).
-        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp, _remotepairing._tcp]
+        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp, _remotepairing._tcp, _poki._tcp]
         LSApplicationQueriesSchemes: [karing, surge, loon, shadowrocket, sing-box, stash, quantumult-x, clashmi]
         # A pairing file sent by AirDrop, Files or Poki Setup opens in Poki (Setup > Pair This iPhone).
         CFBundleDocumentTypes:

@@ -56,6 +56,11 @@ final class LiveCore: CoreSession {
     deinit { pump?.cancel() }
 
     func start(relay: RelayAddress) { core.start(relay: relay) }
+    /// A computer's connection over USB or Wi-Fi (LocalListener): PokiCore proves both sides and
+    /// answers its requests as it answers the relay's (issue #609).
+    func serveLocal(_ connection: WebSocketConnection, transport: LocalTransport, computers: LocalComputers) async {
+        await core.serveLocal(connection, transport: transport, host: computers)
+    }
     func stop() { core.stop(); continuation.yield(.relay(.off)) }
     func resolveApproval(id: String, approved: Bool) { core.resolveApproval(id: id, approved: approved) }
     /// The person finished a handed-off screen (Done on the Live Activity): PokiCore lets inputs through again.

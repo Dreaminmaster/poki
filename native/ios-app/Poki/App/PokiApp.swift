@@ -66,6 +66,7 @@ struct PokiApp: App {
                 .font(.allo(.body))
                 #if DEBUG
                 .overlay { if UserDefaults.standard.string(forKey: "pokiScreen") == "fonts" { FontCompare().background(Color(.systemBackground)) } }
+                .overlay { if UserDefaults.standard.string(forKey: "pokiScreen") == "bear" { BearStage() } }
                 #endif
                 .environment(\.startupLog, startupLog)
                 .environment(\.inDuoSplitView, inDuoSplitView)

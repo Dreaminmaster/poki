@@ -40,6 +40,21 @@ logos() {
   done
 }
 logos "$APP"
+# Connectors' own marks (Poki/ConnectorIcons) in their colours, as vectors: name.svg, with
+# name-dark.svg for Dark Mode where the company draws the mark for a dark ground.
+for svg in "$HERE"/Poki/ConnectorIcons/*.svg; do
+  base="$(basename "$svg" .svg)"
+  case "$base" in *-dark) continue ;; esac
+  set="$APP/Connector-$base.imageset"
+  mkdir -p "$set"
+  cp "$svg" "$set/mark.svg"
+  if [ -f "$HERE/Poki/ConnectorIcons/$base-dark.svg" ]; then
+    cp "$HERE/Poki/ConnectorIcons/$base-dark.svg" "$set/mark-dark.svg"
+    echo '{"images":[{"filename":"mark.svg","idiom":"universal"},{"appearances":[{"appearance":"luminosity","value":"dark"}],"filename":"mark-dark.svg","idiom":"universal"}],"info":{"version":1,"author":"poki"},"properties":{"preserves-vector-representation":true,"template-rendering-intent":"original"}}' > "$set/Contents.json"
+  else
+    echo '{"images":[{"filename":"mark.svg","idiom":"universal"}],"info":{"version":1,"author":"poki"},"properties":{"preserves-vector-representation":true,"template-rendering-intent":"original"}}' > "$set/Contents.json"
+  fi
+done
 # Proxy apps' own App Store icons (Poki/ProxyIcons, see its README) beside their names in Setup.
 for png in "$HERE"/Poki/ProxyIcons/*.png; do
   name="Proxy-$(basename "$png" .png)"
@@ -84,7 +99,7 @@ LAUNCH_IMAGES="$HERE/Poki/LaunchImages"
 rm -rf "$LAUNCH_IMAGES"
 mkdir -p "$LAUNCH_IMAGES"
 cp "$LAUNCH/LaunchBackdrop.png" "$LAUNCH_IMAGES/LaunchBackdrop.png"
-swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/AlloRounded-Bold.ttf" "$LAUNCH/LaunchBear.png" \
+swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/AlloRounded-Medium.ttf" "$LAUNCH/LaunchBear.png" \
   "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@2x.png" "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png"
 LAUNCH_GROUND='"red":"0xF5","green":"0xF7","blue":"0xFA"'
 LAUNCH_GROUND_DARK='"red":"0x05","green":"0x07","blue":"0x0D"'

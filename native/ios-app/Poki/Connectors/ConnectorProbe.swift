@@ -80,12 +80,13 @@ struct ConnectorProbe: Equatable {
         return urls
     }
 
-    /// How Poki registers with this authorization server: a client ID metadata document when the
-    /// server says it supports one, else dynamic registration when it has a registration endpoint.
+    /// How Poki registers with this authorization server: dynamic registration when it has a
+    /// registration endpoint (what Poki speaks), else a client ID metadata document when the server
+    /// says it takes one (which Poki does not publish yet), else neither.
     static func registration(fromAuthorizationServerMetadata data: Data) -> Registration {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .none }
-        if object["client_id_metadata_document_supported"] as? Bool == true { return .metadataDocument }
         if let endpoint = object["registration_endpoint"] as? String, !endpoint.isEmpty { return .dynamic }
+        if object["client_id_metadata_document_supported"] as? Bool == true { return .metadataDocument }
         return .none
     }
 
@@ -114,8 +115,9 @@ struct ConnectorProbe: Equatable {
         case noProvider
     }
 
-    /// Reaches the server and works out its sign-in. `progress` gets each step as it finishes.
-    static func run(_ server: URL, session: URLSession = .shared, progress: @escaping @MainActor (Step) -> Void) async throws -> ConnectorProbe {
+    /// Reaches the server and works out its sign-in. `progress` gets each step as it finishes, with
+    /// the HTTP status the server answered it with (0 when the step needed no request of its own).
+    static func run(_ server: URL, session: URLSession = .shared, progress: @escaping @MainActor (Step, Int) -> Void) async throws -> ConnectorProbe {
         guard server.scheme == "https", server.host != nil else { throw Failure.notHTTPS }
         var probe = ConnectorProbe()
         probe.transport = transport(for: server)
@@ -131,13 +133,13 @@ struct ConnectorProbe: Equatable {
         switch http.statusCode {
         case 200..<300:
             probe.serverName = serverName(fromInitialize: body)
-            await progress(.server)
-            await progress(.signInSettings)
-            await progress(.provider)
+            await progress(.server, http.statusCode)
+            await progress(.signInSettings, 0)
+            await progress(.provider, 0)
             return probe
         case 401:
             probe.needsSignIn = true
-            await progress(.server)
+            await progress(.server, 401)
         default:
             throw Failure.notMCP(http.statusCode)
         }
@@ -145,8 +147,11 @@ struct ConnectorProbe: Equatable {
         // Sign-in settings: where the 401 points, else the well-known addresses.
         let header = http.value(forHTTPHeaderField: "WWW-Authenticate") ?? ""
         let candidates = (resourceMetadata(fromWWWAuthenticate: header).map { [$0] } ?? []) + protectedResourceURLs(for: server)
+        var resourceStatus = 0
         for url in candidates {
-            guard let data = await fetch(url, session: session), let issuer = authorizationServer(fromResourceMetadata: data) else { continue }
+            guard let (data, status) = await fetch(url, session: session) else { continue }
+            resourceStatus = status
+            guard status == 200, let issuer = authorizationServer(fromResourceMetadata: data) else { continue }
             probe.resourceMetadata = url
             probe.authorizationServer = issuer
             break
@@ -157,24 +162,23 @@ struct ConnectorProbe: Equatable {
             origin.query = nil
             probe.authorizationServer = origin.url
         }
-        await progress(.signInSettings)
+        await progress(.signInSettings, probe.resourceMetadata == nil ? 0 : resourceStatus)
 
         guard let issuer = probe.authorizationServer else { throw Failure.noSignInSettings }
         for url in authorizationServerMetadataURLs(for: issuer) {
-            guard let data = await fetch(url, session: session) else { continue }
+            guard let (data, status) = await fetch(url, session: session), status == 200 else { continue }
             probe.registration = registration(fromAuthorizationServerMetadata: data)
-            await progress(.provider)
+            await progress(.provider, status)
             return probe
         }
         throw Failure.noProvider
     }
 
-    private static func fetch(_ url: URL, session: URLSession) async -> Data? {
+    private static func fetch(_ url: URL, session: URLSession) async -> (Data, Int)? {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await session.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return data
+        guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return nil }
+        return (data, http.statusCode)
     }
 }
 

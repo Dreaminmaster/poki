@@ -39,6 +39,7 @@ extension Computer {
             return "Scroll"
         }
         if action["drag"] != nil { return "Drag" }
+        if action["adjust"] != nil { return "Adjust" }
         if let spec = action["pinch"] {
             let scale = spec["scale"]?.double ?? action["scale"]?.double ?? 2
             return scale >= 1 ? "Zoom in" : "Zoom out"

@@ -4,6 +4,9 @@ import Foundation
 public struct ToolResult: Sendable {
     public var text: String
     public var jpeg: Data?
+    /// The read's own PNG at the phone's full pixels, sent in place of the JPEG when the caller asked
+    /// for picture: "full" (to save to disk, or to read small text). Issue #609.
+    public var png: Data? = nil
     public var isError = false
     var splitView: PokiCore.SplitViewRead?
     var splitViewNeedsRead = false
@@ -162,7 +165,7 @@ final class Computer: @unchecked Sendable {
     var lastElements: [Element] { listed.map(\.element) }
     var layout: Layout { Layout(all: lastAll, screen: size ?? ScreenSize(width: 10_000, height: 10_000)) }
 
-    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0, "run_read": 0]
+    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "adjust": 0.2, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0, "run_read": 0]
     static let lineLimit = 120
     static let textLimit = 160
 
@@ -273,7 +276,7 @@ final class Computer: @unchecked Sendable {
 
         // Whether the screen changed since the read before (the one the model saw last).
         let visible = listable(reading.elements, screen, includeUnlabeledImages: selectedPane != nil)
-        let tree = visible.map { "\($0.key)@\($0.frame.described)" }.joined(separator: "\n")
+        let tree = visible.map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: "\n")
         let picture = reading.png.map { PictureSketch(png: $0) }
         let pictureMoved = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } } ?? false
         var changedLine: String?
@@ -423,7 +426,7 @@ final class Computer: @unchecked Sendable {
             if tag.isEmpty, let size, coversScreenAlone(e, in: reading.elements, screen: size) {
                 tag = " (one element covering \(Int((e.frame.width * e.frame.height * 100 / (size.width * size.height)).rounded())) % of the screen with no parts in the tree: tap a point on the picture, not its number)"
             }
-            return "\(mark)\(ref) \(e.type) \"\(text)\" \(e.frame.described)\(tag)"
+            return "\(mark)\(ref) \(e.type) \"\(text)\" \(e.frame.described)\(e.stateMark)\(tag)"
         }
         var body: [String] = []
         var heading: String
@@ -959,7 +962,7 @@ final class Computer: @unchecked Sendable {
             return true
         case .button:
             return target?.text?.lowercased() == "home" || !evidence.isEmpty
-        case .tap, .longPress, .pinch:
+        case .tap, .longPress, .pinch, .adjust:
             return evidence.contains(sourceForPoint(target))
         case .drag:
             if target?.array != nil { return evidence.contains(.screenshot) }
@@ -1257,7 +1260,7 @@ final class Computer: @unchecked Sendable {
         var extra: [String] = []
         // The screen before the actions, for the read after them: only a read that differs from it
         // shows that the actions have landed.
-        let seenBefore: String? = size.flatMap { screen in lastTreeAt == nil ? nil : listable(lastAll, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        let seenBefore: String? = size.flatMap { screen in lastTreeAt == nil ? nil : listable(lastAll, screen).map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";") }
 
         // Approval: from the first action that needs it, nothing is sent until the owner approves it
         // on the phone. The actions before it are plain and go first (seen on the phone: a last
@@ -1787,7 +1790,7 @@ final class Computer: @unchecked Sendable {
                 try await runner.tree(timeout: left, format: format, countsAsMiss: false)
             }) else { break }
             slowest = max(slowest, now() - asked)
-            let signature = listable(tree.elements, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+            let signature = listable(tree.elements, screen).map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";")
             if !signature.isEmpty, signature != before, signature == last { return (now() - began, true) }
             last = signature
             await sleep(seconds: 0.06)
@@ -1803,7 +1806,7 @@ final class Computer: @unchecked Sendable {
     /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
     /// nothing could be read.
     func settledRead(until: Double) async -> (all: [Element], foreground: Foreground)? {
-        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";") }
         var latest: (all: [Element], foreground: Foreground)?
         var last: String?
         while until - now() > 0.3 {
@@ -2047,7 +2050,7 @@ final class Computer: @unchecked Sendable {
             return e.frame.width * e.frame.height > Self.contentShare * screen.width * screen.height ? nil : e
         }
         switch kind {
-        case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
+        case .tap, .longPress, .pinch, .adjust: return [at(spec)].compactMap { $0 }
         // The field is tapped before the text goes.
         case .type: return [at(action["ref"])].compactMap { $0 }
         case .drag:
@@ -2141,7 +2144,7 @@ final class Computer: @unchecked Sendable {
             }
             // Waiting, handing the screen over, swipes, Home and launches are not input in a guarded app.
             if let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) { return "input in \(app)" }
-        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .pinch, .waitUntil, .wait:
+        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .adjust, .pinch, .waitUntil, .wait:
             break
         }
         return nil

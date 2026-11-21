@@ -236,6 +236,8 @@ final class AppModel {
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
+    /// Poki Setup's poki-mcp over the USB cable or the same Wi-Fi, beside the relay (issue #609).
+    private var localListener: LocalListener?
     private let launcher: RunnerLauncher
     private let pairer: DevicePairing
     private let pairingKeepAlive = KeepAlive()
@@ -409,6 +411,14 @@ final class AppModel {
                 return await self.unlockForLocalTask(timeout: timeout)
             }
         }
+        let computers = LocalComputers(host: host) { [weak self] computer in
+            // The owner's OK, as for a connector sign-in from a client the relay does not know.
+            await self?.askToConnect(client: computer.describe, callback: computer.agent.isEmpty ? computer.app : "\(computer.app), \(computer.agent)", connector: computer.connector) ?? false
+        }
+        let log = self.log
+        localListener = LocalListener(serve: { [weak core] connection, transport in
+            await core?.serveLocal(connection, transport: transport, computers: computers)
+        }, log: { line in Task { @MainActor in log.add("local", line) } })
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
         // them while the runner is fine, so the runner is asked first; only a runner that does not
         // answer is started again (each restart costs seconds and flashes the automation banner).
@@ -1185,6 +1195,7 @@ final class AppModel {
             launchRunner()
         }
         if let relay { core.start(relay: relay) }
+        localListener?.start(name: deviceName)
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
         openWhileInFront("turned on with Poki in front")
     }
@@ -1293,6 +1304,7 @@ final class AppModel {
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
         core.stop()
+        localListener?.stop()
         launcher.stop()
         if setup.loopback == .builtIn, !historyReads { tunnel.disconnect() }
         if automationPath == .runner {

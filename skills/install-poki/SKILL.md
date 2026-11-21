@@ -140,6 +140,10 @@ Tell the user these after the result:
 
 With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command refuses equal builds; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
 
+## Connect this agent to Poki
+
+Poki Setup ships Poki MCP (`poki-setup mcp serve`): it reaches Poki on the iPhone over the USB cable, else the same Wi-Fi, else the relay when a connector link is saved, and adds Poki Setup's own steps as a `setup` tool. After the install, run `"<tool>" mcp connect --json` (the tool paths are under "Without Node.js, or on Windows") and add Poki MCP to the agent you are with the command it prints for that agent (Claude Code: `claude mcp add --scope user poki -- "<tool>" mcp serve`). Tell the user that the first time this computer connects, Poki asks on the iPhone whether to allow it, and they tap Allow. Then call `connection` and `look` once to check. Done when `connection` names `usb`, `wifi` or `relay` and `look` answers with the screen. Poki 0.4.7 and earlier have no local listener: `connection` then says so, and the relay link is the way.
+
 ## Finish a first installation
 
 After the installer exits, use the version checks above and report the installed version and numeric build, the selected release, and every `unverified` item. An `ok:true` result confirms the installer’s checks, not a working model account or a completed phone task. Keep the installation incomplete if a required check remains unverified.

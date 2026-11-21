@@ -3,37 +3,30 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// Plus in the message field: a sheet that rises from the bottom. Recent photos to tap, the ways to
-/// add a photo or a file, the apps and connectors to mention, and how this chat runs (the model, how
-/// approvals ask and how strict they are). Everything here changes in place, with native menus.
+/// Plus in the message field: a sheet that rises from the bottom, with no title and no headers.
+/// Three plain ways to add something (Photos, Camera, Files), the apps used most as a row of large
+/// icons with More for every app, the connectors, and how this chat runs (the model and approvals).
 struct ComposerAddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     /// How many more photos and files fit in the message.
     var room: Int
-    /// Recent photos already in the message, by their library id.
-    var picked: Set<String>
-    var togglePhoto: (PHAsset) -> Void
     var choosePhotos: () -> Void
     var takePhoto: () -> Void
     var chooseFiles: () -> Void
     var mention: (MentionMatch) -> Void
 
-    @State private var photos = RecentPhotos()
     @State private var connectors = MCPConnectors.shared
     @State private var modelVersion = 0
     @State private var path = NavigationPath()
-    @ScaledMetric(relativeTo: .body) private var tile = 96.0
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section { strip }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listSectionSeparator(.hidden)
-
                 Section {
+                    Button(action: choosePhotos) { SettingsLabel("Photos", systemImage: "photo.on.rectangle") }
+                        .disabled(room == 0)
+                        .accessibilityIdentifier("composer.photos")
                     Button(action: takePhoto) { SettingsLabel("Camera", systemImage: "camera") }
                         .disabled(room == 0 || !UIImagePickerController.isSourceTypeAvailable(.camera))
                         .accessibilityIdentifier("composer.camera")
@@ -44,13 +37,9 @@ struct ComposerAddSheet: View {
                 .foregroundStyle(Color(.label))
 
                 Section {
-                    chips(MentionRecents.apps.prefix(10).map { MentionMatch(capsule: $0, insert: $0.name) })
-                } header: {
-                    Group {
-     SettingsHeader("Apps") 
-                    }
-                    .settingsHeader()
+                    appRow
                 }
+                .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
 
                 Section {
                     let connected = ConnectorCapsules.current.map { MentionMatch(capsule: $0, insert: $0.names[0]) }
@@ -58,82 +47,61 @@ struct ComposerAddSheet: View {
                     NavigationLink(value: AddRoute.connectors) {
                         SettingsRow(title: connected.isEmpty ? "Add Connectors" : "Manage Connectors", symbol: "puzzlepiece.extension")
                     }
-                } header: {
-                    Group {
-     SettingsHeader("Connectors") 
-                    }
-                    .settingsHeader()
                 }
 
-                Section { modelPicker; approvalPicker; sensitivityPicker }
+                Section { modelPicker; approvalPicker }
                     .id(modelVersion)
             }
             .listStyle(.insetGrouped)
-            .navigationTitle(AppLocalization.text("Add to Message"))
-            .navigationBarTitleDisplayMode(.inline)
+            .contentMargins(.top, 4, for: .scrollContent)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", systemImage: "xmark") { dismiss() }
                         .accessibilityIdentifier("composer.add.close")
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("All Photos", action: choosePhotos)
-                        .disabled(room == 0)
-                        .accessibilityIdentifier("composer.photos")
-                }
             }
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: AddRoute.self) { route in
                 switch route {
                 case .connectors: ConnectorsView().settingsPage()
+                case .apps: AllAppsView(pick: { match in mention(match); dismiss() })
                 }
             }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .task { await photos.load() }
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
     }
 
-    // MARK: Recent photos
+    // MARK: Apps and connectors
 
-    @ViewBuilder private var strip: some View {
-        switch photos.access {
-        case .unknown:
-            Color.clear.frame(height: tile)
-        case .ask:
-            Button { Task { await photos.ask() } } label: {
-                Label("Show Recent Photos", systemImage: "photo.on.rectangle")
-                    .frame(maxWidth: .infinity, minHeight: tile)
-            }
-            .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 18))
-        case .denied:
-            Button(action: choosePhotos) {
-                Label("Choose Photos", systemImage: "photo.on.rectangle")
-                    .frame(maxWidth: .infinity, minHeight: tile)
-            }
-            .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 18))
-        case .granted:
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 4) {
-                    ForEach(photos.assets, id: \.localIdentifier) { asset in
-                        let on = picked.contains(asset.localIdentifier)
-                        Button { togglePhoto(asset) } label: {
-                            RecentPhotoTile(asset: asset, photos: photos, side: tile, on: on)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!on && room == 0)
-                        .accessibilityLabel(Text("Photo"))
-                        .accessibilityAddTraits(on ? .isSelected : [])
+    /// The apps used most and most recently, as large icons with their names, then More.
+    private var appRow: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(MentionRecents.apps) { app in
+                    Button { mention(MentionMatch(capsule: app, insert: app.name)); dismiss() } label: {
+                        AppTile(title: app.name) { MentionIcon(capsule: app, size: 56) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("composer.mention.\(app.id)")
+                }
+                NavigationLink(value: AddRoute.apps) {
+                    AppTile(title: AppLocalization.text("More")) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(Color(.secondaryLabel))
+                            .frame(width: 56, height: 56)
+                            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 56 * 0.225, style: .continuous))
                     }
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("composer.apps.more")
             }
-            .scrollIndicators(.hidden)
-            .frame(height: tile)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.horizontal, 12)
         }
+        .scrollIndicators(.hidden)
     }
-
-    // MARK: Apps and connectors
 
     private func chips(_ matches: [MentionMatch]) -> some View {
         ScrollView(.horizontal) {
@@ -144,10 +112,8 @@ struct ComposerAddSheet: View {
                             MentionIcon(capsule: match.capsule, size: 22)
                             Text(verbatim: match.title).font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label)).lineLimit(1)
                         }
-                        .padding(.leading, 5).padding(.trailing, 12).frame(minHeight: 34)
-                        .background(Color(.label).opacity(0.07), in: UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10,
-                                                                                               bottomTrailingRadius: 17, topTrailingRadius: 17,
-                                                                                               style: .continuous))
+                        .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 34)
+                        .background(Color(.label).opacity(0.07), in: RoundedRectangle(cornerRadius: 11 + 6, style: .continuous))
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
@@ -213,95 +179,66 @@ struct ComposerAddSheet: View {
         .pickerStyle(.menu)
         .accessibilityIdentifier("composer.approvals")
     }
-
-    @ViewBuilder private var sensitivityPicker: some View {
-        if model.approvalMode != .off {
-            Picker(selection: Binding(get: { model.classifierLevel }, set: { model.classifierLevel = $0 })) {
-                ForEach(ApprovalClassifier.Level.allCases, id: \.self) { Text(verbatim: $0.title).tag($0) }
-            } label: {
-                SettingsLabel("Sensitivity", systemImage: "dial.medium")
-            }
-            .pickerStyle(.menu)
-            .accessibilityIdentifier("composer.sensitivity")
-        }
-    }
 }
 
-private enum AddRoute: Hashable { case connectors }
+private enum AddRoute: Hashable { case connectors, apps }
 
-/// One recent photo: a square, with a tick when it is in the message.
-private struct RecentPhotoTile: View {
-    let asset: PHAsset
-    let photos: RecentPhotos
-    let side: CGFloat
-    let on: Bool
-    @State private var image: UIImage?
-    @Environment(\.displayScale) private var scale
+/// One app in the sheet's row: its icon, large, and its name under it on one line.
+private struct AppTile<Icon: View>: View {
+    let title: String
+    @ViewBuilder var icon: Icon
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let image { Image(uiImage: image).resizable().scaledToFill() } else { Color(.secondarySystemFill) }
-            }
-            .frame(width: side, height: side).clipped()
-            if on {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.alloRounded(.title3)).symbolRenderingMode(.palette).foregroundStyle(.white, Tint.blue)
-                    .padding(6).transition(.scale.combined(with: .opacity))
-            }
+        VStack(spacing: 6) {
+            icon
+            Text(verbatim: title)
+                .font(.allo(.caption))
+                .foregroundStyle(Color(.label))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .overlay { if on { Rectangle().strokeBorder(Tint.blue, lineWidth: 3) } }
-        .animation(.snappy, value: on)
-        .task(id: asset.localIdentifier) { image = await photos.thumbnail(asset, side: side * scale) }
+        .frame(width: 72)
+        .contentShape(.rect)
     }
 }
 
-/// The photo library's most recent pictures, for the strip; asked for only once the sheet shows it.
-@MainActor
-@Observable
-final class RecentPhotos {
-    enum Access { case unknown, ask, denied, granted }
-    private(set) var access: Access = .unknown
-    private(set) var assets: [PHAsset] = []
-    @ObservationIgnored private let manager = PHCachingImageManager()
+/// Every app Poki can name, searchable the way mentions are (Pinyin included). A tap puts the app in
+/// the message and closes the sheet.
+struct AllAppsView: View {
+    var pick: (MentionMatch) -> Void
+    @State private var query = ""
 
-    func load() async {
-        switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
-        case .notDetermined: access = .ask
-        case .authorized, .limited: fetch()
-        default: access = .denied
+    private var apps: [MentionMatch] {
+        let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty {
+            return MentionSearch.matches(typed, pending: false, explicit: false, limit: 60).filter { !$0.isConnector }
         }
+        let catalog = AppCapsule.catalog
+        let installed = catalog.filter { DynamicApps.name(forID: $0.id) != nil }
+        return (installed.isEmpty ? catalog : installed)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .map { MentionMatch(capsule: $0, insert: $0.name) }
     }
 
-    func ask() async {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        if status == .authorized || status == .limited { fetch() } else { access = .denied }
-    }
-
-    private func fetch() {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.fetchLimit = 30
-        let result = PHAsset.fetchAssets(with: .image, options: options)
-        var list: [PHAsset] = []
-        result.enumerateObjects { asset, _, _ in list.append(asset) }
-        assets = list
-        access = .granted
-    }
-
-    func thumbnail(_ asset: PHAsset, side: CGFloat) async -> UIImage? {
-        let options = PHImageRequestOptions()
-        // One answer: the picture at this size.
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
-        options.resizeMode = .fast
-        return await withCheckedContinuation { continuation in
-            manager.requestImage(for: asset, targetSize: CGSize(width: side, height: side), contentMode: .aspectFill, options: options) { image, _ in
-                continuation.resume(returning: image)
+    var body: some View {
+        List(apps) { match in
+            Button { pick(match) } label: {
+                HStack(spacing: 12) {
+                    MentionIcon(capsule: match.capsule, size: 32)
+                    Text(verbatim: match.title).font(.allo(.body)).foregroundStyle(Color(.label)).lineLimit(1)
+                }
             }
+            .accessibilityIdentifier("composer.allApps.\(match.capsule.id)")
         }
+        .listStyle(.insetGrouped)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: Text("Search Apps"))
+        .navigationTitle(AppLocalization.text("Apps"))
+        .navigationBarTitleDisplayMode(.inline)
     }
+}
 
+/// A photo from the library, read for the message.
+enum RecentPhotos {
     /// The photo itself, for the message.
     static func data(_ asset: PHAsset) async -> Data? {
         let options = PHImageRequestOptions()
