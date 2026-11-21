@@ -11,82 +11,90 @@ import SwiftUI
 /// Models: what each use runs on (Chat, Voice, Decisions, Senses), each picked from the models ticked
 /// under the providers, in sections by provider; and the providers, as the Mail app lists mail
 /// accounts. Local, the models on this iPhone, is always there. Each custom provider is one of its own.
+/// The sections are `ModelSettingsSections`, which the start flow's Connect a Model page shows too.
 struct ModelSettingsView: View {
     /// Opened from Talk with Poki without a key: the OpenAI key's form at once, or its voice models
     /// when the key is there but live voice is off.
     var opensVoiceKey = false
-    @State private var adding = false
-    @State private var version = ModelKeys.saved
     @State private var enteringVoiceKey = false
     @State private var showingLiveVoice = false
     @State private var openedForVoice = false
 
     var body: some View {
         List {
-            Section {
-                ForEach(ModelUse.allCases) { use in
-                    ModelUsePicker(use: use, version: version)
-                }
-            } header: {
-                Group {
-                    Text("In Use").textCase(nil)
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Each list offers the models ticked under the providers below. Senses reads the screen and checks privacy on this iPhone. Its insights use the model picked on the Senses page. Dictation in the message field needs no model.")
-                }
-                .settingsFooter()
-            }
-
-            if LocalModels.recommends {
-                Section { LocalRecommendation() }
-            }
-
-            Section {
-                NavigationLink { LocalProviderDetail() } label: { LocalProviderRow() }
-                    .accessibilityIdentifier("models.provider.local")
-                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
-                    let usage = ProviderUseValue.summary(.account(provider))
-                    NavigationLink { AccountDetail(provider: provider) } label: {
-                        AccountRow(provider: provider, name: provider.name, usage: usage)
-                    }
-                }
-                ForEach(CustomProviders.all) { custom in
-                    let usage = ProviderUseValue.summary(.custom(custom.id))
-                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
-                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
-                    }
-                }
-                Button("Add Provider", systemImage: "plus") { adding = true }
-                    .accessibilityIdentifier("models.provider.add")
-            } header: {
-                Group {
-                    Text("Providers").textCase(nil)
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
-                }
-                .settingsFooter()
-            }
+            ModelSettingsSections()
         }
-        // Reads the version so the page redraws with the new keys and models, without rebuilding it
-        // (a rebuild dropped taps and the sheets it was presenting).
-        .background { Color.clear.accessibilityHidden(true).id(version) }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Models"))
         .navigationBarTitleDisplayMode(.inline)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .sheet(isPresented: $adding) { AddAccount() }
         .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
         .navigationDestination(isPresented: $showingLiveVoice) { ModelTickList(use: .voice, provider: .account(.openai)) }
         .task {
             guard opensVoiceKey, !openedForVoice else { return }
             openedForVoice = true
             if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if VoiceDirect.account == nil { showingLiveVoice = true }
+        }
+    }
+}
+
+/// The Models page's sections, for a List or a Form: In Use, the local recommendation, and the
+/// providers with Add Provider. One copy, on Settings' Models page and the start flow's page.
+struct ModelSettingsSections: View {
+    @State private var adding = false
+    @State private var version = ModelKeys.saved
+
+    var body: some View {
+        Section {
+            ForEach(ModelUse.allCases) { use in
+                ModelUsePicker(use: use, version: version)
+            }
+        } header: {
+            Group {
+                Text("In Use").textCase(nil)
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Each list offers the models ticked under the providers below. Senses reads the screen and checks privacy on this iPhone. Its insights use the model picked on the Senses page. Dictation in the message field needs no model.")
+            }
+            .settingsFooter()
+        }
+
+        if LocalModels.recommends {
+            Section { LocalRecommendation() }
+        }
+
+        Section {
+            NavigationLink { LocalProviderDetail() } label: { LocalProviderRow() }
+                .accessibilityIdentifier("models.provider.local")
+            ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
+                let usage = ProviderUseValue.summary(.account(provider))
+                NavigationLink { AccountDetail(provider: provider) } label: {
+                    AccountRow(provider: provider, name: provider.name, usage: usage)
+                }
+            }
+            ForEach(CustomProviders.all) { custom in
+                let usage = ProviderUseValue.summary(.custom(custom.id))
+                NavigationLink { CustomProviderDetail(id: custom.id) } label: {
+                    AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+                }
+            }
+            // The sheet and the redraw hang on this one row: on the sections they would repeat per row.
+            Button("Add Provider", systemImage: "plus") { adding = true }
+                .accessibilityIdentifier("models.provider.add")
+                .sheet(isPresented: $adding) { AddAccount() }
+                .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
+        } header: {
+            Group {
+                Text("Providers").textCase(nil)
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+            }
+            .settingsFooter()
         }
     }
 }

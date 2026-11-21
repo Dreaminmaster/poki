@@ -369,83 +369,27 @@ struct StartShortcutPage: View {
     }
 }
 
-/// The start flow's models page, as one question (the owner, Nov 21 2026: "simplify to the dumbest
-/// possible"): sign in with ChatGPT, or paste a key from another provider. One is enough. The model on
-/// this iPhone is a separate, optional part under it. Settings' Models page keeps every choice.
+/// The start flow's models page: Settings' Models page itself (its In Use pickers, the local model,
+/// the providers and Add Provider) under the page's hero (the owner, Nov 21 2026: the same options
+/// and features as the Models page).
 struct StartModelsPage: View {
     var goOn: () -> Void
     @State private var hasModel = ModelKeys.hasUsableKey
-    @State private var modelName = ModelKeys.selectedModelName
-    @State private var signingIn = false
-    @State private var adding = false
 
     var body: some View {
         Form {
             StartHero(symbol: "sparkles", title: "Connect a Model",
-                      line: "Poki needs an AI account to think. Pick one way below. One is enough.",
+                      line: "Poki needs an AI account to think. Add one provider below. One is enough.",
                       done: hasModel)
-            Section {
-                if hasModel {
-                    SettingsRow(title: "Connected", symbol: "checkmark.seal", value: modelName, accessory: .done)
-                        .accessibilityIdentifier("firstRun.models.connected")
-                    NavigationLink(value: DetailsRoute.model) {
-                        SettingsRow(title: "Change or Add Another", symbol: "arrow.left.arrow.right")
-                    }
-                    .accessibilityIdentifier("firstRun.models")
-                } else {
-                    Button { signingIn = true } label: {
-                        SettingsRow(title: "Sign In with ChatGPT", caption: "Use your ChatGPT plan. No key to copy.", symbol: "person.crop.circle")
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("firstRun.models.chatgpt")
-                    Button { adding = true } label: {
-                        SettingsRow(title: "Paste an API Key", caption: "Anthropic, OpenAI, Gemini and more", symbol: "key")
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("firstRun.models.key")
-                }
-            } header: {
-                Group {
-                    Text(hasModel ? LocalizedStringKey("Your Model") : LocalizedStringKey("Pick One Way"))
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Your sign in or key stays on this iPhone.")
-                }
-                .settingsFooter()
-            }
-            Section {
-                WelcomeLocalModels()
-                if LocalModels.recommends { LocalRecommendation() }
-            } header: {
-                Group {
-                    Text("Optional")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone.")
-                }
-                .settingsFooter()
-            }
+            ModelSettingsSections()
         }
         .navigationTitle(Text(verbatim: ""))
         .navigationBarTitleDisplayMode(.inline)
         .settingsPage()
-        .sheet(isPresented: $signingIn, onDismiss: refresh) { ChatGPTSignIn() }
-        .sheet(isPresented: $adding, onDismiss: refresh) { AddAccount() }
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
-        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in hasModel = ModelKeys.hasUsableKey }
+        .onAppear { hasModel = ModelKeys.hasUsableKey }
         .bottomBar(softEdge: true) {
             StartButtons(primary: "Continue", action: goOn, secondary: hasModel ? nil : "Set Up Later", secondaryAction: goOn)
         }
-    }
-
-    private func refresh() {
-        hasModel = ModelKeys.hasUsableKey
-        modelName = ModelKeys.selectedModelName
     }
 }
