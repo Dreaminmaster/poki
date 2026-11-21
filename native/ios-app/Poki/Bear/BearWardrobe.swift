@@ -129,12 +129,38 @@ struct BearOutfitColors: Codable, Equatable {
     var accent: UInt32?
 }
 
+enum BearOutfitColorChannel: CaseIterable, Hashable {
+    case primary, accent
+
+    var name: LocalizedStringResource {
+        switch self {
+        case .primary: "Main Color"
+        case .accent: "Accent Color"
+        }
+    }
+
+    var storage: WritableKeyPath<BearOutfitColors, UInt32?> {
+        switch self {
+        case .primary: \.primary
+        case .accent: \.accent
+        }
+    }
+}
+
+struct BearWornColors: Equatable {
+    var headwear = BearOutfitColors()
+    var clothes = BearOutfitColors()
+
+    subscript(_ slot: BearOutfitSlot) -> BearOutfitColors { slot == .headwear ? headwear : clothes }
+}
+
 @MainActor
 @Observable
 final class BearWardrobe {
     private struct Saved: Codable {
         var selection = BearOutfitSelection.bare
         var colors: [BearOutfit: BearOutfitColors] = [:]
+        var headwearColors: [BearOutfit: BearOutfitColors]?
     }
 
     static let shared = BearWardrobe()
@@ -156,9 +182,28 @@ final class BearWardrobe {
         set { if newValue != saved.selection { saved.selection = newValue } }
     }
 
-    var colors: BearOutfitColors {
-        get { selection.clothes.flatMap { saved.colors[$0] } ?? BearOutfitColors() }
-        set { if let clothes = selection.clothes, newValue != colors { saved.colors[clothes] = newValue } }
+    var wornColors: BearWornColors {
+        BearWornColors(headwear: self[colors: .headwear], clothes: self[colors: .clothes])
+    }
+
+    subscript(colors slot: BearOutfitSlot) -> BearOutfitColors {
+        get {
+            guard let outfit = selection[slot] else { return BearOutfitColors() }
+            let colors = slot == .headwear ? saved.headwearColors : saved.colors
+            return colors?[outfit] ?? BearOutfitColors()
+        }
+        set {
+            guard let outfit = selection[slot], newValue != self[colors: slot] else { return }
+            let override = newValue == BearOutfitColors() ? nil : newValue
+            switch slot {
+            case .headwear:
+                var colors = saved.headwearColors ?? [:]
+                colors[outfit] = override
+                saved.headwearColors = colors.isEmpty ? nil : colors
+            case .clothes:
+                saved.colors[outfit] = override
+            }
+        }
     }
 
     func thumbnail(_ name: String) -> UIImage? {

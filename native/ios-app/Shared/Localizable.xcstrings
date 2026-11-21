@@ -38159,19 +38159,19 @@
         }
       }
     },
-    "Mix and Match": {
+    "Customize Poki": {
       "extractionState": "manual",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自由搭配"
+            "value": "自定义 Poki"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "自由搭配"
+            "value": "自訂 Poki"
           }
         }
       }

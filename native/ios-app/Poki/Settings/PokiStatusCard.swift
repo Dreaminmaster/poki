@@ -61,7 +61,7 @@ struct PokiMenu<Face: View>: View {
     var openModel: () -> Void
     /// The tap that opens the menu, for the bear to answer.
     var tapped: () -> Void = {}
-    var openOutfits: (() -> Void)? = nil
+    var openCustomization: (() -> Void)? = nil
     @ViewBuilder var face: () -> Face
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -132,8 +132,9 @@ struct PokiMenu<Face: View>: View {
                 }
                 .accessibilityIdentifier("status.autoUnlock")
             }
-            if let openOutfits {
-                Button("Outfits", systemImage: "tshirt", action: openOutfits)
+            if let openCustomization {
+                Button("Customize Poki", systemImage: "hanger", action: openCustomization)
+                    .accessibilityIdentifier("status.customizePoki")
             }
         } label: {
             face()

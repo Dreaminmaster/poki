@@ -43,8 +43,8 @@ struct ChatView: View {
         pokes += 1
     }
 
-    private func openWardrobe() {
-        tapPoki()
+    private func openCustomization() {
+        wardrobeMixing = true
         wardrobeOpen = true
     }
 
@@ -177,7 +177,8 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki, openModel: openModel)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } },
+                           openDetails: tapPoki, openModel: openModel, openCustomization: openCustomization)
                     .logStartupAppearance(.topBar)
             }
         }
@@ -224,7 +225,7 @@ struct ChatView: View {
             GeometryReader { proxy in
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
-                               tap: tapPoki, openModel: openModel, openOutfits: openWardrobe, travel: { flightRise = $0 })
+                               tap: tapPoki, openModel: openModel, openCustomization: openCustomization, travel: { flightRise = $0 })
                         .offset(y: home && wardrobeOpen ? -46 : 0)
                         .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
                 }

@@ -14,12 +14,65 @@ final class BearDressing {
     enum Motion { case immediate, fade, animated }
 
     @MainActor
+    private struct Paint {
+        let channel: BearOutfitColorChannel
+        let originalTint: UIColor
+
+        static func materials(in component: ModelComponent, slot: BearOutfitSlot) -> [Int: Paint] {
+            var paints: [Int: Paint] = [:]
+            // RealityKit groups meshes that share a skeleton into one model entity.
+            for mesh in component.mesh.contents.models {
+                guard let channel = channel(for: mesh.id, slot: slot) else { continue }
+                for part in mesh.parts {
+                    let index = part.materialIndex
+                    guard component.materials.indices.contains(index),
+                          let material = component.materials[index] as? PhysicallyBasedMaterial else { continue }
+                    paints[index] = Paint(channel: channel, originalTint: material.baseColor.tint)
+                }
+            }
+            return paints
+        }
+
+        private static func channel(for mesh: String, slot: BearOutfitSlot) -> BearOutfitColorChannel? {
+            if slot == .clothes {
+                if mesh.hasPrefix("Primary_") { return .primary }
+                if mesh.hasPrefix("Accent_") { return .accent }
+                return nil
+            }
+            // The shipped headwear names every mesh Fixed_. Opt in the fabric and frames by name.
+            switch mesh {
+            case "Fixed_N_01_p", "Fixed_N_02_shell", "Fixed_N_03_p", "Fixed_N_05_p", "Fixed_N_06_p",
+                 "Fixed_N_07_p", "Fixed_N_08_p", "Fixed_N_09_p", "Fixed_N_10_frame", "Fixed_N_11_p",
+                 "Fixed_N_12_p": return .primary
+            case "Fixed_N_01_t", "Fixed_N_02_ring", "Fixed_N_03_t", "Fixed_N_05_a", "Fixed_N_06_a",
+                 "Fixed_N_07_a", "Fixed_N_08_a", "Fixed_N_09_a", "Fixed_N_10_a", "Fixed_N_11_gog",
+                 "Fixed_N_12_a": return .accent
+            default: return nil
+            }
+        }
+    }
+
+    static func originalHeadwearColors(in template: Entity) -> [BearOutfitColorChannel: UIColor] {
+        var colors: [BearOutfitColorChannel: UIColor] = [:]
+        func collect(_ entity: Entity) {
+            if let model = entity as? ModelEntity, !model.jointNames.isEmpty, let component = model.model {
+                let paints = Paint.materials(in: component, slot: .headwear)
+                for (_, paint) in paints.sorted(by: { $0.key < $1.key }) where colors[paint.channel] == nil {
+                    colors[paint.channel] = paint.originalTint
+                }
+            }
+            entity.children.forEach(collect)
+        }
+        collect(template)
+        return colors
+    }
+
+    @MainActor
     private struct Piece {
         struct Skin {
             let model: ModelEntity
             let joints: [Int]
-            let paints: [Int: KeyPath<BearOutfitColors, UInt32?>]
-            let originalTints: [Int: UIColor]
+            let paints: [Int: Paint]
         }
 
         let root = Entity()
@@ -36,23 +89,8 @@ final class BearDressing {
                 if let model = entity as? ModelEntity, !model.jointNames.isEmpty {
                     let indices = model.jointNames.compactMap { joints.firstIndex(of: $0) }
                     if indices.count == model.jointNames.count, let component = model.model {
-                        var paints: [Int: KeyPath<BearOutfitColors, UInt32?>] = [:]
-                        if slot == .clothes {
-                            // RealityKit groups meshes that share a skeleton into one model entity.
-                            for mesh in component.mesh.contents.models {
-                                let color: KeyPath<BearOutfitColors, UInt32?>
-                                if mesh.id.hasPrefix("Primary_") { color = \.primary }
-                                else if mesh.id.hasPrefix("Accent_") { color = \.accent }
-                                else { continue }
-                                for part in mesh.parts { paints[part.materialIndex] = color }
-                            }
-                        }
-                        let originalTints = paints.reduce(into: [Int: UIColor]()) { tints, paint in
-                            if let material = component.materials[paint.key] as? PhysicallyBasedMaterial {
-                                tints[paint.key] = material.baseColor.tint
-                            }
-                        }
-                        skins.append(Skin(model: model, joints: indices, paints: paints, originalTints: originalTints))
+                        let paints = Paint.materials(in: component, slot: slot)
+                        skins.append(Skin(model: model, joints: indices, paints: paints))
                         if let light { model.components.set(ImageBasedLightReceiverComponent(imageBasedLight: light)) }
                     } else {
                         model.isEnabled = false
@@ -74,10 +112,9 @@ final class BearDressing {
             for skin in skins where !skin.paints.isEmpty {
                 guard var component = skin.model.model else { continue }
                 var materials = component.materials
-                for (index, color) in skin.paints {
-                    guard let original = skin.originalTints[index],
-                          var material = materials[index] as? PhysicallyBasedMaterial else { continue }
-                    material.baseColor.tint = colors[keyPath: color].map { UIColor(hex: $0) } ?? original
+                for (index, paint) in skin.paints {
+                    guard var material = materials[index] as? PhysicallyBasedMaterial else { continue }
+                    material.baseColor.tint = colors[keyPath: paint.channel.storage].map { UIColor(hex: $0) } ?? paint.originalTint
                     materials[index] = material
                 }
                 component.materials = materials
@@ -106,7 +143,7 @@ final class BearDressing {
     private var armRest: Float = 0
     private var armChange = (from: Float(0), start: TimeInterval(0))
     private var selection = BearOutfitSelection.bare
-    private var colors = BearOutfitColors()
+    private var colors = BearWornColors()
     private let names: [String]
     private let arms: [(Int, simd_quatf)]
     private let light: Entity?
@@ -132,7 +169,7 @@ final class BearDressing {
         if let source = self.light { root.addChild(source) }
     }
 
-    func wear(_ outfit: BearOutfitModels, colors: BearOutfitColors, motion: Motion, now: TimeInterval) -> Bool {
+    func wear(_ outfit: BearOutfitModels, colors: BearWornColors, motion: Motion, now: TimeInterval) -> Bool {
         let next = outfit.selection
         guard next != selection || colors != self.colors else { return false }
         let changes = BearOutfitSlot.allCases.filter { next[$0] != selection[$0] }
@@ -167,7 +204,9 @@ final class BearDressing {
             }
             armChange = (armRest, start)
         }
-        current[.clothes]?.recolor(colors)
+        for slot in BearOutfitSlot.allCases where next[slot] != selection[slot] || colors[slot] != self.colors[slot] {
+            current[slot]?.recolor(colors[slot])
+        }
         selection = next
         self.colors = colors
         pending = true
