@@ -264,30 +264,36 @@ private struct BearMixView: View {
     @ViewBuilder private var mixHeader: some View {
         PokiPortrait(mood: .ready, side: previewSize)
             .accessibilityHidden(true)
-        equippedItems
+        if typeSize.isAccessibilitySize {
+            equippedItems
+        } else {
+            // Keep the last capsule's upward exit inside its row, below the portrait.
+            equippedItems.clipped()
+        }
         categoryPicker
     }
 
-    @ViewBuilder private var categoryPicker: some View {
-        if typeSize.isAccessibilitySize {
-            Picker("Outfit pieces", selection: slotSelection) {
-                Text(BearOutfitSlot.headwear.name).tag(BearOutfitSlot.headwear)
-                Text(BearOutfitSlot.clothes.name).tag(BearOutfitSlot.clothes)
+    private var categoryPicker: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                outfitPiecesPicker
+                    .pickerStyle(.menu)
+                    .font(.body)
+                    .frame(maxWidth: 520, minHeight: 44, alignment: .leading)
+            } else {
+                outfitPiecesPicker
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 520)
             }
-            .pickerStyle(.menu)
-            .font(.body)
-            .frame(maxWidth: 520, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 16)
-            .accessibilityIdentifier("wardrobe.pieces")
-        } else {
-            Picker("Outfit pieces", selection: slotSelection) {
-                Text(BearOutfitSlot.headwear.name).tag(BearOutfitSlot.headwear)
-                Text(BearOutfitSlot.clothes.name).tag(BearOutfitSlot.clothes)
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 520)
-            .padding(.horizontal, 16)
-            .accessibilityIdentifier("wardrobe.pieces")
+        }
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("wardrobe.pieces")
+    }
+
+    private var outfitPiecesPicker: some View {
+        Picker("Outfit pieces", selection: slotSelection) {
+            Text(BearOutfitSlot.headwear.name).tag(BearOutfitSlot.headwear)
+            Text(BearOutfitSlot.clothes.name).tag(BearOutfitSlot.clothes)
         }
     }
 
