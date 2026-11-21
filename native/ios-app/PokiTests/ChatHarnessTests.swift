@@ -1421,19 +1421,22 @@ final class FakeCompletions: @unchecked Sendable {
     private var waiting: [(NWConnection, String)] = []
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
+    private let rejectUnknownCacheField: Bool
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
     var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
     init(replies: [String], responseStatuses: [Int] = [], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
-         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
+         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil,
+         rejectUnknownCacheField: Bool = false) throws {
         self.replies = replies
         self.responseStatuses = responseStatuses
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
         self.holdAfter = holdAfter
         self.onRequest = onRequest
+        self.rejectUnknownCacheField = rejectUnknownCacheField
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -1509,10 +1512,16 @@ final class FakeCompletions: @unchecked Sendable {
             let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
             let specified = !responseStatuses.isEmpty
             let code = specified ? responseStatuses.removeFirst() : 200
-            let error = #"{"error":{"message":"synthetic rejection"}}"#
-            let payload = specified && code != 200 ? error : scripted
-            let status = specified ? (code == 200 ? "200 OK" : "\(code) Bad Request") : responseStatus
-            return (payload, status, specified && code != 200 ? "application/json" : "text/event-stream", bodies.count)
+            // Simulate strict OpenAI-compatible servers. The real Responses
+            // stream must never require a non-standard cache key to work.
+            let unsupported = rejectUnknownCacheField && json["prompt_cache_key"] != nil
+            let error = unsupported ? #"{"error":{"message":"Unknown field prompt_cache_key"}}"#
+                                    : #"{"error":{"message":"synthetic rejection"}}"#
+            let payload = unsupported || (specified && code != 200) ? error : scripted
+            let status = unsupported ? "400 Bad Request"
+                : (specified ? (code == 200 ? "200 OK" : "\(code) Bad Request") : responseStatus)
+            let errorResponse = unsupported || (specified && code != 200)
+            return (payload, status, errorResponse ? "application/json" : "text/event-stream", bodies.count)
         }
         onRequest?(json)
         let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(payload.utf8.count)\r\nConnection: close\r\n\r\n"
