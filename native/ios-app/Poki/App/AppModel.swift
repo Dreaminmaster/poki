@@ -1275,6 +1275,7 @@ final class AppModel {
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
+        for approval in approvals { ApprovalNotice.clear(approval.id) }
         core.stop()
         launcher.stop()
         if setup.loopback == .builtIn { tunnel.disconnect() }
@@ -2178,32 +2179,24 @@ final class AppModel {
                              caller: currentCaller, kind: .approval, detail: detail, why: approval.reason)
     }
 
-    /// Each request is answered by the owner on the Live Activity, or on a notification when there is none.
+    /// The island asks first. The notification is available if nobody answers before iOS folds it.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        // One surface per approval. With a Live Activity, its alert is the ask (Allow and Don't Allow
-        // on the expanded island and the Lock Screen card): a banner on top of it put two asks over the
-        // top of the screen, and a tap on the banner opens Poki in the middle of the task. The
-        // time-sensitive notification is for when there is no Live Activity to pop up: off in
-        // Settings, dismissed, or Poki turned on from the background, where iOS starts none.
-        if activity.isRunning {
-            log.add("approval", "asked on the Live Activity only, no notification")
-        } else {
-            ApprovalNotice.post(approval, caller: caller)
-        }
+        ApprovalNotice.post(approval, after: activity.isRunning ? ApprovalNotice.islandReminderDelay : 0)
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
+        ApprovalNotice.clear(approval.id)
         core.resolveApproval(id: approval.id, approved: approved)
     }
 
     /// Don’t Ask Again on an approval's card: this step goes through and approvals are off from now on.
     func stopAsking(_ approval: PendingApproval) {
         turnApprovalsOff()
-        core.resolveApproval(id: approval.id, approved: true)
+        resolve(approval, approved: true)
     }
 
     private func turnApprovalsOff() {
@@ -2274,16 +2267,17 @@ final class AppModel {
         for decision in ApprovalMailbox.drain() { decide(decision) }
     }
 
-    /// A decision from the Live Activity. The card shows the answer at once (Allowing, Denying).
-    /// Allow is tapped on the expanded Dynamic Island, which takes about a second to collapse; input
-    /// sent at once can land on it (iOS then opens Poki). So the Live Activity's decisions reach
-    /// PokiCore after a short pause, the app's own buttons at once.
+    /// Restore the progress display immediately. Let the island fold before PokiCore sends input
+    /// so the approved tap can land in the target app.
     func decide(_ decision: ApprovalDecision) {
         // Don’t Ask Again is the owner's word about all later steps too, so it counts for a card whose
         // approval has already ended.
         if decision.stopAsking { turnApprovalsOff() }
         // A tap on an approval that already ended (answered in the app, or timed out) does nothing.
         guard approvals.contains(where: { $0.id == decision.approvalID }) else { return }
+        guard activity.state.phase != .deciding || activity.state.approval?.id != decision.approvalID else { return }
+        ApprovalNotice.clear(decision.approvalID)
+        lastApprovalAnswered = Date()
         log.add("approval", "\(decision.approved ? "allowed" : "denied") \(decision.approvalID) on the Live Activity\(decision.stopAsking ? ", asking off" : "")")
         activity.update { state in
             guard state.approval?.id == decision.approvalID else { return }

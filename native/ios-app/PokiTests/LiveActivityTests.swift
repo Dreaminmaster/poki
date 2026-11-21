@@ -326,6 +326,24 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertTrue(state.face.compact.says("Allow?"))
     }
 
+    func testAnsweringAnIslandApprovalReturnsToProgressWithoutConfirmation() {
+        let controller = ActivityController()
+        controller.update { $0.phase = .working; $0.headline = "Working"; $0.app = "Messages" }
+        let normalProgress = controller.state.face
+
+        let approval = PendingApproval(id: "approval", app: "Messages", summary: "Send message",
+                                       reason: "sending a message", expires: .now.addingTimeInterval(60))
+        controller.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?" }
+        XCTAssertEqual(controller.state.face.bottom, .approval(id: approval.id))
+
+        controller.update { $0.phase = .deciding; $0.decision = true }
+        XCTAssertEqual(controller.state.face.compact, normalProgress.compact, "Answering shows normal progress")
+        XCTAssertEqual(controller.state.face.bottom, normalProgress.bottom, "Answering shows no confirmation card")
+
+        controller.update { $0.phase = .working; $0.approval = nil; $0.headline = "Continuing" }
+        XCTAssertNotEqual(controller.state.face.event, "Allowed", "Continuing shows no approval confirmation")
+    }
+
     private static var runningSession: RunningSession?
 
     private struct RunningSession {

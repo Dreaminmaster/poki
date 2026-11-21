@@ -103,8 +103,6 @@ struct ActivityFace: Hashable {
         /// segments. Stop beside it.
         case progress(line: Bool, stop: Bool)
         case approval(id: String)
-        /// The answer is on its way to PokiCore.
-        case deciding(String)
         /// "Continue" for a screen the agent handed to the person.
         case handoff(id: String)
         /// Open Poki to fix a stopped runner or pairing error.
@@ -257,7 +255,7 @@ extension PokiState {
         face.endsTalk = voice != nil && (phase == .idle || phase == .working) && !stale
         face.talkGlow = voice != nil && !stale
         face.shieldsTaps = !stale && ([.working, .approval, .deciding, .handoff].contains(phase) || voice != nil)
-        // A fresh event ("Started", "Allowed") shows beside the app's name for a few seconds. An app
+        // A fresh event ("Started", "Denied") shows beside the app's name for a few seconds. An app
         // switch is the app's name itself, already there; so is a word the face already says (Done
         // over a finished run, Paired over Paired), which said twice read as a fault (ESP-954).
         if let event, !phase.holdsApproval, event.kind != .app {
@@ -285,7 +283,7 @@ extension PokiState {
 
     private var baseFace: ActivityFace {
         switch phase {
-        case .working:
+        case .working, .deciding:
             let inApp = app.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
             let name = AppName.display(inApp) ?? (voice != nil ? String(activity: "Voice") : nil)
             return ActivityFace(
@@ -297,21 +295,9 @@ extension PokiState {
                 bottom: .progress(line: name != nil || plan != nil, stop: true),
                 thumbnail: hasThumbnail ? .large : .none,
                 compact: workingCompact(app: inApp))
-        case .approval, .deciding:
+        case .approval:
             guard let approval else { return quietFace }
             let question = approval.question
-            if phase == .deciding {
-                let allowed = decision == true
-                return ActivityFace(
-                    symbol: allowed ? "checkmark.circle.fill" : "xmark.circle.fill",
-                    bear: allowed ? .phone : .needs, size: .asking,
-                    meta: .none,
-                    content: question,
-                    bottom: .deciding(allowed ? String(activity: "Continuing") : String(activity: "Telling the agent")),
-                    offersStopAsking: approval.offersStopAsking,
-                    thumbnail: hasThumbnail ? .small : .none,
-                    compact: .symbol(allowed ? "checkmark" : "xmark", allowed ? .accent : .quiet))
-            }
             return ActivityFace(
                 symbol: "hand.raised.fill",
                 bear: .needs, size: .asking,
