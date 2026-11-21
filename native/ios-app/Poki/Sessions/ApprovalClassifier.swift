@@ -48,10 +48,34 @@ enum ApprovalClassifier {
     /// Approvals the model did not allow that went on to the owner's card.
     private(set) static var handed: Set<String> = []
 
-    static func route(_ approval: PendingApproval, voiceOn: Bool) -> Route {
+    /// Capture the source when the approval event arrives. Checking whether the owner's chat
+    /// happens to be running later is not proof that an MCP agent's request belongs to it.
+    enum Origin: Equatable {
+        case chat(String)
+        case voice(String)
+        case outsideAgent(String)
+        case unknown
+
+        var belongsToOwner: Bool {
+            switch self { case .chat, .voice: true; case .outsideAgent, .unknown: false }
+        }
+        var routingSessionID: String? {
+            switch self { case .chat(let id), .voice(let id): id; case .outsideAgent, .unknown: nil }
+        }
+    }
+
+    static func origin(voiceOn: Bool, outsideSession: String? = SessionStore.shared.activeSessionID) -> Origin {
+        if let outsideSession { return .outsideAgent(outsideSession) }
+        if let delegatedID = AskPoki.liveSessionID { return .outsideAgent(delegatedID) }
+        if let chat = AskPoki.chat, chat.running { return .chat(chat.sessionID) }
+        if voiceOn, let chat = AskPoki.chat { return .voice(chat.sessionID) }
+        return .unknown
+    }
+
+    static func route(_ approval: PendingApproval, voiceOn: Bool, origin suppliedOrigin: Origin? = nil) -> Route {
         if let known = routes[approval.id] { return known }
         let mode = Self.mode
-        let own = AskPoki.chat?.running == true || voiceOn
+        let own = (suppliedOrigin ?? origin(voiceOn: voiceOn)).belongsToOwner
         let reply = mode == .reply && own
         let route: Route
         if requiresOwner(approval) { route = .owner }
@@ -86,8 +110,9 @@ enum ApprovalClassifier {
     private(set) static var verdicts: [String: Verdict] = [:]
 
     static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine],
-                       resolveModel: (ModelProvider, String) -> Model? = { $0.piModel($1) }) async -> Verdict {
-        let verdict = await ask(approval, level: level, voice: voice, resolveModel: resolveModel)
+                       origin suppliedOrigin: Origin? = nil) async -> Verdict {
+        let verdict = await ask(approval, level: level, voice: voice,
+                                origin: suppliedOrigin ?? origin(voiceOn: !voice.isEmpty))
         verdicts[approval.id] = verdict
         if verdicts.count > 50 { verdicts.removeAll() }
         return verdict
@@ -136,14 +161,14 @@ enum ApprovalClassifier {
         return (text, complete)
     }
 
-    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine],
-                            resolveModel: (ModelProvider, String) -> Model?) async -> Verdict {
+    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine], origin: Origin) async -> Verdict {
+        guard origin.belongsToOwner else { return Verdict(allowed: false, reason: "outside approvals require owner confirmation") }
         let provider = ModelKeys.selectedProvider
         guard provider.wired, ModelKeys.key(provider) != nil || provider == .custom,
-              let model = resolveModel(provider, ModelKeys.selectedModel) else {
+              let model = provider.piModel(ModelKeys.selectedModel) else {
             return Verdict(allowed: false, reason: "no chat model to ask")
         }
-        var said = AskPoki.chat?.ownerContext ?? []
+        var said = origin.routingSessionID == AskPoki.chat?.sessionID ? (AskPoki.chat?.ownerContext ?? []) : []
         for line in voice.suffix(12) {
             switch line.role {
             case .you: said.append(.init(text: "Owner (live call): \(line.text)"))
@@ -165,7 +190,7 @@ enum ApprovalClassifier {
         """
         // A live chat's approval shares its session. External approvals use their own stable ID
         // rather than accidentally borrowing an unrelated chat's provider routing identity.
-        let approvalSessionID = AskPoki.chat?.running == true ? AskPoki.chat?.sessionID : nil
+        let approvalSessionID = origin.routingSessionID
         let loop = PiLoop(provider: provider, model: model,
                           sessionID: approvalSessionID ?? "approval-\(approval.id)", tools: []) { _ in
             .init(text: "No tools.", jpeg: nil, isError: true)
