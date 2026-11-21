@@ -366,7 +366,11 @@ final class Computer: @unchecked Sendable {
         var assigned = [Int?](repeating: nil, count: shown.count)
         var moved = Set<Int>()
         for (i, e) in shown.enumerated() where !e.fromPicture {
-            if let r = exact["\(e.key)@\(e.frame.described)"]?.first(where: { !used.contains($0) }) { assigned[i] = r; used.insert(r) }
+            if let r = exact["\(e.key)@\(e.frame.described)"]?.first(where: { !used.contains($0) }) {
+                assigned[i] = r
+                used.insert(r)
+                if let previous = refs[r], previous.isDisabled != e.isDisabled { moved.insert(r) }
+            }
         }
         // Only a countdown in its text ran on, in the same place: the same control, listed as changed
         // so the model reads the new text.
@@ -417,6 +421,7 @@ final class Computer: @unchecked Sendable {
             if tag.isEmpty, let size, coversScreenAlone(e, in: reading.elements, screen: size) {
                 tag = " (one element covering \(Int((e.frame.width * e.frame.height * 100 / (size.width * size.height)).rounded())) % of the screen with no parts in the tree: tap a point on the picture, not its number)"
             }
+            if e.isDisabled { tag += " [disabled]" }
             return "\(mark)\(ref) \(e.type) \"\(text)\" \(e.frame.described)\(tag)"
         }
         var body: [String] = []

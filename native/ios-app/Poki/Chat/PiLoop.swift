@@ -191,6 +191,21 @@ final class PiLoop {
                     guard case .toolResult(let result) = message else { return message }
                     return .toolResult(grants.validated(result, revision: revision))
                 }
+                let isPicture: (ContentBlock) -> Bool = { block in
+                    if case .image = block { return true }
+                    return false
+                }
+                var keptObservationPicture = false
+                for index in messages.indices.reversed() {
+                    guard case .toolResult(var result) = messages[index],
+                          result.toolName == "look" || result.toolName == "do" else { continue }
+                    if keptObservationPicture {
+                        result.content.removeAll(where: isPicture)
+                        messages[index] = .toolResult(result)
+                    } else {
+                        keptObservationPicture = result.content.contains(where: isPicture)
+                    }
+                }
                 if let index = messages.indices.first, case .system(var system) = messages[index],
                    case .text(let text) = system.content {
                     system.content = .text(Harness.historyInstructions(text, allowed: allowed))
