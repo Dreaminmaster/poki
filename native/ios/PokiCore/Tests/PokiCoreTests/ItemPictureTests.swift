@@ -6,6 +6,32 @@ import XCTest
 final class ItemPictureTests: XCTestCase {
     let screen = ScreenSize(width: 402, height: 874)
 
+    func testChatCanRetrieveAnEarlierScreenshotFromTheSameTask() async throws {
+        let (core, wda, host) = makeCore()
+        defer { withExtendedLifetime(host) {} }
+        let first = Data("original screenshot".utf8).base64EncodedString()
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(first)]) }
+        let before = await core.callTool("look", arguments: "{}", localTask: "compare")
+        let prefix = "screenshot_id: "
+        let line = try XCTUnwrap(before.text.split(separator: "\n").first { $0.hasPrefix(prefix) })
+        let id = String(line.dropFirst(prefix.count))
+        let args = JSON.object(["screenshot_id": .string(id)]).serialized()
+
+        let second = Data("next screenshot with a different size".utf8).base64EncodedString()
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(second)]) }
+        let after = await core.callTool("look", arguments: "{}", localTask: "compare")
+        XCTAssertNotNil(before.jpeg)
+        XCTAssertNotNil(after.jpeg)
+        XCTAssertNotEqual(before.jpeg, after.jpeg)
+        let retrieved = await core.callTool("get_screenshot", arguments: args, localTask: "compare")
+        XCTAssertFalse(retrieved.isError, retrieved.text)
+        XCTAssertEqual(retrieved.jpeg, before.jpeg)
+
+        let fromAnotherTask = await core.callTool("get_screenshot", arguments: args, localTask: "another task")
+        XCTAssertTrue(fromAnotherTask.isError)
+        XCTAssertNil(fromAnotherTask.jpeg)
+    }
+
     func testItemPicturesUseTheScreenThatSuppliedTheirCoordinates() async throws {
         let (core, wda, host) = makeCore()
         defer { withExtendedLifetime(host) {} }

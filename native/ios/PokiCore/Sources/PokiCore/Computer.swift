@@ -505,9 +505,9 @@ final class Computer: @unchecked Sendable {
         var itemPictureSource: ItemPictureSource?
         let pokiPane = reading.foreground?.pokiPane
         if !inWorkspace, reading.screenshotCompanion == nil, pokiPane != "left", pokiPane != "right",
-           let png = reading.png, jpeg != nil, let size {
+           let png = reading.png, let jpeg, let size {
             let images = reading.elements.filter { $0.type == "Image" && !$0.fromPicture }.map(\.frame)
-            itemPictureSource = ItemPictureSource(png: png, screen: size, images: images)
+            itemPictureSource = ItemPictureSource(png: png, jpeg: jpeg, screen: size, images: images)
         }
         // A screenshot helps the caller recover from a failed action without hiding the failure.
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,

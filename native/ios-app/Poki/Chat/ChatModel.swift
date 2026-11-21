@@ -1382,6 +1382,8 @@ final class ChatModel {
             let answer = scroll.count(refs, in: messageScreen, pane: messagePane)
             messageScroll = scroll
             return answer
+        case "get_screenshot":
+            return await app.runTool(call.name, arguments: call.arguments, localTask: localTask)
         case "finish_task":
             guard var result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)

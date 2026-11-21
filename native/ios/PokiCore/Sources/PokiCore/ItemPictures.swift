@@ -20,6 +20,7 @@ public struct ItemPictures: Sendable {
 
 struct ItemPictureSource: Sendable {
     let png: Data
+    let jpeg: Data
     let screen: ScreenSize
     let images: [Rect]
 }
@@ -43,6 +44,11 @@ struct ItemPictureSources {
         let id = UUID().uuidString.lowercased()
         recent.append(Capture(id: id, task: task, at: at, source: source))
         return id
+    }
+
+    func screenshot(_ id: String, task: String) -> Data? {
+        let at = now()
+        return recent.first { $0.id == id && $0.task == task && at - $0.at < Self.lifetime }?.source.jpeg
     }
 
     func pictures(_ requests: [String: ItemPictureRequest], task: String) -> [ItemPictures] {

@@ -719,6 +719,19 @@ public final class PokiCore: @unchecked Sendable {
     func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
+        if name == "get_screenshot", local, !byOwnersVoice {
+            guard let id = args["screenshot_id"]?.string, !id.isEmpty, let localTask else {
+                return ToolResult(text: "Use a screenshot_id from this task.", jpeg: nil, isError: true)
+            }
+            guard await gate.enter(waiting: 2) else {
+                return ToolResult(text: "Poki is busy. Try retrieving the screenshot again.", jpeg: nil, isError: true)
+            }
+            defer { gate.leave() }
+            guard !Task.isCancelled, let jpeg = itemPictureSources.screenshot(id, task: localTask) else {
+                return ToolResult(text: "This screenshot is no longer available in this task.", jpeg: nil, isError: true)
+            }
+            return ToolResult(text: "Earlier screenshot \(id). Use a current screen read for taps.", jpeg: jpeg, isError: false)
+        }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
             // Outside the gate: the app's tool makes its own look and do calls, one at a time as any.
             let answer = await tool.run(args.serialized(), session, answerBy.map { max(0, $0 - now() - 3) })

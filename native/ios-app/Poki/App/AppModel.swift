@@ -2125,6 +2125,7 @@ final class AppModel {
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
     func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
+        if name == "get_screenshot" { return await core.callTool(name, arguments: arguments, localTask: localTask) }
         if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded) }
         if !sessionOn {
             if !sessionStarting { startSession() }
