@@ -125,7 +125,10 @@ final class PiLoop {
                 }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
-            sessionId: sessionID,
+            // Built-in providers do not need a Poki routing ID in their HTTP
+            // payloads. Avoid PiSwift's implicit Responses cache metadata on
+            // every ordinary OpenAI request; custom OpenCode routing stays explicit.
+            sessionId: provider == .custom ? sessionID : nil,
             identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
