@@ -171,7 +171,7 @@ extension SetupStep {
         case .loopback: "Poki needs one helper app to reach this iPhone. Pick one, do its steps, and watch it turn green."
         case .pairing: "Gives Poki its own key to this iPhone. The key stays on this device."
         case .automation: SetupStep.inProcess ? "Allows Poki to control other apps." : "Allows Poki Runner to control other apps."
-        case .background: "Keeps Poki connected in the background and shows its activity on the Lock Screen."
+        case .background: "Keeps Poki running in the background."
         }
     }
 }
@@ -699,58 +699,63 @@ private struct PairingPage: View {
 
 // MARK: 6, background
 
-private struct BackgroundPage: View {
+/// Stay On in Background, one section: location set to Always, and Live Activities. Each row is its
+/// own button: Allow asks iOS, and once iOS answered anything short of Always, the Choose Always
+/// popup explains and opens Settings (the owner, Nov 21 2026).
+struct BackgroundPage: View {
     @Environment(AppModel.self) private var model
+    @State private var choosingAlways = false
 
     var body: some View {
+        let background = model.background
         Section {
-            LabeledContent {
-                if model.background.allowed { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-            } label: {
-                Label("Location", systemImage: "location")
+            Button(action: location) {
+                SettingsRow(title: "Location", symbol: "location", value: locationValue,
+                            warns: background.allowed && !background.always || background.denied,
+                            valueIsAction: background.authorization == .notDetermined,
+                            accessory: background.always ? .done : nil)
+                    .contentShape(.rect)
             }
-            if model.background.denied {
-                Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
-            } else if !model.background.allowed {
-                Button("Allow Location Access") { model.background.requestPermission() }
-            } else if !model.background.always {
-                // iOS shows its own Always Allow prompt once. After that the change is made in Settings.
-                if !model.background.askedAlways {
-                    Button("Change to Always Allow") { model.background.requestPermission() }
-                }
-                Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("background.location")
+            Button { if !model.activitiesEnabled { openSettings(model, for: .background) } } label: {
+                SettingsRow(title: "Live Activities", symbol: "platter.filled.bottom.iphone",
+                            value: model.activitiesEnabled ? nil : AppLocalization.text(LocalizedStringResource("Off")),
+                            warns: !model.activitiesEnabled, accessory: model.activitiesEnabled ? .done : nil)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("background.activities")
         } footer: {
             Group {
-                Text(model.background.always ? "Poki stays active in the background without the location indicator, and never records your location."
-                     : model.background.allowed ? "Poki keeps itself running with silent audio. Always Allow makes that sturdier, and iOS shows no location indicator for it. Poki never records your location."
-                     : model.background.denied ? "Location Services is off for Poki. It keeps itself running with silent audio, which iOS may stop during calls or other audio."
-                     : "iOS needs a background mode to keep apps running. Poki uses lowest-accuracy location with Always Allow, which shows no location indicator, and never records your location.")
+                Text("Poki never records your location.")
             }
             .settingsFooter()
         }
-        Section {
-            LabeledContent {
-                if model.activitiesEnabled { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                else { Text("Off").foregroundStyle(.orange) }
-            } label: {
-                Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
-            }
-            if !model.activitiesEnabled {
-                Button("Open Settings", systemImage: "gear") { openSettings(model, for: .background) }
-            }
-        } footer: {
-            Group {
-                Text(model.activitiesEnabled ? "Poki shows steps, pairing codes and approvals on the Lock Screen." : "Turn them on to see the agent’s steps and approve sensitive actions.")
-            }
-            .settingsFooter()
+        .onChange(of: background.endedShortOfAlways) { _, _ in
+            if !model.background.always { choosingAlways = true }
         }
-        Section { EmptyView() } footer: {
-            Group {
-                Text(SetupStep.inProcess ? "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it." : "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it.")
-            }
-            .settingsFooter()
+        .alert("Choose Always", isPresented: $choosingAlways) {
+            Button("Open Settings") { openSettings(model, for: .background) }
+            Button("Not Now", role: .cancel) {}
+        } message: {
+            Text("Poki counts this as set up only with Always, and never records your location.")
         }
+    }
+
+    private var locationValue: String? {
+        let background = model.background
+        if background.always { return nil }
+        if background.authorization == .notDetermined { return AppLocalization.text(LocalizedStringResource("Allow")) }
+        if background.denied { return AppLocalization.text(LocalizedStringResource("Off")) }
+        return AppLocalization.text(LocalizedStringResource("While Using"))
+    }
+
+    /// Before iOS asked, the request; after, the popup that sends the owner to Settings.
+    private func location() {
+        let background = model.background
+        if background.always { return }
+        if background.authorization == .notDetermined { background.requestPermission() } else { choosingAlways = true }
     }
 }
 

@@ -2685,7 +2685,8 @@ final class AppModel {
         // The disk image downloads by itself (and is checked again when Poki turns on): it does not hold the step open.
         case .pairing: pairingPath != nil && pairingTrouble == nil
         case .automation: setup.uiAutomation
-        case .background: background.allowed
+        // Only Always keeps Poki up without the location indicator: While Using is not set up.
+        case .background: background.always
         }
     }
 

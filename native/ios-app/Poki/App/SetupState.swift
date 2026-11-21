@@ -156,7 +156,7 @@ enum SetupStep: String, CaseIterable, Identifiable {
         case .loopback: "In Poki's Setup, enable the local connection or choose an external connection."
         case .pairing: Self.onDevicePairing ? "Settings > Privacy & Security > Developer Mode > Pair with Poki, then type the code shown here." : "Pair from Poki Setup on your computer, then send the pairing file to this iPhone."
         case .automation: "Settings > Developer > Enable UI Automation."
-        case .background: "Allow location While Using the App, and keep Live Activities on."
+        case .background: "Set location to Always, and keep Live Activities on."
         }
     }
 }

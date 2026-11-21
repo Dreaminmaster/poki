@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreLocation
 import Foundation
+import UIKit
 
 /// Keeps Poki running in the background while it is on, so the relay connection and the launcher stay
 /// up. Silent audio does it; location is the backup only when it is needed: while a pairing waits in
@@ -40,31 +41,61 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     var denied: Bool { authorization == .denied || authorization == .restricted }
 
     /// Always Allow lets Poki stay up without the location pill. iOS asks for While Using first and
-    /// offers the upgrade on the second request.
+    /// offers the upgrade on the second request. Setup counts the step as done only with Always.
     var always: Bool { authorization == .authorizedAlways }
 
     /// iOS shows its "Change to Always Allow" prompt once for an app, ever. After that only Settings
-    /// can change it, so Setup sends the owner there and does not offer a button that does nothing.
+    /// can change it. Asking once also puts Always among the choices in Settings.
     private(set) var askedAlways = UserDefaults.standard.bool(forKey: "background.askedAlways")
     /// Set by Setup's first request, so the Always Allow prompt follows While Using at once and the
     /// owner answers both in one place, one time.
     private var upgradeAfterFirstAnswer = false
+    /// The Always Allow prompt is up, or was answered and the answer is not read yet.
+    private var awaitingAlways = false
+    /// Counts each time a request ended short of Always (While Using, Don't Allow, or the upgrade
+    /// turned down), and each time Settings took Always away: Setup shows its Choose Always popup then.
+    private(set) var endedShortOfAlways = 0
+    private var activeWatch: NSObjectProtocol?
 
     /// Setup's button, and nothing else, asks for location: no prompt comes up by itself later.
     func requestPermission() {
         if authorization == .notDetermined {
             upgradeAfterFirstAnswer = true
             manager.requestWhenInUseAuthorization()
-        } else {
-            askAlways()
+        } else if !askAlways() {
+            endedShortOfAlways += 1
         }
     }
 
-    private func askAlways() {
-        guard authorization == .authorizedWhenInUse, !askedAlways else { return }
+    /// Asks for the upgrade when iOS still offers its prompt. False when it does not.
+    @discardableResult private func askAlways() -> Bool {
+        guard authorization == .authorizedWhenInUse, !askedAlways else { return false }
         askedAlways = true
         UserDefaults.standard.set(true, forKey: "background.askedAlways")
+        awaitingAlways = true
+        watchAnswer()
         manager.requestAlwaysAuthorization()
+        // iOS may not show the prompt at all; then nothing makes Poki inactive and active again.
+        Task { try? await Task.sleep(for: .seconds(1.5)); readAlwaysAnswer() }
+        return true
+    }
+
+    /// The Always Allow prompt makes Poki inactive while it is up. Kept for the life of the keeper.
+    private func watchAnswer() {
+        guard activeWatch == nil else { return }
+        activeWatch = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(0.8))
+                self?.readAlwaysAnswer()
+            }
+        }
+    }
+
+    /// The upgrade prompt is gone: Keep Only While Using leaves the status as it was, with no callback.
+    private func readAlwaysAnswer() {
+        guard awaitingAlways, UIApplication.shared.applicationState == .active else { return }
+        awaitingAlways = false
+        if !always { endedShortOfAlways += 1 }
     }
 
     /// Who wants Poki kept running: the session (Poki is on) and Screen History, each on its own.
@@ -247,11 +278,17 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         Task { @MainActor in
+            let before = self.authorization
             self.authorization = status
             // Setup's first answer was While Using: iOS's Always Allow prompt follows at once.
             if self.upgradeAfterFirstAnswer, status != .notDetermined {
                 self.upgradeAfterFirstAnswer = false
-                self.askAlways()
+                if !self.askAlways(), status != .authorizedAlways { self.endedShortOfAlways += 1 }
+            } else if self.awaitingAlways, status == .authorizedAlways {
+                self.awaitingAlways = false
+            } else if before == .authorizedAlways, status != .authorizedAlways, status != .notDetermined {
+                // Always taken away in Settings.
+                self.endedShortOfAlways += 1
             }
             // Always Allow taken away while location was running: it stops, so no indicator shows.
             if !self.always { self.stopLocation() }

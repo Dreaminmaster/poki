@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Set location to Always, and keep Live Activities on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将位置设为“始终”，并保持实时活动开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將位置設為「永遠」，並保持即時動態開啟。"
+          }
+        }
+      }
+    },
     "%lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {

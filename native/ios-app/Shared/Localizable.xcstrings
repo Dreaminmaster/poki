@@ -1,6 +1,118 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Allow Location" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许定位"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許定位"
+          }
+        }
+      }
+    },
+    "While Using" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 App 期间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 App 期間"
+          }
+        }
+      }
+    },
+    "Choose Always" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择“始终”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇「永遠」"
+          }
+        }
+      }
+    },
+    "Poki counts this as set up only with Always, and never records your location." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有选择“始终”，Poki 才算配置完成。Poki 从不记录你的位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有選擇「永遠」，Poki 才算配置完成。Poki 從不記錄你的位置。"
+          }
+        }
+      }
+    },
+    "Poki never records your location." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 从不记录你的位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 從不記錄你的位置。"
+          }
+        }
+      }
+    },
+    "Keeps Poki running in the background." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Poki 在后台保持运行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Poki 在背景保持執行。"
+          }
+        }
+      }
+    },
+    "Set location to Always, and keep Live Activities on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将位置设为“始终”，并保持实时活动开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將位置設為「永遠」，並保持即時動態開啟。"
+          }
+        }
+      }
+    },
     "1. Pick One App" : {
       "localizations" : {
         "zh-Hans" : {

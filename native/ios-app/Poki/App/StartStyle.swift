@@ -313,6 +313,15 @@ struct StartFlowPage: View {
         let checkedByHand = [SetupStep.runner, .developerMode, .automation].contains(step)
         if done {
             StartButtons(primary: "Continue", action: goOn)
+        } else if step == .background {
+            // One button: iOS's request first, Settings once iOS answered short of Always.
+            if model.background.authorization == .notDetermined {
+                StartButtons(primary: "Allow Location", action: { model.background.requestPermission() },
+                             secondary: "Set Up Later", secondaryAction: goOn)
+            } else {
+                StartButtons(primary: "Open Settings", action: { openSettings(model, for: step) },
+                             secondary: "Set Up Later", secondaryAction: goOn)
+            }
         } else if checkedByHand {
             StartButtons(primary: "Open Settings", action: { openSettings(model, for: step) },
                          secondary: "Set Up Later", secondaryAction: goOn)
