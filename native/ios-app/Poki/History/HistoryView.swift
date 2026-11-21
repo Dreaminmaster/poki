@@ -397,7 +397,7 @@ struct LoopbackShortcutLastRun: View {
     @ObservedObject private var reconnect = HistoryReconnect.shared
 
     private var lastRun: String {
-        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Never")) }
+        guard let at = reconnect.lastAt else { return AppLocalization.text(LocalizedStringResource("Not Yet")) }
         if !reconnect.lastWorked { return AppLocalization.text(LocalizedStringResource("Did Not Connect")) }
         return at.formatted(.relative(presentation: .named))
     }

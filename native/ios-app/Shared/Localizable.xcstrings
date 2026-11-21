@@ -518,13 +518,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选“任意网络”，再选这台 iPhone 离开 Wi-Fi 时的选项。"
+            "value" : "选“任意网络”，再选这台 iPhone 离开 Wi-⁠Fi 时的选项。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選「任何網路」，再選這台 iPhone 離開 Wi-Fi 時的選項。"
+            "value" : "選「任何網路」，再選這台 iPhone 離開 Wi-⁠Fi 時的選項。"
           }
         }
       }
@@ -29428,13 +29428,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "离开 Wi-Fi 后继续工作。下次开启 Poki 时生效。"
+            "value" : "离开 Wi-⁠Fi 后继续工作。下次开启 Poki 时生效。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "離開 Wi-Fi 後繼續運作。下次開啟 Poki 時生效。"
+            "value" : "離開 Wi-⁠Fi 後繼續運作。下次開啟 Poki 時生效。"
           }
         }
       }
@@ -45187,13 +45187,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki Loopback 快捷指令"
+            "value" : "Poki Loopback 快⁠捷⁠指⁠令"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki Loopback 捷徑"
+            "value" : "Poki Loopback 捷⁠徑"
           }
         }
       }
@@ -46304,6 +46304,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "這台 iPhone 上的小模型負責快速判斷並寫螢幕歷史筆記，它讀到的內容不會離開手機。"
+          }
+        }
+      }
+    },
+    "Not Yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有"
           }
         }
       }
