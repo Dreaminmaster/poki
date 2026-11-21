@@ -14,8 +14,8 @@ struct LaunchCurtain: UIViewRepresentable {
     var handsOver = false
     var done: () -> Void
 
-    /// The storyboard's pictures, by their tags in LaunchScreen.storyboard.
-    enum Part: Int { case backdrop = 1, word, bear }
+    /// The storyboard's pictures, by their tags in LaunchScreen.storyboard, and the paper under them.
+    enum Part: Int { case backdrop = 1, word, bear, ground }
 
     func makeUIView(context: Context) -> Stage {
         let stage = Stage(handsOver: handsOver, done: done)
@@ -64,7 +64,7 @@ struct LaunchCurtain: UIViewRepresentable {
                 fade.startAnimation(afterDelay: LaunchMotion.hold)
                 return
             }
-            let bear = part(.bear), word = part(.word), backdrop = part(.backdrop)
+            let bear = part(.bear), word = part(.word), backdrop = part(.backdrop), ground = part(.ground)
             let sink = UIViewPropertyAnimator(duration: LaunchMotion.sink, curve: .easeIn) {
                 bear?.transform = CGAffineTransform(translationX: 0, y: (bear?.bounds.height ?? 0) + 8)
             }
@@ -74,6 +74,7 @@ struct LaunchCurtain: UIViewRepresentable {
             }
             let reveal = UIViewPropertyAnimator(duration: LaunchMotion.reveal, curve: .easeInOut) {
                 backdrop?.alpha = 0
+                ground?.alpha = 0
                 self.backgroundColor = .clear
                 self.subviews.first?.backgroundColor = .clear
             }

@@ -70,14 +70,37 @@ bears() {
 }
 bears "$APP"
 
-# SplashBoard can retain an older asset catalogue after an update. The launch storyboard reads
-# standalone PNGs so its pictures are available before the app loads its own catalogue.
+# The launch screen (Poki/LaunchArt/README.md). Layered so the worst case is still the right ground:
+# - the storyboard's own ground is a system colour, which iOS draws in the right appearance with no
+#   asset catalogue at all;
+# - over it, the paper (LaunchGround), the light and the word come from the catalogue with a Dark
+#   Mode version each, under names that carry the pictures' version. SplashBoard has drawn a launch
+#   screen from an app's older catalogue after an update (#536): a versioned name it does not find
+#   leaves the ground, never an older or a light picture;
+# - the bear, the same in both appearances, stays a loose PNG, at 2x.
+# The loose word, dark word and light stay for the welcome's hello and the tests.
 LAUNCH="$HERE/Poki/LaunchArt"
 LAUNCH_IMAGES="$HERE/Poki/LaunchImages"
+rm -rf "$LAUNCH_IMAGES"
 mkdir -p "$LAUNCH_IMAGES"
 cp "$LAUNCH/LaunchBackdrop.png" "$LAUNCH_IMAGES/LaunchBackdrop.png"
 swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/AlloRounded-Black.ttf" "$LAUNCH/LaunchBear.png" \
-  "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@3x.png" "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png"
+  "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@2x.png" "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png"
+LAUNCH_GROUND='"red":"0xF5","green":"0xF7","blue":"0xFA"'
+LAUNCH_GROUND_DARK='"red":"0x05","green":"0x07","blue":"0x0D"'
+LAUNCH_VERSION="$(cat "$LAUNCH/LaunchBackdrop.png" "$LAUNCH/LaunchBackdropDark.png" "$LAUNCH_IMAGES/LaunchWordmark@3x.png" \
+  "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png" <(echo "$LAUNCH_GROUND $LAUNCH_GROUND_DARK") | shasum | cut -c1-10)"
+dark='"appearances":[{"appearance":"luminosity","value":"dark"}],'
+mkdir -p "$APP/LaunchBackdrop-$LAUNCH_VERSION.imageset" "$APP/LaunchWord-$LAUNCH_VERSION.imageset" "$APP/LaunchGround-$LAUNCH_VERSION.colorset"
+cp "$LAUNCH/LaunchBackdrop.png" "$APP/LaunchBackdrop-$LAUNCH_VERSION.imageset/light.png"
+cp "$LAUNCH/LaunchBackdropDark.png" "$APP/LaunchBackdrop-$LAUNCH_VERSION.imageset/dark.png"
+echo "{\"images\":[{\"filename\":\"light.png\",\"idiom\":\"universal\",\"scale\":\"1x\"},{$dark\"filename\":\"dark.png\",\"idiom\":\"universal\",\"scale\":\"1x\"}],\"info\":{\"version\":1,\"author\":\"poki\"}}" > "$APP/LaunchBackdrop-$LAUNCH_VERSION.imageset/Contents.json"
+cp "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$APP/LaunchWord-$LAUNCH_VERSION.imageset/light@3x.png"
+cp "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png" "$APP/LaunchWord-$LAUNCH_VERSION.imageset/dark@3x.png"
+echo "{\"images\":[{\"filename\":\"light@3x.png\",\"idiom\":\"universal\",\"scale\":\"3x\"},{$dark\"filename\":\"dark@3x.png\",\"idiom\":\"universal\",\"scale\":\"3x\"}],\"info\":{\"version\":1,\"author\":\"poki\"}}" > "$APP/LaunchWord-$LAUNCH_VERSION.imageset/Contents.json"
+echo "{\"colors\":[{\"idiom\":\"universal\",\"color\":{\"color-space\":\"srgb\",\"components\":{$LAUNCH_GROUND,\"alpha\":\"1.000\"}}},{$dark\"idiom\":\"universal\",\"color\":{\"color-space\":\"srgb\",\"components\":{$LAUNCH_GROUND_DARK,\"alpha\":\"1.000\"}}}],\"info\":{\"version\":1,\"author\":\"poki\"}}" > "$APP/LaunchGround-$LAUNCH_VERSION.colorset/Contents.json"
+sed "s/__V__/$LAUNCH_VERSION/g" "$LAUNCH/LaunchScreen.storyboard" > "$HERE/Poki/LaunchScreen.storyboard"
+echo "launch pictures version $LAUNCH_VERSION"
 
 WIDGET="$HERE/PokiWidgets/Assets.xcassets"
 catalog "$WIDGET"

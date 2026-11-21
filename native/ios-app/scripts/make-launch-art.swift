@@ -1,4 +1,4 @@
-// Draws the launch screen's word and bear at 3x (see Poki/LaunchArt/README.md) and writes two PNGs.
+// Draws the launch screen's word at 3x and its bear at 2x (see Poki/LaunchArt/README.md) and writes two PNGs.
 //   swift make-launch-art.swift <AlloRounded-Black.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Allo or a shadow itself: both are
 // drawn here, at build time, from the design's values.
@@ -38,7 +38,8 @@ enum Bear {
   static let margin: CGFloat = 45
 }
 
-let scale: CGFloat = 3
+/// Pixels a point: the word at 3x, where its edges show; the bear at 2x (below).
+var scale: CGFloat = 3
 let args = CommandLine.arguments
 guard args.count == 6 else {
   FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-Black.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
@@ -88,7 +89,11 @@ do {
   }
 }
 
-// The bear with its shadow baked in, the bear's bottom on the picture's bottom.
+// The bear with its shadow baked in, the bear's bottom on the picture's bottom, at 2x: its cut-out is
+// 1024 pixels wide, fewer than the 1254 a 418-point bear has at 3x, so 3x added pixels and no detail,
+// and made it the only launch picture over 4 MiB decoded (#530). iOS draws the launch screen before
+// Poki runs, with less room than an app.
+scale = 2
 do {
   guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[2]) as CFURL, nil),
         let bear = CGImageSourceCreateImageAtIndex(source, 0, nil) else { FileHandle.standardError.write("cannot read \(args[2])\n".data(using: .utf8)!); exit(1) }

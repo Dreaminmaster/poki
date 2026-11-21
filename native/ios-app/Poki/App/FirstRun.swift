@@ -310,9 +310,9 @@ struct LaunchArt {
             }
             (art.word, art.wordPicture) = picture(.word)
             (art.bear, art.bearPicture) = picture(.bear)
-            // The storyboard's pictures are loose PNGs (#536), so they have no Dark Mode version of
-            // their own. The hello draws the word over the dark home page, so it takes the dark word
-            // that make-launch-art.swift draws beside the light one, at the same size and place.
+            // The storyboard's word has its own Dark Mode picture (Poki/LaunchArt/README.md); should the
+            // catalogue not have it, the hello still draws the dark word make-launch-art.swift writes
+            // beside the light one, at the same size and place.
             if dark, let file = Bundle.main.path(forResource: "LaunchWordmarkDark@3x", ofType: "png"),
                let darkWord = UIImage(contentsOfFile: file) {
                 art.wordPicture = darkWord
