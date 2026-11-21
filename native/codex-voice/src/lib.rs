@@ -4,6 +4,7 @@ use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use codex_app_server::in_process::{self, InProcessServerEvent, InProcessStartArgs};
 use codex_app_server_protocol::{
     ClientInfo, ClientRequest, InitializeCapabilities, InitializeParams, JSONRPCErrorError,
@@ -38,17 +39,25 @@ pub unsafe extern "C" fn poki_codex_start(home: *const c_char, emit: Event) -> b
         .name("poki-codex-voice".into())
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            if let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+            let stage = if let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
                 .build()
             {
-                let _ = runtime.block_on(serve(home, incoming, emit));
-            }
+                runtime
+                    .block_on(serve(home, incoming, emit))
+                    .err()
+                    .map(|error| error.to_string())
+            } else {
+                Some("async runtime".to_owned())
+            };
             if let Ok(mut slot) = REQUESTS.lock() {
                 *slot = None;
             }
-            publish(emit, json!({"method": "poki/runtime/closed"}));
+            publish(
+                emit,
+                json!({"method": "poki/runtime/closed", "params": {"stage": stage}}),
+            );
         });
     if worker.is_err() {
         return false;
@@ -77,7 +86,7 @@ async fn serve(
     mut incoming: mpsc::Receiver<Value>,
     emit: Event,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(&home)?;
+    std::fs::create_dir_all(&home).context("app support directory")?;
     let overrides = vec![
         (
             "cli_auth_credentials_store".into(),
@@ -93,15 +102,12 @@ async fn serve(
         .without_project_context()
         .cli_overrides(overrides.clone())
         .build()
-        .await?;
+        .await
+        .context("Codex configuration")?;
     let network = in_process::EmbeddedNetworkPolicy::load(&loader).await;
     network.activate(&mut config);
-    let environments = EnvironmentManager::from_codex_home(
-        &home,
-        None,
-        network.bind(config.http_client_factory()),
-    )
-    .await?;
+    let environments =
+        EnvironmentManager::without_environments(network.bind(config.http_client_factory()));
     let state_db = codex_core::init_state_db(&config).await;
     let mut client = in_process::start(InProcessStartArgs {
         arg0_paths: Default::default(),
@@ -132,7 +138,8 @@ async fn serve(
         },
         channel_capacity: 64,
     })
-    .await?;
+    .await
+    .context("app server initialization")?;
     let sender = client.sender();
 
     loop {
@@ -192,7 +199,7 @@ async fn serve(
             },
         }
     }
-    client.shutdown().await?;
+    client.shutdown().await.context("app server shutdown")?;
     Ok(())
 }
 

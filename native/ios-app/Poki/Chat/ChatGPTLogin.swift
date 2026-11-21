@@ -13,6 +13,16 @@ import WebKit
 ///
 /// The tokens go into the keychain as one JSON item and are never printed or logged.
 enum ChatGPTAccount {
+    @MainActor private static var renewal: (stored: String, task: Task<String?, Never>)?
+
+    struct SignInRequired: LocalizedError {
+        var errorDescription: String? { ChatGPTAccount.signInAgain }
+    }
+
+    static var signInAgain: String {
+        AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT again. Open Settings, then Models."))
+    }
+
     static func decode(_ stored: String) -> OAuthCredentials? {
         try? JSONDecoder().decode(OAuthCredentials.self, from: Data(stored.utf8))
     }
@@ -26,6 +36,40 @@ enum ChatGPTAccount {
 
     static func signOut() throws {
         try ModelKeys.removeChatGPTSignIn()
+    }
+
+    @MainActor
+    static func signOutIncludingVoice() async throws {
+        try await CodexVoice.shared.signOut()
+        try signOut()
+    }
+
+    @MainActor
+    static func accessToken() async -> String? {
+        guard let stored = ModelKeys.key(.chatgpt), let credential = decode(stored),
+              credential.clientId?.isEmpty == false else { return nil }
+        let now = Date().timeIntervalSince1970 * 1000
+        if credential.expires > now + 60_000 || credential.refresh.isEmpty && credential.expires > now {
+            return credential.access
+        }
+        guard !credential.refresh.isEmpty else { return nil }
+
+        // A new chat asks for a title and a reply at the same time. Both need the same rotated token.
+        let task: Task<String?, Never>
+        if let renewal, renewal.stored == stored {
+            task = renewal.task
+        } else {
+            task = Task {
+                defer { if renewal?.stored == stored { renewal = nil } }
+                guard let fresh = try? await refreshOpenAIChatGPTToken(credential),
+                      ModelKeys.key(.chatgpt) == stored else { return nil }
+                do { try save(fresh); return fresh.access }
+                catch { return nil }
+            }
+            renewal = (stored, task)
+        }
+        guard let access = await task.value, ModelKeys.key(.chatgpt).flatMap(decode)?.access == access else { return nil }
+        return access
     }
 
     /// This installation's id for OpenAI's registration (`ext_agent_host_id`), made once.
@@ -176,8 +220,16 @@ struct ChatGPTSignIn: View {
     }
 
     private func signOut() {
-        do { try ChatGPTAccount.signOut(); dismiss() }
-        catch { problem = AppLocalization.text("Could not sign out of ChatGPT. Try again.") }
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                try await ChatGPTAccount.signOutIncludingVoice()
+                dismiss()
+            } catch {
+                problem = AppLocalization.text("Could not sign out of ChatGPT. Try again.")
+            }
+        }
     }
 
     private func done(_ credentials: OAuthCredentials) {

@@ -220,6 +220,7 @@ private struct AccountDetail: View {
     @State private var editing = false
     @State private var signingIn = false
     @State private var signOutFailed = false
+    @State private var signingOut = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
@@ -259,18 +260,25 @@ private struct AccountDetail: View {
             Section {
                 Button(provider.signsIn ? "Sign Out" : "Delete Account", role: .destructive) {
                     if provider.signsIn {
-                        do { try ChatGPTAccount.signOut() }
-                        catch { signOutFailed = true; return }
+                        signingOut = true
+                        Task {
+                            defer { signingOut = false }
+                            do {
+                                try await ChatGPTAccount.signOutIncludingVoice()
+                                accountRemoved()
+                            } catch {
+                                signOutFailed = true
+                            }
+                        }
+                        return
                     } else if provider == .custom, let current = CustomProviders.current {
                         CustomProviders.remove(current.id)
                     } else {
                         ModelKeys.remove(provider)
                     }
-                    if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
-                        ModelKeys.selectedProvider = other
-                    }
-                    dismiss()
+                    accountRemoved()
                 }
+                .disabled(signingOut)
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -285,6 +293,14 @@ private struct AccountDetail: View {
         .alert("Could not sign out of ChatGPT. Try again.", isPresented: $signOutFailed) {
             Button("OK", role: .cancel) {}
         }
+    }
+
+    private func accountRemoved() {
+        if ModelKeys.selectedProvider == provider,
+           let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
+            ModelKeys.selectedProvider = other
+        }
+        dismiss()
     }
 }
 

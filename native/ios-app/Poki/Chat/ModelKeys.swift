@@ -393,16 +393,7 @@ enum ModelCredential {
             let custom = piProvider.flatMap { CustomProviders.provider(piProvider: $0) } ?? CustomProviders.current
             return custom.flatMap { CustomProviders.key($0.id) } ?? "none"
         }
-        guard let stored = ModelKeys.key(provider) else { return nil }
-        guard provider.signsIn else { return stored }
-        // A sign-in from OpenAI's open-source flow carries its issued client id; an older Codex-client
-        // sign-in does not, and has to be done again.
-        guard var credentials = ChatGPTAccount.decode(stored), credentials.clientId?.isEmpty == false else { return nil }
-        if credentials.expires < Date().timeIntervalSince1970 * 1000 + 60_000, !credentials.refresh.isEmpty {
-            guard let fresh = try? await refreshOpenAIChatGPTToken(credentials) else { return nil }
-            credentials = fresh
-            try? ChatGPTAccount.save(credentials)
-        }
-        return credentials.access
+        if provider.signsIn { return await ChatGPTAccount.accessToken() }
+        return ModelKeys.key(provider)
     }
 }

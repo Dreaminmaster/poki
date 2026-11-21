@@ -46,6 +46,8 @@ final class CodexVoice {
         URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
     }
 
+    private var homePath: String { home.path(percentEncoded: false) }
+
     func prepare(onEvent: @escaping (String, JSON) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
         let generation = UUID()
         active = generation
@@ -53,7 +55,7 @@ final class CodexVoice {
         self.onTool = onTool
         try await requireAccount(generation)
         let answer = try await request("thread/start", [
-            "cwd": home.path(), "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true,
+            "cwd": homePath, "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true,
             "dynamicTools": VoiceDirect.codexTools,
         ])
         try check(generation)
@@ -94,6 +96,8 @@ final class CodexVoice {
     }
 
     func signOut() async throws {
+        guard running || FileManager.default.fileExists(atPath: homePath) else { return }
+        onEvent?("thread/realtime/closed", [:])
         stop()
         try await request("account/logout", [:])
     }
@@ -132,8 +136,13 @@ final class CodexVoice {
         try startRuntime()
         nextRequest += 1
         let id = nextRequest
-        return try await awaitMessage("rpc:\(id)", timeout: .seconds(60)) {
-            self.send(["id": id, "method": method, "params": params])
+        do {
+            return try await awaitMessage("rpc:\(id)", timeout: .seconds(60)) {
+                self.send(["id": id, "method": method, "params": params])
+            }
+        } catch {
+            AppLog.shared.add("voice", "Codex request failed: \(method), request \(id)")
+            throw error
         }
     }
 
@@ -165,7 +174,7 @@ final class CodexVoice {
 
     private func startRuntime() throws {
         if running { return }
-        running = home.path().withCString { path in
+        running = homePath.withCString { path in
             poki_codex_start(path) { value in
                 guard let value else { return }
                 let text = String(cString: value)
@@ -187,6 +196,9 @@ final class CodexVoice {
             if let result = message["result"] as? JSON {
                 finish("rpc:\(id)", .success(result))
             } else {
+                if pending["rpc:\(id)"] != nil, let code = (message["error"] as? JSON)?["code"] as? Int {
+                    AppLog.shared.add("voice", "Codex request \(id) returned error \(code)")
+                }
                 finish("rpc:\(id)", .failure(Failure.unavailable))
             }
             return
@@ -195,6 +207,9 @@ final class CodexVoice {
         let params = message["params"] as? JSON ?? [:]
         if method == "poki/runtime/closed" {
             running = false
+            if let stage = params["stage"] as? String {
+                AppLog.shared.add("voice", "Codex runtime stopped at \(stage)")
+            }
             for key in Array(pending.keys) { finish(key, .failure(Failure.unavailable)) }
             onEvent?("thread/realtime/error", [:])
             return
