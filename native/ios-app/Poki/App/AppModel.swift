@@ -2123,9 +2123,9 @@ final class AppModel {
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
-    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
-        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded) }
+        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }
@@ -2138,7 +2138,7 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded)
     }
 
     func itemPictures(for card: ResultCard, localTask: String) async -> [String: Data]? {

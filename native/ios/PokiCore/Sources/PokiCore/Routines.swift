@@ -971,9 +971,11 @@ public final class SkillStore: @unchecked Sendable {
         return TaskBrief(text: (noteLines + skillLines).joined(separator: "\n"), notes: includedNotes)
     }
 
-    func appMemoryBrief(for app: String) -> TaskBrief {
+    func appMemoryBrief(for app: String, excluding: Set<String> = []) -> TaskBrief {
         let notes = withFile { file in
-            Array(file.notes.reversed().lazy.filter { $0.app?.lowercased() == app }.prefix(8))
+            Array(file.notes.reversed().lazy.filter {
+                $0.app?.lowercased() == app && !excluding.contains($0.id)
+            }.prefix(8))
         }
         let lines = notes.map { "- [\($0.id)] \($0.text)" }
         let header = "Saved memories for this app. Apply relevant memories:"

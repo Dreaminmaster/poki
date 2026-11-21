@@ -36,8 +36,104 @@ enum Harness {
     If you need clarification at any point during a counted scroll in the owner's chat, call wait_for_counted_scroll_reply with your question. That pauses the task. When the owner replies, take a fresh read and recheck the messages before scrolling again.
     """
 
+    /// Apps with dedicated result card layouts (`ResultCardLooks`).
+    enum DedicatedCardApp: CaseIterable, Hashable, Sendable {
+        case railway12306, ctrip, taobao, dianping, uberEats
+
+        static func matching(bundleID: String) -> DedicatedCardApp? {
+            switch bundleID.lowercased() {
+            case "cn.12306.rails12306": .railway12306
+            case "ctrip.com": .ctrip
+            case "com.taobao.taobao4iphone": .taobao
+            case "com.dianping.dpscope": .dianping
+            case "com.ubercab.ubereats": .uberEats
+            default: nil
+            }
+        }
+    }
+
+    /// Which result card schemas `finish_task` exposes for a task.
+    enum ResultCardMode: Equatable, Hashable, Sendable {
+        /// Omit `finish_task.card` completely (delegated tasks, system utility apps, explicit-URL web tasks).
+        case none
+        /// Expose generic `list` plus the dedicated layouts for `apps`.
+        case scoped(Set<DedicatedCardApp>)
+
+        static let all = ResultCardMode.scoped(Set(DedicatedCardApp.allCases))
+        static let genericList = ResultCardMode.scoped([])
+
+        /// Monotonically widens the mode when a task launches or reads an app during execution.
+        /// Never shrinks mid-task so the provider's prompt-cache prefix stays stable.
+        func including(app bundleID: String) -> ResultCardMode {
+            let normalized = bundleID.lowercased()
+            if normalized.isEmpty || normalized == "com.apple.springboard" || Harness.nonCardAppBundleIDs.contains(normalized) {
+                return self
+            }
+            if let dedicated = DedicatedCardApp.matching(bundleID: normalized) {
+                switch self {
+                case .none: return .scoped([dedicated])
+                case .scoped(var apps):
+                    apps.insert(dedicated)
+                    return .scoped(apps)
+                }
+            }
+            switch self {
+            case .none: return .genericList
+            case .scoped: return self
+            }
+        }
+    }
+
+    /// System utility apps that never produce selectable catalog result cards.
+    static let nonCardAppBundleIDs: Set<String> = [
+        "com.apple.preferences",
+        "com.apple.mobileslideshow",
+        "com.apple.camera",
+        "com.apple.mobiletimer",
+        "com.apple.calculator",
+        "com.apple.weather",
+        "com.apple.mobilephone",
+        "com.apple.mobilesms",
+        "com.apple.facetime",
+        "com.apple.mobileaddressbook",
+        "com.apple.health",
+        "com.apple.fitness",
+        "com.apple.home",
+        "com.apple.voicememos",
+        "com.apple.translate",
+        "com.apple.findmy",
+        "com.apple.passwords",
+        "com.apple.shortcuts",
+        "com.apple.passbook",
+    ]
+
+    /// Chooses the initial result-card schema scope for a task without natural-language intent guessing.
+    /// Delegated tasks never render cards; tasks explicitly naming only system utility apps or an explicit
+    /// http(s) URL without a phone app omit `card` until a card-capable app is observed. Tasks naming a
+    /// card-capable app scope `card` to that app's dedicated kinds plus generic `list`; open-ended tasks
+    /// with no named app keep all card kinds.
+    static func resultCardMode(for task: String, rendersCards: Bool) -> ResultCardMode {
+        guard rendersCards else { return .none }
+        var namedApps: [String] = []
+        for segment in CapsuleText.segments(task) {
+            if case .app(let capsule, _) = segment {
+                let id = capsule.id.lowercased()
+                if !namedApps.contains(id) { namedApps.append(id) }
+            }
+        }
+        if !namedApps.isEmpty {
+            if namedApps.allSatisfy({ nonCardAppBundleIDs.contains($0) }) { return .none }
+            return .scoped(Set(namedApps.compactMap(DedicatedCardApp.matching(bundleID:))))
+        }
+        if task.range(of: #"https?://\S+"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return .none
+        }
+        return .all
+    }
+
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
-    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
+    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false,
+                                            includeMemoryAttribution: Bool? = nil) -> (text: String, notes: [MemoryNote]) {
         if inSplitView {
             var parts = [splitViewInstructions, countedScrollInstructions]
             if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
@@ -68,7 +164,9 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
+        if includeMemoryAttribution ?? !SkillStore.shared.notes.isEmpty {
+            parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
+        }
         parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
@@ -112,16 +210,20 @@ enum Harness {
 
     /// A Pi loop holds executable implementations, even for tools currently withheld.
     /// The current permission determines which ones are declared for each request.
-    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
+    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool,
+                          includeMemoryAttribution: Bool = true,
+                          resultCardMode: ResultCardMode = .all) -> [ToolSpec] {
+        let taskTools = Self.taskTools(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
         if !inSplitView {
-            return catalogTools(includeScreenHistory: includeScreenHistory) + [findApp] + WebTools.specs.map(withActionMemoryIDs) + taskTools
+            let webTools = includeMemoryAttribution ? WebTools.specs.map(withActionMemoryIDs) : WebTools.specs
+            return catalogTools(includeScreenHistory: includeScreenHistory, includeMemoryAttribution: includeMemoryAttribution) + [findApp] + webTools + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: includeScreenHistory).filter { $0.name == "status" || $0.name == "screen_history" } + taskTools
+        ] + catalogTools(includeScreenHistory: includeScreenHistory, includeMemoryAttribution: includeMemoryAttribution).filter { $0.name == "status" || $0.name == "screen_history" } + taskTools
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
@@ -134,8 +236,8 @@ enum Harness {
     }
 
     /// PokiCore's catalog: look, do and status.
-    static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
-    static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
+    static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false, includeMemoryAttribution: true)
+    nonisolated static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
 
     private static func withActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
         guard memoryUsingActions.contains(tool.name), var properties = tool.schema["properties"] as? [String: Any] else { return tool }
@@ -150,20 +252,33 @@ enum Harness {
         return tool
     }
 
-    private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
+    nonisolated static func withoutActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
+        guard (memoryUsingActions.contains(tool.name) || tool.name == "finish_task"),
+              var properties = tool.schema["properties"] as? [String: Any],
+              properties.removeValue(forKey: "used_memory_ids") != nil else { return tool }
+        var tool = tool
+        tool.schema["properties"] = properties
+        return tool
+    }
+
+    private static func catalogTools(includeScreenHistory: Bool, includeMemoryAttribution: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            return withActionMemoryIDs(ToolSpec(name: name, description: description, schema: schema))
+            let spec = ToolSpec(name: name, description: description, schema: schema)
+            return includeMemoryAttribution ? withActionMemoryIDs(spec) : spec
         }
     }
 
-    private static func object(_ properties: [String: Any], _ required: [String]) -> [String: Any] {
+    private nonisolated static func object(_ properties: [String: Any], _ required: [String]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": required, "additionalProperties": false]
     }
-    private static let string: [String: Any] = ["type": "string"]
-    private static let taskTools = [reportPlan, countMessages, waitForCountedScrollReply, finishTask]
+    private nonisolated static let string: [String: Any] = ["type": "string"]
+    private static func taskTools(includeMemoryAttribution: Bool, resultCardMode: ResultCardMode) -> [ToolSpec] {
+        [reportPlan, countMessages, waitForCountedScrollReply,
+         finishTask(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)]
+    }
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
@@ -183,65 +298,110 @@ enum Harness {
         description: "Pause a counted message scroll in the owner's chat and ask for the information you need to continue it. The question is shown to the owner with a reply button.",
         schema: object(["question": string], ["question"]))
 
-    static let finishTask = ToolSpec(
-        name: "finish_task",
-        description: "Finish after observing the requested result. On failure set success=false and say what worked, what blocked completion and what you tried. In details give the requested facts as whole current labels or values. Set answer.kind to action only for an executed change, field for fixed values, or list for requested entries. For field, use current refs and label/value. For a label like Capacity,90%, use prefix Capacity, and suffix % to identify the field. For list, include all requested current rows in order with names/times. Use start_ref/end_ref only for unique labels immediately outside the rows. Never invent refs or report a heading as a requested value.",
-        schema: object([
+    static let finishTask = finishTask(includeMemoryAttribution: true, resultCardMode: .all)
+
+    nonisolated static func finishTask(includeMemoryAttribution: Bool, resultCardMode: ResultCardMode) -> ToolSpec {
+        var properties: [String: Any] = [
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
-            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],
                 "start_ref": string, "end_ref": string,
             ], ["kind"]),
-            "card": resultCard,
-        ], ["success", "summary", "details", "answer"]))
+        ]
+        if includeMemoryAttribution {
+            properties["used_memory_ids"] = ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."]
+        }
+        if case .scoped(let apps) = resultCardMode {
+            properties["card"] = resultCard(for: apps)
+        }
+        return ToolSpec(
+            name: "finish_task",
+            description: "Finish after observing the requested result. On failure set success=false and say what worked, what blocked completion and what you tried. In details give the requested facts as whole current labels or values. Set answer.kind to action only for an executed change, field for fixed values, or list for requested entries. For field, use current refs and label/value. For a label like Capacity,90%, use prefix Capacity, and suffix % to identify the field. For list, include all requested current rows in order with names/times. Use start_ref/end_ref only for unique labels immediately outside the rows. Never invent refs or report a heading as a requested value.",
+            schema: object(properties, ["success", "summary", "details", "answer"]))
+    }
 
-    /// finish_task's card, with each look's fields (`ResultCardLooks`).
-    private static let resultCard: [String: Any] = {
+    /// finish_task's card, scoped to `apps`'s dedicated layouts plus generic `list` (`ResultCardLooks`).
+    private nonisolated static func resultCard(for apps: Set<DedicatedCardApp>) -> [String: Any] {
         let action = object(["label": string, "say": string], ["label", "say"])
         let seat = object(["name": string, "left": string], ["name", "left"])
-        // Every look's fields in one item: each look reads its own (cardDescription names them per kind).
-        let fields = ["date", "from", "to", "depart", "arrive", "duration", "price", "note", "from_city", "to_city", "arrive_day", "stops",
-                      "airline", "cabin", "city", "dates", "subtitle", "stars", "rating", "reviews", "location", "was", "total", "hotel",
-                      "beds", "breakfast", "cancel", "trip", "baggage", "refund", "ticketing", "query", "price_label", "sold", "shop",
-                      "delivery", "category", "area", "distance", "store", "detail", "calories", "heading", "subheading", "value", "value_note"]
-        var properties: [String: Any] = Dictionary(uniqueKeysWithValues: (["id", "title"] + fields).map { ($0, string) })
-        properties["seats"] = ["type": "array", "items": seat]
-        let leg = object(["number": string, "from": string, "to": string, "depart": string, "arrive": string, "arrive_day": string,
-                          "wait": string, "change": string, "seats": ["type": "array", "items": seat]], ["number"])
+        var fields = ["subtitle", "detail", "value", "value_note", "note", "heading", "subheading"]
+        if apps.contains(.railway12306) {
+            fields += ["date", "from", "to", "depart", "arrive", "duration", "price"]
+        }
+        if apps.contains(.ctrip) {
+            fields += ["date", "from", "to", "depart", "arrive", "duration", "price", "from_city", "to_city", "arrive_day", "stops",
+                       "airline", "cabin", "city", "dates", "stars", "rating", "reviews", "location", "was", "total", "hotel",
+                       "beds", "breakfast", "cancel", "trip", "baggage", "refund", "ticketing"]
+        }
+        if apps.contains(.taobao) {
+            fields += ["query", "price", "price_label", "sold", "shop", "delivery"]
+        }
+        if apps.contains(.dianping) {
+            fields += ["query", "rating", "reviews", "price", "category", "area", "distance"]
+        }
+        if apps.contains(.uberEats) {
+            fields += ["store", "price", "calories"]
+        }
+        var properties: [String: Any] = Dictionary((["id", "title"] + fields).map { ($0, string) }, uniquingKeysWith: { first, _ in first })
+        if apps.contains(.railway12306) {
+            properties["seats"] = ["type": "array", "items": seat]
+        }
+        var legProperties: [String: Any] = ["number": string, "from": string, "to": string, "depart": string, "arrive": string,
+                                            "arrive_day": string, "wait": string, "change": string]
+        if apps.contains(.railway12306) {
+            legProperties["seats"] = ["type": "array", "items": seat]
+        }
+        let leg = object(legProperties, ["number"])
         properties["legs"] = ["type": "array", "items": leg, "minItems": 2]
         properties["image"] = ["type": "array", "items": ["type": "number"], "minItems": 4, "maxItems": 4,
                                "description": "[x, y, width, height] of the complete photo itself in the screenshot named by image_screenshot. The bounds exclude the row, text, and controls."]
         properties["image_screenshot"] = ["type": "string", "description": "Copy the screenshot_id from the tool answer whose screenshot supplied this item's image coordinates."]
         let item = object(properties, ["id", "title"])
-        let kinds = [RailwayTrains.kind, RailwayTransfers.kind, Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares, Taobao.kind, Dianping.kind, UberEats.kind, AnyAppList.kind]
+        var kinds: [String] = []
+        if apps.contains(.railway12306) { kinds += [RailwayTrains.kind, RailwayTransfers.kind] }
+        if apps.contains(.ctrip) { kinds += [Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares] }
+        if apps.contains(.taobao) { kinds.append(Taobao.kind) }
+        if apps.contains(.dianping) { kinds.append(Dianping.kind) }
+        if apps.contains(.uberEats) { kinds.append(UberEats.kind) }
+        kinds.append(AnyAppList.kind)
         var card = object(["app": string, "kind": ["type": "string", "enum": kinds],
                            "items": ["type": "array", "items": item, "minItems": 1], "recommended": string,
                            "primary": action, "next": action], ["app", "kind", "items", "recommended", "primary"])
-        card["description"] = cardDescription
+        card["description"] = cardDescription(for: apps)
         return card
-    }()
+    }
 
-    private static let cardDescription = """
-        Use a result card for one or more selectable items from one app, even if the owner asks for only one. The card replaces the reply's list. Omit it for other results. Use the owner's language. Copy values as shown and omit fields the screen does not show. Use note for a fact that affects the choice.
-
-        Fields below are per item unless stated. Use the kind and app ID listed. Select the best item with recommended (its id). primary and optional next have label (shown on the button) and say (sent as the owner's next message). The card fills {field} from the selected item. Use fields available to that item so the message stands alone with its key facts. Omit next when no clear follow-up exists.
-
-        12306.trains (cn.12306.rails12306): Always use this card for direct train results in 12306. id and title are the train number, date is the displayed date, from/to are stations, depart/arrive are times. Include duration, price and seats [{name, left}]. primary: 在 12306 查看 / 在 12306 打开 {date} {title} 次（{from} {depart} 开）. For sending a train, put the recipient from long-term notes in label and say, using {date} and {title} in say. If no note names a recipient, use label 发送车次 and leave the recipient for the owner. Never offer paying, booking or choosing seats for 12306.
-        12306.transfers (cn.12306.rails12306): title is the trains joined by →. Include date, from/to, depart/arrive, total duration, price and ordered legs [{number, from, to, depart, arrive, wait, change, seats: [{name, left}]}]. wait is the layover, change describes the transfer shown. primary: 在 12306 查看 / 在 12306 打开 {date} {title}（{from} {depart} 开）.
-        ctrip.flights (ctrip.com): title is the flight numbers joined by >. Include depart, arrive, arrive_day (arrival day offset), from/to airports, from_city/to_city, date, duration, stops, airline, cabin, price and, for connections, ordered legs [{number, from, to, depart, arrive, wait, change}]. primary: 在携程查看 / 在携程打开 {date} {title}（{depart} 起飞，{price}）.
-        ctrip.hotels (ctrip.com): title is the hotel name. Include subtitle (other name), stars, rating, reviews, location, price (per night), was (original price) and total (stay total). Put city and dates on the first item. primary: 在携程查看 / 在携程打开 {title}（{price}）.
-        ctrip.rooms (ctrip.com): title is the room type. Include beds, breakfast, cancel, price (per night), was (original price) and total (stay total). Put the shared hotel on the first item and dates (stay dates) on every room for the heading and selected button. primary: 在携程查看 / 在携程打开 {hotel} 的 {title}（{dates}，{price}）.
-        ctrip.fares (ctrip.com): title is the fare name. Include price, cabin, baggage, refund (refund and change rules) and ticketing. Put trip and dates on the first item. primary: 在携程查看 / 在携程打开 {title} {price} 这个票价.
-        taobao.products (com.taobao.taobao4iphone): Include title, price, price_label (e.g. 补贴价), sold, shop and delivery. Put query on the first item. primary: 在淘宝查看 / 在淘宝打开 {shop} 的 {title}（{price}）.
-        dianping.places (com.dianping.dpscope): Include title, subtitle, rating, reviews, price, category, area and distance. Put query on the first item. primary: 在大众点评查看 / 在大众点评打开 {title}.
-        ubereats.items (com.ubercab.UberEats): Include title, price, detail (what comes with it) and calories. Put store on the first item. primary: View in Uber Eats / Open {title} ({price}) in Uber Eats.
-        list (any other app, with its own bundle ID): Include title, subtitle, detail, value (the deciding price, time or rating) and value_note. For a journey with connections, use ordered legs as in flights. Put heading and subheading on the first item. Use a dedicated kind where one exists. primary: 在<app>查看 / 在<app>打开 {title}.
-
-        For pictured items, send image (bounds of the complete photo itself) and image_screenshot (screenshot_id from the same observation) together. The bounds exclude the row, text, and controls. Items may use different screenshots. Omit both fields if the full photo is clipped or there is no screenshot_id. Never guess.
-        """
+    private nonisolated static func cardDescription(for apps: Set<DedicatedCardApp>) -> String {
+        var kindLines: [String] = []
+        if apps.contains(.railway12306) {
+            kindLines.append("12306.trains (cn.12306.rails12306): Always use this card for direct train results in 12306. id and title are the train number, date is the displayed date, from/to are stations, depart/arrive are times. Include duration, price and seats [{name, left}]. primary: 在 12306 查看 / 在 12306 打开 {date} {title} 次（{from} {depart} 开）. For sending a train, put the recipient from long-term notes in label and say, using {date} and {title} in say. If no note names a recipient, use label 发送车次 and leave the recipient for the owner. Never offer paying, booking or choosing seats for 12306.")
+            kindLines.append("12306.transfers (cn.12306.rails12306): title is the trains joined by →. Include date, from/to, depart/arrive, total duration, price and ordered legs [{number, from, to, depart, arrive, wait, change, seats: [{name, left}]}]. wait is the layover, change describes the transfer shown. primary: 在 12306 查看 / 在 12306 打开 {date} {title}（{from} {depart} 开）.")
+        }
+        if apps.contains(.ctrip) {
+            kindLines.append("ctrip.flights (ctrip.com): title is the flight numbers joined by >. Include depart, arrive, arrive_day (arrival day offset), from/to airports, from_city/to_city, date, duration, stops, airline, cabin, price and, for connections, ordered legs [{number, from, to, depart, arrive, wait, change}]. primary: 在携程查看 / 在携程打开 {date} {title}（{depart} 起飞，{price}）.")
+            kindLines.append("ctrip.hotels (ctrip.com): title is the hotel name. Include subtitle (other name), stars, rating, reviews, location, price (per night), was (original price) and total (stay total). Put city and dates on the first item. primary: 在携程查看 / 在携程打开 {title}（{price}）.")
+            kindLines.append("ctrip.rooms (ctrip.com): title is the room type. Include beds, breakfast, cancel, price (per night), was (original price) and total (stay total). Put the shared hotel on the first item and dates (stay dates) on every room for the heading and selected button. primary: 在携程查看 / 在携程打开 {hotel} 的 {title}（{dates}，{price}）.")
+            kindLines.append("ctrip.fares (ctrip.com): title is the fare name. Include price, cabin, baggage, refund (refund and change rules) and ticketing. Put trip and dates on the first item. primary: 在携程查看 / 在携程打开 {title} {price} 这个票价.")
+        }
+        if apps.contains(.taobao) {
+            kindLines.append("taobao.products (com.taobao.taobao4iphone): Include title, price, price_label (e.g. 补贴价), sold, shop and delivery. Put query on the first item. primary: 在淘宝查看 / 在淘宝打开 {shop} 的 {title}（{price}）.")
+        }
+        if apps.contains(.dianping) {
+            kindLines.append("dianping.places (com.dianping.dpscope): Include title, subtitle, rating, reviews, price, category, area and distance. Put query on the first item. primary: 在大众点评查看 / 在大众点评打开 {title}.")
+        }
+        if apps.contains(.uberEats) {
+            kindLines.append("ubereats.items (com.ubercab.UberEats): Include title, price, detail (what comes with it) and calories. Put store on the first item. primary: View in Uber Eats / Open {title} ({price}) in Uber Eats.")
+        }
+        kindLines.append("list (any other app, with its own bundle ID): Include title, subtitle, detail, value (the deciding price, time or rating) and value_note. For a journey with connections, use ordered legs as in flights. Put heading and subheading on the first item. Use a dedicated kind where one exists. primary: 在<app>查看 / 在<app>打开 {title}.")
+        return [
+            "Use a result card for one or more selectable items from one app, even if the owner asks for only one. The card replaces the reply's list. Omit it for other results. Use the owner's language. Copy values as shown and omit fields the screen does not show. Use note for a fact that affects the choice.",
+            "Fields below are per item unless stated. Use the kind and app ID listed. Select the best item with recommended (its id). primary and optional next have label (shown on the button) and say (sent as the owner's next message). The card fills {field} from the selected item. Use fields available to that item so the message stands alone with its key facts. Omit next when no clear follow-up exists.",
+            kindLines.joined(separator: "\n"),
+            "For pictured items, send image (bounds of the complete photo itself) and image_screenshot (screenshot_id from the same observation) together. The bounds exclude the row, text, and controls. Items may use different screenshots. Omit both fields if the full photo is clipped or there is no screenshot_id. Never guess.",
+        ].joined(separator: "\n\n")
+    }
 
     /// task-runner.mjs's answers to its harness tools.
     static let planPublished = "Plan published. Continue."

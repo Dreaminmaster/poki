@@ -23,12 +23,72 @@ final class PiLoop {
     let model: Model
     let inSplitView: Bool
     private let agent: Agent
-    private let allTools: [AgentTool]
+    private let toolVariants: [ToolVariant]
+    private let toolPolicy = ToolPolicy()
     private let gate = StopGate()
     /// A custom address's HTTP client, which repairs a doubled `data:` stream and keeps what the address
     /// answered for the log.
     private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
+
+    private struct FinishToolCache: @unchecked Sendable {
+        struct Key: Hashable {
+            let includeMemoryAttribution: Bool
+            let resultCardMode: Harness.ResultCardMode
+        }
+        private final class Store: @unchecked Sendable {
+            let lock = NSLock()
+            var tools: [Key: AgentTool] = [:]
+        }
+        private let store = Store()
+        private let execute: AgentToolExecute
+
+        init(execute: @escaping AgentToolExecute) { self.execute = execute }
+
+        func tool(includeMemoryAttribution: Bool, resultCardMode: Harness.ResultCardMode) -> AgentTool {
+            let key = Key(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
+            if let cached = store.lock.withLock({ store.tools[key] }) { return cached }
+            let spec = Harness.finishTask(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
+            let built = AgentTool(label: spec.name, name: spec.name, description: spec.description,
+                                  parameters: spec.schema.mapValues { AnyCodable($0) }, execute: execute)
+            return store.lock.withLock {
+                if let existing = store.tools[key] { return existing }
+                store.tools[key] = built
+                return built
+            }
+        }
+    }
+
+    private enum ToolVariant: Sendable {
+        case standard(withMemory: AgentTool, withoutMemory: AgentTool)
+        case finish(FinishToolCache)
+    }
+
+    private final class ToolPolicy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var includeMemoryAttribution = true
+        private var rendersCards = true
+        private var resultCardMode: Harness.ResultCardMode = .all
+
+        func set(includeMemoryAttribution: Bool, rendersCards: Bool, resultCardMode: Harness.ResultCardMode) {
+            lock.withLock {
+                self.includeMemoryAttribution = includeMemoryAttribution
+                self.rendersCards = rendersCards
+                self.resultCardMode = resultCardMode
+            }
+        }
+
+        func observeApp(_ bundleID: String) {
+            lock.withLock {
+                guard rendersCards else { return }
+                resultCardMode = resultCardMode.including(app: bundleID)
+            }
+        }
+
+        func current() -> (memoryAttribution: Bool, resultCardMode: Harness.ResultCardMode) {
+            lock.withLock { (includeMemoryAttribution, resultCardMode) }
+        }
+    }
 
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
@@ -37,7 +97,24 @@ final class PiLoop {
         return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
     }
 
-    init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
+    /// Only forward `sessionId` to providers confirmed to accept OpenAI's `prompt_cache_key`
+    /// and session-routing headers. Arbitrary custom gateways frequently reject unknown Responses
+    /// parameters with HTTP 400 (`unsupported_parameter`), so custom endpoints receive `sessionId`
+    /// only when targeting official `api.openai.com`.
+    nonisolated static func sessionCacheKey(for provider: ModelProvider, model: Model, sessionID: String?) -> String? {
+        guard let sessionID, !sessionID.isEmpty else { return nil }
+        switch provider {
+        case .openai, .chatgpt:
+            return sessionID
+        case .custom:
+            return URL(string: model.baseUrl)?.host?.lowercased() == "api.openai.com" ? sessionID : nil
+        case .anthropic, .deepseek, .gemini, .openrouter:
+            return nil
+        }
+    }
+
+    init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, sessionId: String? = nil,
+         carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
         self.provider = provider
         self.model = model
@@ -47,8 +124,9 @@ final class PiLoop {
         self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
-        let agentTools = tools.map { spec in
-            AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
+        let policy = self.toolPolicy
+        let variants = tools.map { spec -> ToolVariant in
+            let execute: AgentToolExecute = { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = .sortedKeys
@@ -80,13 +158,24 @@ final class PiLoop {
                 }
                 return Self.result(answer)
             }
+            if spec.name == "finish_task" {
+                return .finish(FinishToolCache(execute: execute))
+            }
+            let stripped = Harness.withoutActionMemoryIDs(spec)
+            let withMemory = AgentTool(label: spec.name, name: spec.name, description: spec.description,
+                                       parameters: spec.schema.mapValues { AnyCodable($0) }, execute: execute)
+            let withoutMemory = AgentTool(label: stripped.name, name: stripped.name, description: stripped.description,
+                                          parameters: stripped.schema.mapValues { AnyCodable($0) }, execute: execute)
+            return .standard(withMemory: withMemory, withoutMemory: withoutMemory)
         }
-        allTools = agentTools
+        toolVariants = variants
         // agent/pi-session.mjs: low thinking, one tool call at a time. Pi copies the
         // tool list at prompt start; prepareRequest updates its *live* context each turn.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low,
-                                     tools: Self.availableTools(agentTools, allowed: HistoryCapture.agentQueryAllowed), messages: messages),
+                                     tools: Self.availableTools(variants, allowed: HistoryCapture.agentQueryAllowed,
+                                                                includeMemoryAttribution: true, resultCardMode: .all),
+                                     messages: messages),
             streamFn: { model, transcript, options in
                 // API credentials may have suspended after prepareRequest. Recheck at
                 // the last request boundary too; never add a tool the live context lacks.
@@ -120,6 +209,7 @@ final class PiLoop {
                 }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
+            sessionId: Self.sessionCacheKey(for: provider, model: model, sessionID: sessionId),
             getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
             prepareToolResultMessage: { result in
@@ -127,7 +217,10 @@ final class PiLoop {
             },
             prepareRequest: { request, _ in
                 let revision = HistoryCapture.agentQueryRevision
-                let tools = Self.availableTools(agentTools, allowed: revision != nil)
+                let currentPolicy = policy.current()
+                let tools = Self.availableTools(variants, allowed: revision != nil,
+                                                includeMemoryAttribution: currentPolicy.memoryAttribution,
+                                                resultCardMode: currentPolicy.resultCardMode)
                 var context = request.context
                 context.tools = tools
                 context.messages = context.messages.map { message in
@@ -152,15 +245,27 @@ final class PiLoop {
         ))
     }
 
+    /// Widens the active task's result-card schema when a card-capable app is launched or read.
+    func observeApp(_ bundleID: String) {
+        toolPolicy.observeApp(bundleID)
+    }
+
     /// The owner's message (with the JPEGs of its photos and PDFs) under this task's instructions, then
     /// pi's loop until the model answers without tools, `stop()`, a repeated call or pair on the same
     /// screen, or `maxTurns` model turns (a ceiling for a model that runs away). Owner waits reset the
     /// stall history. `onText` gets each finished text block.
     func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int,
+             includeMemoryAttribution: Bool = true, rendersCards: Bool = true,
+             resultCardMode: Harness.ResultCardMode = .all,
              timing: ChatStepTiming? = nil, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
-        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed)
+        toolPolicy.set(includeMemoryAttribution: includeMemoryAttribution,
+                       rendersCards: rendersCards,
+                       resultCardMode: resultCardMode)
+        agent.tools = Self.availableTools(toolVariants, allowed: HistoryCapture.agentQueryAllowed,
+                                          includeMemoryAttribution: includeMemoryAttribution,
+                                          resultCardMode: resultCardMode)
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -240,8 +345,20 @@ final class PiLoop {
         agent.messages = messages
     }
 
-    nonisolated static func availableTools(_ tools: [AgentTool], allowed: Bool) -> [AgentTool] {
-        tools.filter { $0.name != "screen_history" || allowed }
+    private nonisolated static func availableTools(_ variants: [ToolVariant], allowed: Bool,
+                                                   includeMemoryAttribution: Bool,
+                                                   resultCardMode: Harness.ResultCardMode) -> [AgentTool] {
+        variants.compactMap { variant in
+            let tool: AgentTool
+            switch variant {
+            case .standard(let withMemory, let withoutMemory):
+                tool = includeMemoryAttribution ? withMemory : withoutMemory
+            case .finish(let cache):
+                tool = cache.tool(includeMemoryAttribution: includeMemoryAttribution, resultCardMode: resultCardMode)
+            }
+            if tool.name == "screen_history", !allowed { return nil }
+            return tool
+        }
     }
 
     private nonisolated static func result(_ answer: PokiCore.ToolAnswer) -> AgentToolResult {

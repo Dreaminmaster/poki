@@ -68,9 +68,11 @@ enum ConnectionCheck {
         var options = SimpleStreamOptions()
         options.apiKey = key.isEmpty && provider == .custom ? "none" : key
         if provider == .custom, model.reasoning { options.reasoning = .low }
-        // A connection check runs before a conversation exists. Give this probe its own
-        // routing identifier, using PiSwift's OpenCode host and provider checks.
-        options.headers = openCodeSessionHeaders(model: model, sessionId: UUID().uuidString, headers: options.headers)
+        // A connection check runs before a conversation exists. Match the chat loop's session
+        // cache-key policy so strict custom endpoints fail or pass here the same way as real chat.
+        let probeSessionID = UUID().uuidString
+        options.sessionId = PiLoop.sessionCacheKey(for: provider, model: model, sessionID: probeSessionID)
+        options.headers = openCodeSessionHeaders(model: model, sessionId: probeSessionID, headers: options.headers)
         options.maxTokens = 16
         options.maxRetries = 0
         options.timeoutMs = Int(deadline * 1000) + 5000

@@ -615,12 +615,14 @@ public final class PokiCore: @unchecked Sendable {
         public let automationAuthorizationDeclined: Bool
         public let numberedScreen: NumberedScreen?
         public let offeredMemories: [MemoryNote]
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, numberedScreen: NumberedScreen? = nil, offeredMemories: [MemoryNote] = []) {
+        public let readApp: String?
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, numberedScreen: NumberedScreen? = nil, offeredMemories: [MemoryNote] = [], readApp: String? = nil) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
             self.numberedScreen = numberedScreen
             self.offeredMemories = offeredMemories
+            self.readApp = readApp
         }
     }
 
@@ -629,13 +631,13 @@ public final class PokiCore: @unchecked Sendable {
     /// object the model sent.
     /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
     /// where it was heard.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolAnswer {
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, onActionSucceeded: onActionSucceeded)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
                           automationAuthorizationDeclined: output.automationAuthorizationDeclined,
-                          numberedScreen: output.numberedScreen, offeredMemories: output.offeredMemories)
+                          numberedScreen: output.numberedScreen, offeredMemories: output.offeredMemories, readApp: output.readApp)
     }
 
     /// Returns the indices of writes that were not saved. A required failure discards the whole batch.
@@ -714,7 +716,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -779,7 +781,7 @@ public final class PokiCore: @unchecked Sendable {
         if local, session == nil, let localTask, localTask == computer.recordingTask,
            !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
            let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {
-            let brief = memory.appMemoryBrief(for: app)
+            let brief = memory.appMemoryBrief(for: app, excluding: offeredMemoryIDs)
             if !brief.notes.isEmpty {
                 output.text += "\n" + brief.text
                 output.offeredMemories = brief.notes
