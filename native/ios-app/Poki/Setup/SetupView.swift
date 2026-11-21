@@ -654,7 +654,7 @@ private struct PairingPage: View {
             }
             .settingsFooter()
         }
-        .sheet(isPresented: $scanning) { PairingScannerSheet() }
+        .sheet(isPresented: $scanning) { PairingScannerSheet().outsideStartFlow() }
         // Poki Setup on a computer may be writing the file into Poki right now.
         .task { while !Task.isCancelled { model.lookForHandedPairing(); try? await Task.sleep(for: .seconds(3)) } }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.propertyList, .xml, .data]) { result in

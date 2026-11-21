@@ -50,21 +50,33 @@ struct StartIcon<Icon: View>: View {
     }
 }
 
-/// The start flow's ground: the system's grouped background in both directions, so lists and their
-/// footers read as Settings' do and nothing shows through the bottom button.
+/// The start flow's ground: Poki's blue (the owner, Nov 21 2026: blue for the setup guidance pages),
+/// a deep night blue in Dark Mode, with the rows as cards on it. The tiles hello keeps the home light.
 struct StartGround: View {
     var design: StartDesign
     var hello = false
+    /// Poki blue, #2084FD, and the docs site's night blue in Dark Mode.
+    static let blue = Color(light: 0x2084FD, dark: 0x0A2F6B)
+    /// Words straight on the blue: white, and white at reduced opacity for the quieter lines.
+    static let ink = Color.white
+    static let quietInk = Color.white.opacity(0.82)
+
     var body: some View {
         if design == .tiles && hello {
             HomeBackdrop(home: true, working: false, frozen: true).ignoresSafeArea()
         } else {
-            Color(.systemGroupedBackground).ignoresSafeArea()
+            Self.blue.ignoresSafeArea()
         }
     }
 }
 
-/// The start flow's main button: the system's prominent glass on iOS 26, bordered prominent before,
+extension View {
+    /// A sheet opened from the start flow draws on the system's ground, so it leaves the flow's look.
+    func outsideStartFlow() -> some View { environment(\.startDesign, nil) }
+}
+
+/// The start flow's main button: the system's prominent glass on iOS 26, bordered prominent before, white
+/// with Poki blue words on the blue ground,
 /// the width of the page's text, with a text button under it when there is a second choice.
 struct StartButtons: View {
     var primary: LocalizedStringKey
@@ -78,16 +90,18 @@ struct StartButtons: View {
     var body: some View {
         VStack(spacing: 8) {
             Button(action: action) {
-                Text(primary).font(.allo(.body, .semibold)).frame(maxWidth: .infinity)
+                // Poki blue on a white button: the prominent glass takes the white tint on the blue ground.
+                Text(primary).font(.allo(.body, .semibold)).foregroundStyle(StartGround.blue).frame(maxWidth: .infinity)
             }
             .controlSize(.large)
             .buttonBorderShape(.capsule)
             .glassButton(prominent: true)
+            .tint(.white)
             .disabled(primaryDisabled)
             .accessibilityIdentifier(primaryID)
             if let secondary {
                 Button(action: secondaryAction) {
-                    Text(secondary).font(.allo(.body)).frame(maxWidth: .infinity, minHeight: 44)
+                    Text(secondary).font(.allo(.body)).foregroundStyle(StartGround.ink).frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier(secondaryID)
@@ -102,9 +116,9 @@ struct StartButtons: View {
         // button (a disabled glass button is see-through).
         .background {
             VStack(spacing: 0) {
-                LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0), Color(.systemGroupedBackground)],
+                LinearGradient(colors: [StartGround.blue.opacity(0), StartGround.blue],
                                startPoint: .top, endPoint: .bottom).frame(height: 24)
-                Color(.systemGroupedBackground)
+                StartGround.blue
             }
             .padding(.top, -24)
             .ignoresSafeArea(edges: .bottom)
@@ -176,11 +190,11 @@ struct StartHello: View {
         return VStack(alignment: alignment, spacing: 10) {
             Text(verbatim: headline)
                 .font(.alloRounded(.largeTitle, .bold))
-                .foregroundStyle(Color(.label))
+                .foregroundStyle(design == .plain ? StartGround.ink : Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Text(verbatim: line)
                 .font(.allo(.body))
-                .foregroundStyle(Color(.secondaryLabel))
+                .foregroundStyle(design == .plain ? StartGround.quietInk : Color(.secondaryLabel))
         }
         .multilineTextAlignment(text)
         .fixedSize(horizontal: false, vertical: true)
@@ -219,16 +233,16 @@ struct StartHero: View {
                 Image(systemName: done ? "checkmark.circle.fill" : symbol)
                     .font(.system(size: min(glyph, 80), weight: .regular))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(done ? Color(.systemGreen) : Color(.systemBlue))
+                    .foregroundStyle(StartGround.ink)
                     .contentTransition(.symbolEffect(.replace))
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.alloRounded(.largeTitle, .bold))
-                    .foregroundStyle(Color(.label))
+                    .foregroundStyle(StartGround.ink)
                     .accessibilityAddTraits(.isHeader)
                 Text(line)
                     .font(.allo(.body))
-                    .foregroundStyle(Color(.secondaryLabel))
+                    .foregroundStyle(StartGround.quietInk)
             }
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)

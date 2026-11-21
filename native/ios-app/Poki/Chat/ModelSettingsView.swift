@@ -28,7 +28,7 @@ struct ModelSettingsView: View {
         .listSectionSpacing(16)
         .navigationTitle(AppLocalization.text("Models"))
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai) }
+        .sheet(isPresented: $enteringVoiceKey) { KeyEntry(provider: .openai).outsideStartFlow() }
         .navigationDestination(isPresented: $showingLiveVoice) { ModelTickList(use: .voice, provider: .account(.openai)) }
         .task {
             guard opensVoiceKey, !openedForVoice else { return }
@@ -83,7 +83,7 @@ struct ModelSettingsSections: View {
             // The sheet and the redraw hang on this one row: on the sections they would repeat per row.
             Button("Add Provider", systemImage: "plus") { adding = true }
                 .accessibilityIdentifier("models.provider.add")
-                .sheet(isPresented: $adding) { AddAccount() }
+                .sheet(isPresented: $adding) { AddAccount().outsideStartFlow() }
                 .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         } header: {
             Group {
@@ -234,8 +234,8 @@ private struct AccountDetail: View {
         .navigationTitle(Text(verbatim: provider.name))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { KeyEntry(provider: provider) }
-        .sheet(isPresented: $signingIn, onDismiss: { version = ModelKeys.saved }) { ChatGPTSignIn() }
+        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { KeyEntry(provider: provider).outsideStartFlow() }
+        .sheet(isPresented: $signingIn, onDismiss: { version = ModelKeys.saved }) { ChatGPTSignIn().outsideStartFlow() }
     }
 }
 
@@ -279,9 +279,9 @@ struct AddAccount: View {
             .navigationTitle(AppLocalization.text("Add Provider"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .sheet(item: $editing, onDismiss: { if editing == nil { dismiss() } }) { provider in KeyEntry(provider: provider) }
-            .sheet(isPresented: $signingIn, onDismiss: { if ChatGPTAccount.signedIn { dismiss() } }) { ChatGPTSignIn() }
-            .sheet(isPresented: $addingCustom, onDismiss: { if addedCustom { dismiss() } }) { CustomProviderEditor(id: nil) { addedCustom = true } }
+            .sheet(item: $editing, onDismiss: { if editing == nil { dismiss() } }) { provider in KeyEntry(provider: provider).outsideStartFlow() }
+            .sheet(isPresented: $signingIn, onDismiss: { if ChatGPTAccount.signedIn { dismiss() } }) { ChatGPTSignIn().outsideStartFlow() }
+            .sheet(isPresented: $addingCustom, onDismiss: { if addedCustom { dismiss() } }) { CustomProviderEditor(id: nil) { addedCustom = true }.outsideStartFlow() }
         }
     }
 

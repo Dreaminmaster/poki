@@ -226,14 +226,26 @@ extension View {
     /// without this every footer showed at body size (the owner, Nov 20 2026: far too big). A font or
     /// colour set inside a footer still wins over this one.
     func settingsFooter() -> some View {
-        font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+        modifier(SettingsSectionWords(header: false))
     }
 
     /// A section header as iOS 26 draws it: body size, bold, secondary. Under the app's root Allo
     /// body font every header was Regular (the owner, Nov 20 2026: headers had no weight); set here,
     /// in Allo, a weight a header sets inside still wins.
     func settingsHeader() -> some View {
-        font(.allo(.headline, .bold)).foregroundStyle(Color(.secondaryLabel))
+        modifier(SettingsSectionWords(header: true))
+    }
+}
+
+/// A header's or footer's words: secondary on the settings pages, white on the start flow's blue.
+private struct SettingsSectionWords: ViewModifier {
+    var header: Bool
+    @Environment(\.startDesign) private var startDesign
+
+    func body(content: Content) -> some View {
+        content
+            .font(header ? .allo(.headline, .bold) : .allo(.footnote))
+            .foregroundStyle(startDesign == nil ? Color(.secondaryLabel) : header ? StartGround.ink : StartGround.quietInk)
     }
 }
 

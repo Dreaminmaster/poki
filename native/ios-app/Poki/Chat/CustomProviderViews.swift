@@ -99,7 +99,7 @@ struct CustomProviderDetail: View {
         .navigationTitle(Text(verbatim: CustomProviders.provider(id)?.displayName ?? ModelProvider.custom.name))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { CustomProviderEditor(id: id) }
+        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { CustomProviderEditor(id: id).outsideStartFlow() }
     }
 
     /// "Responses", "Automatic, uses Responses", with "Backup" for the addresses after the first.
