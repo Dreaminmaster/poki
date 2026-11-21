@@ -28,7 +28,7 @@ struct MentionMatch: Identifiable, Equatable {
     var id: String { capsule.id + "|" + insert }
     var isConnector: Bool { capsule.isConnector }
     /// The name the row shows.
-    var title: String { isConnector ? String(insert.dropFirst()) : capsule.name }
+    var title: String { isConnector ? String(insert.dropFirst()) : insert }
 }
 
 /// Finds the apps and connectors that fit what is being written. Pure text work: the field hands it
@@ -102,16 +102,23 @@ enum MentionSearch {
         }
         for capsule in AppCapsule.catalog {
             var best: Int?
+            // The name that matched, so 淘 typed in Chinese becomes 淘宝, not Taobao.
+            var matched = capsule.name
             for name in capsule.names {
                 let chinese = name.unicodeScalars.contains(where: CapsuleText.isUnspaced)
                 if spelling, !chinese { continue }
                 var keys = spelling ? [] : [fold(name)]
                 if chinese { keys += Pinyin.keys(name) }
-                for key in keys { if let s = score(key, typed) { best = max(best ?? s, s) } }
+                for key in keys {
+                    if let s = score(key, typed), s > (best ?? -1) { best = s; matched = name }
+                }
             }
             if let best {
                 let recency = MentionRecents.rank(capsule.id).map { 20 - min($0, 19) } ?? 0
-                scored.append((best + recency, MentionMatch(capsule: capsule, insert: capsule.name)))
+                // In the script it was typed in: the Chinese name for Chinese (or Pinyin) words, the
+                // name shown in this language otherwise.
+                let insert = matched.unicodeScalars.contains(where: CapsuleText.isUnspaced) ? matched : capsule.name
+                scored.append((best + recency, MentionMatch(capsule: capsule, insert: insert)))
             }
         }
         var seen = Set<String>()

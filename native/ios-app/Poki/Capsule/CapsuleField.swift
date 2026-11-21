@@ -57,8 +57,11 @@ struct CapsuleField: UIViewRepresentable {
         view.updateFont(for: UIContentSizeCategory(typeSize))
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
         // A write from outside (a recommendation, dictation, Send emptying the field): render it whole,
-        // caret at the end.
-        if view.plainText != text { view.setPlain(text) }
+        // caret at the end. Never while the keyboard is composing: an update that came with the binding
+        // a keystroke behind (the mention list appearing, say) rewrote the field and committed the
+        // pending Pinyin as Latin letters ("tai" became "ttaiai"). Outside writes do not happen mid-
+        // composition, and the binding catches up on the next change.
+        if view.markedTextRange == nil, view.plainText != text { view.setPlain(text) }
         if focused, !view.isFirstResponder {
             DispatchQueue.main.async { view.becomeFirstResponder() }
         } else if !focused, view.isFirstResponder {
@@ -358,6 +361,10 @@ final class CapsuleTextView: UITextView {
     /// The words at the caret, with the keyboard's pending text, and where the caret is on screen.
     func mentionQuery() -> MentionQuery? {
         guard isFirstResponder, selectedRange.length == 0, let caretPosition = selectedTextRange?.end else { return nil }
+        // Right after a capsule its words are already a name: no list (淘宝 just picked offered
+        // Ele.me, whose other name begins with it).
+        if selectedRange.location > 0, markedTextRange == nil,
+           textStorage.attribute(.attachment, at: selectedRange.location - 1, effectiveRange: nil) is PillTextAttachment { return nil }
         let caretPlain = plainOffset(selectedRange.location)
         let before = String((plainText as NSString).substring(to: min(caretPlain, (plainText as NSString).length)))
         let pendingStart = markedTextRange.map { plainOffset(offset(from: beginningOfDocument, to: $0.start)) }
