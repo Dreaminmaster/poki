@@ -38,7 +38,17 @@ struct SettingsIcon: View {
         _glyph = ScaledMetric(wrappedValue: size * 0.5, relativeTo: .body)
     }
 
+    @Environment(\.startDesign) private var startDesign
+
     var body: some View {
+        if let startDesign {
+            StartIcon(design: startDesign, warns: warns) { Image(systemName: symbol) }
+        } else {
+            settingsIcon
+        }
+    }
+
+    private var settingsIcon: some View {
         Image(systemName: symbol)
             .font(.system(size: glyph * min(1, maximumSize / size), weight: .semibold))
             .foregroundStyle(warns ? Tint.amberInk : neutral ? Color(.label) : Tint.blueText)
@@ -66,6 +76,7 @@ struct SettingsRow: View {
     /// that leaves Poki (the system's own chevron ends the rows that open a page).
     var accessory: Accessory? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.startDesign) private var startDesign
     @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
 
     enum Accessory { case done, leaves }
@@ -80,7 +91,8 @@ struct SettingsRow: View {
             TitleValueLayout(inline: !typeSize.isAccessibilitySize) {
                 VStack(alignment: .leading, spacing: 2) {
                     titleText
-                    if let caption { Text(caption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
+                    // The start flow says it in the section's footer, and a row holds its title alone.
+                    if let caption, startDesign == nil { Text(caption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                     if let dataCaption {
                         Text(verbatim: dataCaption).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
@@ -106,14 +118,16 @@ struct SettingsRow: View {
     }
 
     @ViewBuilder private func valueView(_ value: String) -> some View {
-        if warns {
+        if warns, startDesign != nil {
+            Text(verbatim: value).font(.allo(.body)).foregroundStyle(Color(.systemOrange))
+        } else if warns {
             Text(verbatim: value).font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(Tint.amberSoft, in: .capsule)
         } else {
             HStack(spacing: 6) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
-                Text(verbatim: value).font(.allo(.subheadline))
+                Text(verbatim: value).font(.allo(startDesign == nil ? .subheadline : .body))
                     .foregroundStyle(valueIsAction ? Tint.blueText : Color(.secondaryLabel))
             }
         }
@@ -162,10 +176,19 @@ extension SettingsLabel where Title == Text, Icon == Image {
 
 private struct SettingsLabelIcon<Icon: View>: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.startDesign) private var startDesign
     @ScaledMetric(relativeTo: .body) private var size = SettingsRowMetrics.iconSize
     @ScaledMetric(relativeTo: .body) private var glyph = SettingsRowMetrics.iconSize / 2
     @ViewBuilder var icon: Icon
     var body: some View {
+        if let startDesign {
+            StartIcon(design: startDesign) { icon }.opacity(isEnabled ? 1 : 0.4)
+        } else {
+            settingsIcon
+        }
+    }
+
+    private var settingsIcon: some View {
         icon
             .font(.system(size: glyph * min(1, SettingsRowMetrics.maximumIconSize / size), weight: .semibold))
             .foregroundStyle(Tint.blueText)
@@ -178,12 +201,16 @@ private struct SettingsLabelIcon<Icon: View>: View {
 }
 
 private struct SettingsPageStyle: ViewModifier {
+    @Environment(\.startDesign) private var startDesign
+
     func body(content: Content) -> some View {
         content
             .labelStyle(SettingsLabelStyle())
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background { HomeBackdrop(home: true, working: false, frozen: true) }
+            .background {
+                if let startDesign { StartGround(design: startDesign) } else { HomeBackdrop(home: true, working: false, frozen: true) }
+            }
             // The soft edge under the title on every settings page, the welcome's setup list included:
             // left to the system there, the large title collapsed into a nearly opaque band with a
             // straight line through the first card (the owner, Nov 20 2026).

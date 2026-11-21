@@ -13,11 +13,11 @@ struct WelcomePanel: View {
     var kind: FirstRun.Kind
     @Binding var path: NavigationPath
     var finish: () -> Void
+    /// The start flow's last page: the cellular shortcut was offered on Local Connection's own page.
+    var summary = false
 
     @State private var hasModel = ModelKeys.hasUsableKey
     @State private var modelName = ModelKeys.selectedModelName
-    @State private var voiceAllowed = WelcomePanel.voiceAllowedNow
-    @State private var notices = UNAuthorizationStatus.notDetermined
 
     static var voiceAllowedNow: Bool {
         AVAudioApplication.shared.recordPermission == .granted && SFSpeechRecognizer.authorizationStatus() == .authorized
@@ -47,7 +47,7 @@ struct WelcomePanel: View {
                 .settingsFooter()
             }
 
-            WelcomeCellularSection()
+            if !summary { WelcomeCellularSection() }
 
             Section {
                 NavigationLink(value: DetailsRoute.model) {
@@ -69,39 +69,7 @@ struct WelcomePanel: View {
                 .settingsFooter()
             }
 
-            Section {
-                WelcomeSensesRow()
-                NavigationLink(value: SettingsRoute.memory) {
-                    SettingsRow(title: "Memory", caption: "What Poki keeps about you and your apps", symbol: "bookmark")
-                }
-                .accessibilityIdentifier("firstRun.memory")
-                Button(action: allowVoice) {
-                    SettingsRow(title: "Dictation", caption: "Talk instead of typing", symbol: "mic",
-                                value: voiceAllowed ? nil : AppLocalization.text(LocalizedStringResource("Allow")),
-                                valueIsAction: true, accessory: voiceAllowed ? .done : nil)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("firstRun.voice")
-                Button(action: allowNotices) {
-                    SettingsRow(title: "Notifications", caption: "Approvals and finished tasks", symbol: "bell.badge",
-                                value: noticesValue, valueIsAction: notices == .notDetermined,
-                                accessory: noticesAllowed ? .done : notices == .denied ? .leaves : nil)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("firstRun.notifications")
-            } header: {
-                Group {
-                    SettingsHeader("Features")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("All optional. Each can be changed later in Settings.")
-                }
-                .settingsFooter()
-            }
+            WelcomeFeaturesSection()
 
             Section {
                 NavigationLink(value: DetailsRoute.agents) {
@@ -114,6 +82,11 @@ struct WelcomePanel: View {
                     SettingsHeader("Connections")
                 }
                 .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Let Claude, ChatGPT and other agents use this iPhone")
+                }
+                .settingsFooter()
             }
         }
         .settingsPage()
@@ -125,7 +98,6 @@ struct WelcomePanel: View {
         .onChange(of: path.count) { _, _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-        .task { await readNotices() }
     }
 
     private func stepRow(_ step: SetupStep) -> some View {
@@ -140,21 +112,10 @@ struct WelcomePanel: View {
 
     private var buttons: some View {
         VStack(spacing: 4) {
-            SettingsPill(title: primaryWord, prominent: true, action: primary)
-                .accessibilityIdentifier("firstRun.next")
-            if nextStep != nil || !hasModel {
-                Button(action: finish) {
-                    Text(kind == .firstRun ? LocalizedStringKey("Finish Later") : LocalizedStringKey("Not Now"))
-                        .font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label).opacity(0.72))
-                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("firstRun.finishLater")
-            }
+            StartButtons(primary: primaryWord, action: primary,
+                         secondary: nextStep != nil || !hasModel ? (kind == .firstRun ? "Finish Later" : "Not Now") : nil,
+                         secondaryAction: finish)
         }
-        .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 8)
-        .frame(maxWidth: 520)
-        .frame(maxWidth: .infinity)
     }
 
     private var primaryWord: LocalizedStringKey {
@@ -170,6 +131,65 @@ struct WelcomePanel: View {
             path.append(DetailsRoute.model)
         } else {
             finish()
+        }
+    }
+
+    private func refresh() {
+        hasModel = ModelKeys.hasUsableKey
+        modelName = ModelKeys.selectedModelName
+    }
+}
+
+/// What Poki can do beyond the iPhone's steps, all optional: Screen History, Memory, and the two
+/// permissions asked here (dictation, notifications). On the welcome's list and as a start flow page.
+struct WelcomeFeaturesSection: View {
+    /// On its own start flow page, whose title and line already say what the header and footer do.
+    var onItsPage = false
+    @State private var voiceAllowed = WelcomePanel.voiceAllowedNow
+    @State private var notices = UNAuthorizationStatus.notDetermined
+
+    var body: some View {
+        Section {
+            WelcomeSensesRow()
+            NavigationLink(value: SettingsRoute.memory) {
+                SettingsRow(title: "Memory", caption: "What Poki keeps about you and your apps", symbol: "bookmark")
+            }
+            .accessibilityIdentifier("firstRun.memory")
+            Button(action: allowVoice) {
+                SettingsRow(title: "Dictation", caption: "Talk instead of typing", symbol: "mic",
+                            value: voiceAllowed ? nil : AppLocalization.text(LocalizedStringResource("Allow")),
+                            valueIsAction: true, accessory: voiceAllowed ? .done : nil)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("firstRun.voice")
+            Button(action: allowNotices) {
+                SettingsRow(title: "Notifications", caption: "Approvals and finished tasks", symbol: "bell.badge",
+                            value: noticesValue, valueIsAction: notices == .notDetermined,
+                            accessory: noticesAllowed ? .done : notices == .denied ? .leaves : nil)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("firstRun.notifications")
+        } header: {
+            if !onItsPage {
+                Group {
+                    SettingsHeader("Features")
+                }
+                .settingsHeader()
+            }
+        } footer: {
+            if !onItsPage {
+                Group {
+                    Text("All optional. Each can be changed later in Settings.")
+                }
+                .settingsFooter()
+            }
+        }
+        .task { await readNotices() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            voiceAllowed = WelcomePanel.voiceAllowedNow
+            Task { await readNotices() }
         }
     }
 
@@ -208,13 +228,6 @@ struct WelcomePanel: View {
 
     private func readNotices() async {
         notices = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-    }
-
-    private func refresh() {
-        hasModel = ModelKeys.hasUsableKey
-        modelName = ModelKeys.selectedModelName
-        voiceAllowed = Self.voiceAllowedNow
-        Task { await readNotices() }
     }
 }
 

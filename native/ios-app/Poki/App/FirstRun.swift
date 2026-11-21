@@ -128,46 +128,38 @@ struct FirstRunGuide: View {
 
     @State private var stage = WelcomeHello.Stage.launch
     @State private var path = NavigationPath()
-
-    private var showsPanel: Bool { stage == .leaving || stage == .gone }
+    private let design = StartDesign.current
 
     var body: some View {
-        ZStack {
-            if showsPanel {
-                NavigationStack(path: $path) {
-                    WelcomePanel(kind: kind, path: $path, finish: finish)
-                        .welcomeDestinations(path: $path)
+        NavigationStack(path: $path) {
+            StartHello(design: design, kind: kind, shown: stage == .hello, setUp: openPanel, later: finish)
+                .background { StartGround(design: design, hello: true) }
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: StartRoute.self) { route in
+                    StartFlowPage(route: route, kind: kind, path: $path, finish: finish)
                 }
-                .transition(.opacity)
-            }
-            if stage != .gone {
-                WelcomeHello(kind: kind, stage: stage, setUp: openPanel, later: finish)
-            }
+                .welcomeDestinations(path: $path)
         }
-        .background { HomeBackdrop(home: true, working: false).ignoresSafeArea() }
+        .environment(\.startDesign, design)
         .interactiveDismissDisabled()
         // Keep the existing limit until the panel's rows and buttons are verified at AX3–AX5.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .task {
-            // The launch screen holds still, then lets go onto this picture of itself (LaunchCurtain).
+            // The launch screen holds still, then lets go onto this page (LaunchCurtain).
             if fromLaunch { try? await Task.sleep(for: .seconds(LaunchMotion.hold + LaunchMotion.handOver * 0.6)) }
             withAnimation(reduceMotion ? .easeInOut(duration: 0.3) : .spring(duration: 0.7, bounce: 0.12)) { stage = .hello }
         }
         .onChange(of: link, initial: true) { _, step in
             guard let step else { return }
             link = nil
-            if stage != .gone { stage = .gone }
+            stage = .hello
             path = NavigationPath([step])
         }
     }
 
     private func openPanel() {
-        guard stage == .hello else { return }
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.25) : .easeIn(duration: LaunchMotion.sink)) { stage = .leaving }
-        Task {
-            try? await Task.sleep(for: .seconds(reduceMotion ? 0.25 : LaunchMotion.sink))
-            stage = .gone
-        }
+        guard stage == .hello, let first = StartRoute.order.first else { return }
+        path.append(first)
     }
 
     private func finish() {

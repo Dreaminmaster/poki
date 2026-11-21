@@ -329,9 +329,6 @@ private struct LoopbackPage: View {
             .settingsFooter()
         }
 
-        // The loopback on cellular is set up with the loopback itself.
-        CellularShortcutSection()
-
         // The external app is the way (ESP-168): every app's steps can be read at any time.
         Section {
             // The free one first: a new person usually has no proxy app.
@@ -354,6 +351,10 @@ private struct LoopbackPage: View {
             .settingsFooter()
         }
         .disabled(externalLocked)
+
+        // The loopback on cellular is set up with the loopback itself, once the loopback is chosen
+        // above: optional but strongly encouraged, and Screen History turns on only after it has run.
+        CellularShortcutSection()
 
         // Poki's own connection is no longer offered (the owner, Nov 19 2026). Only an iPhone that
         // still uses it from before sees its state, and the way to the proxy app.
@@ -834,6 +835,9 @@ struct SetupStepRow: View {
 struct SetupStepPage: View {
     @Environment(AppModel.self) private var model
     var step: SetupStep
+    /// A page of the start flow (`StartRoute`): the step's symbol, name and one line on top in place of
+    /// the status row, and the flow's buttons at the bottom doing what Open Settings did.
+    var hero = false
 
     var body: some View {
         switch step {
@@ -845,6 +849,9 @@ struct SetupStepPage: View {
     /// The steps the phone can't check: a native form with the steps, Open Settings and the switch.
     private var formPage: some View {
         Form {
+            if hero {
+                StartHero(symbol: step.symbol, title: step.rowTitle, line: step.pageSummary, done: model.isDone(step))
+            } else {
             Section {
                 LabeledContent {
                     Text(model.isDone(step) ? "Done" : "Needed").foregroundStyle(model.isDone(step) ? Color.green : Color.orange)
@@ -859,6 +866,7 @@ struct SetupStepPage: View {
                 }
                 .settingsFooter()
             }
+            }
             Section {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     Label { Text(LocalizedStringKey(line)) } icon: { Image(systemName: "\(i + 1).circle") }.font(.allo(.subheadline))
@@ -870,7 +878,7 @@ struct SetupStepPage: View {
                 .settingsHeader()
             }
             Section {
-                Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) }
+                if !hero { Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) } }
                 Toggle(confirmTitle, isOn: confirmBinding)
             } footer: {
                 Group {
@@ -880,7 +888,7 @@ struct SetupStepPage: View {
             }
         }
         // The step's name as Connection and the welcome list it (the owner, Nov 20 2026: one name each).
-        .navigationTitle(Text(step.rowTitle))
+        .navigationTitle(hero ? Text(verbatim: "") : Text(step.rowTitle))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume() }
     }
@@ -923,6 +931,10 @@ struct SetupStepPage: View {
     /// Loopback, pairing and background: the same native form, with their live sections.
     private var cardPage: some View {
         Form {
+            if hero {
+                StartHero(symbol: step.symbol, title: step.rowTitle, line: step.pageSummary,
+                          done: model.stepReadyForUse(step))
+            } else {
             Section {
                 LabeledContent {
                     if step == .loopback && model.loopback.state == .checking && model.setup.loopback != .none {
@@ -941,10 +953,12 @@ struct SetupStepPage: View {
                 }
                 .settingsFooter()
             }
+            }
+            // The loopback's page offers the cellular shortcut itself (LoopbackPage, the owner's rule).
             content
         }
         // The step's name as Connection and the welcome list it (the owner, Nov 20 2026: one name each).
-        .navigationTitle(Text(step.rowTitle))
+        .navigationTitle(hero ? Text(verbatim: "") : Text(step.rowTitle))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()
