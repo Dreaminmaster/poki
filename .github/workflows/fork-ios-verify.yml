@@ -20,8 +20,8 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: a15eb2c4a665bd356290a6d372990acd263d11cf
-            tests: 'ModelSessionMetadataTests:11 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
+            ref: ba1d5b80fb36940290a4ea3d6b4a3828a7191faa
+            tests: 'ModelSessionMetadataTests:13 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
     timeout-minutes: 90
