@@ -32,6 +32,10 @@ struct ChatView: View {
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
     @State private var wardrobeOpen = false
+    @State private var wardrobeMixing = false
+    @State private var wardrobeOpensSettings = false
+    @Environment(\.openPokiSettings) private var openPokiSettings
+    @Environment(\.bearCovered) private var bearCovered
 
     private func tapPoki() {
         writing = false
@@ -114,11 +118,24 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack {
-            chatContent.accessibilityHidden(wardrobeOpen)
-            BearWardrobeOverlay(isPresented: $wardrobeOpen)
+        chatContent
+            .environment(\.bearOutfitPreview, wardrobeOpen)
+            .environment(\.bearCovered, bearCovered || wardrobeMixing)
+            .sheet(isPresented: $wardrobeOpen, onDismiss: wardrobeDismissed) {
+                BearWardrobeSheet(mixing: $wardrobeMixing) {
+                    wardrobeOpensSettings = true
+                    wardrobeOpen = false
+                }
+                .environment(\.bearOutfitPreview, true)
+            }
+    }
+
+    private func wardrobeDismissed() {
+        wardrobeMixing = false
+        if wardrobeOpensSettings {
+            wardrobeOpensSettings = false
+            openPokiSettings?()
         }
-        .environment(\.bearOutfitPreview, wardrobeOpen)
     }
 
     @ViewBuilder private var chatContent: some View {
