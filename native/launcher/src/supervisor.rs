@@ -38,8 +38,8 @@ pub struct Config {
     #[serde(default)]
     pub in_process: bool,
     /// A file the mounted developer disk image puts on the phone, as the app's own process sees it.
-    /// In-process, when the loopback refuses the connection and this file is there, the app opens its
-    /// own session on the image. None: no such fallback.
+    /// In-process, if the loopback refuses or drops the connection and this file is there,
+    /// the app opens its own session on the image. None: no such fallback.
     #[serde(default)]
     pub ddi_marker: Option<PathBuf>,
 }
@@ -222,14 +222,14 @@ impl Launcher {
         let mut device = match Device::open(config.device_address, &mut pairing, Duration::from_secs(20)).await {
             Ok(device) => device,
             // On cellular the loopback can refuse the connection (GitHub issue 35) while the image
-            // mounted earlier is still there: the app's own session needs neither. It is ready only
-            // once that session opens, and nothing here checked the pairing. The refusal's words go
-            // with it, for the app's log. While the app looks for a moved remote pairing port on
+            // mounted earlier is still there. A proxy can also accept and drop the handshake.
+            // The app's own session needs neither. It is ready only after that session opens;
+            // nothing here checked pairing. Keep the transport error in the app's log. While the app looks for a moved remote pairing port on
             // Wi-Fi, a refusal is `NotListening` and waits for that port; once the search ends, the
             // same refusal comes here again.
             Err(failure)
                 if config.in_process
-                    && failure.remote_stage == Some(Stage::Connect)
+                    && matches!(failure.remote_stage, Some(Stage::Connect | Stage::HandshakeDropped))
                     && config.ddi_marker.as_deref().is_some_and(Path::is_file) =>
             {
                 let status = json!({"runner": "in-process", "code": "local_ddi", "detail": failure.detail});
