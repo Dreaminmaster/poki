@@ -75,6 +75,9 @@ final class MemorySourceNavigationUITests: XCTestCase {
         let app = launchFixture(liveTask: true)
         defer { app.terminate() }
         try XCTSkipUnless(app.frame.width < 750, "Run on an iPhone-size simulator")
+        let composer = app.buttons["composer.main"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 15), "The real chat composer must be loaded")
+        XCTAssertEqual(composer.label, "Stop", "The fixture must start a real in-flight chat before any Memory navigation")
         openSource(app)
         verifyDraftAfterClosing(app, expectRunning: true)
     }
