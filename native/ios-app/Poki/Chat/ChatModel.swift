@@ -1470,6 +1470,10 @@ final class ChatModel {
                     countedDistance = bounded.distance
                 }
             }
+            if call.name == "do", actions.isEmpty, args["finish"] as? Bool == true, args["app"] == nil {
+                let line = await app.finishEmptyDo(localSession: splitViewSession)
+                return PokiCore.ToolAnswer(text: line ?? "finish: Poki will return when the task ends.", jpeg: nil, isError: false)
+            }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }
             let phoneArguments: String
