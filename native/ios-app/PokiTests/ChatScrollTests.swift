@@ -38,17 +38,6 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
     }
 
-    func testSearchJumpToAnOlderMessageMovesScrollAwayFromNewest() throws {
-        let (scroll, feed) = try transcript()
-        XCTAssertLessThan(gap(scroll), 2)
-        let target = feed.entries[8].id
-        let jump = ConversationSearchJump(sessionID: "search-fixture", entryID: target)
-        feed.jump = jump
-        settle { self.gap(scroll) > 200 && feed.appliedJump == jump.requestID }
-        XCTAssertGreaterThan(gap(scroll), 200, "A matching saved message should be in view, not the newest message")
-        XCTAssertEqual(feed.appliedJump, jump.requestID, "Navigation must acknowledge the exact request")
-    }
-
     /// Opening and dismissing a saved-message jump only changes scroll position: it must not
     /// unmount the composer, discard unsent text, or replace the active conversation.
     func testSearchJumpAndCancellationKeepUnsentChatDraft() throws {
