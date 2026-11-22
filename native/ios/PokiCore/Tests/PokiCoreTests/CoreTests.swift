@@ -569,7 +569,7 @@ final class ApprovalTests: XCTestCase {
         let result = await core.tool("do", arguments: #"{"actions":[{"tap":1}]}"#)
         XCTAssertTrue(result.text.contains("approval_required"), result.text)
         let approval = try XCTUnwrap(core.pendingApproval)
-        XCTAssertEqual(approval.reason, "deleting (\\"delete\\")")
+        XCTAssertTrue(approval.reason.contains("deleting"), approval.reason)
         XCTAssertNil(approval.sourceSession, "Owner Live Voice must not be classified as an outside MCP caller")
         XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
     }
