@@ -5,8 +5,8 @@ import UIKit
 /// Talk with Poki without leaving the app you're in: from the Action Button, Shortcuts or Siri, Poki
 /// stays in the background, so the app in front stays in front, and Poki looks at it and works in it
 /// while you talk. The Live Activity shows the talk and carries End. Running this again stops a live
-/// talk, or finishes and sends an offline opening recording as text when voice could not connect;
-/// End on the Live Activity always cancels.
+/// talk, or finishes and sends unconfirmed opening speech as text if voice could not connect or
+/// disconnected before confirming it; End on the Live Activity always cancels.
 ///
 /// iOS opens the microphone for an app in the background only from an AudioRecordingIntent, and only
 /// with a Live Activity up: LiveActivityIntent lets this intent start one from the background. When
@@ -14,7 +14,7 @@ import UIKit
 /// permission) or the Live Activity does not start, Poki opens and Talk to Poki goes on from there.
 struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     static let title = LocalizedStringResource("Poki Anytime", table: "Entry")
-    static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk, or to send your recording as text if voice couldn’t connect.", table: "Entry"))
+    static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk, or to send unconfirmed opening speech as text if voice couldn’t connect or disconnected.", table: "Entry"))
     static let openAppWhenRun = false
     @available(iOS 26.0, *)
     static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }

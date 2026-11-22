@@ -811,6 +811,10 @@ final class VoiceModel {
         AppLocalization.text(LocalizedStringResource("Voice couldn’t connect, and I couldn’t turn the recording into text.", table: "Entry"))
     }
 
+    private static var openingUncertainAfterAction: String {
+        AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Nothing was sent again. Check whether the rest of what you said went through.", table: "Entry"))
+    }
+
     private func sendOpeningAudioIfReady() -> Bool {
         guard ready, connectionOpen, let capture = openingCapture else { return true }
         if capture.audio.allowSending(session: session) {
@@ -838,7 +842,23 @@ final class VoiceModel {
     private func startOpeningDictation() -> Bool {
         let number = session
         guard let capture = openingCapture,
-              let plan = capture.audio.prepareForOwnerDictation(session: number) else { return false }
+              let outcome = capture.audio.prepareForOwnerDictation(session: number) else { return false }
+        let plan: OpeningVoiceAudio.RecoveryPlan
+        switch outcome {
+        case .confirmed:
+            return false
+        case .uncertainPrefixUsed:
+            trace("voice connection lost after work started without server audio position")
+            endSession()
+            session += 1
+            let note = Self.openingUncertainAfterAction
+            phase = .lost(note)
+            lines.append(VoiceLine(role: .note, text: note))
+            endTranscript()
+            return true
+        case .dictation(let recoveryPlan):
+            plan = recoveryPlan
+        }
         if plan.kind == .fullOpening {
             for call in calls where call.session == number && call.state == .running && !startedCallIDs.contains(call.id) {
                 abortedOpeningCallIDs.insert(call.id)

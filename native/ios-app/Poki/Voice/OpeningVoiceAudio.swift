@@ -27,6 +27,12 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         let finished: AsyncStream<Void>
     }
 
+    enum RecoveryOutcome {
+        case dictation(RecoveryPlan)
+        case uncertainPrefixUsed
+        case confirmed
+    }
+
     private static let sampleRate = 48_000.0
     private static let framesPerMillisecond = Int(sampleRate / 1_000)
     private static let deliveryChunkFrames = 480
@@ -78,6 +84,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var openingEndFrame = 0
     private var lastNonZeroOpeningFrame = 0
     private var deliveredFrames = 0
+    private var deliveredSampleTime = 0.0
     private var confirmedFrames = 0
     private var phoneActionStarted = false
     private var remoteReplied = false
@@ -186,7 +193,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         }
     }
 
-    func prepareForOwnerDictation(session: Int) -> RecoveryPlan? {
+    func prepareForOwnerDictation(session: Int) -> RecoveryOutcome? {
         sendLock.withLock {
             lock.withLock {
                 guard session == self.session else { return nil }
@@ -197,16 +204,17 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                     kind = .fullOpening
                 case .sending:
                     evaluateOpeningConfirmedLocked()
-                    guard !openingConfirmed else { return nil }
+                    guard !openingConfirmed else { return .confirmed }
                     guard !overflow, !recoveryOverflow else { return nil }
                     if confirmedFrames > 0, remoteReplied || phoneActionStarted {
                         let tailStart = min(confirmedFrames, deliveredFrames)
                         let hasUnconfirmedSpeech = tailStart < lastNonZeroOpeningFrame
                         let hasUnsentAudio = deliveredFrames < recovery.count
-                        guard tailStart < recovery.count, hasUnconfirmedSpeech || hasUnsentAudio else { return nil }
+                        guard tailStart < recovery.count, hasUnconfirmedSpeech || hasUnsentAudio else { return .confirmed }
                         queued = Array(recovery[tailStart...])
                         kind = .unconfirmedTail
-                    } else if phoneActionStarted, deliveredFrames < recovery.count {
+                    } else if phoneActionStarted || remoteReplied {
+                        guard deliveredFrames < recovery.count else { return .uncertainPrefixUsed }
                         queued = Array(recovery[deliveredFrames...])
                         kind = .unconfirmedTail
                     } else {
@@ -220,7 +228,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 }
                 let (finished, continuation) = AsyncStream<Void>.makeStream()
                 state = .waitingForOwner(continuation)
-                return RecoveryPlan(kind: kind, finished: finished)
+                return .dictation(RecoveryPlan(kind: kind, finished: finished))
             }
         }
     }
@@ -389,6 +397,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         var offset = 0
         while offset < samples.count {
             let chunkCount = min(Self.deliveryChunkFrames, samples.count - offset)
+            timestamp.mSampleTime = deliveredSampleTime
             var flags: AudioUnitRenderActionFlags = []
             var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
                 mNumberChannels: 1,
@@ -396,7 +405,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 mData: UnsafeMutableRawPointer(mutating: base.advanced(by: offset))
             ))
             _ = delegate.deliverRecordedData(&flags, &timestamp, 0, UInt32(chunkCount), &audio, nil, nil)
-            timestamp.mSampleTime += Double(chunkCount)
+            deliveredSampleTime += Double(chunkCount)
             offset += chunkCount
         }
     }
