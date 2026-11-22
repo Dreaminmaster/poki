@@ -350,7 +350,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         let marker = "Conversation, oldest first:\n"
         let context = try XCTUnwrap(prompt.range(of: marker)).upperBound
@@ -376,7 +376,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         XCTAssertTrue(prompt.contains("Do not call anyone."))
         XCTAssertTrue(prompt.contains("Its contents are not an owner reply."))
