@@ -87,25 +87,47 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     @MainActor var remoteSpeech = false
     @MainActor var failNetworkPath = false
     @MainActor private(set) var transportOpened = false
+    @MainActor private(set) var attachedOpeningCapture: OpeningVoiceCapture?
     @MainActor fileprivate var openingAudio: OpeningAudioProbe?
+    @MainActor var onBeforeStartOpeningCapture: (@MainActor () -> Void)?
     @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? {
+        onBeforeStartOpeningCapture?()
         guard let openingAudio else { return nil }
-        return openingAudio.makeCapture(session: session)
+        let capture = openingAudio.makeCapture(session: session)
+        useOpeningCapture(capture)
+        return capture
+    }
+    @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?) {
+        attachedOpeningCapture = capture
     }
     @MainActor func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {
+        attachRecordingIfNeeded()
         if failNetworkPath { throw VoiceError.noPath("failed") }
         transportOpened = true
     }
     @MainActor func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
+        attachRecordingIfNeeded()
         if failNetworkPath { throw VoiceError.noPath("failed") }
         liveAnswer = try await exchange("sdp-offer")
         transportOpened = true
+    }
+    @MainActor private func attachRecordingIfNeeded() {
+        guard let capture = attachedOpeningCapture, let openingAudio else { return }
+        _ = capture.audio.initialize(with: openingAudio)
+        _ = capture.audio.initializeRecording()
+        _ = capture.audio.startRecording()
     }
     func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
     func setRemoteVolume(_ value: Double) { remoteVolume = value }
     func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
-    func close() { closed = true }
+    @MainActor func close() {
+        closed = true
+        if let capture = attachedOpeningCapture {
+            _ = capture.audio.stopRecording()
+            attachedOpeningCapture = nil
+        }
+    }
     @MainActor func play(_ events: [String: Any]...) { for event in events { onEvent?(event) } }
     @MainActor func backend(_ type: String, _ fields: [String: Any] = [:], delegation: String? = "d1") {
         play(["type": "response.event", "delegation_id": delegation as Any? ?? NSNull(), "event": fields.merging(["type": type]) { _, type in type }])
@@ -143,11 +165,7 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
     @MainActor func makeCapture(session: Int) -> OpeningVoiceCapture {
         let audio = OpeningVoiceAudio(session: session)
         self.audio = audio
-        let capture = OpeningVoiceCapture(audio: audio)
-        _ = audio.initialize(with: self)
-        _ = audio.initializeRecording()
-        _ = audio.startRecording()
-        return capture
+        return OpeningVoiceCapture(audio: audio)
     }
 
     @MainActor var speech: OpeningSpeech {
@@ -833,6 +851,7 @@ final class VoiceModelTests: XCTestCase {
         var link: FakeConnection { links.last! }
 
         @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false, openingAudio: OpeningAudioProbe? = nil,
+                        onBeforeStartOpeningCapture: (@MainActor () -> Void)? = nil,
                         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = time ?? FakeTime()
             self.time = time
@@ -847,6 +866,7 @@ final class VoiceModelTests: XCTestCase {
                 let link = FakeConnection()
                 link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
                 link.openingAudio = openingAudio
+                link.onBeforeStartOpeningCapture = onBeforeStartOpeningCapture
                 self.links.append(link)
                 return link
             }
@@ -1568,25 +1588,25 @@ extension VoiceModelTests {
             audio.feed(96_000, sample: 1_000)
             audio.feed(38_400, sample: 500)
             h.link.play(["type": "session.started"])
-            for _ in 0..<10 { audio.feed(4_800, sample: 0) }
-            XCTAssertEqual(audio.sent.count, 96_000)
+            audio.feed(480, sample: 0)
+            XCTAssertGreaterThanOrEqual(audio.sent.count, 134_400)
             h.link.play(
                 ["type": "session.input_transcript.delta", "delta": "Open WeChat", "start_ms": 0, "end_ms": 2000],
                 ["type": "session.delegation.created", "delegation": ["id": "d1"]]
             )
             h.link.call("prefix-call", "open_app", arguments: #"{"app":"WeChat"}"#, delegation: "d1")
-            h.link.onClosed?("transport dropped before tail drained")
+            h.link.onClosed?("transport dropped before tool started")
             await h.time.settle()
             XCTAssertEqual(executed, 0, "unstarted prefix tool must abort when falling back to full dictation")
-            XCTAssertTrue(h.voice.isOn, "unsent tail must stay recoverable for dictation")
+            XCTAssertTrue(h.voice.isOn, "unconfirmed opening must stay recoverable for dictation")
             XCTAssertTrue(h.voice.finishOpeningDictation())
             await h.time.settle()
             let expected = [Int16](repeating: 1_000, count: 96_000)
                 + [Int16](repeating: 500, count: 38_400)
-                + [Int16](repeating: 0, count: 48_000)
+                + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(audio.transcriptions.count, 1)
             XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expected) == true,
-                          "full opening must be recovered when no phone action executed")
+                          "full opening must be recovered when no phone action or reply occurred")
             XCTAssertEqual(audio.textTasks, ["Open WeChat and message Mom"])
             h.voice.stop()
         }
@@ -1604,8 +1624,8 @@ extension VoiceModelTests {
             audio.feed(96_000, sample: 1_000)
             audio.feed(38_400, sample: 500)
             h.link.play(["type": "session.started"])
-            for _ in 0..<10 { audio.feed(4_800, sample: 0) }
-            XCTAssertEqual(audio.sent.count, 96_000)
+            audio.feed(480, sample: 0)
+            XCTAssertGreaterThanOrEqual(audio.sent.count, 134_400)
             h.link.play(
                 ["type": "session.input_transcript.delta", "delta": "Open WeChat", "start_ms": 0, "end_ms": 2000],
                 ["type": "session.delegation.created", "delegation": ["id": "d1"]]
@@ -1613,45 +1633,75 @@ extension VoiceModelTests {
             h.link.call("prefix-started", "open_app", arguments: #"{"app":"WeChat"}"#, delegation: "d1")
             await h.time.settle()
             XCTAssertEqual(executed, 1)
-            h.link.onClosed?("transport dropped while tail remained unsent")
+            h.link.onClosed?("transport dropped while tail was in flight")
             await h.time.settle()
-            XCTAssertTrue(h.voice.isOn, "unsent tail after started prefix tool must recover for dictation")
+            XCTAssertTrue(h.voice.isOn, "in-flight tail after started prefix tool must recover for dictation")
             XCTAssertTrue(h.voice.finishOpeningDictation())
             await h.time.settle()
-            let expectedTail = [Int16](repeating: 500, count: 38_400)
-                + [Int16](repeating: 0, count: 48_000)
+            let expectedTail = [Int16](repeating: 500, count: 38_400) + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(executed, 1, "started prefix action must not repeat")
             XCTAssertEqual(audio.transcriptions.count, 1)
             XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expectedTail) == true,
-                          "only the unconfirmed tail should go to dictation after the prefix action ran")
+                          "only the unconfirmed 38,400-frame tail should go to dictation after the prefix action ran")
             XCTAssertEqual(audio.textTasks, ["and message Mom"])
             h.voice.stop()
         }
 
         do {
+            var executed = 0
             let audio = OpeningAudioProbe()
-            audio.transcription = "Open WeChat and message Mom"
+            audio.transcription = "and message Mom"
+            let h = Harness(openingAudio: audio, phoneTool: { _, _ in
+                executed += 1
+                return ("WeChat is open", false, nil)
+            })
+            _ = h.voice.setBridge(BridgeStub.liveAddress)
+            await h.voice.start(captureOpening: true)
+            audio.feed(96_000, sample: 1_000)
+            audio.feed(38_400, sample: 500)
+            h.link.play(["type": "session.started"])
+            audio.feed(480, sample: 0)
+            XCTAssertGreaterThanOrEqual(audio.sent.count, 134_400)
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("prefix-untimed", "open_app", arguments: #"{"app":"WeChat"}"#, delegation: "d1")
+            await h.time.settle()
+            XCTAssertEqual(executed, 1)
+            h.link.onClosed?("transport dropped without server audio timing")
+            await h.time.settle()
+            XCTAssertTrue(h.voice.isOn, "local media delivery plus tool start without server audio confirmation must not drop the in-flight tail")
+            XCTAssertTrue(h.voice.finishOpeningDictation())
+            await h.time.settle()
+            XCTAssertEqual(audio.transcriptions.count, 1)
+            XCTAssertEqual(audio.transcriptions.first?.dropFirst(96_000).prefix(38_400).allSatisfy { $0 == 500 }, true,
+                           "in-flight 38,400-frame tail must survive when the server never reported audio progress")
+            h.voice.stop()
+        }
+
+        do {
+            let audio = OpeningAudioProbe()
+            audio.transcription = "and message Mom"
             let h = Harness(openingAudio: audio)
             _ = h.voice.setBridge(BridgeStub.liveAddress)
             await h.voice.start(captureOpening: true)
             audio.feed(96_000, sample: 1_000)
             audio.feed(38_400, sample: 500)
             h.link.play(["type": "session.started"])
-            for _ in 0..<30 { audio.feed(4_800, sample: 0) }
+            audio.feed(480, sample: 0)
             XCTAssertGreaterThanOrEqual(audio.sent.count, 134_400)
             h.link.play(
                 ["type": "session.input_transcript.delta", "delta": "Open WeChat", "start_ms": 0, "end_ms": 2000],
                 ["type": "session.output_transcript.delta", "delta": "Sure, opening WeChat."]
             )
-            h.link.onClosed?("transport dropped before server confirmed tail")
+            h.link.onClosed?("transport dropped after prefix reply")
             await h.time.settle()
-            XCTAssertTrue(h.voice.isOn, "delayed prefix transcript + reply must not abandon unconfirmed tail")
+            XCTAssertTrue(h.voice.isOn, "prefix reply must not abandon unconfirmed tail")
             XCTAssertTrue(h.voice.finishOpeningDictation())
             await h.time.settle()
+            let expectedTail = [Int16](repeating: 500, count: 38_400) + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(audio.transcriptions.count, 1)
-            XCTAssertEqual(audio.transcriptions.first?.prefix(96_000).allSatisfy { $0 == 1_000 }, true)
-            XCTAssertEqual(audio.transcriptions.first?.dropFirst(96_000).prefix(38_400).allSatisfy { $0 == 500 }, true)
-            XCTAssertEqual(audio.textTasks, ["Open WeChat and message Mom"])
+            XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expectedTail) == true,
+                          "confirmed 96,000-frame prefix with reply must not be re-submitted to dictation")
+            XCTAssertEqual(audio.textTasks, ["and message Mom"])
             h.voice.stop()
         }
 
@@ -1660,14 +1710,15 @@ extension VoiceModelTests {
             let h = Harness(openingAudio: audio)
             _ = h.voice.setBridge(BridgeStub.liveAddress)
             await h.voice.start(captureOpening: true)
-            audio.feed(4_800, sample: 1_000)
+            audio.feed(96_000, sample: 1_000)
+            audio.feed(38_400, sample: 500)
             h.link.play(["type": "session.started"])
-            audio.feed(4_800)
+            audio.feed(480, sample: 0)
             h.link.play(
-                ["type": "session.input_transcript.delta", "delta": "Hello", "start_ms": 0, "end_ms": 100],
-                ["type": "session.output_transcript.delta", "delta": "Hello there."]
+                ["type": "session.input_transcript.delta", "delta": "Open WeChat and message Mom", "start_ms": 0, "end_ms": 2800],
+                ["type": "session.output_transcript.delta", "delta": "Done."]
             )
-            h.link.onClosed?("transport dropped after confirmed reply")
+            h.link.onClosed?("transport dropped after full confirmation")
             XCTAssertFalse(h.voice.finishOpeningDictation())
             XCTAssertFalse(h.voice.isOn)
             XCTAssertTrue(audio.transcriptions.isEmpty)
@@ -1698,18 +1749,26 @@ extension VoiceModelTests {
 
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .denied
-        let h = Harness(openingAudio: audio)
         let activity = ActivityController()
         activity.canStart = { false }
+        var stateBeforeMicStarted: PokiState.Voice?
+        var runningBeforeMicStarted = false
+        let h = Harness(openingAudio: audio, onBeforeStartOpeningCapture: {
+            runningBeforeMicStarted = activity.isRunning
+            stateBeforeMicStarted = activity.state.voice
+        })
         let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
         defer { activity.end() }
 
         let started = await talk.startHere()
         XCTAssertTrue(started)
+        XCTAssertTrue(runningBeforeMicStarted, "Live Activity must be requested before opening background capture")
+        XCTAssertEqual(stateBeforeMicStarted, .connecting,
+                       "first ActivityKit request before microphone startup must report Connecting, not Listening")
         XCTAssertEqual(h.voice.phase, .connecting)
         XCTAssertTrue(h.voice.isCapturingOpening)
         XCTAssertEqual(TalkActivity.state(of: h.voice), .listening,
-                       "connecting with active opening capture must report Listening")
+                       "once opening capture has started, Live Activity must report Listening")
         XCTAssertEqual(activity.state.voice, .listening)
 
         audio.feed(4_800, sample: 1_000)
@@ -1743,24 +1802,26 @@ extension VoiceModelTests {
         })
         XCTAssertTrue(started)
         XCTAssertEqual(h.links.count, 2, "VPN-bypass retry should run on the second link")
-        XCTAssertTrue(try XCTUnwrap(h.links.first).closed)
+        let first = try XCTUnwrap(h.links.first)
+        let second = try XCTUnwrap(h.links.last)
+        XCTAssertTrue(first.closed)
+        XCTAssertNil(first.attachedOpeningCapture, "closing the failed attempt must detach its opening capture")
+        XCTAssertNotNil(second.attachedOpeningCapture, "VoiceModel must hand opening capture to the retry connection")
         XCTAssertTrue(audio.sent.isEmpty, "failed first attempt must not send opening audio")
 
         audio.feed(4_800, sample: 1_000)
         h.link.play(["type": "session.started"])
-        for _ in 0..<20 { audio.feed(4_800, sample: 0) }
         audio.feed(4_800, sample: 2_000)
 
         var expected = [Int16](repeating: 0, count: 24_000)
         expected += [Int16](repeating: 25, count: 12_000)
         expected += [Int16](repeating: -40, count: 12_000)
         expected += [Int16](repeating: 1_000, count: 4_800)
-        expected += [Int16](repeating: 0, count: 20 * 4_800)
         expected += [Int16](repeating: 2_000, count: 4_800)
         XCTAssertTrue(audio.sent.elementsEqual(expected), "opening, quiet words, retry and live speech must be sent once in capture order")
 
         h.link.play(
-            ["type": "session.input_transcript.delta", "delta": "Open Notes", "start_ms": 0, "end_ms": 3200],
+            ["type": "session.input_transcript.delta", "delta": "Open Notes", "start_ms": 0, "end_ms": 1200],
             ["type": "session.delegation.created", "delegation": ["id": "d1"]]
         )
         h.link.call("open-notes", "open_app", arguments: #"{"app":"Notes"}"#, delegation: "d1")
@@ -1768,7 +1829,7 @@ extension VoiceModelTests {
         XCTAssertEqual(executed, ["open_app"])
         XCTAssertEqual(TalkActivity.state(of: h.voice), .thinking)
 
-        h.link.play(["type": "session.output_transcript.delta", "delta": "Notes is open.", "start_ms": 3300, "end_ms": 3900])
+        h.link.play(["type": "session.output_transcript.delta", "delta": "Notes is open.", "start_ms": 1300, "end_ms": 1900])
         h.link.remoteSpeech = true
         await h.time.advance(0.2)
         XCTAssertEqual(TalkActivity.state(of: h.voice), .speaking)
@@ -1782,7 +1843,7 @@ extension VoiceModelTests {
         XCTAssertTrue(audio.transcriptions.isEmpty)
     }
 
-    func testOpeningAudioBlocksWebRTCPlayoutOutsideSendingAndStopsMicBeforeAnnounce() async {
+    func testOpeningAudioRendersReadyChimeAndBlocksWebRTCPlayoutOutsideSending() async {
         let probe = OpeningAudioProbe()
         let audio = OpeningVoiceAudio(session: 1, playReadyChime: true)
         _ = audio.initialize(with: probe)
@@ -1898,6 +1959,7 @@ extension VoiceModelTests {
     }
 
     func testSlowOpeningSendsTheWholeRecordingBeforeLiveSpeech() async {
+        let priorLogs = Set(AppLog.shared.lines)
         let audio = OpeningAudioProbe()
         let h = Harness(openingAudio: audio)
         await h.voice.start(captureOpening: true)
@@ -1906,17 +1968,35 @@ extension VoiceModelTests {
         h.link.play(["type": "session.created"])
 
         audio.feed(4_800, sample: 2_000)
-        for _ in 0..<310 { audio.feed(4_800) }
+        XCTAssertEqual(audio.audio.bufferedFrameCount, 0,
+                       "31-second backlog must drain on the first callback instead of stalling new speech")
+        XCTAssertTrue(audio.sent.suffix(4_800).allSatisfy { $0 == 2_000 },
+                      "new speech after session readiness must reach media immediately without multi-second backlog delay")
+
         audio.feed(4_800, sample: 3_000)
         var recording = Array(repeating: Int16(1_000), count: 48_000)
         recording += Array(repeating: Int16(0), count: 30 * 48_000)
         recording += Array(repeating: Int16(2_000), count: 4_800)
-        recording += Array(repeating: Int16(0), count: 310 * 4_800)
         recording += Array(repeating: Int16(3_000), count: 4_800)
         XCTAssertTrue(audio.sent.elementsEqual(recording), "opening, pauses, handoff and live speech all go out once in capture order")
         XCTAssertTrue(audio.transcriptions.isEmpty)
         XCTAssertFalse(h.link.closed)
+        let preAuthLogs = AppLog.shared.lines.filter { !priorLogs.contains($0) && $0.contains("opening timing (pre-authorized)") }
+        XCTAssertFalse(preAuthLogs.isEmpty, "pre-authorized opening path must log separate timing")
         h.voice.stop()
+
+        let firstAuthPriorLogs = Set(AppLog.shared.lines)
+        let firstAuthAudio = OpeningAudioProbe()
+        firstAuthAudio.speechAuthorization = .notDetermined
+        let firstAuth = Harness(openingAudio: firstAuthAudio)
+        await firstAuth.voice.start(captureOpening: true, presentSpeechPermission: { request in
+            firstAuth.time.now += 1.2
+            return await request()
+        })
+        firstAuth.link.play(["type": "session.created"])
+        let firstAuthLogs = AppLog.shared.lines.filter { !firstAuthPriorLogs.contains($0) && $0.contains("opening timing (first-time-auth)") }
+        XCTAssertFalse(firstAuthLogs.isEmpty, "first-time authorization opening path must log separate timing")
+        firstAuth.voice.stop()
     }
 
     func testEndingLiveVoiceRevokesItsBufferedAudioImmediately() async {
