@@ -192,7 +192,8 @@ struct PokiDetailsView: View {
                                 back: { if !path.isEmpty { path.removeLast() } },
                                 searchJump: searchJump?.sessionID == id ? searchJump : nil,
                                 onSearchJumpApplied: onSearchJumpApplied,
-                                sessionStore: sessionStore)
+                                sessionStore: sessionStore,
+                                readOnly: true)
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .language:
