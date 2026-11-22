@@ -115,6 +115,8 @@ enum VoiceDirect {
     Start promptly. The voice assistant introduces the task. Give one brief factual update when a meaningful step is confirmed and more work remains. Continue without waiting. Return the verified result or blocker.
     """
 
+    static var realtimeInstructions: String { instructions() }
+
     private static func instructions(live: Bool = false) -> String { """
     # Role
     You are Poki, a voice assistant that operates the user's iPhone with tools.
@@ -170,6 +172,14 @@ enum VoiceDirect {
         ]
     }
 
+    static var codexTools: [[String: Any]] {
+        tools(live: false).compactMap { tool in
+            guard let name = tool["name"] as? String, localTools.contains(name),
+                  let description = tool["description"], let schema = tool["parameters"] else { return nil }
+            return ["type": "function", "name": name, "description": description, "inputSchema": schema]
+        }
+    }
+
     /// PokiCore's own description of do (the text chat's), so voice knows every action the chat knows:
     /// launch any app, scroll_to, back, long_press, handoff and the rest.
     private static let doDescription: String = Harness.phoneTools.first { $0.name == "do" }?.description
@@ -182,7 +192,7 @@ enum VoiceDirect {
         let selected = ModelCatalog.voiceModelID(for: account)
         return [
             "type": "realtime", "model": account == .openai && selected.hasPrefix("gpt-live-") ? ModelCatalog.voiceRealtime : selected,
-            "instructions": instructions(), "output_modalities": ["audio"],
+            "instructions": realtimeInstructions, "output_modalities": ["audio"],
             "audio": [
                 "input": ["turn_detection": ["type": "server_vad", "silence_duration_ms": 450, "prefix_padding_ms": 300, "threshold": 0.5, "create_response": account != .openai, "interrupt_response": true],
                           "noise_reduction": ["type": "near_field"], "transcription": ["model": "gpt-4o-mini-transcribe", "language": "zh"]],

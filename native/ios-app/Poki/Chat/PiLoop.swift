@@ -183,6 +183,7 @@ final class PiLoop {
                                                                 resultCardMode: .all),
                                      messages: messages),
             streamFn: { model, transcript, options in
+                if provider.signsIn, options.apiKey == nil { throw ChatGPTAccount.SignInRequired() }
                 // API credentials may have suspended after prepareRequest. Recheck at
                 // the last request boundary too; never add a tool the live context lacks.
                 let revision = HistoryCapture.agentQueryRevision
@@ -227,6 +228,9 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if provider.signsIn, model.provider == "openai-codex" {
+                    options.httpClient = ChatGPTAccount.ResponsesClient(transport: DefaultProviderHTTPClient(env: options.env))
+                }
                 if let trace = ChatStepTiming.current {
                     if model.api == .openAIResponses {
                         let onPayload = options.onPayload
@@ -413,11 +417,16 @@ final class PiLoop {
         return AgentToolResult(content: content, isError: answer.isError)
     }
 
-    /// The provider's message for the owner. pi never puts the key in it; a sign-in that ran out says so.
+    /// The provider's message for the owner. ChatGPT errors can contain the upstream response body.
     private static func words(_ message: String, provider: ModelProvider) -> String {
+        if provider.signsIn {
+            if ConnectionCheck.statusIn(message) == 401 || message.contains(ChatGPTAccount.signInAgain) {
+                return ChatGPTAccount.signInAgain
+            }
+            return AppLocalization.text(LocalizedStringResource("\(provider.name), \(AppLocalization.text("the request failed."))"))
+        }
         if message.contains("No API key") || message.contains("missingApiKey") || message.isEmpty && !ModelKeys.hasKey(provider) {
-            return provider.signsIn ? AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT again. Open Settings, then Models."))
-                                    : AppLocalization.text(LocalizedStringResource("Add your \(provider.name) key. Open Settings, then Models."))
+            return AppLocalization.text(LocalizedStringResource("Add your \(provider.name) key. Open Settings, then Models."))
         }
         // The provider's stream ended on an error event with nothing in it (the library prints the
         // missing fields as "undefined"): said plainly, with what is left of it when there is any.

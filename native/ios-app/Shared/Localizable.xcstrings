@@ -14095,6 +14095,86 @@
         }
       }
     },
+    "Sign in to ChatGPT again to start a voice conversation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重新登录 ChatGPT，再开始语音对话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請重新登入 ChatGPT，再開始語音對話。"
+          }
+        }
+      }
+    },
+    "Enter this code on the ChatGPT page to sign in for text chat and live voice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在 ChatGPT 页面输入此设备码，即可登录文字聊天和实时语音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在 ChatGPT 頁面輸入此裝置碼，即可登入文字聊天和即時語音。"
+          }
+        }
+      }
+    },
+    "Use your ChatGPT subscription for text chat and live voice. Your sign-in stays in this iPhone’s Keychain." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 套餐进行文字聊天和实时语音。登录信息保存在这台 iPhone 的钥匙串中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 方案進行文字聊天和即時語音。登入資訊保存在這部 iPhone 的鑰匙圈中。"
+          }
+        }
+      }
+    },
+    "Poki uses this ChatGPT sign-in for both text chat and live voice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用同一次 ChatGPT 登录进行文字聊天和实时语音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 使用同一次 ChatGPT 登入進行文字聊天和即時語音。"
+          }
+        }
+      }
+    },
+    "Text chat works with every account. Live voice works with ChatGPT, an OpenAI API key, or a custom endpoint with the Realtime API." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有账号都支持文字聊天。实时语音支持 ChatGPT、OpenAI API 密钥以及兼容实时接口的自定义服务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有帳號都支援文字聊天。即時語音支援 ChatGPT、OpenAI API 金鑰以及相容即時介面的自訂服務。"
+          }
+        }
+      }
+    },
     "Sign in to ChatGPT again. Open Settings, then Models." : {
       "localizations" : {
         "zh-Hans" : {
@@ -15948,6 +16028,18 @@
         }
       }
     },
+    "Could not sign in to ChatGPT. Try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法登录 ChatGPT。请重试。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "無法登入 ChatGPT。請重試。" } }
+      }
+    },
+    "Could not sign out of ChatGPT. Try again." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法退出 ChatGPT。请重试。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "無法登出 ChatGPT。請重試。" } }
+      }
+    },
     "The latest screen" : {
       "localizations" : {
         "zh-Hans" : {
@@ -17602,6 +17694,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用免費的 LocalDevVPN、你已有的代理 App，或 內建本機連線。"
+          }
+        }
+      }
+    },
+    "Use a Device Code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用设备码登录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用裝置代碼登入"
           }
         }
       }
@@ -26804,6 +26912,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "內建本機連線"
+          }
+        }
+      }
+    },
+    "Other Sign-In Methods" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他登录方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他登入方式"
           }
         }
       }
