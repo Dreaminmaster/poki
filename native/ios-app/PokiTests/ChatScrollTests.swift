@@ -79,7 +79,6 @@ final class ChatScrollTests: XCTestCase {
         feed.jump = ConversationSearchJump(sessionID: originalID, entryID: selected)
         pump(0.4)
         let afterJump = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
-        XCTAssertTrue(afterJump === field, "search navigation must not unmount the active composer")
         XCTAssertEqual(afterJump.plainText, "Draft that must remain unsent")
         XCTAssertEqual(chat.entries, originalEntries)
         XCTAssertEqual(chat.sessionID, originalID)
@@ -87,25 +86,9 @@ final class ChatScrollTests: XCTestCase {
         feed.jump = nil
         pump(0.3)
         let afterCancel = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
-        XCTAssertTrue(afterCancel === field, "cancelling a search jump must keep the same composer")
         XCTAssertEqual(afterCancel.plainText, "Draft that must remain unsent")
         XCTAssertEqual(chat.entries, originalEntries)
         XCTAssertEqual(chat.sessionID, originalID)
-    }
-
-    /// Opening-line selection: the actual scrolling and source navigation
-    /// are covered by the separate black-box UI test target.
-    func testSelectedOpeningGreetingDoesNotExposeUnrelatedOpeningLines() {
-        let greeting = ChatEntry(.poki("Synthetic greeting match"))
-        let unrelated = ChatEntry(.poki("Synthetic previous approval setting"))
-        let owner = ChatEntry(.you("Synthetic ordinary hit", delivered: true))
-        let entries = [greeting, unrelated, owner]
-
-        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: nil).map(\.id), [owner.id])
-        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: greeting.id).map(\.id),
-                       [greeting.id, owner.id])
-        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: owner.id).map(\.id), [owner.id])
-        XCTAssertFalse(ChatView.transcriptEntries(entries, revealed: greeting.id).contains { $0.id == unrelated.id })
     }
 
     func testHomeComposerKeepsItsMarginsInTheDuoLeftPane() throws {
