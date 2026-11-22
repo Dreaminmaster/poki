@@ -20,6 +20,7 @@ struct PokiDetailsView: View {
     var openSession: (String, UUID?) -> Void = { _, _ in }
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
+    var revealedSearchEntryID: (String) -> UUID? = { _ in nil }
     var sessionStore: SessionStore = .shared
     @Binding var path: NavigationPath
     @ObservedObject private var historyCapture = HistoryCapture.shared
@@ -193,7 +194,8 @@ struct PokiDetailsView: View {
                                 searchJump: searchJump?.sessionID == id ? searchJump : nil,
                                 onSearchJumpApplied: onSearchJumpApplied,
                                 sessionStore: sessionStore,
-                                readOnly: true)
+                                readOnly: true,
+                                revealedSearchEntryID: revealedSearchEntryID(id))
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .language:
