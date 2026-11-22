@@ -24,6 +24,19 @@ private final class HeldProbe {
     }
 }
 
+/// A proxy that accepts every port until the owner fixes its setting; counts the extra ports tried.
+@MainActor
+private final class ProxyFixture {
+    var fixed = false
+    private(set) var decoys = 0
+
+    func answer(_ port: UInt16) -> ProbeResult {
+        let decoy = LoopbackMonitor.decoyPorts.contains(port)
+        if decoy { decoys += 1 }
+        return ProbeResult(label: "loopback", target: "10.7.0.1:\(port)", outcome: decoy && fixed ? "refused" : "connected", milliseconds: 3)
+    }
+}
+
 @MainActor
 final class LoopbackMonitorTests: XCTestCase {
     private func yield(until condition: () -> Bool) async {
@@ -73,5 +86,44 @@ final class LoopbackMonitorTests: XCTestCase {
         await yield { monitor.state != .checking }
         XCTAssertTrue(monitor.isWorking, "state: \(monitor.state)")
         XCTAssertFalse(monitor.proxyAnswers)
+    }
+
+    /// While a proxy keeps answering on the same network, the timer does not open the extra ports on
+    /// every check (review on #671). Once the owner fixes the proxy's setting, the next recheck
+    /// turns the page green.
+    func testAProxyIsProbedOncePerNetworkAndTheFixIsSeen() async {
+        let proxy = ProxyFixture()
+        let monitor = LoopbackMonitor(probe: { _, port, _ in await proxy.answer(port) })
+        defer { monitor.pause() }
+        for _ in 0..<4 {
+            let before = monitor.checkedAt
+            monitor.check()
+            await yield { monitor.checkedAt != before && monitor.state != .checking }
+        }
+        XCTAssertTrue(monitor.proxyAnswers)
+        XCTAssertEqual(proxy.decoys, 2, "one probe of two ports per network, not one per check")
+
+        proxy.fixed = true
+        monitor.proxyRecheck = 0
+        let before = monitor.checkedAt
+        monitor.check()
+        await yield { monitor.checkedAt != before && monitor.isWorking }
+        XCTAssertTrue(monitor.isWorking, "state: \(monitor.state)")
+        XCTAssertFalse(monitor.proxyAnswers)
+    }
+
+    /// The two extra ports are never the same port drawn twice.
+    func testTheTwoExtraPortsDiffer() {
+        for _ in 0..<2000 {
+            let pair = LoopbackMonitor.decoyPair()
+            XCTAssertNotEqual(pair[0], pair[1])
+            XCTAssertTrue(pair.allSatisfy { LoopbackMonitor.decoyPorts.contains($0) })
+        }
+    }
+
+    /// The setup page and the home issue list name the proxy's own setting, with the Karing item
+    /// the setup steps use.
+    func testTheProxyHintUsesTheKaringItemName() {
+        XCTAssertTrue(LoopbackMonitor.proxyHint.contains("Loopback Address"), LoopbackMonitor.proxyHint)
     }
 }

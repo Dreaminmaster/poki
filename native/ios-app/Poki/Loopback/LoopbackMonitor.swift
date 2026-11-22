@@ -28,6 +28,13 @@ final class LoopbackMonitor {
     private(set) var proxyAnswers = false
     /// The probe epoch in which an answer was last shown to come from this iPhone.
     private var provenEpoch: Int?
+    /// The probe epoch in which a proxy was found answering, and when: the decoy ports are tried
+    /// again only every `proxyRecheck` seconds on the same network, so the timer does not open them
+    /// every 3 s while the proxy keeps answering, and the page still turns green soon after the
+    /// owner fixes the proxy's setting.
+    private var proxyEpoch: Int?
+    private var proxyCheckedAt = Date.distantPast
+    var proxyRecheck: TimeInterval = 30
     /// When the loopback last stopped answering after it had worked; nil while it works.
     private(set) var droppedAt: Date?
     /// Called on every change of state, with the old and the new one.
@@ -211,10 +218,15 @@ final class LoopbackMonitor {
             // itself accepts any port. Once per network, ports nothing listens on must not connect.
             var proxied = false
             if result.outcome == "connected", Self.forced == nil, provenEpoch != epoch {
-                proxied = await acceptsAnyPort()
-                if !proxied { provenEpoch = epoch }
+                if proxyEpoch == epoch, Date().timeIntervalSince(proxyCheckedAt) < proxyRecheck {
+                    proxied = true
+                } else {
+                    proxied = await acceptsAnyPort()
+                    proxyCheckedAt = Date()
+                    if proxied { proxyEpoch = epoch } else { provenEpoch = epoch; proxyEpoch = nil }
+                }
             }
-            if result.outcome != "connected" { provenEpoch = nil }
+            if result.outcome != "connected" { provenEpoch = nil; proxyEpoch = nil }
             running = false
             // A network change makes this answer stale: ask again. A timer tick or resume() that came
             // while the probe was in flight does not: the answer stands, and one more check follows it.
@@ -222,7 +234,9 @@ final class LoopbackMonitor {
                 check()
                 return
             }
-            if proxied { AppLog.shared.add("loopback", "10.7.0.1 accepts ports nothing listens on: a proxy answers, not this iPhone") }
+            if proxied != proxyAnswers {
+                AppLog.shared.add("loopback", proxied ? "10.7.0.1 accepts ports nothing listens on: a proxy answers, not this iPhone" : "10.7.0.1 refuses ports nothing listens on: this iPhone answers")
+            }
             proxyAnswers = proxied
             let probed: State = result.outcome == "connected" && !proxied ? .working(ms: result.milliseconds) : proxied || loopbackInterface() != nil ? .noAnswer : .off
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
@@ -238,18 +252,24 @@ final class LoopbackMonitor {
     /// The iPhone itself refuses them (or, through a reflection, they time out). One that connects
     /// may be a port the iPhone picked for a tunnel, so a second is asked before deciding.
     private func acceptsAnyPort() async -> Bool {
-        for _ in 0..<2 {
-            let decoy = await connect("10.7.0.1", Self.decoyPort(), 1.5)
-            if decoy.outcome != "connected" { return false }
+        for decoy in Self.decoyPair() {
+            let answer = await connect("10.7.0.1", decoy, 1.5)
+            if answer.outcome != "connected" { return false }
         }
         return true
     }
 
-    /// A port in the range iOS does not give its developer services.
-    nonisolated static func decoyPort() -> UInt16 { UInt16.random(in: decoyPorts) }
+    /// Two different ports in the range iOS does not give its developer services: one port that
+    /// happens to listen, drawn twice, would read as a proxy.
+    nonisolated static func decoyPair() -> [UInt16] {
+        let first = UInt16.random(in: decoyPorts)
+        var second = UInt16.random(in: decoyPorts.lowerBound...(decoyPorts.upperBound - 1))
+        if second >= first { second += 1 }
+        return [first, second]
+    }
     nonisolated static let decoyPorts: ClosedRange<UInt16> = 50000...59999
 
-    static var proxyHint: String { AppLocalization.text(LocalizedStringResource("Something answers at 10.7.0.1, but it is not this iPhone. A proxy app is taking the address for itself. In Karing, set TUN › Loopback address to 10.7.0.1. In other proxy apps, turn on the loopback or reflect setting for 10.7.0.1.")) }
+    static var proxyHint: String { AppLocalization.text(LocalizedStringResource("Something answers at 10.7.0.1, but it is not this iPhone. A proxy app is taking the address for itself. In Karing, go to Settings, then TUN, and set Loopback Address to 10.7.0.1. In other proxy apps, turn on the loopback or reflect setting for 10.7.0.1.")) }
 
     private func publish(_ next: State, log: Bool) {
         guard !Self.same(next, state) else { return }
@@ -268,6 +288,8 @@ final class LoopbackMonitor {
         publish(next, log: false)
     }
     #endif
+
+    static var proxyTitle: String { AppLocalization.text(LocalizedStringResource("A proxy app answers instead of this iPhone")) }
 
     static var cellularHint: String { AppLocalization.text(LocalizedStringResource("This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.")) }
     /// Renewing, updating and the first mount of the disk image go through the loopback (ESP-448).
