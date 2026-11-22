@@ -232,7 +232,7 @@ impl Launcher {
                     && matches!(failure.remote_stage, Some(Stage::Connect | Stage::HandshakeDropped))
                     && config.ddi_marker.as_deref().is_some_and(Path::is_file) =>
             {
-                let status = json!({"runner": "in-process", "code": "local_ddi", "detail": failure.detail});
+                let status = json!({"runner": "in-process", "code": "local_ddi", "detail": failure.detail, "loopbackHandshakeDropped": failure.remote_stage == Some(Stage::HandshakeDropped)});
                 return Self::hold_in_process(&me, attempt, status, commands).await;
             }
             Err(failure) => return Err(failure),
