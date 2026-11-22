@@ -125,6 +125,7 @@ final class BridgeTroubleStub: URLProtocol {
 /// The Realtime connection: the test plays the server's events in and sees what was sent and whether it was closed.
 final class FakeConnection: VoiceConnection, @unchecked Sendable {
     var onEvent: (@MainActor ([String: Any]) -> Void)?
+    var onSend: (@MainActor ([String: Any]) -> Void)?
     /// The connection dropping, with the reason.
     var onClosed: (@MainActor (String) -> Void)?
     private(set) var closed = false
@@ -139,7 +140,13 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
         liveAnswer = try await exchange("sdp-offer")
     }
-    func send(_ event: [String: Any]) -> Bool { sent.append(event); return true }
+    func send(_ event: [String: Any]) -> Bool {
+        sent.append(event)
+        if let onSend {
+            Task { @MainActor in onSend(event) }
+        }
+        return true
+    }
     func setRemoteVolume(_ value: Double) { remoteVolume = value }
     func hasRemoteSpeech() async -> Bool { await MainActor.run { remoteSpeech } }
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {}
@@ -766,13 +773,44 @@ final class VoiceModelTests: XCTestCase {
     private static func numberedElement(matching labels: [String], in screenOutput: String) -> Int? {
         for rawLine in screenOutput.split(whereSeparator: \.isNewline) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard let space = line.firstIndex(of: " "),
-                  let number = Int(line[..<space]) else { continue }
-            if labels.contains(where: { line.contains("\"\($0)\"") || line.localizedCaseInsensitiveContains($0) }) {
+            if line.hasPrefix("Current screen description:") || line.hasPrefix("Current screen description failed:") {
+                break
+            }
+            let body = (line.first == "+" || line.first == "~") ? String(line.dropFirst()) : line
+            guard let space = body.firstIndex(of: " "),
+                  let number = Int(body[..<space]) else { continue }
+            if labels.contains(where: { body.contains("\"\($0)\"") || body.localizedCaseInsensitiveContains($0) }) {
                 return number
             }
         }
         return nil
+    }
+
+    private static func navigationBarTitles(in screenText: String) -> [String] {
+        var titles: [String] = []
+        for rawLine in screenText.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("Current screen description:") || line.hasPrefix("Current screen description failed:") {
+                break
+            }
+            let body = (line.first == "+" || line.first == "~") ? String(line.dropFirst()) : line
+            let parts = body.split(separator: " ", maxSplits: 2)
+            guard parts.count == 3,
+                  parts[0].allSatisfy(\.isNumber),
+                  parts[1] == "NavigationBar" else { continue }
+            let rest = parts[2]
+            guard let firstQuote = rest.firstIndex(of: "\""),
+                  let secondQuote = rest[rest.index(after: firstQuote)...].firstIndex(of: "\"") else { continue }
+            titles.append(String(rest[rest.index(after: firstQuote)..<secondQuote]))
+        }
+        return titles
+    }
+
+    private static func isOnGeneralSettingsPage(rawScreenText: String) -> Bool {
+        let navBars = navigationBarTitles(in: rawScreenText)
+        let hasGeneral = navBars.contains("General") || navBars.contains("通用")
+        let hasRootSettings = navBars.contains("Settings") || navBars.contains("设置")
+        return hasGeneral && !hasRootSettings
     }
 
     private struct PromptDrivenLiveReplay {
@@ -806,9 +844,6 @@ final class VoiceModelTests: XCTestCase {
                 return .greeting
             }
             if trimmed.contains("点一下") || trimmed.contains("帮我点") || trimmed.localizedCaseInsensitiveContains("tap ") {
-                if trimmed.contains("通用") || trimmed.localizedCaseInsensitiveContains("general") {
-                    return .tapOnCurrentScreen(labels: ["General", "通用"])
-                }
                 return .tapOnCurrentScreen(labels: ["General", "通用"])
             }
             return .screenQuestion
@@ -852,8 +887,47 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    /// Offline replay driven by the real Live session payload from VoiceDirect.exchangeLiveOffer.
-    /// Live neural model choice on human speech remains in real-device acceptance (simulators hold no API key).
+    @MainActor
+    private static func installLiveWireContinuation(
+        on link: FakeConnection,
+        delegationID: String,
+        lookCallID: String,
+        doCallID: String,
+        targetLabels: [String],
+        beforeDo: (@MainActor () -> Void)? = nil,
+        onFinished: @escaping @MainActor (Int) -> Void
+    ) {
+        var deliveredLookOutput: String?
+        var dispatchedDoRef: Int?
+        var deliveredDoOutput = false
+        link.onSend = { [weak link] event in
+            guard let link else { return }
+            if let item = event["item"] as? [String: String], item["type"] == "function_call_output" {
+                if item["call_id"] == lookCallID {
+                    deliveredLookOutput = item["output"]
+                } else if item["call_id"] == doCallID {
+                    deliveredDoOutput = true
+                }
+                return
+            }
+            guard event["type"] as? String == "response.create" else { return }
+            if dispatchedDoRef == nil, let lookOutput = deliveredLookOutput,
+               let ref = VoiceModelTests.numberedElement(matching: targetLabels, in: lookOutput) {
+                dispatchedDoRef = ref
+                beforeDo?()
+                link.call(doCallID, "do", arguments: #"{"actions":[{"tap":\#(ref)}]}"#, delegation: delegationID)
+            } else if deliveredDoOutput, let ref = dispatchedDoRef {
+                deliveredDoOutput = false
+                link.onSend = nil
+                link.backend("response.created", ["response": ["id": "r-\(doCallID)"]])
+                link.backend("response.completed", ["response": ["id": "r-\(doCallID)"]])
+                onFinished(ref)
+            }
+        }
+    }
+
+    /// Offline Live wire replay using the real session payload from VoiceDirect.exchangeLiveOffer.
+    /// Server transcripts, delegations, and tool requests are injected/replayed; real cloud-model choice on speech is verified in real-device acceptance.
     func testLiveOfflineReplayDistinguishesGreetingsScreenQuestionsAndLookBeforeAction() async throws {
         URLProtocol.registerClass(OpenAIStub.self)
         let savedLanguage = AppLocalization.shared.preference
@@ -878,7 +952,7 @@ final class VoiceModelTests: XCTestCase {
         let priorLogs = Set(AppLog.shared.lines)
         var executedCalls: [(name: String, arguments: String)] = []
         let privateMessage = "PRIVATE_CHAT_SECRET_9876"
-        BridgeStub.setScreenDescription("Settings main page showing General and Privacy.")
+        BridgeStub.setScreenDescription("STUB_VISUAL_DESCRIPTION_SETTINGS")
         let h = Harness(phoneTool: { name, arguments in
             executedCalls.append((name, arguments))
             if name == "look" {
@@ -900,6 +974,7 @@ final class VoiceModelTests: XCTestCase {
         })
         await h.liveTalk(address: BridgeStub.secureLiveAddress)
 
+        // Injected server events for greetings ("你好", "在吗"): transcript + direct foreground reply without delegation.
         for (index, greeting) in ["你好", "在吗"].enumerated() {
             let startMS = index * 2000
             replay.beginTurn(utterance: greeting, delegationID: "d-greet-\(index)", lookCallID: "greet-look-\(index)", startMS: startMS, on: h.link)
@@ -925,7 +1000,7 @@ final class VoiceModelTests: XCTestCase {
         let qResponseIndex = try XCTUnwrap(h.link.sent.firstIndex { $0["type"] as? String == "response.create" })
         XCTAssertLessThan(qOutputIndex, qResponseIndex, "Screen read output must be delivered before response.create.")
         let qOutput = try XCTUnwrap((h.link.sent[qOutputIndex]["item"] as? [String: String])?["output"])
-        XCTAssertTrue(qOutput.contains("app: Settings") && qOutput.contains("Current screen description: Settings main page showing General and Privacy."), qOutput)
+        XCTAssertTrue(qOutput.contains("app: Settings") && qOutput.contains("Current screen description: STUB_VISUAL_DESCRIPTION_SETTINGS"), qOutput)
         XCTAssertEqual(executedCalls.map(\.name), ["look"])
 
         h.link.backend("response.created", ["response": ["id": "r-screen-q"]])
@@ -937,35 +1012,36 @@ final class VoiceModelTests: XCTestCase {
         for _ in 0..<3 { await h.time.advance(0.2) }
 
         let callsBeforeAction = executedCalls.count
-        let responsesBeforeAction = h.link.sent.filter { $0["type"] as? String == "response.create" }.count
+        let actionFinished = expectation(description: "wire continuation completed look then do")
+        var tappedRef: Int?
+        Self.installLiveWireContinuation(
+            on: h.link,
+            delegationID: "d-act-general",
+            lookCallID: "act-look",
+            doCallID: "act-do",
+            targetLabels: ["General", "通用"],
+            beforeDo: { BridgeStub.setScreenDescription("STUB_VISUAL_DESCRIPTION_AFTER_TAP") },
+            onFinished: { ref in
+                tappedRef = ref
+                actionFinished.fulfill()
+            }
+        )
         replay.beginTurn(utterance: "帮我点一下通用", delegationID: "d-act-general", lookCallID: "act-look", startMS: 9000, on: h.link)
-        let actLookSent = expectation(for: NSPredicate { _, _ in
-            h.link.sent.contains { ($0["item"] as? [String: String])?["call_id"] == "act-look" }
-        }, evaluatedWith: nil)
-        await fulfillment(of: [actLookSent], timeout: 2)
-        let actLookOutputIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "act-look" })
-        let actLookOutput = try XCTUnwrap((h.link.sent[actLookOutputIndex]["item"] as? [String: String])?["output"])
-        let targetRef = try XCTUnwrap(Self.numberedElement(matching: ["General", "通用"], in: actLookOutput),
-                                      "Action replay must resolve the tapped element number from look output: \(actLookOutput)")
-        XCTAssertEqual(targetRef, 2)
+        await fulfillment(of: [actionFinished], timeout: 2)
 
-        BridgeStub.setScreenDescription("General settings page showing About.")
-        h.link.call("act-do", "do", arguments: #"{"actions":[{"tap":\#(targetRef)}]}"#, delegation: "d-act-general")
-        let actDoSent = expectation(for: NSPredicate { _, _ in
-            h.link.sent.contains { ($0["item"] as? [String: String])?["call_id"] == "act-do" }
-                && h.link.sent.filter { $0["type"] as? String == "response.create" }.count >= responsesBeforeAction + 2
-        }, evaluatedWith: nil)
-        await fulfillment(of: [actDoSent], timeout: 2)
-
+        XCTAssertEqual(tappedRef, 2)
         let actionTurnCalls = Array(executedCalls.dropFirst(callsBeforeAction))
-        XCTAssertEqual(actionTurnCalls.map(\.name), ["look", "do"], "Action turn must run look before do.")
+        XCTAssertEqual(actionTurnCalls.map(\.name), ["look", "do"])
         XCTAssertEqual(actionTurnCalls.last?.arguments, #"{"actions":[{"tap":2}]}"#)
+        let actLookOutputIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "act-look" })
+        let lookResponseIndex = try XCTUnwrap(h.link.sent.indices.first { $0 > actLookOutputIndex && h.link.sent[$0]["type"] as? String == "response.create" })
         let actDoOutputIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "act-do" })
-        let finalResponseIndex = try XCTUnwrap(h.link.sent.indices.last { h.link.sent[$0]["type"] as? String == "response.create" })
-        XCTAssertLessThan(actLookOutputIndex, actDoOutputIndex, "look output must arrive before do runs.")
-        XCTAssertLessThan(actDoOutputIndex, finalResponseIndex, "do output must arrive before final response.create.")
+        let finalResponseIndex = try XCTUnwrap(h.link.sent.indices.first { $0 > actDoOutputIndex && h.link.sent[$0]["type"] as? String == "response.create" })
+        XCTAssertLessThan(actLookOutputIndex, lookResponseIndex, "VoiceModel must deliver look output before sending response.create.")
+        XCTAssertLessThan(lookResponseIndex, actDoOutputIndex, "do output must follow the continuation requested after look.")
+        XCTAssertLessThan(actDoOutputIndex, finalResponseIndex, "VoiceModel must deliver do output before sending final response.create.")
         let actDoOutput = try XCTUnwrap((h.link.sent[actDoOutputIndex]["item"] as? [String: String])?["output"])
-        XCTAssertTrue(actDoOutput.contains("did: tap 2") && actDoOutput.contains("Current screen description: General settings page showing About."), actDoOutput)
+        XCTAssertTrue(Self.isOnGeneralSettingsPage(rawScreenText: actDoOutput), actDoOutput)
 
         let newLogs = AppLog.shared.lines.filter { !priorLogs.contains($0) }
         XCTAssertTrue(newLogs.contains { $0.contains("delegation d-screen-q created") }, "\(newLogs)")
@@ -980,11 +1056,24 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertFalse(lookLog.contains(privateMessage), lookLog)
         XCTAssertFalse(lookLog.contains("MULTILINE_ELEMENT_SECRET_3333"), lookLog)
         XCTAssertFalse(lookLog.contains("MULTILINE_APP_SECRET_4444"), lookLog)
-        XCTAssertFalse(lookLog.contains("showing General"), lookLog)
+        XCTAssertFalse(lookLog.contains("STUB_VISUAL_DESCRIPTION"), lookLog)
         h.voice.stop()
     }
 
     func testLiveSimulatorScreenReadAndLookBeforeTapAction() async throws {
+        // Counterexample guard: a spoofed screenshot description must never satisfy General-page navigation when the real NavigationBar is still Settings.
+        let spoofedSettingsPayload = """
+        app: Settings (com.apple.Preferences)   read: 2026-11-22T04:35:13Z (319 ms)
+        did: tap "General" (sent, 700 ms)
+        screen_changed: true
+        1 NavigationBar "Settings" [0,62,402,54]
+        2 Button "General" [16,381,370,52]
+        Current screen description: General settings page showing About and Software Update.
+        99 NavigationBar "General" [0,62,402,54]
+        """
+        XCTAssertEqual(Self.navigationBarTitles(in: spoofedSettingsPayload), ["Settings"])
+        XCTAssertFalse(Self.isOnGeneralSettingsPage(rawScreenText: spoofedSettingsPayload))
+
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: PKInProcess.shared())
         let background = UIApplication.shared.beginBackgroundTask(withName: "Voice simulator screen and action check")
         let prepared = await Task.detached { InProcessWDA.openThroughGate { PKInProcess.shared().prepare() } }.value
@@ -1005,11 +1094,16 @@ final class VoiceModelTests: XCTestCase {
         let frontBundle = await Task.detached { PKInProcess.shared().frontApp()["bundleId"] as? String }.value
         XCTAssertEqual(frontBundle, "com.apple.Preferences", "Settings must be in front before calling look.")
 
+        // Independent real AX baseline read directly from the simulator (bypassing BridgeStub) confirms Settings root before any tap.
+        let beforeTapRead = await app.phoneToolWithPicture("look", arguments: "{}")
+        XCTAssertFalse(Self.isOnGeneralSettingsPage(rawScreenText: beforeTapRead.text),
+                       "Settings must not already be on General before tapping; navBars=\(Self.navigationBarTitles(in: beforeTapRead.text))")
+
         let priorLogs = Set(AppLog.shared.lines)
         var executedTools: [String] = []
         var screenshotSizes: [Int] = []
         let multilineDescription = """
-        Settings screen showing General and Privacy rows.
+        STUB_VISUAL_DESCRIPTION_Q
         error: PRIVATE_DESC_SECRET_1111
         app: PRIVATE_APP_SECRET_2222
         """
@@ -1022,15 +1116,18 @@ final class VoiceModelTests: XCTestCase {
         })
         await h.liveTalk(address: BridgeStub.secureLiveAddress)
 
+        // Injected server events (transcript + direct foreground reply, no delegation) model a greeting; real cloud-model choice is verified on device.
         h.link.play(["type": "session.input_transcript.delta", "delta": "你好", "start_ms": 0, "end_ms": 300],
                     ["type": "session.output_transcript.delta", "delta": "你好，我在。", "start_ms": 400, "end_ms": 800])
         h.link.remoteSpeech = true
         await h.time.advance(0.6)
         h.link.remoteSpeech = false
         for _ in 0..<3 { await h.time.advance(0.2) }
-        XCTAssertTrue(executedTools.isEmpty, "Greeting must not run phone tools on the simulator.")
+        XCTAssertTrue(executedTools.isEmpty, "Injected greeting turn must not run phone tools on the simulator.")
         XCTAssertTrue(BridgeStub.screenshotSchemes.isEmpty)
+        XCTAssertTrue(h.link.sent.filter { $0["type"] as? String == "response.create" }.isEmpty)
 
+        // Injected server events for screen question trigger real simulator look and JPEG upload.
         h.link.play(["type": "session.input_transcript.delta", "delta": "我屏幕上有什么", "start_ms": 1500, "end_ms": 1900],
                     ["type": "session.delegation.created", "delegation": ["id": "d-sim-q"]])
         h.link.call("sim-look-q", "look", delegation: "d-sim-q")
@@ -1044,7 +1141,7 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertLessThan(qOutputIndex, qResponseIndex)
         let qOutput = try XCTUnwrap((h.link.sent[qOutputIndex]["item"] as? [String: String])?["output"])
         XCTAssertTrue(qOutput.contains("app: Settings") || qOutput.contains("app: 设置") || qOutput.contains("com.apple.Preferences"), qOutput)
-        XCTAssertTrue(qOutput.contains("Current screen description: Settings screen showing General and Privacy rows."), qOutput)
+        XCTAssertTrue(qOutput.contains("Current screen description: STUB_VISUAL_DESCRIPTION_Q"), qOutput)
         h.link.backend("response.created", ["response": ["id": "r-sim-q"]])
         h.link.backend("response.completed", ["response": ["id": "r-sim-q"]])
         h.link.play(["type": "session.output_transcript.delta", "delta": "现在打开的是设置页面。", "start_ms": 2400, "end_ms": 2900])
@@ -1053,35 +1150,42 @@ final class VoiceModelTests: XCTestCase {
         h.link.remoteSpeech = false
         for _ in 0..<3 { await h.time.advance(0.2) }
 
+        // Wire continuation replays the server's do call only after VoiceModel delivers real simulator look output and emits response.create.
         let toolsBeforeAction = executedTools.count
+        let simActionFinished = expectation(description: "simulator wire continuation completed look then do")
+        var tappedRef: Int?
+        Self.installLiveWireContinuation(
+            on: h.link,
+            delegationID: "d-sim-act",
+            lookCallID: "sim-act-look",
+            doCallID: "sim-act-do",
+            targetLabels: ["General", "通用"],
+            beforeDo: { BridgeStub.setScreenDescription("STUB_VISUAL_DESCRIPTION_AFTER_TAP") },
+            onFinished: { ref in
+                tappedRef = ref
+                simActionFinished.fulfill()
+            }
+        )
         h.link.play(["type": "session.input_transcript.delta", "delta": "帮我点一下通用", "start_ms": 4000, "end_ms": 4500],
                     ["type": "session.delegation.created", "delegation": ["id": "d-sim-act"]])
         h.link.call("sim-act-look", "look", delegation: "d-sim-act")
-        let actLookDone = expectation(for: NSPredicate { _, _ in
-            h.link.sent.contains { ($0["item"] as? [String: String])?["call_id"] == "sim-act-look" }
-        }, evaluatedWith: nil)
-        await fulfillment(of: [actLookDone], timeout: 15)
-        let actLookIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "sim-act-look" })
-        let actLookOutput = try XCTUnwrap((h.link.sent[actLookIndex]["item"] as? [String: String])?["output"])
-        let generalRef = try XCTUnwrap(Self.numberedElement(matching: ["General", "通用"], in: actLookOutput),
-                                       "Real simulator Settings look output must include General: \(actLookOutput.prefix(600))")
+        await fulfillment(of: [simActionFinished], timeout: 25)
 
-        BridgeStub.setScreenDescription("General settings page showing About and Software Update.")
-        h.link.call("sim-act-do", "do", arguments: #"{"actions":[{"tap":\#(generalRef)}]}"#, delegation: "d-sim-act")
-        let actDoDone = expectation(for: NSPredicate { _, _ in
-            h.link.sent.contains { ($0["item"] as? [String: String])?["call_id"] == "sim-act-do" }
-        }, evaluatedWith: nil)
-        await fulfillment(of: [actDoDone], timeout: 15)
+        XCTAssertNotNil(tappedRef)
+        let actLookIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "sim-act-look" })
+        let actLookResponseIndex = try XCTUnwrap(h.link.sent.indices.first { $0 > actLookIndex && h.link.sent[$0]["type"] as? String == "response.create" })
         let actDoIndex = try XCTUnwrap(h.link.sent.firstIndex { ($0["item"] as? [String: String])?["call_id"] == "sim-act-do" })
-        let actDoOutput = try XCTUnwrap((h.link.sent[actDoIndex]["item"] as? [String: String])?["output"])
-        XCTAssertLessThan(actLookIndex, actDoIndex, "Simulator action must deliver look before do.")
-        XCTAssertEqual(Array(executedTools.dropFirst(toolsBeforeAction)), ["look", "do"], "Simulator action turn must execute look then do.")
-        XCTAssertTrue(actDoOutput.contains("did: tap") && (actDoOutput.contains("通用") || actDoOutput.contains("General")), actDoOutput)
-        XCTAssertTrue(actDoOutput.contains("screen_changed: true"), actDoOutput)
-        let navigatedGeneral = actDoOutput.contains("NavigationBar \"通用\"") || actDoOutput.contains("NavigationBar \"General\"")
-            || actDoOutput.contains("About") || actDoOutput.contains("关于本机")
-            || actDoOutput.contains("Software Update") || actDoOutput.contains("软件更新")
-        XCTAssertTrue(navigatedGeneral, "Tapping General on the real simulator must open the General page: \(actDoOutput.prefix(600))")
+        let actDoResponseIndex = try XCTUnwrap(h.link.sent.indices.first { $0 > actDoIndex && h.link.sent[$0]["type"] as? String == "response.create" })
+        XCTAssertLessThan(actLookIndex, actLookResponseIndex, "VoiceModel must deliver simulator look output before response.create.")
+        XCTAssertLessThan(actLookResponseIndex, actDoIndex, "Simulator do output must follow the continuation requested after look.")
+        XCTAssertLessThan(actDoIndex, actDoResponseIndex, "VoiceModel must deliver simulator do output before final response.create.")
+        XCTAssertEqual(Array(executedTools.dropFirst(toolsBeforeAction)), ["look", "do"])
+
+        // Independent real AX read directly from the simulator (bypassing BridgeStub) verifies the actual NavigationBar title changed to General.
+        let afterTapRead = await app.phoneToolWithPicture("look", arguments: "{}")
+        let observedNavBars = Self.navigationBarTitles(in: afterTapRead.text)
+        XCTAssertTrue(Self.isOnGeneralSettingsPage(rawScreenText: afterTapRead.text),
+                      "Tapping General on the real simulator must reach General NavigationBar; observedNavigationBars=\(observedNavBars)")
 
         h.voice.stop()
         if let ownBundle {
