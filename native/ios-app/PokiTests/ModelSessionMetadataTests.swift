@@ -362,11 +362,15 @@ final class ModelSessionMetadataTests: XCTestCase {
             // Keep an actual owner ChatModel request in progress while a completely
             // unrelated MCP approval arrives. The old implementation borrowed this
             // chat's session because it checked only owner.running.
+            let ownerResponseGate = DispatchSemaphore(value: 0)
+            defer { ownerResponseGate.signal() }
             ModelServerStub.responder = { _, body in
                 let text = String(decoding: body, as: UTF8.self)
                 if text.contains("Owner live approval route regression")
                     && !text.contains("You name chat conversations") {
-                    Thread.sleep(forTimeInterval: 3)
+                    // Hold the *chat* response until the unrelated approval
+                    // was checked; the independent title request may complete.
+                    _ = ownerResponseGate.wait(timeout: .now() + 12)
                 }
                 return (200, "text/event-stream", FakeCompletions.text("Held owner response."))
             }
@@ -374,9 +378,8 @@ final class ModelSessionMetadataTests: XCTestCase {
             // The test only proves a race if the owner's real HTTP request is
             // already in flight, rather than merely scheduled by ChatModel.
             let until = ContinuousClock.now + .seconds(8)
-            while !ModelServerStub.requests.contains(where: {
-                String(decoding: $0.body, as: UTF8.self).contains("Owner live approval route regression")
-            }), ContinuousClock.now < until {
+            while self.actualChatRequests(containing: "Owner live approval route regression").isEmpty,
+                  ContinuousClock.now < until {
                 try await Task.sleep(for: .milliseconds(25))
             }
             let ownerRequests = self.actualChatRequests(containing: "Owner live approval route regression")
@@ -397,7 +400,9 @@ final class ModelSessionMetadataTests: XCTestCase {
             }
             XCTAssertTrue(wrongRequests.isEmpty, "An external approval borrowed the concurrent owner's model context")
             XCTAssertEqual(owner.sessionID, ownerOrigin.routingSessionID)
-            owner.stop()
+            // Do not release the owner while the external check is pending.
+            ownerResponseGate.signal()
+            try await self.waitForTask(owner)
         }
     }
 
