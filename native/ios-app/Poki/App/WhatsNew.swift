@@ -60,7 +60,7 @@ enum WhatsNewCatalog {
                     zhHant: "執行少繞路，畫面更快"
                 ),
                 summary: WhatsNewText(
-                    en: "Apps open accurately without extra checks, and new screens appear faster after swiping.",
+                    en: "Apps open right on target with no detours, and screens update faster.",
                     zhHans: "打开 App 更准、干完即停，滑动或打开后更快看到新画面。",
                     zhHant: "開啟 App 更準、做完即停，滑動或開啟後更快看到新畫面。"
                 )
@@ -74,7 +74,7 @@ enum WhatsNewCatalog {
                     zhHant: "新任務清爽，收尾順暢"
                 ),
                 summary: WhatsNewText(
-                    en: "New tasks start without old screenshots, and your mic recovers automatically after remote control.",
+                    en: "No old screenshots in new tasks, and your mic resets after remote control.",
                     zhHans: "新任务不带上一轮旧截图，远程控制结束后麦克风自动恢复。",
                     zhHant: "新任務不帶上一輪舊截圖，遠端控制結束後麥克風自動恢復。"
                 )
@@ -88,7 +88,7 @@ enum WhatsNewCatalog {
                     zhHant: "車次清晰，設定好找"
                 ),
                 summary: WhatsNewText(
-                    en: "12306 train cards read cleaner, with deduplicated settings and clearer menu names.",
+                    en: "Neater China Railway 12306 cards and cleaner, deduplicated settings.",
                     zhHans: "12306 车次卡片排版更易读，设置页去重并优化了入口名称。",
                     zhHant: "12306 車次卡片排版更易讀，設定頁去重並最佳化了入口名稱。"
                 )
@@ -97,12 +97,12 @@ enum WhatsNewCatalog {
                 id: "approvals-copy-launch",
                 symbol: "checkmark.shield",
                 title: WhatsNewText(
-                    en: "Approvals, Copy, Steady Launch",
+                    en: "Quick Controls, Steady Launch",
                     zhHans: "快捷操作与启动优化",
                     zhHant: "快捷操作與啟動最佳化"
                 ),
                 summary: WhatsNewText(
-                    en: "Direct iPad Live Activity approvals, copyable browser instructions, and steadier iPhone 17 Pro startup.",
+                    en: "iPad Live Activity approvals, browser instructions copy, steadier iPhone 17 Pro.",
                     zhHans: "iPad 灵动岛操作确认直接生效，浏览器说明可复制，iPhone 17 Pro 启动更稳。",
                     zhHant: "iPad 動態島操作確認直接生效，瀏覽器說明可複製，iPhone 17 Pro 啟動更穩。"
                 )
