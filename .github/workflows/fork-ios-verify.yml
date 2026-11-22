@@ -21,12 +21,12 @@ jobs:
         include:
           - pr: 249
             device: iPhone
-            ref: 247a91cdc144a7d0249e685c0612ebbfaf5c964e
+            ref: 063cf23b35a52072a2bd6ddce391c72024e813c8
             tests: 'ConversationSearchTests:16 ChatScrollTests:5'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
           - pr: 249
             device: iPad
-            ref: 247a91cdc144a7d0249e685c0612ebbfaf5c964e
+            ref: 063cf23b35a52072a2bd6ddce391c72024e813c8
             tests: ''
             ui_tests: 'testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
