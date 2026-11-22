@@ -40,6 +40,8 @@ struct SetupSections: View {
     @Binding var path: NavigationPath
     /// On the Setup page: Guide Me under the card, which walks the list one page at a time.
     var guideMe = false
+    /// Settings › Setup hides the optional groups that already live on the Settings home page.
+    var includeOptionalGroups = true
 
     @State private var hasModel = ModelKeys.hasUsableKey
     @State private var modelName = ModelKeys.selectedModelName
@@ -68,47 +70,47 @@ struct SetupSections: View {
             .settingsFooter()
         }
 
-        CellularShortcutSection()
+        if includeOptionalGroups {
+            Section {
+                NavigationLink(value: DetailsRoute.model) {
+                    SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
+                                symbol: "sparkles", value: hasModel ? modelName : nil,
+                                accessory: hasModel ? .done : nil)
+                }
+                .accessibilityIdentifier("firstRun.models")
+            } header: {
+                Group {
+                    SettingsHeader("Models")
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Poki needs an AI account to think. Add one provider below. One is enough.")
+                }
+                .settingsFooter()
+            }
 
-        Section {
-            NavigationLink(value: DetailsRoute.model) {
-                SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
-                            symbol: "sparkles", value: hasModel ? modelName : nil,
-                            accessory: hasModel ? .done : nil)
-            }
-            .accessibilityIdentifier("firstRun.models")
-        } header: {
-            Group {
-                SettingsHeader("Models")
-            }
-            .settingsHeader()
-        } footer: {
-            Group {
-                Text("Poki needs an AI account to think. Add one provider below. One is enough.")
-            }
-            .settingsFooter()
-        }
+            WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
 
-        WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
-
-        Section {
-            NavigationLink(value: DetailsRoute.agents) {
-                SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
+            Section {
+                NavigationLink(value: DetailsRoute.agents) {
+                    SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
+                }
+                .accessibilityIdentifier("firstRun.agents")
+                .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
+                .onAppear(perform: refresh)
+            } header: {
+                Group {
+                    SettingsHeader("Connections")
+                }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    Text("Let Claude, ChatGPT and other agents use this iPhone")
+                }
+                .settingsFooter()
             }
-            .accessibilityIdentifier("firstRun.agents")
-            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-            .onAppear(perform: refresh)
-        } header: {
-            Group {
-                SettingsHeader("Connections")
-            }
-            .settingsHeader()
-        } footer: {
-            Group {
-                Text("Let Claude, ChatGPT and other agents use this iPhone")
-            }
-            .settingsFooter()
         }
     }
 
@@ -214,6 +216,69 @@ struct WelcomePanel: View {
     }
 }
 
+/// Decides whether tapping a Notifications row requests system authorization first or opens iOS Settings.
+enum NotificationPermissionAction: Equatable {
+    case requestAuthorization
+    case openSystemSettings
+
+    static func forStatus(_ status: UNAuthorizationStatus, openSettingsWhenAuthorized: Bool) -> Self? {
+        switch status {
+        case .notDetermined: .requestAuthorization
+        case .denied: .openSystemSettings
+        case .authorized, .provisional, .ephemeral:
+            openSettingsWhenAuthorized ? .openSystemSettings : nil
+        @unknown default: .openSystemSettings
+        }
+    }
+}
+
+/// Settings' Notifications row: requests system notification permission when not yet determined,
+/// and opens iOS notification settings otherwise.
+struct SettingsNotificationsRow: View {
+    @State private var notices = UNAuthorizationStatus.notDetermined
+
+    var body: some View {
+        Button(action: handleTap) {
+            SettingsRow(title: "Notifications", symbol: "bell.badge",
+                        value: value, valueIsAction: notices == .notDetermined,
+                        accessory: notices == .notDetermined ? nil : .leaves)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .task { await readNotices() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await readNotices() }
+        }
+    }
+
+    private var value: String? {
+        switch notices {
+        case .notDetermined: AppLocalization.text(LocalizedStringResource("Allow"))
+        case .denied: AppLocalization.text(LocalizedStringResource("Off"))
+        default: nil
+        }
+    }
+
+    private func handleTap() {
+        switch NotificationPermissionAction.forStatus(notices, openSettingsWhenAuthorized: true) {
+        case .requestAuthorization:
+            Task {
+                ApprovalNotice.registerActions()
+                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                await readNotices()
+            }
+        case .openSystemSettings:
+            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+        case nil:
+            break
+        }
+    }
+
+    private func readNotices() async {
+        notices = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+}
+
 /// What Poki can do beyond the iPhone's steps, all optional: Screen History, Memory, and the two
 /// permissions asked here (dictation, notifications). On the welcome's list and as a start flow page.
 struct WelcomeFeaturesSection: View {
@@ -293,15 +358,17 @@ struct WelcomeFeaturesSection: View {
 
     /// Asked here the first time; once turned down only the system's Settings can turn it on.
     private func allowNotices() {
-        guard !noticesAllowed else { return }
-        if notices == .denied {
+        switch NotificationPermissionAction.forStatus(notices, openSettingsWhenAuthorized: false) {
+        case .requestAuthorization:
+            Task {
+                ApprovalNotice.registerActions()
+                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                await readNotices()
+            }
+        case .openSystemSettings:
             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
-            return
-        }
-        Task {
-            ApprovalNotice.registerActions()
-            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-            await readNotices()
+        case nil:
+            break
         }
     }
 
