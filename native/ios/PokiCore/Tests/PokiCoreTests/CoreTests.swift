@@ -560,6 +560,20 @@ final class ApprovalTests: XCTestCase {
         XCTAssertTrue(anonymousCore.pendingApproval?.sourceSession?.hasPrefix("anonymous-external-") == true)
     }
 
+    /// The Voice tab executes its live tool calls through core.tool("do").
+    /// Its source belongs to the owner even though the Core transport is not
+    /// the ordinary in-app ChatModel callTool(local: true) path.
+    func testLiveVoiceDoApprovalHasNoExternalSource() async throws {
+        let (core, wda, _) = makeCore(screenWithDelete()) { $0.approvalWait = 0 }
+        _ = await core.tool("look", arguments: "{}")
+        let result = await core.tool("do", arguments: #"{"actions":[{"tap":1}]}"#)
+        XCTAssertTrue(result.text.contains("approval_required"), result.text)
+        let approval = try XCTUnwrap(core.pendingApproval)
+        XCTAssertEqual(approval.reason, "deleting (\\"delete\\")")
+        XCTAssertNil(approval.sourceSession, "Owner Live Voice must not be classified as an outside MCP caller")
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty)
+    }
+
     /// The chat's model loop in the app calls the tools with JSON text through `callTool`; a deletion
     /// still waits for the owner and taps nothing.
     func testTheInAppChatPathWaitsForTheOwnerToo() async {
