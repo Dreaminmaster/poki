@@ -10779,6 +10779,22 @@
         }
       }
     },
+    "Poki asks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待处理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待處理"
+          }
+        }
+      }
+    },
     "Poki asks: %@" : {
       "localizations" : {
         "zh-Hans" : {

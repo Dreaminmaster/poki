@@ -92,7 +92,7 @@ final class ActivityController {
     /// counts as having none, which keeps the banner.
     private static let dynamicIslandMinInset: CGFloat = 51
 
-    private static func hasDynamicIsland() -> Bool {
+    static func hasDynamicIsland() -> Bool {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return false }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         for scene in scenes {

@@ -424,7 +424,7 @@ final class AppModel {
         // Allow and Deny on the Live Activity run in this process and come straight here.
         ApprovalIntentBridge.install { [weak self] decision in
             guard let self else { return false }
-            self.decide(decision)
+            await self.decide(decision)
             return true
         }
         // The same answers from the approval notification's own buttons.
@@ -2151,7 +2151,15 @@ final class AppModel {
         // time-sensitive notification is for when there is no Live Activity to pop up: off in
         // Settings, dismissed, or Poki turned on from the background, where iOS starts none.
         if activity.isRunning {
-            log.add("approval", "asked on the Live Activity only, no notification")
+            if ActivityController.hasDynamicIsland() {
+                log.add("approval", "asked on the Live Activity only, no notification")
+            } else {
+                // Without a Dynamic Island, iPadOS and notch iPhones dismiss the top Live Activity
+                // banner after 6 seconds with no pill left to reopen it. Schedule a fallback notice
+                // after the banner goes away so the owner can still approve without returning to Poki.
+                ApprovalNotice.post(approval, caller: caller, after: Self.nonIslandNoticeDelay)
+                log.add("approval", "asked on the Live Activity with fallback notification after \(Int(Self.nonIslandNoticeDelay)) s")
+            }
         } else {
             ApprovalNotice.post(approval, caller: caller)
         }
@@ -2179,7 +2187,7 @@ final class AppModel {
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
             let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.drainApprovals() }
+            Task { @MainActor in await model.drainApprovals() }
         }, ApprovalMailbox.notification as CFString, nil, .deliverImmediately)
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
@@ -2231,34 +2239,38 @@ final class AppModel {
     }
 
     /// Decisions an intent left in the App Group mailbox because it ran outside the app.
-    func drainApprovals() {
-        for decision in ApprovalMailbox.drain() { decide(decision) }
+    func drainApprovals() async {
+        for decision in ApprovalMailbox.drain() { await decide(decision) }
     }
 
-    /// A decision from the Live Activity. The card shows the answer at once (Allowing, Denying).
-    /// Allow is tapped on the expanded Dynamic Island, which takes about a second to collapse; input
-    /// sent at once can land on it (iOS then opens Poki). So the Live Activity's decisions reach
-    /// PokiCore after a short pause, the app's own buttons at once.
-    func decide(_ decision: ApprovalDecision) {
+    /// A decision from the Live Activity or its fallback notification. The card shows the answer at
+    /// once (Allowing, Denying). On a Dynamic Island phone, Allow is tapped on the expanded island,
+    /// which takes about a second to collapse; input sent at once can land on it (iOS then opens
+    /// Poki). On iPad and notch phones there is no island to collapse, and returning from the intent
+    /// before resolving lets RunningBoard suspend Poki while a detached sleep is still pending.
+    func decide(_ decision: ApprovalDecision) async {
         // Don’t Ask Again is the owner's word about all later steps too, so it counts for a card whose
         // approval has already ended.
         if decision.stopAsking { turnApprovalsOff() }
         // A tap on an approval that already ended (answered in the app, or timed out) does nothing.
         guard approvals.contains(where: { $0.id == decision.approvalID }) else { return }
+        ApprovalNotice.clear(decision.approvalID)
         log.add("approval", "\(decision.approved ? "allowed" : "denied") \(decision.approvalID) on the Live Activity\(decision.stopAsking ? ", asking off" : "")")
         activity.update { state in
             guard state.approval?.id == decision.approvalID else { return }
             state.phase = .deciding
             state.decision = decision.approved
         }
-        Task { @MainActor in
+        if decision.waitForIslandCollapse, ActivityController.hasDynamicIsland() {
             try? await Task.sleep(for: .seconds(Self.islandCollapse))
-            core.resolveApproval(id: decision.approvalID, approved: decision.approved)
         }
+        core.resolveApproval(id: decision.approvalID, approved: decision.approved)
     }
 
     /// How long the expanded island takes to fold after a tap on its button.
     static let islandCollapse: TimeInterval = 1.5
+    /// Delay before posting a fallback approval notification after a non-island Live Activity banner dismisses.
+    static let nonIslandNoticeDelay: TimeInterval = 7
 
     /// A launcher failure as the Live Activity's content line, in English (the face words it in the
     /// system's language). The codes the launcher sends (native/launcher/src/device.rs, ddi.rs,
