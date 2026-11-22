@@ -3544,27 +3544,39 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertNil(chatProperties["finish"], "In-app chat do schema must not expose finish")
         XCTAssertTrue(PokiCore.toolCatalogJSON.contains(#""finish""#), "External MCP tool catalog must keep finish")
 
+        final class ReadSnapshots: @unchecked Sendable {
+            private let lock = NSLock()
+            private var values: [Int] = []
+            func append(_ count: Int) { lock.withLock { values.append(count) } }
+            var all: [Int] { lock.withLock { values } }
+        }
         let automation = FakeAutomation()
         _ = automation.prepare()
         let transport = SessionScreenTransport(session: automation)
+        let snapshots = ReadSnapshots()
         let server = try FakeCompletions(replies: [
             FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1]),
             FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]]),
             FakeCompletions.tool("finish_task", ["success": true, "summary": "Opened Settings.", "details": [], "answer": ["kind": "action"]]),
             FakeCompletions.tool("do", ["actions": [], "finish": true]),
             FakeCompletions.text("Opened Settings."),
-        ])
+        ], onRequest: { _ in
+            snapshots.append(transport.screenReads)
+        })
         let marker = "empty-finish-check-\(UUID().uuidString)"
         AppLog.shared.add("test", marker)
         let chat = chat(on: server, transport: transport, automation: automation, kind: .poki)
-        let readsBeforeFinish = transport.screenReads
         let done = expectation(description: "Task finished")
         ChatModel.afterTask = { _ in done.fulfill() }
         chat.send("Open Settings")
         await fulfillment(of: [done], timeout: 10)
 
+        let counts = snapshots.all
         let taskLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }))
-        XCTAssertEqual(transport.screenReads - readsBeforeFinish, 1, "Empty finish do must not trigger an extra screen read")
+        XCTAssertEqual(counts.count, 5, "Expected 5 scripted turns: \(counts)")
+        XCTAssertGreaterThanOrEqual(counts[3], 1, "Launch must read the screen before empty finish")
+        XCTAssertEqual(counts[4], counts[3], "Empty finish do must not trigger an extra screen read")
+        XCTAssertEqual(transport.screenReads, counts[3], "Empty finish do must not trigger an extra screen read")
         XCTAssertFalse(taskLogs.contains { $0.contains("[agent] started: Look at the screen") }, "Empty finish do must not log a Look at the screen step: \(taskLogs)")
         XCTAssertFalse(taskLogs.contains { $0.contains("a tap hit the Live Activity") }, "Returning to Poki on empty finish must not misreport a Live Activity tap: \(taskLogs)")
     }
