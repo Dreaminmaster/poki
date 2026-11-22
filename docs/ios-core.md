@@ -387,18 +387,26 @@ on the phone; the next first `look` of a task in that app names the saved skills
   task lets go of it, which closes nothing. With Apps by Name off, a `do` that names an app is
   refused with nothing sent rather than sent to whatever app is in front.
 - **Reading when the screen settles** (`CoreConfig.quickRead`, on by default; a switch in Testing
-  Options). After a launch, a button, a swipe or a pinch (pauses of 0.6 s and up) the read comes as
-  soon as the tree has changed from what it was before the action, lists something, and two reads in
-  a row agree, bounded by the old fixed pause (each read gets only the time left, so a slow tree
-  never makes the pause longer); the answer says "read after N ms". After a single local number-key
-  tap on an identified numeric display, reading starts immediately and reuses a verified screenshot
-  once a second tree confirms the app, layout, and value (retaking the screenshot if the confirming
-  tree arrives more than 0.6 s after the picture). If nothing changes through the 0.8 s late-update
-  window or the tap stays unconfirmed on the same display, observation stops, reports
-  `touch effect: unconfirmed`, and omits the screenshot rather than returning an unconfirmed or
-  cached pre-tap image, so the caller rechecks with `look` without repeating the tap. Other taps
-  keep the fixed 0.45 s pause, and turning `quickRead` off restores the fixed pause for number-key
-  taps too.
+  Options). After a button, a swipe or a pinch (pauses of 0.6 s and up) the read comes as soon as
+  the tree has changed from what it was before the action, lists something, and two reads in a row
+  agree, bounded by the old fixed pause (each read gets only the time left, so a slow tree never
+  makes the pause longer); the answer says "read after N ms" and reuses the confirmed settled tree
+  with a screenshot captured after input completed rather than reading the tree a third time. After
+  `scroll_to` finds its target following one or more swipes, or after `launch`, reading starts
+  immediately without the fixed settle pause, prepares a post-input screenshot bound to the current
+  action generation and earliest allowed timestamp, and delivers only once the target app, visible
+  layout, and pixels settle (ignoring scroll-bar churn and waiting past coasting or launch
+  transition frames). If a capture channel without frame timestamps only returns a delayed
+  pre-action image after the screen moved or switched apps, Poki rejects it, clears the cached
+  pre-action screenshot, and omits the picture so subsequent coordinate taps require a fresh `look`.
+  After a single local number-key tap on an identified numeric display, reading starts immediately
+  and reuses a verified screenshot once a second tree confirms the app, layout, and value (retaking
+  the screenshot if the confirming tree arrives more than 0.6 s after the picture). If nothing
+  changes through the 0.8 s late-update window or the tap stays unconfirmed on the same display,
+  observation stops, reports `touch effect: unconfirmed`, and omits the screenshot rather than
+  returning an unconfirmed or cached pre-tap image, so the caller rechecks with `look` without
+  repeating the tap. Other taps keep the fixed 0.45 s pause, and turning `quickRead` off restores
+  the fixed pause for number-key taps, `scroll_to`, `launch`, and long-pause actions too.
 - **The owner's locks, apps and Recent Updates** (the app's Memory page). A note may name the app it
   is about (`app`) and the conversation of Poki's own chat it was heard in (`heard: {session, app}`).
   The owner locks a note or a skill: no agent forgets, edits, renames or saves over a locked one
@@ -601,10 +609,11 @@ on the phone; the next first `look` of a task in that app names the saved skills
   "; an alert is over the list ("Just a moment": Not now): answer it first".
 - **No picture at all: the read before's stands in, marked stale.** When neither the runner nor the
   host gives a picture (a restart under load), the answer carries the picture of the read before
-  with "the screenshot is the one of the read before, 14 s old (no newer one came)". Exception: after
-  an unconfirmed local number-key tap with `CoreConfig.quickRead` on, Poki clears the cached
-  screenshot and returns no image instead of substituting an unconfirmed or pre-tap picture, so the
-  caller rechecks with `look` without repeating the tap. The host's own path gets up to 15 s of the
+  with "the screenshot is the one of the read before, 14 s old (no newer one came)". Exception: with
+  `CoreConfig.quickRead` on, after an unconfirmed local number-key tap or after a `scroll_to`,
+  `launch`, or settled long-pause action where only a delayed pre-action image arrives, Poki clears
+  the cached screenshot and returns no image instead of substituting an unconfirmed or pre-action
+  picture, so the caller rechecks with `look` before tapping coordinates or repeating input. The host's own path gets up to 15 s of the
   call's remaining time, and starts beside the runner's screenshot when the runner is already busy
   at the read's start, so the two are not in series.
 - **A launch under a system alert names the alert.** When the read after a launch shows the Home
