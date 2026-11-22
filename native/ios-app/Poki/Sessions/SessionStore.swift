@@ -756,9 +756,10 @@ final class SessionStore {
         }
     }
 
-    /// The hand-off's chat takes the id of the outside session's conversation, so the agent's own calls
-    /// and its hand-off stay apart: the hand-off gets its own row.
-    func handoffID(for agentSession: String?) -> String { "\(agentSession.map(conversation(for:)) ?? "agent")-ask-\(UUID().uuidString.prefix(8).lowercased())" }
+    /// A delegated chat owns a fresh saved conversation, independent of the outside
+    /// MCP transport/session ID. The same ID goes to the model and survives retries
+    /// and restoration, while the MCP caller is tracked separately by AskPoki.jobs.
+    func handoffID(for _: String?) -> String { "ask-\(UUID().uuidString.lowercased())" }
 
     func client(of agentSession: String?) -> String {
         if let id = agentSession, let name = clients[id] { return name }
