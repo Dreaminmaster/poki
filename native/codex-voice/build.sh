@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode=${1:?Usage: build.sh check|build aarch64-apple-ios[-sim]}
-target=${2:?Usage: build.sh check|build aarch64-apple-ios[-sim]}
-case "$mode" in check|build) ;; *) exit 2 ;; esac
-case "$target" in aarch64-apple-ios|aarch64-apple-ios-sim) ;; *) exit 2 ;; esac
+mode=${1:?Usage: build.sh check|build|test [aarch64-apple-ios[-sim]|host]}
+if [[ "$mode" == test ]]; then
+    target=${2:-host}
+    [[ "$target" == host ]] || exit 2
+else
+    target=${2:?Usage: build.sh check|build aarch64-apple-ios[-sim]}
+    case "$target" in aarch64-apple-ios|aarch64-apple-ios-sim) ;; *) exit 2 ;; esac
+fi
+case "$mode" in check|build|test) ;; *) exit 2 ;; esac
 
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
-if ! rustup target list --toolchain stable --installed | grep -Fxq "$target"; then
+if [[ "$target" != host ]] && ! rustup target list --toolchain stable --installed | grep -Fxq "$target"; then
     rustup target add --toolchain stable "$target"
 fi
 
@@ -17,6 +22,14 @@ revision=6aaac694803004a63c6f393d153c96d22521a6b9
 build_dir="$repo/build/codex-voice/$target"
 source_dir="$build_dir/$revision"
 mkdir -p "$build_dir"
+if [[ "$target" == host && ! -f "$source_dir/.poki-prepared" ]]; then
+    for existing in "$repo/build/codex-voice/aarch64-apple-ios-sim/$revision" "$repo/build/codex-voice/aarch64-apple-ios/$revision"; do
+        if [[ -f "$existing/.poki-prepared" ]]; then
+            source_dir="$existing"
+            break
+        fi
+    done
+fi
 if [[ ! -f "$source_dir/.poki-prepared" ]]; then
     mkdir -p "$source_dir"
     curl -fsSL "https://codeload.github.com/openai/codex/tar.gz/$revision" \
@@ -126,4 +139,8 @@ fi
 cd "$workspace"
 export CARGO_TARGET_DIR="$build_dir/target"
 export CARGO_PROFILE_RELEASE_DEBUG=0
-cargo +stable "$mode" "${options[@]}" --target "$target" -p poki-codex-voice
+if [[ "$mode" == test ]]; then
+    cargo +stable test "${options[@]}" --lib -p poki-codex-voice -- --nocapture
+else
+    cargo +stable "$mode" "${options[@]}" --target "$target" -p poki-codex-voice
+fi

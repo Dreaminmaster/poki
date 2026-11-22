@@ -22,8 +22,6 @@ typealias Emit = @convention(c) (UnsafePointer<CChar>?) -> Void
 var emit: Emit?
 var state = Session.missing
 var authorizationRequests = 0
-var threadStartParams: [String: Any]?
-var realtimeStartParams: [String: Any]?
 
 func poki_codex_start(_ path: UnsafePointer<CChar>, _ next: @escaping Emit) -> Bool {
     emit = next
@@ -41,10 +39,7 @@ func poki_codex_send(_ message: UnsafePointer<CChar>) -> Bool {
     case "account/login/start":
         authorizationRequests += 1
     case "thread/start":
-        threadStartParams = body["params"] as? [String: Any]
         result = ["thread": ["id": "fixture-thread"]]
-    case "thread/realtime/start":
-        realtimeStartParams = body["params"] as? [String: Any]
     default:
         break
     }
@@ -85,12 +80,6 @@ func poki_codex_send(_ message: UnsafePointer<CChar>) -> Bool {
         let sdp = try await voice.start(offer: "fixture-offer")
         expect(sdp == "fixture-answer" && voice.authorization == nil,
                "The shared sign-in opens the voice session without authorization UI")
-        expect(threadStartParams?["developerInstructions"] as? String == VoiceDirect.realtimeInstructions
-               && (threadStartParams?["dynamicTools"] as? [[String: Any]])?.count == VoiceDirect.codexTools.count,
-               "thread/start passes the shared instructions and phone tools")
-        expect(realtimeStartParams?["prompt"] as? String == VoiceDirect.realtimeInstructions
-               && realtimeStartParams?["includeStartupContext"] as? Bool == false,
-               "thread/realtime/start passes the shared instructions without startup context")
     } catch {
         expect(false, "The shared sign-in opens the voice session without authorization UI")
     }

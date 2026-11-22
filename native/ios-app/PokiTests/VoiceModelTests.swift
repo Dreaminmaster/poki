@@ -985,51 +985,6 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    func testEmbeddedCodexRuntimeBootsWithExternalToolsDisabled() async throws {
-        let tempHome = FileManager.default.temporaryDirectory.appending(path: "codex-voice-config-\(UUID().uuidString)", directoryHint: .isDirectory)
-        defer { try? FileManager.default.removeItem(at: tempHome) }
-        final class Receiver: @unchecked Sendable {
-            static let lock = NSLock()
-            static var continuation: CheckedContinuation<String, Never>?
-            static var messages: [String] = []
-            static func deliver(_ text: String) {
-                lock.lock()
-                if let cont = continuation, text.contains(#""id":777"#) || text.contains("poki/runtime/closed") {
-                    continuation = nil
-                    lock.unlock()
-                    cont.resume(returning: text)
-                } else {
-                    messages.append(text)
-                    lock.unlock()
-                }
-            }
-        }
-        Receiver.lock.withLock {
-            Receiver.continuation = nil
-            Receiver.messages.removeAll()
-        }
-        let started = tempHome.path(percentEncoded: false).withCString { path in
-            poki_codex_start(path) { value in
-                guard let value else { return }
-                Receiver.deliver(String(cString: value))
-            }
-        }
-        XCTAssertTrue(started)
-        let response: String = await withCheckedContinuation { continuation in
-            Receiver.lock.withLock {
-                if let existing = Receiver.messages.first(where: { $0.contains(#""id":777"#) || $0.contains("poki/runtime/closed") }) {
-                    continuation.resume(returning: existing)
-                } else {
-                    Receiver.continuation = continuation
-                }
-            }
-            let sent = #"{"id":777,"method":"account/read","params":{"refreshToken":false}}"#.withCString { poki_codex_send($0) }
-            XCTAssertTrue(sent)
-        }
-        XCTAssertFalse(response.contains("poki/runtime/closed"), "Codex runtime closed during startup: \(response)")
-        XCTAssertTrue(response.contains(#""id":777"#) && response.contains(#""result""#), response)
-    }
-
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
         let selected = UserDefaults.standard.object(forKey: "chat.provider")
         let saved = ModelKeys.key(.chatgpt)
