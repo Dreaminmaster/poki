@@ -24,6 +24,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     struct RecoveryPlan {
         let kind: RecoveryKind
+        let hasUncertainEarlierAudio: Bool
         let finished: AsyncStream<Void>
     }
 
@@ -198,6 +199,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             lock.withLock {
                 guard session == self.session else { return nil }
                 let kind: RecoveryKind
+                var hasUncertainEarlierAudio = false
                 switch state {
                 case .buffering:
                     guard !overflow else { return nil }
@@ -217,6 +219,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                         guard deliveredFrames < recovery.count else { return .uncertainPrefixUsed }
                         queued = Array(recovery[deliveredFrames...])
                         kind = .unconfirmedTail
+                        hasUncertainEarlierAudio = true
                     } else {
                         queued = recovery
                         kind = .fullOpening
@@ -228,7 +231,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 }
                 let (finished, continuation) = AsyncStream<Void>.makeStream()
                 state = .waitingForOwner(continuation)
-                return .dictation(RecoveryPlan(kind: kind, finished: finished))
+                return .dictation(RecoveryPlan(kind: kind, hasUncertainEarlierAudio: hasUncertainEarlierAudio, finished: finished))
             }
         }
     }

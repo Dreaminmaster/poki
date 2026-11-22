@@ -497,6 +497,22 @@
         }
       }
     },
+    "Connection lost after Poki started working. Only the unsent end will be sent as text. Check whether the earlier part was already handled." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已开始处理后连接断开，仅将确定未送出的尾段转成文字发送。请确认刚才那部分是否已执行，避免重复操作。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已開始處理後連線中斷，僅將確定未送出的尾段轉成文字送出。請確認剛才那部分是否已執行，避免重複操作。"
+          }
+        }
+      }
+    },
     "Allow Poki to use the microphone first." : {
       "localizations" : {
         "zh-Hans" : {

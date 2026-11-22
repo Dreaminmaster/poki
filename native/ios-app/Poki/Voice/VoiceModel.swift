@@ -815,6 +815,10 @@ final class VoiceModel {
         AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Nothing was sent again. Check whether the rest of what you said went through.", table: "Entry"))
     }
 
+    private static var openingUncertainEarlierPart: String {
+        AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Only the unsent end will be sent as text. Check whether the earlier part was already handled.", table: "Entry"))
+    }
+
     private func sendOpeningAudioIfReady() -> Bool {
         guard ready, connectionOpen, let capture = openingCapture else { return true }
         if capture.audio.allowSending(session: session) {
@@ -867,8 +871,13 @@ final class VoiceModel {
         let authorized = openingSpeechAuthorized
         trace("voice connection failed before confirmed use of opening audio")
         closeConnection("switching to on-device dictation")
-        transcript = nil
         endVoiceConnection()
+        if plan.hasUncertainEarlierAudio {
+            lines.append(VoiceLine(role: .note, text: Self.openingUncertainEarlierPart))
+            endTranscript()
+        } else {
+            transcript = nil
+        }
         guard authorized else {
             _ = releaseOpeningCapture(session: number, forDictation: false)
             phase = .lost(Self.openingSpeechUnavailable)
@@ -908,7 +917,9 @@ final class VoiceModel {
             else { text = nil }
             guard session == number, !Task.isCancelled else { return }
             if let text, !text.isEmpty, openingSpeech.sendText(text) {
-                let notice = AppLocalization.text(LocalizedStringResource("Voice couldn’t connect. I’ll handle this as text.", table: "Entry"))
+                let notice = plan.hasUncertainEarlierAudio
+                    ? Self.openingUncertainEarlierPart
+                    : AppLocalization.text(LocalizedStringResource("Voice couldn’t connect. I’ll handle this as text.", table: "Entry"))
                 await openingSpeech.announce(notice)
                 if session == number { phase = .off }
             } else {
