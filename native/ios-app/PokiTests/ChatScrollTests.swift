@@ -37,6 +37,16 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
     }
 
+    func testReadingBackReservesBottomSpaceForNewestButton() throws {
+        let (scroll, _) = try transcript()
+        let bottomAtNewest = scroll.adjustedContentInset.bottom
+        readBack(scroll)
+        XCTAssertGreaterThanOrEqual(
+            scroll.adjustedContentInset.bottom - bottomAtNewest, 44,
+            "Showing the scroll-to-bottom button must reserve its height at the bottom of the transcript"
+        )
+    }
+
     func testHomeComposerKeepsItsMarginsInTheDuoLeftPane() throws {
         let (reference, actual) = try duoHomeComposerFrames(size: CGSize(width: 469, height: 669), inDuoSplitView: true)
         XCTAssertEqual(actual.minX, reference.minX, accuracy: 1, "The left safe area moved the composer")

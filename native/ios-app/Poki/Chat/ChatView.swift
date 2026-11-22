@@ -711,13 +711,14 @@ struct ChatTranscript<Footer: View>: View {
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
-        // Under the bars the system's soft scroll edge takes the messages (`softTopEdge`). No mask of
-        // our own here: one made the messages vanish in a short straight ramp above the bar, which
-        // read as a hard edge, and left the system's effect nothing to blur.
-        .overlay(alignment: .bottom) {
+        // Reserve the scroll-to-bottom button's height in the bottom bar while reading back so it
+        // never sits over a result card's action button.
+        .bottomBar(softEdge: true) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
+                    .padding(.top, 4)
                     .padding(.bottom, 10)
+                    .frame(maxWidth: .infinity)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
