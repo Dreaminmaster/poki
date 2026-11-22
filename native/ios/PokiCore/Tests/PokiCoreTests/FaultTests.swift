@@ -1100,7 +1100,7 @@ final class GymTests: XCTestCase {
         let look = await core.call("look", [:])
         XCTAssertFalse(look.isError, look.text)
         XCTAssertTrue(look.text.contains("runner: starting (the phone is asking the owner for the passcode)"), look.text)
-        XCTAssertTrue(look.text.contains("call look or status again every few seconds"), look.text)
+        XCTAssertTrue(look.text.contains("Call look or status again in a few seconds"), look.text)
     }
 
     func testABusyGateAnswersWithThePicture() async {
