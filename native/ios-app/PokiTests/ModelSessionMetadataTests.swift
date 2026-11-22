@@ -353,7 +353,7 @@ final class ModelSessionMetadataTests: XCTestCase {
             defer { if let originalApp, let originalChat { AskPoki.install(app: originalApp, chat: originalChat) } }
 
             let owned = PendingApproval(id: UUID().uuidString, app: "Phone",
-                                        summary: "Synthetic owned action", reason: "a call",
+                                        summary: "Synthetic owned action", reason: "a call (in Phone)",
                                         expires: .now.addingTimeInterval(60))
             let ownerOrigin = ApprovalClassifier.Origin.chat(owner.sessionID)
             XCTAssertEqual(ApprovalClassifier.route(owned, voiceOn: false, origin: ownerOrigin), .model(reply: false))
@@ -371,9 +371,20 @@ final class ModelSessionMetadataTests: XCTestCase {
                 return (200, "text/event-stream", FakeCompletions.text("Held owner response."))
             }
             owner.send("Owner live approval route regression")
-            XCTAssertTrue(owner.running, "the real owner request must be live during the external approval")
+            // The test only proves a race if the owner's real HTTP request is
+            // already in flight, rather than merely scheduled by ChatModel.
+            let until = ContinuousClock.now + .seconds(8)
+            while !ModelServerStub.requests.contains(where: {
+                String(decoding: $0.body, as: UTF8.self).contains("Owner live approval route regression")
+            }), ContinuousClock.now < until {
+                try await Task.sleep(for: .milliseconds(25))
+            }
+            let ownerRequests = self.actualChatRequests(containing: "Owner live approval route regression")
+            XCTAssertEqual(ownerRequests.last?.headers["x-opencode-session"], owner.sessionID,
+                           "the owner's model request must reach the fixture before external approval")
+            XCTAssertTrue(owner.running, "the real owner request must remain live during the external approval")
             let outside = PendingApproval(id: UUID().uuidString, app: "Phone",
-                                          summary: "Synthetic external action", reason: "a call",
+                                          summary: "Synthetic external action", reason: "a call (in Phone)",
                                           expires: .now.addingTimeInterval(60),
                                           sourceSession: "mcp-external-session")
             let external = ApprovalClassifier.origin(voiceOn: false, outsideSession: outside.sourceSession)
