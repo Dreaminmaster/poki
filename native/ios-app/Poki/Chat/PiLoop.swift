@@ -202,6 +202,9 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if provider.signsIn, model.provider == "openai-codex" {
+                    options.httpClient = ChatGPTAccount.ResponsesClient(transport: DefaultProviderHTTPClient(env: options.env))
+                }
                 if let trace = ChatStepTiming.current {
                     if model.api == .openAIResponses {
                         let onPayload = options.onPayload

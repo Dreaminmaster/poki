@@ -839,6 +839,34 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    func testSubscriptionVoiceClosesOnTimeIfTheAnswerTranscriptArrivesAfterPlayback() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            defer { h.voice.stop() }
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
+            link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.voice.phase, .speaking)
+
+            link.remoteSpeech = false
+            for _ in 0..<3 { await h.time.advance(0.2) }
+            XCTAssertEqual(h.voice.phase, .listening)
+            await h.time.advance(7)
+            XCTAssertTrue(h.voice.isOn)
+            codex.notify("thread/realtime/transcript/done", ["role": "assistant", "text": "Hi there."])
+            XCTAssertTrue(h.voice.lines.contains { $0.role == .poki && $0.text == "Hi there." })
+
+            await h.time.advance(1)
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertNil(TalkActivity.state(of: h.voice))
+            XCTAssertTrue(link.closed)
+            XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
         let selected = UserDefaults.standard.object(forKey: "chat.provider")
         let saved = ModelKeys.key(.chatgpt)

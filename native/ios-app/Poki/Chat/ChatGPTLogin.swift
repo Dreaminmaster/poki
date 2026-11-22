@@ -12,6 +12,21 @@ enum ChatGPTAccount {
         var errorDescription: String? { ChatGPTAccount.signInAgain }
     }
 
+    struct ResponsesClient: ProviderHTTPClient {
+        let transport: DefaultProviderHTTPClient
+
+        func send(_ request: URLRequest) async throws -> ProviderHTTPResponse {
+            try await send(request, timeoutPolicy: .request)
+        }
+
+        func send(_ request: URLRequest, timeoutPolicy: ProviderHTTPTimeoutPolicy) async throws -> ProviderHTTPResponse {
+            let response = try await transport.send(request, timeoutPolicy: timeoutPolicy)
+            // PiSwift's Codex adapter keeps only the response body in its final error message.
+            if response.statusCode == 401 { throw SignInRequired() }
+            return response
+        }
+    }
+
     static var signInAgain: String {
         AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT again. Open Settings, then Models."))
     }

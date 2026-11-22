@@ -1219,9 +1219,9 @@ final class VoiceModel {
         }
         guard method == "thread/realtime/transcript/done", let text = params["text"] as? String,
               !text.isEmpty, let role = params["role"] as? String else { return }
-        lastActivity = time.now()
-        keepOpen()
         if role == "user" {
+            lastActivity = time.now()
+            keepOpen()
             lines.append(VoiceLine(role: .you, text: text))
             awaitingAnswer = true
             phase = .thinking

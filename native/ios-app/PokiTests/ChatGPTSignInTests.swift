@@ -18,7 +18,7 @@ final class ChatGPTSignInTests: XCTestCase {
         savedLanguage = AppLocalization.shared.preference
         AppLocalization.shared.preference = "en"
         ModelServerStub.clear()
-        ModelServerStub.additionalHosts = ["api.openai.com", "auth.openai.com"]
+        ModelServerStub.additionalHosts = ["api.openai.com", "auth.openai.com", "chatgpt.com"]
         URLProtocol.registerClass(ModelServerStub.self)
     }
 
@@ -31,6 +31,37 @@ final class ChatGPTSignInTests: XCTestCase {
     }
 
     func testSharedCodexSignInSelectsTheTextProviderWithoutALegacyCredential() async throws {
+        try await withSharedCodexSignIn("fixture-shared-access") {
+            XCTAssertTrue(ChatGPTAccount.signedIn)
+            let model = try XCTUnwrap(ModelProvider.chatgpt.piModel("gpt-6.1-sol"))
+            XCTAssertEqual(model.provider, "openai-codex")
+            let token = await ModelCredential.apiKey(for: .chatgpt, piProvider: model.provider)
+            XCTAssertEqual(token, "fixture-shared-access")
+        }
+    }
+
+    func testRejectedSharedCodexSignInUsesHTTPStatusToAskForSignIn() async throws {
+        let expiry = Int(Date().addingTimeInterval(3600).timeIntervalSince1970)
+        let claims = Data("""
+        {"exp":\(expiry),"https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account"}}
+        """.utf8)
+        let payload = claims.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        try await withSharedCodexSignIn("e30.\(payload).fixture") {
+            for (status, expected) in [
+                (401, "Sign in to ChatGPT again. Open Settings, then Models."),
+                (403, "ChatGPT, the request failed.")
+            ] {
+                ModelServerStub.answer = (status, #"{"error":{"message":"Unauthorized"}}"#)
+                ModelServerStub.recordedReset()
+                let outcome = try await runTextRequest()
+                XCTAssertEqual(ModelServerStub.requests.compactMap(\.url?.path), ["/backend-api/codex/responses"])
+                XCTAssertEqual(outcome, .failed(expected), "HTTP \(status)")
+            }
+        }
+    }
+
+    private func withSharedCodexSignIn(_ access: String, run: () async throws -> Void) async throws {
         try ChatGPTAccount.signOut()
         try FileManager.default.createDirectory(at: CodexAccount.home, withIntermediateDirectories: true)
         let path = try XCTUnwrap(realpath(CodexAccount.home.path(percentEncoded: false), nil))
@@ -39,17 +70,13 @@ final class ChatGPTSignInTests: XCTestCase {
             .map { String(format: "%02x", $0) }.joined()
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: "Codex Auth", kSecAttrAccount as String: "cli|\(fingerprint)"]
-        let stored = Data(#"{"auth_mode":"chatgpt","tokens":{"access_token":"fixture-shared-access"}}"#.utf8)
+        let stored = try JSONSerialization.data(withJSONObject: ["auth_mode": "chatgpt", "tokens": ["access_token": access]])
         let status = SecItemAdd(query.merging([kSecValueData as String: stored]) { old, _ in old } as CFDictionary, nil)
         XCTAssertEqual(status, errSecSuccess)
         guard status == errSecSuccess else { return }
         defer { SecItemDelete(query as CFDictionary) }
 
-        XCTAssertTrue(ChatGPTAccount.signedIn)
-        let model = try XCTUnwrap(ModelProvider.chatgpt.piModel("gpt-6.1-sol"))
-        XCTAssertEqual(model.provider, "openai-codex")
-        let token = await ModelCredential.apiKey(for: .chatgpt, piProvider: model.provider)
-        XCTAssertEqual(token, "fixture-shared-access")
+        try await run()
     }
 
     func testExpiredSignInSharesRenewalAndStoresTheRotatedCredential() async throws {
