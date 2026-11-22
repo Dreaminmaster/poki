@@ -41,7 +41,6 @@ struct ChatView: View {
     var shortcutStore: HomeShortcutStore = .shared
     /// Optional observational hook for hosted UI tests, reporting the rows the view actually supplies
     /// to its transcript. Never changes navigation or message filtering; nil in production.
-    var onTranscriptRowsChanged: (([UUID]) -> Void)? = nil
 
     private var voice: VoiceModel { model.voice }
     /// The taps on Poki's picture, for the bear to answer.
@@ -172,8 +171,6 @@ struct ChatView: View {
                 }
                 LiveVoiceTranscript(voice: voice)
             }
-            .onAppear { onTranscriptRowsChanged?(shown.map(\.id)) }
-            .onChange(of: shown.map(\.id)) { _, rows in onTranscriptRowsChanged?(rows) }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
             HomePage(home: home, writing: writing, rise: flightRise, sessionStore: sessionStore, shortcutStore: shortcutStore,

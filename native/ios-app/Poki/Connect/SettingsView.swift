@@ -38,7 +38,6 @@ struct SettingsDestination: View {
     var route: SettingsRoute
     var push: (SettingsRoute) -> Void
     var pop: () -> Void
-    var memoryLibrary: MemoryLibrary? = nil
     var body: some View {
         switch route {
         case .connector(let secret): ConnectorDetail(secret: secret, back: pop)
@@ -48,8 +47,8 @@ struct SettingsDestination: View {
             if new.count > 1, let last = new.last { push(last) } else if new.isEmpty { pop() }
         }))
         case .log: LogView(back: pop)
-        case .memory: MemoryView(back: pop, library: memoryLibrary ?? .shared)
-        case .memoryPage(let page): MemoryDestination(page: page, library: memoryLibrary ?? .shared)
+        case .memory: MemoryView(back: pop)
+        case .memoryPage(let page): MemoryDestination(page: page)
         case .activityPreview: ActivityPreview()
         }
     }

@@ -21,7 +21,6 @@ struct PokiDetailsView: View {
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
     var sessionStore: SessionStore = .shared
-    var memoryLibrary: MemoryLibrary? = nil
     @Binding var path: NavigationPath
     @ObservedObject private var historyCapture = HistoryCapture.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
@@ -203,7 +202,7 @@ struct PokiDetailsView: View {
             }
             .navigationDestination(for: SetupStep.self) { SetupStepPage(step: $0).settingsPage() }
             .navigationDestination(for: SettingsRoute.self) { route in
-                SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } }, memoryLibrary: memoryLibrary)
+                SettingsDestination(route: route, push: { path.append($0) }, pop: { if !path.isEmpty { path.removeLast() } })
                     .settingsPage()
             }
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }

@@ -23,7 +23,7 @@ enum MemoryPage: Hashable {
 /// The page for a Memory route.
 struct MemoryDestination: View {
     var page: MemoryPage
-    var library: MemoryLibrary = .shared
+    private var library: MemoryLibrary { .shared }
     var body: some View {
         switch page {
         case .about(let open): MemoryScopeView(scope: .about, open: open, library: library)
@@ -37,7 +37,7 @@ struct MemoryDestination: View {
 /// Memory's first page.
 struct MemoryView: View {
     var back: () -> Void
-    var library: MemoryLibrary = .shared
+    private var library: MemoryLibrary { .shared }
     @State private var page = MemoryPageState()
     @State private var query = ""
     @State private var importing = false

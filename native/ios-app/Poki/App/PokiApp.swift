@@ -100,7 +100,6 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     var sessionStore: SessionStore = .shared
     var shortcutStore: HomeShortcutStore = .shared
-    var memoryLibrary: MemoryLibrary? = nil
     @State private var sidebarWidth: CGFloat?
     private var showsSidebar: Bool { sidebarWidth != nil }
     // Both navigation layouts share the composer while the window changes size.
@@ -292,7 +291,6 @@ struct RootView: View {
             searchJump: searchJump,
             onSearchJumpApplied: consumeSearchJump,
             sessionStore: sessionStore,
-            memoryLibrary: memoryLibrary,
             path: $detailsPath
         )
         // Presented on its own, so it says the edge's style itself rather than counting on the
