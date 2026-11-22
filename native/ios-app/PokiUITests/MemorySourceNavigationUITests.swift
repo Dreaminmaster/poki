@@ -7,9 +7,10 @@ final class MemorySourceNavigationUITests: XCTestCase {
     private let marker = "Synthetic saved source transcript"
     private let draft = "Synthetic unsent composer draft"
 
-    private func launchFixture() -> XCUIApplication {
+    private func launchFixture(liveTask: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-pokiUITestMemorySource", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if liveTask { app.launchArguments += ["-pokiUITestLiveTask", "YES"] }
         app.launch()
         return app
     }
@@ -63,7 +64,10 @@ final class MemorySourceNavigationUITests: XCTestCase {
     }
 
     func testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft() throws {
-        let app = launchFixture()
+        // Starts a genuine ChatModel.send using a held HTTP fixture request.
+        // A narrow idle chat intentionally restores the saved conversation
+        // instead, so using an idle fixture here would test the wrong policy.
+        let app = launchFixture(liveTask: true)
         defer { app.terminate() }
         try XCTSkipUnless(app.frame.width < 750, "Run on an iPhone-size simulator")
         openSource(app)
