@@ -148,6 +148,17 @@ targets:
         # @testable import Poki re-reads the app's bridging header, which includes the launcher's C
         # header and Poki/Native's headers.
         HEADER_SEARCH_PATHS: $(SRCROOT)/../launcher/include $(SRCROOT)/Poki/Native
+  PokiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PokiUITests]
+    dependencies:
+      - target: Poki
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Poki
   PokiWidgets:
     type: app-extension
     platform: iOS
@@ -181,10 +192,11 @@ schemes:
         Poki: all
         PokiWidgets: all
         PokiTests: [test]
+        PokiUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets: [PokiTests]
+      targets: [PokiTests, PokiUITests]
     archive:
       config: Release
