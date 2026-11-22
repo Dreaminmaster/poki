@@ -385,19 +385,22 @@ extension PokiState {
                 compact: .symbol("hand.tap.fill", .accent))
         case .idle:
             if let voice {
-                let (line, hint, bear): (String, String, ActivityBear) = switch voice {
-                case .listening: (StatusWord.listening.text, String(activity: "Talk with Poki"), .ready)
-                case .thinking: (StatusWord.thinking.text, String(activity: "Working out the next step."), .thinking)
-                case .speaking: (StatusWord.speaking.text, String(activity: "Talk with Poki"), .ready)
+                let (line, hint, bear, symbol): (String, String, ActivityBear, String) = switch voice {
+                case .connecting: (StatusWord.starting.text, ActivityWords.local("Connecting"), .ready, "antenna.radiowaves.left.and.right")
+                case .listening: (StatusWord.listening.text, String(activity: "Talk with Poki"), .ready, "waveform")
+                case .finishingOpening: (StatusWord.listening.text, String(activity: "Run Poki Anytime again to send as text."), .ready, "waveform")
+                case .thinking: (StatusWord.thinking.text, String(activity: "Working out the next step."), .thinking, "waveform")
+                case .speaking: (StatusWord.speaking.text, String(activity: "Talk with Poki"), .ready, "waveform")
                 }
                 return ActivityFace(
-                    symbol: "waveform",
+                    symbol: symbol,
                     bear: bear, size: .working,
                     meta: .none,
                     content: line,
                     subtitle: hint,
+                    subtitleLines: voice == .finishingOpening ? 2 : 1,
                     bottom: .none,
-                    compact: .symbol("waveform", .accent))
+                    compact: .symbol(symbol, .accent))
             }
             return quietFace
         }

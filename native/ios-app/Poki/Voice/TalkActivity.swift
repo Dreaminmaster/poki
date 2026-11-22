@@ -40,9 +40,11 @@ final class TalkActivity {
     /// The talk's state as the Live Activity says it: nil while no talk is on.
     static func state(of voice: VoiceModel) -> PokiState.Voice? {
         guard voice.isOn else { return nil }
+        if voice.waitsForOpeningDictation { return .finishingOpening }
         switch voice.phase {
         case .off, .lost: return nil
-        case .connecting, .listening, .hearing: return .listening
+        case .connecting: return voice.isCapturingOpening ? .listening : .connecting
+        case .listening, .hearing: return .listening
         case .thinking: return .thinking
         case .speaking: return .speaking
         }
@@ -78,17 +80,16 @@ final class TalkActivity {
         activity.finishNow(alert: false, result: said, task: asked.map { voice.lines[$0].text })
     }
 
-    /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first, while
-    /// the intent runs, and the microphone only once it is up, because iOS ends an app that records in
-    /// the background without one. false: the Live Activity did not start, and nothing else did.
-    func startHere() async -> Bool {
-        show(.listening, fromIntent: true)
+    /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first in
+    /// Connecting while the intent runs, and switches to Listening once background capture starts,
+    /// because iOS ends an app that records in the background without an active Live Activity.
+    func startHere(presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async -> Bool {
+        show(.connecting, fromIntent: true)
         guard activity.isRunning else {
             show(nil)
             return false
         }
-        await voice.start()
-        // Not connected: the talk's phase says why, and the Live Activity goes (`follow` sees no talk).
+        await voice.start(captureOpening: true, presentSpeechPermission: presentSpeechPermission)
         show(Self.state(of: voice))
         return true
     }

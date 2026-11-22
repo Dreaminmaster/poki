@@ -1,10 +1,12 @@
 import AppIntents
 import AVFAudio
+import UIKit
 
 /// Talk with Poki without leaving the app you're in: from the Action Button, Shortcuts or Siri, Poki
 /// stays in the background, so the app in front stays in front, and Poki looks at it and works in it
-/// while you talk. The Live Activity shows the talk and carries End; running this again stops the
-/// talk and what Poki is doing, as End does.
+/// while you talk. The Live Activity shows the talk and carries End. Running this again stops a live
+/// talk, or finishes and sends unconfirmed opening speech as text if voice could not connect or
+/// disconnected before confirming it; End on the Live Activity always cancels.
 ///
 /// iOS opens the microphone for an app in the background only from an AudioRecordingIntent, and only
 /// with a Live Activity up: LiveActivityIntent lets this intent start one from the background. When
@@ -12,7 +14,7 @@ import AVFAudio
 /// permission) or the Live Activity does not start, Poki opens and Talk to Poki goes on from there.
 struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     static let title = LocalizedStringResource("Poki Anytime", table: "Entry")
-    static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk.", table: "Entry"))
+    static let description = IntentDescription(LocalizedStringResource("Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk, or to send unconfirmed opening speech as text if voice couldn’t connect or disconnected.", table: "Entry"))
     static let openAppWhenRun = false
     @available(iOS 26.0, *)
     static var supportedModes: IntentModes { [.background, .foreground(.dynamic)] }
@@ -26,19 +28,40 @@ struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundConti
         guard let app = AskPoki.app, let chat = AskPoki.chat else {
             return try await openPoki(LocalizedStringResource("Poki wasn’t ready. Try again in a moment.", table: "Entry"))
         }
+        if app.voice.finishOpeningDictation() { return .result() }
         if app.voice.isOn {
             AppLog.shared.add("voice", "Poki Anytime ended the talk")
             app.stopFromOutside("Poki Anytime ended the talk")
             return .result()
         }
         if let why = Self.whyPokiOpens(app, chat) { return try await openPoki(why) }
+        VoiceOpeningFeedback.vibrate()
         AppLog.shared.add("voice", "Talk Here: starting a talk with Poki in the background")
         app.prepareForTask()
-        guard await app.talkHere() else {
+        guard await app.talkHere(presentSpeechPermission: presentSpeechPermission) else {
             return try await openPoki(LocalizedStringResource("Poki couldn’t show the talk on the Lock Screen, so it opens to talk.", table: "Entry"))
         }
         if case .lost(let why) = app.voice.phase { throw TalkHereError(why: why) }
         return .result()
+    }
+
+    @MainActor
+    private func presentSpeechPermission(_ request: @MainActor () async -> Bool) async -> Bool {
+        if UIApplication.shared.applicationState == .active { return await request() }
+        let dialog = IntentDialog(LocalizedStringResource("Open Poki to allow on-device speech recognition for when voice can’t connect.", table: "Entry"))
+        do {
+            if #available(iOS 26.0, *) {
+                let mode = systemContext.currentMode
+                if mode != .foreground {
+                    guard mode.canContinueInForeground else { return false }
+                    try await continueInForeground(dialog, alwaysConfirm: false)
+                }
+                return await request()
+            }
+            return try await requestToContinueInForeground(dialog, continuation: request)
+        } catch {
+            return false
+        }
     }
 
     /// Why the talk has to start in Poki instead, in the words the shortcut shows; nil when it can start here.

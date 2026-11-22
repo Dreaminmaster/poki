@@ -2792,6 +2792,23 @@
         }
       }
     },
+    "Run Poki Anytime again to send as text." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说完后，再运行一次「随时 Poki」转成文字。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說完後，再執行一次「隨時 Poki」轉成文字。"
+          }
+        }
+      }
+    },
     "Talk with Poki" : {
       "extractionState" : "manual",
       "localizations" : {
