@@ -436,7 +436,7 @@ final class AppModel {
         // Allow and Deny on the Live Activity run in this process and come straight here.
         ApprovalIntentBridge.install { [weak self] decision in
             guard let self else { return false }
-            self.decide(decision)
+            await self.decide(decision)
             return true
         }
         // The same answers from the approval notification's own buttons.
@@ -2194,7 +2194,13 @@ final class AppModel {
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        ApprovalNotice.post(approval, after: activity.isRunning ? ApprovalNotice.islandReminderDelay : 0)
+        if activity.isRunning {
+            let delay = ActivityController.hasDynamicIsland() ? ApprovalNotice.islandReminderDelay : Self.nonIslandNoticeDelay
+            ApprovalNotice.post(approval, after: delay)
+            log.add("approval", "asked on the Live Activity with fallback notification after \(Int(delay)) s")
+        } else {
+            ApprovalNotice.post(approval, after: 0)
+        }
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
@@ -2220,7 +2226,7 @@ final class AppModel {
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
             let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.drainApprovals() }
+            Task { @MainActor in await model.drainApprovals() }
         }, ApprovalMailbox.notification as CFString, nil, .deliverImmediately)
         CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
             guard let observer else { return }
@@ -2272,13 +2278,16 @@ final class AppModel {
     }
 
     /// Decisions an intent left in the App Group mailbox because it ran outside the app.
-    func drainApprovals() {
-        for decision in ApprovalMailbox.drain() { decide(decision) }
+    func drainApprovals() async {
+        for decision in ApprovalMailbox.drain() { await decide(decision) }
     }
 
-    /// Restore the progress display immediately. Let the island fold before PokiCore sends input
-    /// so the approved tap can land in the target app.
-    func decide(_ decision: ApprovalDecision) {
+    /// A decision from the Live Activity or its fallback notification. Restore the progress display
+    /// immediately. On a Dynamic Island phone, let the island fold before PokiCore sends input so the
+    /// approved tap can land in the target app. On iPad and notch phones there is no island to
+    /// collapse, and awaiting resolution before the intent returns prevents RunningBoard from
+    /// suspending Poki before PokiCore receives the decision.
+    func decide(_ decision: ApprovalDecision) async {
         // Don’t Ask Again is the owner's word about all later steps too, so it counts for a card whose
         // approval has already ended.
         if decision.stopAsking { turnApprovalsOff() }
@@ -2293,14 +2302,16 @@ final class AppModel {
             state.phase = .deciding
             state.decision = decision.approved
         }
-        Task { @MainActor in
+        if decision.waitForIslandCollapse, ActivityController.hasDynamicIsland() {
             try? await Task.sleep(for: .seconds(Self.islandCollapse))
-            core.resolveApproval(id: decision.approvalID, approved: decision.approved)
         }
+        core.resolveApproval(id: decision.approvalID, approved: decision.approved)
     }
 
     /// How long the expanded island takes to fold after a tap on its button.
     static let islandCollapse: TimeInterval = 1.5
+    /// Delay before posting a fallback approval notification after a non-island Live Activity banner dismisses.
+    static let nonIslandNoticeDelay: TimeInterval = 7
 
     /// A launcher failure as the Live Activity's content line, in English (the face words it in the
     /// system's language). The codes the launcher sends (native/launcher/src/device.rs, ddi.rs,

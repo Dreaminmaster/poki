@@ -1,6 +1,6 @@
 # Install
 
-This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is no longer updated and stays available as it is. To put the Poki app on an iPhone,
+This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is frozen for features and receives only targeted security maintenance. To put the Poki app on an iPhone,
 use the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup instead, as the
 [README](../README.md#install-poki-on-your-iphone) describes; that path does not need Xcode.
 

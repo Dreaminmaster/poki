@@ -500,6 +500,87 @@ final class LiveActivityTests: XCTestCase {
         }
     }
 
+    func testNonDynamicIslandApprovalIntentResolvesBeforeReturningAndSchedulesFallbackNotice() async throws {
+        try await withFinishWindow(dynamicIsland: false) {
+            InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
+            let defaults = UserDefaults.standard
+            let keys = ["relayAddress", "relayEnabled", "wantsOn", ApprovalClassifier.modeKey]
+            let saved = keys.map { defaults.object(forKey: $0) }
+            let setup = SetupState.load()
+            let automation = FakeAutomation()
+            let transport = SessionScreenTransport(session: automation, screenLabel: { "Delete" })
+            let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
+            defer {
+                automation.answer(nil)
+                if app.sessionOn { app.stopSession() }
+                for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) }
+                setup.save()
+            }
+            UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+            app.loopback.simulate(.working(ms: 9))
+            app.setup.loopback = .proxy
+            XCTAssertTrue(app.setRelay("https://relay.invalid"))
+            app.becameActive()
+            app.startSession()
+            app.wakeRunner()
+            for _ in 0..<150 where !["failed", "running"].contains(app.runner.state) {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            app.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+            for _ in 0..<150 where !app.hasOpenInProcessSession {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            await app.chatTaskBegan()
+
+            let look = await app.runTool("look", arguments: "{}")
+            XCTAssertFalse(look.isError, look.text)
+
+            let allowTask = Task { await app.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+            for _ in 0..<150 where app.approvals.isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let first = try XCTUnwrap(app.approvals.first, "Sensitive tap must raise a pending approval")
+            let firstNoticeID = "approval-\(first.id)"
+            defer { clearNotice(firstNoticeID) }
+
+            var scheduledFallback: UNNotificationRequest?
+            for _ in 0..<50 {
+                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+                if let match = pending.first(where: { $0.identifier == firstNoticeID }) {
+                    scheduledFallback = match
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertNotNil(scheduledFallback, "Without a Dynamic Island, a fallback approval notification must be scheduled after the Live Activity banner dismisses")
+
+            let allowStarted = ContinuousClock.now
+            _ = try await ApproveActionIntent(approvalID: first.id).perform()
+            let allowResult = await allowTask.value
+            let allowElapsed = ContinuousClock.now - allowStarted
+            XCTAssertFalse(allowResult.isError, allowResult.text)
+            XCTAssertLessThan(allowElapsed, .milliseconds(900), "On a device without a Dynamic Island, ApproveActionIntent must resolve before returning instead of waiting behind an unawaited collapse sleep")
+
+            let pendingAfterAllow = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            XCTAssertFalse(pendingAfterAllow.contains { $0.identifier == firstNoticeID }, "Answering on the Live Activity must cancel the fallback approval notification")
+
+            let denyTask = Task { await app.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+            for _ in 0..<150 where app.approvals.isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let second = try XCTUnwrap(app.approvals.first, "Second sensitive tap must raise a pending approval")
+            let secondNoticeID = "approval-\(second.id)"
+            defer { clearNotice(secondNoticeID) }
+
+            let denyStarted = ContinuousClock.now
+            _ = try await DenyActionIntent(approvalID: second.id).perform()
+            let denyResult = await denyTask.value
+            let denyElapsed = ContinuousClock.now - denyStarted
+            XCTAssertTrue(denyResult.isError || denyResult.text.lowercased().contains("denied") || denyResult.text.lowercased().contains("not"), denyResult.text)
+            XCTAssertLessThan(denyElapsed, .milliseconds(900), "On a device without a Dynamic Island, DenyActionIntent must resolve before returning")
+        }
+    }
+
     private func ensureRunningSession() async throws -> RunningSession {
         if let session = Self.runningSession, session.activities().first != nil {
             return session
