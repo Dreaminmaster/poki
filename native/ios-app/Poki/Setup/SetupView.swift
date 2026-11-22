@@ -295,7 +295,7 @@ private struct LoopbackPage: View {
 
     var body: some View {
         let monitor = model.loopback
-        let localReady = model.hasOpenInProcessSession && !monitor.isWorking
+        let localReady = (model.hasOpenInProcessSession || model.mountedImageStandsIn) && !monitor.isWorking
         let chosen = LoopbackChoice.chosen(model.setup.proxyApp)
 
         Section {

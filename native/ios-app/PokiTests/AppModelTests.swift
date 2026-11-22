@@ -1922,8 +1922,8 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.automation), "Home chat must not treat an unfinished loopback check as off")
         XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.automation), "Conversation chat must not treat an unfinished loopback check as off")
         model.setup.uiAutomation = true
-        let checkingLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(checkingLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+        let checkingLabels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(checkingLabels.contains { $0 == "Next" || $0.hasSuffix(", Next") },
                        "Connection must not ask to turn on a configured loopback while checking: \(checkingLabels)")
 
         model.loopback.simulate(.working(ms: 6))
@@ -1969,10 +1969,10 @@ final class FrontendSubtractionTests: XCTestCase {
         )
         XCTAssertFalse(chatLabels.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") },
                        "Chat screen must not prompt for Local Connection when 10.7.0.1 answers: \(chatLabels)")
-        let connectionLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(connectionLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+        let connectionLabels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(connectionLabels.contains { $0 == "Next" || $0.hasSuffix(", Next") },
                        "Connection screen must not prompt to turn on Local Connection when 10.7.0.1 answers: \(connectionLabels)")
-        XCTAssertTrue(connectionLabels.contains { $0.contains("Set Up Again") },
+        XCTAssertTrue(connectionLabels.contains { $0.contains("Guide Me") },
                       "Connection screen must report setup complete when 10.7.0.1 answers: \(connectionLabels)")
     }
 
@@ -1993,9 +1993,9 @@ final class FrontendSubtractionTests: XCTestCase {
             XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.loopback), "Home, \(answer)")
             XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, \(answer)")
             XCTAssertFalse(model.setupReadyForUse, "the Settings entry, \(answer)")
-            let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-            XCTAssertTrue(connection.contains { $0.contains("Turn On") }, "Connection, \(answer): \(connection)")
-            XCTAssertFalse(connection.contains { $0.contains("Set Up Again") }, "Connection, \(answer): \(connection)")
+            let connection = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+            XCTAssertTrue(connection.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "Connection, \(answer): \(connection)")
+            XCTAssertTrue(connection.contains { $0.contains("Guide Me") }, "Setup, \(answer): \(connection)")
         }
     }
 
@@ -2014,9 +2014,9 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.hasOpenInProcessSession, "the session is not open yet, so nothing else stands in for the loopback")
         XCTAssertNil(SetupIssueHint.first(model: model))
         XCTAssertTrue(model.setupReadyForUse)
-        let labels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(labels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "\(labels)")
-        XCTAssertTrue(labels.contains { $0.contains("Set Up Again") }, "\(labels)")
+        let labels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(labels.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "\(labels)")
+        XCTAssertTrue(labels.contains { $0.contains("Guide Me") }, "\(labels)")
     }
 
     /// A task on the mounted image ends and the runner stands by, as after every chat or agent task:
@@ -2048,8 +2048,8 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertNil(SetupIssueHint.homeLine(model: model), "Home after the task")
         XCTAssertFalse(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues after the task")
         XCTAssertTrue(model.setupReadyForUse, "the Settings entry after the task")
-        let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(connection.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "Connection after the task: \(connection)")
+        let connection = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(connection.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "Connection after the task: \(connection)")
         model.setup.proxyApp = "localdevvpn"
         let page = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
         XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")

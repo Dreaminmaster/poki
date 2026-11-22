@@ -93,7 +93,7 @@ struct SetupSections: View {
 
         Section {
             NavigationLink(value: DetailsRoute.agents) {
-                SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right")
+                SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
             }
             .accessibilityIdentifier("firstRun.agents")
             .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
