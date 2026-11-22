@@ -499,6 +499,7 @@ struct SessionView: View {
     var sessionStore: SessionStore = .shared
     /// Settings search/source previews may inspect another session but must never mutate it.
     var readOnly = false
+    var revealedSearchEntryID: UUID? = nil
 
     @State private var renaming = false
     @State private var newName = ""
@@ -511,7 +512,11 @@ struct SessionView: View {
         let live = sample || (running?.running ?? (session?.live ?? false))
         // The live task's card shows what Poki last saw of the screen, as in the chat.
         let shot: Image? = sample ? SampleShot.image(dark: scheme == .dark) : live ? model.lastShot.map { Image(uiImage: $0) } : nil
-        ChatTranscript(entries: sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? [],
+        let entries = sample ? GuestSample.entries : (running?.entries ?? session?.entries) ?? []
+        let visibleEntries = readOnly && session?.kind == .poki
+            ? ChatView.transcriptEntries(entries, revealed: searchJump?.entryID ?? revealedSearchEntryID)
+            : entries
+        ChatTranscript(entries: visibleEntries,
                        jump: searchJump, onSearchJumpApplied: onSearchJumpApplied,
                        typing: running?.awaitingModel ?? false, canRetry: false, retry: {}, session: id,
                        live: live, waiting: live && !model.approvals.isEmpty, handedOver: live && model.handoffText != nil,
