@@ -150,12 +150,14 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
     let preferredInputIOBufferDuration = 0.01
     let preferredOutputIOBufferDuration = 0.01
     private(set) var sent: [Int16] = []
+    private(set) var deliveredSampleTimes: [Double] = []
     var transcriptions: [[Int16]] = []
     var notices: [String] = []
     var textTasks: [String] = []
     var speechAuthorization = SFSpeechRecognizerAuthorizationStatus.authorized
     var permissionAnswer = SFSpeechRecognizerAuthorizationStatus.authorized
     var transcription = ""
+    var transcribeSamples: (([Int16]) -> String)?
     var transcriptionFails = false
     var permissionRequests = 0
     var playoutRequests = 0
@@ -175,10 +177,10 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
             return self.speechAuthorization
         }, transcribe: { buffer in
             guard self.speechAuthorization == .authorized else { return "" }
-            let samples = UnsafeBufferPointer(start: buffer.int16ChannelData![0], count: Int(buffer.frameLength))
-            self.transcriptions.append(Array(samples))
+            let samples = Array(UnsafeBufferPointer(start: buffer.int16ChannelData![0], count: Int(buffer.frameLength)))
+            self.transcriptions.append(samples)
             if self.transcriptionFails { throw VoiceError.noWebRTC }
-            return self.transcription
+            return self.transcribeSamples?(samples) ?? self.transcription
         }, sendText: { text in
             self.textTasks.append(text)
             return true
@@ -190,16 +192,17 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
         })
     }
 
-    func feed(_ frames: Int, sample: Int16 = 0) {
+    func feed(_ frames: Int, sample: Int16 = 0, sampleTime: AVAudioFramePosition = 0) {
         let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 1, interleaved: true)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
         buffer.frameLength = AVAudioFrameCount(frames)
         buffer.int16ChannelData![0].update(repeating: sample, count: frames)
-        audio.input(buffer, at: AVAudioTime(sampleTime: 0, atRate: 48_000))
+        audio.input(buffer, at: AVAudioTime(sampleTime: sampleTime, atRate: 48_000))
     }
 
     var deliverRecordedData: RTCAudioDeviceDeliverRecordedDataBlock {
-        { [weak self] _, _, _, count, buffer, _, _ in
+        { [weak self] _, timestamp, _, count, buffer, _, _ in
+            self?.deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
             if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
                 self?.sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
             }
@@ -1575,10 +1578,19 @@ extension VoiceModelTests {
     }
 
     func testDisconnectAfterPrefixToolCallOrReplyPreservesUnconfirmedTailWithoutDuplicates() async {
+        func sampleTranscript(_ samples: [Int16]) -> String {
+            let hasPrefix = samples.contains(1_000)
+            let hasTail = samples.contains(500)
+            if hasPrefix && hasTail { return "Open WeChat and message Mom" }
+            if hasPrefix { return "Open WeChat" }
+            if hasTail { return "and message Mom" }
+            return ""
+        }
+
         do {
             var executed = 0
             let audio = OpeningAudioProbe()
-            audio.transcription = "Open WeChat and message Mom"
+            audio.transcribeSamples = sampleTranscript
             let h = Harness(openingAudio: audio, phoneTool: { _, _ in
                 executed += 1
                 return ("WeChat is open", false, nil)
@@ -1605,8 +1617,8 @@ extension VoiceModelTests {
                 + [Int16](repeating: 500, count: 38_400)
                 + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(audio.transcriptions.count, 1)
-            XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expected) == true,
-                          "full opening must be recovered when no phone action or reply occurred")
+            XCTAssertEqual(audio.transcriptions.first, expected,
+                           "full opening must be recovered when no phone action or reply occurred")
             XCTAssertEqual(audio.textTasks, ["Open WeChat and message Mom"])
             h.voice.stop()
         }
@@ -1614,7 +1626,7 @@ extension VoiceModelTests {
         do {
             var executed = 0
             let audio = OpeningAudioProbe()
-            audio.transcription = "and message Mom"
+            audio.transcribeSamples = sampleTranscript
             let h = Harness(openingAudio: audio, phoneTool: { _, _ in
                 executed += 1
                 return ("WeChat is open", false, nil)
@@ -1641,20 +1653,22 @@ extension VoiceModelTests {
             let expectedTail = [Int16](repeating: 500, count: 38_400) + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(executed, 1, "started prefix action must not repeat")
             XCTAssertEqual(audio.transcriptions.count, 1)
-            XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expectedTail) == true,
-                          "only the unconfirmed 38,400-frame tail should go to dictation after the prefix action ran")
+            XCTAssertEqual(audio.transcriptions.first, expectedTail,
+                           "only the unconfirmed 38,400-frame tail should go to dictation after the prefix action ran")
             XCTAssertEqual(audio.textTasks, ["and message Mom"])
             h.voice.stop()
         }
 
         do {
             var executed = 0
+            var endedLines: [VoiceLine] = []
             let audio = OpeningAudioProbe()
-            audio.transcription = "and message Mom"
+            audio.transcribeSamples = sampleTranscript
             let h = Harness(openingAudio: audio, phoneTool: { _, _ in
                 executed += 1
                 return ("WeChat is open", false, nil)
             })
+            h.voice.onConversationEnded = { lines, _ in endedLines = lines }
             _ = h.voice.setBridge(BridgeStub.liveAddress)
             await h.voice.start(captureOpening: true)
             audio.feed(96_000, sample: 1_000)
@@ -1668,18 +1682,62 @@ extension VoiceModelTests {
             XCTAssertEqual(executed, 1)
             h.link.onClosed?("transport dropped without server audio timing")
             await h.time.settle()
-            XCTAssertTrue(h.voice.isOn, "local media delivery plus tool start without server audio confirmation must not drop the in-flight tail")
+            XCTAssertFalse(h.voice.isOn, "without server audio timing after a started action, do not re-queue the uncertain prefix for dictation")
+            XCTAssertFalse(h.voice.finishOpeningDictation())
+            XCTAssertTrue(audio.transcriptions.isEmpty, "started action without server audio position must not re-dictate the prefix")
+            XCTAssertTrue(audio.textTasks.isEmpty, "started action without server audio position must not resubmit a text task")
+            let expectedNote = AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Nothing was sent again. Check whether the rest of what you said went through.", table: "Entry"))
+            XCTAssertEqual(h.voice.phase, .lost(expectedNote))
+            XCTAssertTrue(endedLines.contains { $0.role == .note && $0.text == expectedNote },
+                          "conversation must ask the user to confirm whether the rest went through")
+            h.voice.stop()
+        }
+
+        do {
+            var executed = 0
+            let audio = OpeningAudioProbe()
+            audio.transcribeSamples = { samples in
+                let hasPrefix = samples.contains(1_000)
+                let hasTail = samples.contains(500)
+                if hasPrefix && hasTail { return "Open WeChat and message Mom" }
+                if hasPrefix { return "Open WeChat" }
+                if hasTail { return "and message Mom" }
+                return ""
+            }
+            let h = Harness(openingAudio: audio, phoneTool: { _, _ in
+                executed += 1
+                return ("WeChat is open", false, nil)
+            })
+            _ = h.voice.setBridge(BridgeStub.liveAddress)
+            await h.voice.start(captureOpening: true)
+            audio.feed(96_000, sample: 1_000)
+            h.link.play(["type": "session.started"])
+            audio.feed(480, sample: 0)
+            XCTAssertEqual(audio.sent.count, 96_480)
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("prefix-untimed-unsent-tail", "open_app", arguments: #"{"app":"WeChat"}"#, delegation: "d1")
+            await h.time.settle()
+            XCTAssertEqual(executed, 1)
+            _ = audio.audio.stopRecording()
+            audio.feed(38_400, sample: 500)
+            XCTAssertEqual(audio.sent.count, 96_480)
+            h.link.onClosed?("transport dropped with strictly unsent tail")
+            await h.time.settle()
+            XCTAssertTrue(h.voice.isOn, "strictly unsent tail must remain recoverable even without server timing")
             XCTAssertTrue(h.voice.finishOpeningDictation())
             await h.time.settle()
+            let expectedUnsentTail = [Int16](repeating: 500, count: 38_400)
             XCTAssertEqual(audio.transcriptions.count, 1)
-            XCTAssertEqual(audio.transcriptions.first?.dropFirst(96_000).prefix(38_400).allSatisfy { $0 == 500 }, true,
-                           "in-flight 38,400-frame tail must survive when the server never reported audio progress")
+            XCTAssertEqual(audio.transcriptions.first, expectedUnsentTail,
+                           "only the exact 38,400 strictly unsent tail frames may go to dictation")
+            XCTAssertEqual(audio.textTasks, ["and message Mom"])
+            XCTAssertEqual(executed, 1)
             h.voice.stop()
         }
 
         do {
             let audio = OpeningAudioProbe()
-            audio.transcription = "and message Mom"
+            audio.transcribeSamples = sampleTranscript
             let h = Harness(openingAudio: audio)
             _ = h.voice.setBridge(BridgeStub.liveAddress)
             await h.voice.start(captureOpening: true)
@@ -1699,8 +1757,8 @@ extension VoiceModelTests {
             await h.time.settle()
             let expectedTail = [Int16](repeating: 500, count: 38_400) + [Int16](repeating: 0, count: 480)
             XCTAssertEqual(audio.transcriptions.count, 1)
-            XCTAssertTrue(audio.transcriptions.first?.elementsEqual(expectedTail) == true,
-                          "confirmed 96,000-frame prefix with reply must not be re-submitted to dictation")
+            XCTAssertEqual(audio.transcriptions.first, expectedTail,
+                           "confirmed 96,000-frame prefix with reply must not be re-submitted to dictation")
             XCTAssertEqual(audio.textTasks, ["and message Mom"])
             h.voice.stop()
         }
@@ -1879,8 +1937,10 @@ extension VoiceModelTests {
         _ = renderBlock(480)
         XCTAssertEqual(probe.playoutRequests, 1, "WebRTC playout should render through VPIO while sending")
 
-        let plan = audio.prepareForOwnerDictation(session: 1)
-        XCTAssertNotNil(plan)
+        let outcome = audio.prepareForOwnerDictation(session: 1)
+        if case .dictation = outcome { } else {
+            XCTFail("expected dictation recovery outcome when switching before any server action")
+        }
         let fallbackBlock = renderBlock(480)
         XCTAssertTrue(fallbackBlock.silent)
         XCTAssertEqual(probe.playoutRequests, 1, "WebRTC playout must stop immediately when switching to dictation")
@@ -1963,17 +2023,21 @@ extension VoiceModelTests {
         let audio = OpeningAudioProbe()
         let h = Harness(openingAudio: audio)
         await h.voice.start(captureOpening: true)
-        audio.feed(48_000, sample: 1_000)
-        for _ in 0..<30 { audio.feed(48_000) }
+        audio.feed(48_000, sample: 1_000, sampleTime: 0)
+        for index in 1...30 { audio.feed(48_000, sampleTime: AVAudioFramePosition(index * 48_000)) }
         h.link.play(["type": "session.created"])
 
-        audio.feed(4_800, sample: 2_000)
+        audio.feed(4_800, sample: 2_000, sampleTime: 31 * 48_000)
         XCTAssertEqual(audio.audio.bufferedFrameCount, 0,
                        "31-second backlog must drain on the first callback instead of stalling new speech")
         XCTAssertTrue(audio.sent.suffix(4_800).allSatisfy { $0 == 2_000 },
                       "new speech after session readiness must reach media immediately without multi-second backlog delay")
 
-        audio.feed(4_800, sample: 3_000)
+        audio.feed(4_800, sample: 3_000, sampleTime: 31 * 48_000 + 4_800)
+        XCTAssertFalse(audio.deliveredSampleTimes.isEmpty)
+        for pair in zip(audio.deliveredSampleTimes, audio.deliveredSampleTimes.dropFirst()) {
+            XCTAssertGreaterThan(pair.1, pair.0, "delivered media sample times must stay strictly monotonic across backlog flush and live speech")
+        }
         var recording = Array(repeating: Int16(1_000), count: 48_000)
         recording += Array(repeating: Int16(0), count: 30 * 48_000)
         recording += Array(repeating: Int16(2_000), count: 4_800)
