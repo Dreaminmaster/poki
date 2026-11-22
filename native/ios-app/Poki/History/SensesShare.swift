@@ -27,6 +27,7 @@ struct SensesShare: Codable, Equatable {
     private static let visitGap: TimeInterval = 5 * 60
 
     /// The answer, then one line for the apps and one for the item, in plain English for the model.
+    @MainActor
     var text: String {
         var lines = [answer]
         if !apps.isEmpty {
@@ -49,6 +50,7 @@ struct SensesShare: Codable, Equatable {
     /// about. Nil when nothing is left of it: the model said NONE, or only that. A NONE on its own
     /// line, or ending the answer after a sentence (the model saying there is nothing more), is taken
     /// out; a NONE inside a title or a sentence ("NONE left to lose") stays.
+    @MainActor
     static func parse(_ raw: String, entries: [HistoryEntry]) -> SensesShare? {
         var kept: [String] = []
         var itemLine: String?
@@ -83,6 +85,7 @@ struct SensesShare: Codable, Equatable {
     /// and the apps the answer names. When neither names one, the apps whose own screen text shares
     /// the most words with the answer. Never apps that were merely used around the same time (review
     /// of #627: a Reddit answer listed Spotify and Notes because they were used longest).
+    @MainActor
     static func uses(_ entries: [HistoryEntry], about answer: String, item: Item? = nil) -> [Use] {
         var byApp: [String: [HistoryEntry]] = [:]
         var order: [String] = []
@@ -116,6 +119,7 @@ struct SensesShare: Codable, Equatable {
     }
 
     /// An app's display name and the last part of its id, lowercased, as an answer may name it.
+    @MainActor
     private static func names(_ app: String) -> [String] {
         var out = [HistoryAppNames.name(app).lowercased()]
         if let last = app.split(separator: ".").last, last.count >= 3 { out.append(last.lowercased()) }
@@ -131,6 +135,7 @@ struct SensesShare: Codable, Equatable {
     }
 
     /// "APP NAME | title" when the app is one the owner used in these reads and the title is a title.
+    @MainActor
     private static func item(_ line: String, entries: [HistoryEntry]) -> Item? {
         let parts = line.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
         guard parts.count == 2 else { return nil }
