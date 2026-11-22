@@ -656,7 +656,7 @@ struct ChatTranscript<Footer: View>: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
 
-    private var tracksScroll: Bool { !entries.isEmpty || typing || canRetry || live }
+    private var tracksScroll: Bool { !entries.isEmpty || typing || canRetry || live || Footer.self != EmptyView.self }
 
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
@@ -890,13 +890,6 @@ enum ChatFollow: Equatable {
         var content: CGFloat
         var visible: CGFloat
 
-        init(offset: CGFloat, top: CGFloat, content: CGFloat, visible: CGFloat) {
-            self.offset = offset
-            self.top = top
-            self.content = content
-            self.visible = visible
-        }
-
         init(_ geometry: ScrollGeometry) {
             offset = geometry.contentOffset.y
             top = geometry.contentInsets.top
@@ -912,7 +905,8 @@ enum ChatFollow: Equatable {
     /// back into view unless you are reading; a scroll that leaves the end is yours, unless the chat
     /// itself is on its way down.
     func after(_ old: Frame, _ new: Frame) -> (follow: ChatFollow, scroll: Bool) {
-        if new.visible <= 0 || new.atEnd { return (.newest, false) }
+        if new.visible <= 0 { return (self, false) }
+        if new.atEnd { return (.newest, false) }
         let resized = old.content != new.content || old.visible != new.visible
         switch self {
         case .reading: return (.reading, false)
