@@ -1038,7 +1038,7 @@ final class Computer: @unchecked Sendable {
         typedInto = nil
         // The approval event carries the source that raised it. Grant matching
         // remains the upstream workspace/action policy until unified Core #609.
-        let sourceSession: String? = local ? nil : (session ?? anonymousExternalOrigin)
+        let sourceSession: String? = (local || byOwnersVoice) ? nil : (session ?? anonymousExternalOrigin)
         var started = now()
         let callStarted = started
         var approvalWaited = 0.0
