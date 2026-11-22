@@ -32,6 +32,46 @@ final class ItemPictureTests: XCTestCase {
         XCTAssertNil(fromAnotherTask.jpeg)
     }
 
+    func testLongTaskCanRetrieveFirstScreenshotAfterMoreThanTenReads() async throws {
+        let (core, wda, host) = makeCore()
+        defer { withExtendedLifetime(host) {} }
+        let frame = Rect(x: 10, y: 200, width: 100, height: 100)
+        let box = Rect(x: 12, y: 201, width: 100, height: 100)
+        var captured: [(id: String, jpeg: Data, png: Data)] = []
+
+        for step in 1...11 {
+            let png = Data("long-task-screen-\(step)-\(String(repeating: "x", count: step))".utf8)
+            wda.set("GET /screenshot") { _ in (200, ["value": .string(png.base64EncodedString())]) }
+            wda.tree([Node("Image", "Step \(step)", [frame.x, frame.y, frame.width, frame.height])])
+            let answer = await core.callTool("look", arguments: "{}", localTask: "long-task")
+            let jpeg = try XCTUnwrap(answer.jpeg)
+            let prefix = "screenshot_id: "
+            let line = try XCTUnwrap(answer.text.split(separator: "\n").first { $0.hasPrefix(prefix) })
+            captured.append((String(line.dropFirst(prefix.count)), jpeg, png))
+        }
+
+        let first = try XCTUnwrap(captured.first)
+        let latest = try XCTUnwrap(captured.last)
+        XCTAssertNotEqual(first.jpeg, latest.jpeg)
+
+        let firstArgs = JSON.object(["screenshot_id": .string(first.id)]).serialized()
+        let retrieved = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "long-task")
+        XCTAssertFalse(retrieved.isError, retrieved.text)
+        XCTAssertEqual(retrieved.jpeg, first.jpeg)
+
+        let fromAnotherTask = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "other-task")
+        XCTAssertTrue(fromAnotherTask.isError)
+        XCTAssertNil(fromAnotherTask.jpeg)
+
+        let cardRequests = Dictionary(uniqueKeysWithValues: captured.enumerated().map { index, item in
+            ("step-\(index + 1)", ItemPictureRequest(screenshotID: item.id, box: box))
+        })
+        let cardPictures = await core.itemPictures(cardRequests, localTask: "long-task")
+        XCTAssertEqual(cardPictures.count, 8)
+        XCTAssertFalse(cardPictures.contains { $0.png == first.png })
+        XCTAssertTrue(cardPictures.contains { $0.png == latest.png })
+    }
+
     func testItemPicturesUseTheScreenThatSuppliedTheirCoordinates() async throws {
         let (core, wda, host) = makeCore()
         defer { withExtendedLifetime(host) {} }
