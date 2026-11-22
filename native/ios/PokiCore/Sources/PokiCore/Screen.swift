@@ -84,6 +84,8 @@ struct ScreenshotCompanion: Sendable {
 struct ScreenCapture: Sendable {
     let data: Data
     let companion: ScreenshotCompanion?
+    let startedAt: Double
+    let finishedAt: Double
 }
 
 /// One read of the screen. Either part may be missing; `notes` says why.
@@ -92,6 +94,7 @@ public struct Reading: Sendable {
     public var foreground: Foreground?
     public var png: Data?
     var screenshotCompanion: ScreenshotCompanion?
+    var firstPictureStartedAt: Double?
     var firstPictureAt: Double?
     var treeAt: Double?
     public var notes: [String] = []
@@ -214,7 +217,7 @@ extension Runner {
         // The in-process source remembers the foreground it actually sampled. Asking first can
         // make it enumerate the foreground twice and leave the identity read queued before the tree.
         if appAfterSource { _ = try? await source }
-        let appBudget = appAfterSource ? timeout - (now() - started) : timeout
+        let appBudget = appAfterSource ? max(0.25, timeout - (now() - started)) : timeout
         async let app = appBudget > 0 ? try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? appBudget : min(appBudget, 2),
                                                  countsAsMiss: countsAsMiss) : nil
         let appValue = await app
@@ -246,18 +249,20 @@ extension Runner {
     }
 
     func captureScreen(timeout: Double) async throws -> ScreenCapture {
+        let startedAt = now()
         let value = try await raw("GET", "/screenshot", timeout: timeout)
+        let finishedAt = now()
         guard let base64 = value.string ?? value["image"]?.string,
               let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
             throw RunnerError(message: "the runner sent no screenshot", delivery: .notSent)
         }
-        if value.string != nil { return ScreenCapture(data: data, companion: nil) }
+        if value.string != nil { return ScreenCapture(data: data, companion: nil, startedAt: startedAt, finishedAt: finishedAt) }
         guard let companion = value["companion"], let identity = companion["identity"]?.string, !identity.isEmpty,
               let bundle = companion["bundleId"]?.string, !bundle.isEmpty,
               let side = companion["pokiPane"]?.string, side == "left" || side == "right" else {
             throw RunnerError(message: "the screenshot did not identify the companion pane", delivery: .notSent)
         }
-        return ScreenCapture(data: data, companion: ScreenshotCompanion(identity: identity, bundleID: bundle, pokiPane: side))
+        return ScreenCapture(data: data, companion: ScreenshotCompanion(identity: identity, bundleID: bundle, pokiPane: side), startedAt: startedAt, finishedAt: finishedAt)
     }
 
     /// /wda/screen needs no session; a session's window size fails once the app it was opened on is gone.
@@ -352,7 +357,8 @@ extension Runner {
         switch await picturePart {
         case .success(let capture)?:
             reading.use(capture)
-            reading.firstPictureAt = pictureAt.value
+            reading.firstPictureStartedAt = capture.startedAt
+            reading.firstPictureAt = pictureAt.value ?? capture.finishedAt
         case .failure(let e)?:
             // The tree came (on a second try, from a runner that was busy or new) but the picture
             // taken beside the first try did not: the runner gives it now (seen in the gym). Else
@@ -361,7 +367,8 @@ extension Runner {
             let readLeft = started + timeout + extra - now()
             if treeCame, readLeft > 0.4, let again = try? await captureScreen(timeout: min(1.5, readLeft)) {
                 reading.use(again)
-                reading.firstPictureAt = now()
+                reading.firstPictureStartedAt = again.startedAt
+                reading.firstPictureAt = again.finishedAt
                 reading.notes.append("the screenshot came on the second try (the first: \(e))")
             } else if let early = hostEarly, let png = await early.value {
                 reading.png = png

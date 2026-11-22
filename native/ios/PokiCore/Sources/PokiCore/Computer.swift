@@ -130,6 +130,17 @@ final class Computer: @unchecked Sendable {
     /// The element the last scroll_to found, so the read after it can give its number (it may be
     /// past the listing's limit: the gym's 1,507-element grid had its button at 1506).
     var scrollFound: Element?
+    struct ScrollTargetObservation {
+        let inputAt: Double
+        let elements: [Element]
+        let foreground: Foreground
+        let targetTreeAt: Double
+        let target: Element
+        let swipes: Int
+    }
+    var scrollObservation: ScrollTargetObservation?
+    var actionGeneration: UInt64 = 0
+    private var preparedCapture: PreparedCapture?
     /// Shapes touches and typing after a person's (see `Humanize`); off sends the legacy schedules.
     var humanize: Humanize
     /// The element the last type went to and its text, so the read after it can say which number the
@@ -1126,6 +1137,7 @@ final class Computer: @unchecked Sendable {
 
     func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
         scrollFound = nil
+        scrollObservation = nil
         typedInto = nil
         var started = now()
         let callStarted = started
@@ -1309,6 +1321,8 @@ final class Computer: @unchecked Sendable {
         }
 
         let numberTap = local && !finish && sensitive == nil && config.quickRead() ? numberTapTarget(actions) : nil
+        let generation = nextActionGeneration()
+        let beforePicture = lastPicture
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
@@ -1329,14 +1343,38 @@ final class Computer: @unchecked Sendable {
                 extra.append("touch effect: unconfirmed (\(tapRead.reason)). Recheck the display with look before continuing. The tap was sent once.")
             }
         }
-        if let lastKind, tapRead?.reading == nil {
-            let remainingPause = (Self.settle[lastKind] ?? 0.4) - (tapRead == nil ? 0 : now() - readStarted)
+        let launched = toRun.compactMap { $0["launch"].flatMap { $0.string ?? $0["bundle"]?.string } }.last
+        var screenObservation: FreshScreenObservation?
+        if error == nil, tapRead == nil, config.quickRead(), selectedPane == nil, !finish {
+            if moreKind == ActionKind.scrollTo.rawValue, let scroll = scrollObservation {
+                screenObservation = await readAfterScroll(scroll, generation: generation, beforePicture: beforePicture, until: until)
+            } else if moreKind == ActionKind.launch.rawValue, let launched {
+                screenObservation = await readAfterLaunch(bundleID: launched, beforeApp: before?.bundleID, beforePicture: beforePicture, generation: generation, started: readStarted, until: until)
+            }
+            if let screenObservation, screenObservation.omitStalePicture {
+                lastPNG = nil
+                lastPNGAt = nil
+                extra.append("screenshot omitted: only a pre-action image arrived after the action; call look before tapping coordinates")
+            }
+        }
+        if let lastKind, tapRead?.reading == nil, screenObservation?.reading == nil {
+            cancelPreparedCapture()
+            let elapsed = (tapRead == nil && screenObservation == nil) ? 0 : now() - readStarted
+            let remainingPause = (Self.settle[lastKind] ?? 0.4) - elapsed
             let pause = min(remainingPause, max(0, until - now() - config.readTimeout - 0.3))
             if pause >= 0.6, config.quickRead(), let seen = seenBefore {
                 // The long pauses (a launch, a swipe, a hardware button) cover the slowest screens: one
                 // that has changed and holds still across two reads is read now.
-                let (waited, settled) = await settledPause(pause, before: seen)
-                did.append(settled ? "read after \(Int((waited * 1000).rounded())) ms: the screen had changed and held still" : "paused \(Int((waited * 1000).rounded())) ms before reading")
+                let outcome = await settledPause(pause, before: seen, generation: generation, earliestAllowedAt: readStarted, beforePicture: beforePicture, until: until)
+                did.append(outcome.settled ? "read after \(Int((outcome.waited * 1000).rounded())) ms: the screen had changed and held still" : "paused \(Int((outcome.waited * 1000).rounded())) ms before reading")
+                if let reused = outcome.observation {
+                    screenObservation = reused
+                    if reused.omitStalePicture {
+                        lastPNG = nil
+                        lastPNGAt = nil
+                        extra.append("screenshot omitted: only a pre-action image arrived after the action; call look before tapping coordinates")
+                    }
+                }
             } else if pause > 0.01 {
                 await sleep(seconds: pause)
                 did.append("paused \(Int((pause * 1000).rounded())) ms before reading")
@@ -1347,11 +1385,11 @@ final class Computer: @unchecked Sendable {
         // What the model saw last, so a read made again in this call still compares with it.
         let seenTree = lastTree, seenPicture = lastPicture
         var result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch && tapRead == nil, did: did, error: error,
-                                        extra: (approvedNote.map { [$0] } ?? []) + extra, reading: tapRead?.reading)
+                                        extra: (approvedNote.map { [$0] } ?? []) + extra, reading: tapRead?.reading ?? screenObservation?.reading)
         // The read shows Poki in front where another app was being worked in: a tap at the top of
         // the screen landed on Poki's Live Activity in the Dynamic Island. The app comes back and
         // the read is made again, so the model never sees (or acts in) Poki's own screen.
-        if tapRead == nil, config.isPoki(lastForeground), !toRun.contains(where: { $0["launch"] != nil }), until - now() > config.readTimeout + 1,
+        if tapRead == nil, screenObservation == nil, config.isPoki(lastForeground), !toRun.contains(where: { $0["launch"] != nil }), until - now() > config.readTimeout + 1,
            let back = await bringBack(from: before, why: "after the actions (a tap near the top of the screen lands on Poki's Live Activity in the Dynamic Island)", check: false) {
             result = await readAndReply(until: until, full: full, changes: true, checkingTouch: checkingTouch, did: did, error: error, extra: (approvedNote.map { [$0] } ?? []) + extra + [back])
         }
@@ -1359,7 +1397,6 @@ final class Computer: @unchecked Sendable {
         // app's (gym: Photos launched from Safari answered Safari's whole tree under Photos' screen,
         // twice). The read is made again, within the call, until the launched app is in front, or
         // when the whole picture changed over an unchanged tree.
-        let launched = toRun.compactMap { $0["launch"].flatMap { $0.string ?? $0["bundle"]?.string } }.last
         var rereads = 0
         // Up to six re-reads: a cold launch on the simulator (Photos from Safari) had the old app in
         // front past the third re-read at 5.8 s (gym finding 39); the action's time bounds them.
@@ -1410,11 +1447,20 @@ final class Computer: @unchecked Sendable {
         let total = now() - callStarted
         let readTook = now() - readStarted
         #if canImport(OSLog)
+        let deliveredAt = now()
         if let tapRead {
             let firstPicture = tapRead.firstPictureAt.map { String(Int((($0 - readStarted) * 1000).rounded())) } ?? "none"
             let target = tapRead.targetAt.map { String(Int((($0 - readStarted) * 1000).rounded())) } ?? "none"
             let rereads = tapRead.reading == nil ? tapRead.samples : max(0, tapRead.samples - 1)
             let timing = "tap observation: input_uptime=\(readStarted) first_picture_ms=\(firstPicture) target_tree_ms=\(target) read_ms=\(Int((readTook * 1000).rounded())) rereads=\(rereads) reason=\(tapRead.reason)"
+            Logger(subsystem: "nz.zheha.poki", category: "screen").notice("\(timing, privacy: .public)")
+        } else if let screenObservation {
+            let base = screenObservation.inputAt
+            let firstPicture = screenObservation.firstPictureAt.map { String(Int((($0 - base) * 1000).rounded())) } ?? "none"
+            let target = screenObservation.targetAt.map { String(Int((($0 - base) * 1000).rounded())) } ?? "none"
+            let totalReadMs = Int(((deliveredAt - base) * 1000).rounded())
+            let rereads = screenObservation.reading == nil ? screenObservation.samples : max(0, screenObservation.samples - 1)
+            let timing = "screen observation: kind=\(screenObservation.kind) input_uptime=\(base) pause_ms=\(screenObservation.pauseMs) first_picture_ms=\(firstPicture) target_tree_ms=\(target) read_ms=\(totalReadMs) delivered_uptime=\(deliveredAt) rereads=\(rereads) reused_tree=\(screenObservation.reusedTree) reason=\(screenObservation.reason)"
             Logger(subsystem: "nz.zheha.poki", category: "screen").notice("\(timing, privacy: .public)")
         }
         #endif
@@ -1938,33 +1984,450 @@ final class Computer: @unchecked Sendable {
         return digit.text == target.expected && region.contains(digit.box.centre)
     }
 
+    private struct PreparedCapture: Sendable {
+        let generation: UInt64
+        let expectedApp: String?
+        let earliestAllowedAt: Double
+        let task: Task<ScreenCapture?, Never>
+    }
+
+    private struct FreshScreenObservation {
+        let kind: String
+        let inputAt: Double
+        var reading: Reading?
+        var confirmed = false
+        var firstPictureAt: Double?
+        var targetAt: Double?
+        var pauseMs = 0
+        var samples = 0
+        var reusedTree = false
+        var omitStalePicture = false
+        var reason = "settling deadline"
+    }
+
+    private func nextActionGeneration() -> UInt64 {
+        cancelPreparedCapture()
+        actionGeneration &+= 1
+        return actionGeneration
+    }
+
+    func cancelPreparedCapture() {
+        preparedCapture?.task.cancel()
+        preparedCapture = nil
+    }
+
+    func prepareCapture(generation: UInt64, expectedApp: String?, earliestAllowedAt: Double, timeout: Double) {
+        preparedCapture?.task.cancel()
+        guard selectedPane == nil else { preparedCapture = nil; return }
+        let budget = max(0.2, timeout)
+        let runner = self.runner
+        let task = Task<ScreenCapture?, Never> {
+            try? await runner.captureScreen(timeout: budget)
+        }
+        preparedCapture = PreparedCapture(generation: generation, expectedApp: expectedApp, earliestAllowedAt: earliestAllowedAt, task: task)
+    }
+
+    private func hasPreparedCapture(generation: UInt64, expectedApp: String?, earliestAllowedAt: Double) -> Bool {
+        guard let prepared = preparedCapture else { return false }
+        return prepared.generation == generation
+            && prepared.expectedApp == expectedApp
+            && prepared.earliestAllowedAt >= earliestAllowedAt
+    }
+
+    private func takePreparedCapture(generation: UInt64, expectedApp: String?, earliestAllowedAt: Double) async -> ScreenCapture? {
+        guard let prepared = preparedCapture else { return nil }
+        preparedCapture = nil
+        guard prepared.generation == generation,
+              prepared.expectedApp == expectedApp,
+              prepared.earliestAllowedAt >= earliestAllowedAt else {
+            prepared.task.cancel()
+            return nil
+        }
+        guard let capture = await prepared.task.value,
+              capture.companion == nil,
+              capture.startedAt >= earliestAllowedAt else {
+            return nil
+        }
+        return capture
+    }
+
+    private func stabilityElements(_ elements: [Element], screen: ScreenSize) -> [Element] {
+        listable(elements, screen).filter { element in
+            guard element.type != "ScrollBar" else { return false }
+            let lower = element.text.lowercased()
+            return !lower.contains("scroll bar") && !element.text.contains("滚动条") && !element.text.contains("捲動軸")
+        }
+    }
+
+    private func layoutSettled(previous: [Element], current: [Element], screen: ScreenSize, tolerance: Double = 1.5) -> Bool {
+        let a = stabilityElements(previous, screen: screen)
+        let b = stabilityElements(current, screen: screen)
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) {
+            guard x.key == y.key,
+                  abs(x.frame.x - y.frame.x) <= tolerance,
+                  abs(x.frame.y - y.frame.y) <= tolerance,
+                  abs(x.frame.width - y.frame.width) <= tolerance,
+                  abs(x.frame.height - y.frame.height) <= tolerance else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func visibleTargetMatch(_ wanted: Element, in elements: [Element], screen: ScreenSize) -> Element? {
+        let layout = Layout(all: elements, screen: screen)
+        return elements.first { element in
+            guard element.key == wanted.key else { return false }
+            let frame = element.frame
+            guard frame.x >= 0, frame.y >= 0, frame.maxX <= screen.width, frame.maxY <= screen.height else { return false }
+            return !layout.covers(element).contains { $0.frame.contains(frame.centre) }
+        }
+    }
+
+    private func readAfterScroll(_ scroll: ScrollTargetObservation, generation: UInt64, beforePicture: PictureSketch?, until: Double) async -> FreshScreenObservation {
+        let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
+        let expectedApp = scroll.foreground.bundleID
+        let earliestAllowedAt = scroll.inputAt
+        let deadline = min(now() + Self.settleWindow, until - config.readTimeout - 0.3)
+        let stalePictureDeadline = min(now() + Self.idleNumberTapWindow, deadline)
+        let requiresPictureChange = beforePicture != nil && beforePicture?.hash == nil
+        var result = FreshScreenObservation(kind: "scroll_to", inputAt: scroll.inputAt, targetAt: scroll.targetTreeAt)
+        var priorElements = scroll.elements
+        var priorPicture: PictureSketch?
+        var sawCoasting = false
+        var sawStalePicture = false
+        var lastTreeWithoutPicture: Reading?
+
+        while deadline - now() > 0.15, !Task.isCancelled {
+            let sampleAt = now()
+            let budget = min(config.readTimeout, deadline - sampleAt)
+            if !hasPreparedCapture(generation: generation, expectedApp: expectedApp, earliestAllowedAt: earliestAllowedAt) {
+                prepareCapture(generation: generation, expectedApp: expectedApp, earliestAllowedAt: earliestAllowedAt, timeout: budget)
+            }
+            let tree = try? await runner.tree(timeout: budget, format: config.treeFormat, countsAsMiss: false, appAfterSource: true)
+            let treeAt = now()
+            var capture = await takePreparedCapture(generation: generation, expectedApp: expectedApp, earliestAllowedAt: earliestAllowedAt)
+            result.samples += 1
+
+            guard let tree else {
+                result.reason = "tree read failed"
+                return result
+            }
+            if tree.elements.contains(where: { $0.type == "Alert" && !$0.fromPicture }) {
+                result.reason = "system alert over list"
+                return result
+            }
+            guard tree.foreground.bundleID == expectedApp, tree.foreground.pokiPane == nil, !config.isPoki(tree.foreground) else {
+                result.reason = "foreground changed or is unknown"
+                return result
+            }
+            if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
+                let retakeBudget = deadline - now()
+                if retakeBudget > 0.4,
+                   let retaken = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
+                   retaken.companion == nil, retaken.startedAt >= earliestAllowedAt {
+                    capture = retaken
+                } else {
+                    capture = nil
+                }
+            }
+            if let capture, result.firstPictureAt == nil {
+                result.firstPictureAt = capture.finishedAt
+            }
+
+            let targetNow = visibleTargetMatch(scroll.target, in: tree.elements, screen: screen)
+            if !layoutSettled(previous: priorElements, current: tree.elements, screen: screen) || targetNow == nil {
+                sawCoasting = true
+                priorElements = tree.elements
+                priorPicture = capture.map { PictureSketch(png: $0.data) }
+                await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+                continue
+            }
+
+            if let targetNow { scrollFound = targetNow }
+            let withoutPicture = Reading(elements: tree.elements, foreground: tree.foreground, png: nil,
+                                         screenshotCompanion: nil, firstPictureStartedAt: nil, firstPictureAt: nil,
+                                         treeAt: treeAt, notes: [], ms: Int(((treeAt - scroll.inputAt) * 1000).rounded()))
+            guard let capture else {
+                lastTreeWithoutPicture = withoutPicture
+                if sampleAt >= stalePictureDeadline {
+                    result.reason = "no fresh picture paired with the tree"
+                    return result
+                }
+                await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+                continue
+            }
+
+            let sketch = PictureSketch(png: capture.data)
+            if requiresPictureChange, let before = beforePicture, !sketch.differs(from: before) {
+                sawStalePicture = true
+                lastTreeWithoutPicture = withoutPicture
+                priorPicture = nil
+                if sampleAt >= stalePictureDeadline {
+                    result.reading = withoutPicture
+                    result.omitStalePicture = true
+                    result.reusedTree = true
+                    result.reason = "stale pre-action picture rejected"
+                    return result
+                }
+                await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+                continue
+            }
+            if sawCoasting {
+                guard let previous = priorPicture, !sketch.differs(from: previous) else {
+                    priorPicture = sketch
+                    await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
+                    continue
+                }
+            }
+            if runner.transport.usesDynamicScreenSize {
+                let left = deadline - now()
+                guard left > 0.1, let current = try? await runner.screenSize(timeout: left),
+                      size == nil || current == size else {
+                    result.reason = "screen size changed or is unknown"
+                    return result
+                }
+                size = current
+            }
+            let settled = Reading(elements: tree.elements, foreground: tree.foreground, png: capture.data,
+                                  screenshotCompanion: nil, firstPictureStartedAt: capture.startedAt,
+                                  firstPictureAt: capture.finishedAt, treeAt: treeAt, notes: [],
+                                  ms: Int(((now() - scroll.inputAt) * 1000).rounded()))
+            result.reading = settled
+            result.confirmed = true
+            result.reusedTree = true
+            result.reason = "scroll target and picture settled"
+            return result
+        }
+        if sawStalePicture, let fallback = lastTreeWithoutPicture {
+            result.reading = fallback
+            result.omitStalePicture = true
+            result.reusedTree = true
+            result.reason = "stale pre-action picture rejected"
+        }
+        return result
+    }
+
+    private func readAfterLaunch(bundleID: String, beforeApp: String?, beforePicture: PictureSketch?, generation: UInt64, started: Double, until: Double) async -> FreshScreenObservation {
+        let arriveDeadline = min(started + (Self.settle["launch"] ?? 0.9), until - config.readTimeout - 0.3)
+        let settleDeadline = min(started + Self.settleWindow, until - config.readTimeout - 0.3)
+        if size == nil, let fetched = try? await screenSize(until: settleDeadline) {
+            size = fetched
+        }
+        let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
+        let requiresPictureChange = beforeApp != nil && beforeApp != bundleID && beforePicture != nil && beforePicture?.hash == nil
+        var result = FreshScreenObservation(kind: "launch", inputAt: started)
+        var sawTargetApp = false
+        var prior: (elements: [Element], picture: PictureSketch, pictureAt: Double)?
+        var sawStalePicture = false
+        var lastTreeWithoutPicture: Reading?
+        var stalePictureDeadline: Double?
+
+        while !Task.isCancelled {
+            let activeDeadline = sawTargetApp ? settleDeadline : arriveDeadline
+            guard activeDeadline - now() > 0.15 else { break }
+            let sampleAt = now()
+            let budget = min(config.readTimeout, settleDeadline - sampleAt)
+            prepareCapture(generation: generation, expectedApp: bundleID, earliestAllowedAt: started, timeout: budget)
+            let tree = try? await runner.tree(timeout: budget, format: config.treeFormat, countsAsMiss: false, appAfterSource: true)
+            let treeAt = now()
+            var capture = await takePreparedCapture(generation: generation, expectedApp: bundleID, earliestAllowedAt: started)
+            result.samples += 1
+
+            guard let tree else {
+                result.reason = "tree read failed"
+                return result
+            }
+            if tree.foreground.bundleID == "com.apple.springboard",
+               tree.elements.contains(where: { $0.type == "Alert" && !$0.fromPicture }) {
+                result.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: capture?.data,
+                                         screenshotCompanion: nil, firstPictureStartedAt: capture?.startedAt,
+                                         firstPictureAt: capture?.finishedAt, treeAt: treeAt, notes: [],
+                                         ms: Int(((now() - started) * 1000).rounded()))
+                result.firstPictureAt = result.firstPictureAt ?? capture?.finishedAt
+                result.reusedTree = true
+                result.reason = "system alert over launched app"
+                return result
+            }
+            guard tree.foreground.bundleID == bundleID, tree.foreground.pokiPane == nil,
+                  !config.isPoki(tree.foreground), !stabilityElements(tree.elements, screen: screen).isEmpty else {
+                prior = nil
+                await sleep(seconds: max(0, min(activeDeadline, sampleAt + 0.1) - now()))
+                continue
+            }
+
+            sawTargetApp = true
+            if result.targetAt == nil { result.targetAt = treeAt }
+            if stalePictureDeadline == nil {
+                stalePictureDeadline = min(now() + Self.idleNumberTapWindow, settleDeadline)
+            }
+
+            if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
+                let retakeBudget = settleDeadline - now()
+                if retakeBudget > 0.4,
+                   let retaken = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
+                   retaken.companion == nil, retaken.startedAt >= started {
+                    capture = retaken
+                } else {
+                    capture = nil
+                }
+            }
+            if let capture, result.firstPictureAt == nil {
+                result.firstPictureAt = capture.finishedAt
+            }
+
+            let withoutPicture = Reading(elements: tree.elements, foreground: tree.foreground, png: nil,
+                                         screenshotCompanion: nil, firstPictureStartedAt: nil, firstPictureAt: nil,
+                                         treeAt: treeAt, notes: [], ms: Int(((treeAt - started) * 1000).rounded()))
+            guard let capture else {
+                lastTreeWithoutPicture = withoutPicture
+                if let limit = stalePictureDeadline, sampleAt >= limit {
+                    result.reason = "no fresh picture paired with launched app"
+                    return result
+                }
+                await sleep(seconds: max(0, min(settleDeadline, sampleAt + 0.12) - now()))
+                continue
+            }
+
+            let sketch = PictureSketch(png: capture.data)
+            if requiresPictureChange, let before = beforePicture, !sketch.differs(from: before) {
+                sawStalePicture = true
+                lastTreeWithoutPicture = withoutPicture
+                prior = nil
+                if let limit = stalePictureDeadline, sampleAt >= limit {
+                    result.reading = withoutPicture
+                    result.omitStalePicture = true
+                    result.reusedTree = true
+                    result.reason = "stale pre-action picture rejected"
+                    return result
+                }
+                await sleep(seconds: max(0, min(settleDeadline, sampleAt + 0.12) - now()))
+                continue
+            }
+
+            if let previous = prior,
+               layoutSettled(previous: previous.elements, current: tree.elements, screen: screen),
+               !sketch.differs(from: previous.picture) {
+                if capture.finishedAt - previous.pictureAt < 0.12 {
+                    await sleep(seconds: max(0, min(settleDeadline, previous.pictureAt + 0.12) - now()))
+                    continue
+                }
+                if runner.transport.usesDynamicScreenSize {
+                    let left = min(config.readTimeout, until - now() - 0.3)
+                    guard left > 0.1, let current = try? await runner.screenSize(timeout: left),
+                          size == nil || current == size else {
+                        result.reason = "screen size changed or is unknown"
+                        return result
+                    }
+                    size = current
+                }
+                result.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: capture.data,
+                                         screenshotCompanion: nil, firstPictureStartedAt: capture.startedAt,
+                                         firstPictureAt: capture.finishedAt, treeAt: treeAt, notes: [],
+                                         ms: Int(((now() - started) * 1000).rounded()))
+                result.confirmed = true
+                result.reusedTree = true
+                result.reason = "launched app and picture settled"
+                return result
+            }
+
+            prior = (tree.elements, sketch, capture.finishedAt)
+            await sleep(seconds: max(0, min(settleDeadline, sampleAt + 0.12) - now()))
+        }
+
+        if sawStalePicture, let fallback = lastTreeWithoutPicture {
+            result.reading = fallback
+            result.omitStalePicture = true
+            result.reusedTree = true
+            result.reason = "stale pre-action picture rejected"
+        } else if !sawTargetApp {
+            result.reason = "launched app not in front before launch pause"
+        }
+        return result
+    }
+
     /// Up to `pause` seconds before the read after the actions, ended early once the screen differs
     /// from `before`, lists something, and two reads in a row agree (an app still drawing its first
     /// screen lists nothing). A read is given only the time left, and one slower than that left is not
     /// begun again: the pause is never longer than it was, and a read cut short by it is not taken
     /// for a runner gone. A read that fails ends the sampling, and the rest of the pause is slept.
-    func settledPause(_ pause: Double, before: String) async -> (waited: Double, settled: Bool) {
+    private func settledPause(_ pause: Double, before: String, generation: UInt64, earliestAllowedAt: Double, beforePicture: PictureSketch?, until: Double) async -> (waited: Double, settled: Bool, observation: FreshScreenObservation?) {
         let began = now()
-        guard let screen = size else { await sleep(seconds: pause); return (pause, false) }
-        await sleep(seconds: min(pause, 0.15))
-        var last: String?
-        var slowest = 0.0
+        guard let screen = size else { await sleep(seconds: pause); return (pause, false, nil) }
+        await sleep(seconds: min(pause, 0.05))
+        var lastElements: [Element]?
+        var samples = 0
+        var targetAt: Double?
         while true {
             let left = pause - (now() - began)
-            guard left > max(0.25, slowest) else { break }
-            let asked = now()
+            guard (lastElements != nil ? left > 0.14 : left > 0.20) else { break }
             guard let tree = try? await withDeadline(left, "a read while the screen settles", { [runner, format = config.treeFormat] in
-                try await runner.tree(timeout: left, format: format, countsAsMiss: false)
+                try await runner.tree(timeout: left, format: format, countsAsMiss: false, appAfterSource: true)
             }) else { break }
-            slowest = max(slowest, now() - asked)
+            let treeAt = now()
+            samples += 1
             let signature = listable(tree.elements, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
-            if !signature.isEmpty, signature != before, signature == last { return (now() - began, true) }
-            last = signature
+            let wasUnset = lastElements == nil
+            if !signature.isEmpty, signature != before {
+                if targetAt == nil { targetAt = treeAt }
+                if let previous = lastElements, layoutSettled(previous: previous, current: tree.elements, screen: screen) {
+                    let waited = treeAt - began
+                    let observation = await finalizeSettledPauseTree(tree, treeAt: treeAt, waited: waited, samples: samples, targetAt: targetAt, generation: generation, earliestAllowedAt: earliestAllowedAt, beforePicture: beforePicture, until: until)
+                    return (waited, true, observation)
+                }
+                lastElements = tree.elements
+                if wasUnset { continue }
+            } else {
+                lastElements = nil
+            }
             await sleep(seconds: 0.06)
         }
+        cancelPreparedCapture()
         let rest = pause - (now() - began)
         if rest > 0.01 { await sleep(seconds: rest) }
-        return (now() - began, false)
+        return (now() - began, false, nil)
+    }
+
+    private func finalizeSettledPauseTree(_ tree: (elements: [Element], foreground: Foreground), treeAt: Double, waited: Double, samples: Int, targetAt: Double?, generation: UInt64, earliestAllowedAt: Double, beforePicture: PictureSketch?, until: Double) async -> FreshScreenObservation? {
+        guard selectedPane == nil, tree.foreground.pokiPane == nil, !config.isPoki(tree.foreground),
+              !tree.elements.contains(where: { $0.type == "Alert" && !$0.fromPicture }) else {
+            cancelPreparedCapture()
+            return nil
+        }
+        let budget = min(config.readTimeout, max(0.4, until - now() - 0.3))
+        var capture = await takePreparedCapture(generation: generation, expectedApp: tree.foreground.bundleID, earliestAllowedAt: earliestAllowedAt)
+        if capture == nil, budget > 0.4 {
+            if let fresh = try? await runner.captureScreen(timeout: budget),
+               fresh.companion == nil, fresh.startedAt >= earliestAllowedAt {
+                capture = fresh
+            }
+        }
+        if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
+            let retakeBudget = min(1.5, until - now() - 0.3)
+            if retakeBudget > 0.4,
+               let retaken = try? await runner.captureScreen(timeout: retakeBudget),
+               retaken.companion == nil, retaken.startedAt >= earliestAllowedAt {
+                capture = retaken
+            } else {
+                capture = nil
+            }
+        }
+        guard let capture else { return nil }
+        let requiresPictureChange = beforePicture != nil && beforePicture?.hash == nil
+        if requiresPictureChange, let before = beforePicture, !PictureSketch(png: capture.data).differs(from: before) {
+            var stale = FreshScreenObservation(kind: "settled_pause", inputAt: earliestAllowedAt, firstPictureAt: capture.finishedAt, targetAt: targetAt, pauseMs: Int((waited * 1000).rounded()), samples: samples, reusedTree: true, omitStalePicture: true, reason: "stale pre-action picture rejected")
+            stale.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: nil,
+                                    screenshotCompanion: nil, firstPictureStartedAt: nil, firstPictureAt: nil,
+                                    treeAt: treeAt, notes: [], ms: Int(((now() - earliestAllowedAt) * 1000).rounded()))
+            return stale
+        }
+        var obs = FreshScreenObservation(kind: "settled_pause", inputAt: earliestAllowedAt, confirmed: true, firstPictureAt: capture.finishedAt, targetAt: targetAt, pauseMs: Int((waited * 1000).rounded()), samples: samples, reusedTree: true, reason: "settled pause tree reused")
+        obs.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: capture.data,
+                              screenshotCompanion: nil, firstPictureStartedAt: capture.startedAt,
+                              firstPictureAt: capture.finishedAt, treeAt: treeAt, notes: [],
+                              ms: Int(((now() - earliestAllowedAt) * 1000).rounded()))
+        return obs
     }
 
     /// How long `pressNow` reads for two reads in a row that agree.
