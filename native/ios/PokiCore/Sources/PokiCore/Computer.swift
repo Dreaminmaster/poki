@@ -2106,7 +2106,6 @@ final class Computer: @unchecked Sendable {
         let requiresPictureChange = beforePicture != nil && beforePicture?.hash == nil
         var result = FreshScreenObservation(kind: "scroll_to", inputAt: scroll.inputAt, targetAt: scroll.targetTreeAt)
         var priorElements = scroll.elements
-        var priorTreeAt = scroll.targetTreeAt
         var priorPicture: PictureSketch?
         var sawCoasting = false
         var sawStalePicture = false
@@ -2144,7 +2143,6 @@ final class Computer: @unchecked Sendable {
             if !layoutSettled(previous: priorElements, current: tree.elements, screen: screen, tolerance: Self.scrollSettleTolerance) || targetNow == nil {
                 sawCoasting = true
                 priorElements = tree.elements
-                priorTreeAt = treeAt
                 priorPicture = capture.map { PictureSketch(png: $0.data) }
                 await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                 continue
@@ -2179,11 +2177,10 @@ final class Computer: @unchecked Sendable {
                 await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                 continue
             }
-            if sawCoasting, capture.startedAt < priorTreeAt {
+            if sawCoasting {
                 guard let previous = priorPicture, !sketch.differs(from: previous) else {
                     priorPicture = sketch
                     priorElements = tree.elements
-                    priorTreeAt = treeAt
                     await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                     continue
                 }
@@ -2248,11 +2245,27 @@ final class Computer: @unchecked Sendable {
             }
             if tree.foreground.bundleID == "com.apple.springboard",
                tree.elements.contains(where: { $0.type == "Alert" && !$0.fromPicture }) {
-                result.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: capture?.data,
-                                         screenshotCompanion: nil, firstPictureStartedAt: capture?.startedAt,
-                                         firstPictureAt: capture?.finishedAt, treeAt: treeAt, notes: [],
-                                         ms: Int(((now() - started) * 1000).rounded()))
+                capture = await freshCaptureIfStale(capture, treeAt: treeAt, earliestAllowedAt: started, deadline: settleDeadline)
                 result.firstPictureAt = result.firstPictureAt ?? capture?.finishedAt
+                if let existing = capture, requiresPictureChange, let before = beforePicture,
+                   !PictureSketch(png: existing.data).differs(from: before) {
+                    result.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: nil,
+                                             screenshotCompanion: nil, firstPictureStartedAt: nil,
+                                             firstPictureAt: nil, treeAt: treeAt, notes: [],
+                                             ms: Int(((now() - started) * 1000).rounded()))
+                    result.omitStalePicture = true
+                    result.reusedTree = true
+                    result.reason = "stale pre-action picture rejected over system alert"
+                    return result
+                }
+                guard let fresh = capture else {
+                    result.reason = "system alert over launched app without fresh picture"
+                    return result
+                }
+                result.reading = Reading(elements: tree.elements, foreground: tree.foreground, png: fresh.data,
+                                         screenshotCompanion: nil, firstPictureStartedAt: fresh.startedAt,
+                                         firstPictureAt: fresh.finishedAt, treeAt: treeAt, notes: [],
+                                         ms: Int(((now() - started) * 1000).rounded()))
                 result.reusedTree = true
                 result.reason = "system alert over launched app"
                 return result

@@ -1267,14 +1267,12 @@ final class LookDoTests: XCTestCase {
     func testLaunchFromFreshSessionReusesSettledScreenWithDynamicSize() async {
         let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true))
         let settledPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 80, width: 360, height: 240)) }
-        let sourcesAfterLaunch = LockedBox(0)
         wda.set("GET /wda/activeAppInfo") { _ in
             (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
         }
         wda.set("POST /wda/apps/activate") { _ in (200, ["value": .null]) }
         wda.set("GET /source") { _ in
-            sourcesAfterLaunch.update { $0 += 1 }
-            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+            (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
                 ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
             ]]])
         }
@@ -1322,6 +1320,43 @@ final class LookDoTests: XCTestCase {
         XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
     }
 
+    private final class SignalGate: @unchecked Sendable {
+        private let state = LockedBox<(open: Bool, waiters: [UUID: CheckedContinuation<Bool, Never>])>((false, [:]))
+
+        func open() {
+            let waiters = state.update { s -> [CheckedContinuation<Bool, Never>] in
+                guard !s.open else { return [] }
+                s.open = true
+                let pending = Array(s.waiters.values)
+                s.waiters.removeAll()
+                return pending
+            }
+            for waiter in waiters { waiter.resume(returning: true) }
+        }
+
+        @discardableResult
+        func wait(timeout seconds: Double? = nil) async -> Bool {
+            let id = UUID()
+            let timer: Task<Void, Never>? = seconds.map { seconds in
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                    let waiter = self.state.update { s in s.waiters.removeValue(forKey: id) }
+                    waiter?.resume(returning: false)
+                }
+            }
+            let opened = await withCheckedContinuation { continuation in
+                let immediate = state.update { s -> Bool in
+                    if s.open { return true }
+                    s.waiters[id] = continuation
+                    return false
+                }
+                if immediate { continuation.resume(returning: true) }
+            }
+            timer?.cancel()
+            return opened
+        }
+    }
+
     func testScrollToDoesNotUseInFlightPreActionScreenshotForNextCoordinateTap() async throws {
         let (core, wda, host) = makeCore { $0.readTimeout = 0.25 }
         host.state.value = .automationReady(revision: 1)
@@ -1330,7 +1365,8 @@ final class LookDoTests: XCTestCase {
         let preActionShotStartedAt = LockedBox<Double?>(nil)
         let preActionShotReturnedAt = LockedBox<Double?>(nil)
         let inputCompletedAt = LockedBox<Double?>(nil)
-        let releasePreActionShot = LockedBox(false)
+        let releasePreActionShot = SignalGate()
+        let preActionShotReturned = SignalGate()
         let latePayload = LockedBox<Data?>(nil)
         wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
         wda.set("GET /screenshot") { _ in
@@ -1340,12 +1376,15 @@ final class LookDoTests: XCTestCase {
             }
             if n == 2 {
                 preActionShotStartedAt.value = now()
-                await Task.detached { while !releasePreActionShot.value { usleep(5_000) } }.value
+                await releasePreActionShot.wait()
                 latePayload.value = oldPicture
                 preActionShotReturnedAt.value = now()
+                preActionShotReturned.open()
                 return (200, ["value": .string(oldPicture.base64EncodedString())])
             }
-            await Task.detached { while latePayload.value == nil { usleep(5_000) } }.value
+            guard inputCompletedAt.value != nil else { throw TransportError.timedOut }
+            releasePreActionShot.open()
+            await preActionShotReturned.wait()
             return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
         }
         wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
@@ -1353,8 +1392,6 @@ final class LookDoTests: XCTestCase {
             XCTAssertNil(preActionShotReturnedAt.value, "pre-action screenshot must still be in flight during scroll input")
             wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
             inputCompletedAt.value = now()
-            releasePreActionShot.value = true
-            await Task.detached { while preActionShotReturnedAt.value == nil { usleep(5_000) } }.value
             return (200, ["value": .null])
         }
 
@@ -1387,7 +1424,8 @@ final class LookDoTests: XCTestCase {
         let preActionShotStartedAt = LockedBox<Double?>(nil)
         let preActionShotReturnedAt = LockedBox<Double?>(nil)
         let inputCompletedAt = LockedBox<Double?>(nil)
-        let releasePreActionShot = LockedBox(false)
+        let releasePreActionShot = SignalGate()
+        let preActionShotReturned = SignalGate()
         let latePayload = LockedBox<Data?>(nil)
         wda.set("GET /wda/activeAppInfo") { _ in
             if launched.value {
@@ -1403,12 +1441,15 @@ final class LookDoTests: XCTestCase {
             }
             if n == 2 {
                 preActionShotStartedAt.value = now()
-                await Task.detached { while !releasePreActionShot.value { usleep(5_000) } }.value
+                await releasePreActionShot.wait()
                 latePayload.value = oldPicture
                 preActionShotReturnedAt.value = now()
+                preActionShotReturned.open()
                 return (200, ["value": .string(oldPicture.base64EncodedString())])
             }
-            await Task.detached { while latePayload.value == nil { usleep(5_000) } }.value
+            guard inputCompletedAt.value != nil else { throw TransportError.timedOut }
+            releasePreActionShot.open()
+            await preActionShotReturned.wait()
             return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
         }
         wda.set("POST /wda/apps/activate") { [wda] _ in
@@ -1417,8 +1458,6 @@ final class LookDoTests: XCTestCase {
             launched.value = true
             wda.source([("Button", "Continue")], app: "Photos")
             inputCompletedAt.value = now()
-            releasePreActionShot.value = true
-            await Task.detached { while preActionShotReturnedAt.value == nil { usleep(5_000) } }.value
             return (200, ["value": .null])
         }
 
@@ -1452,11 +1491,13 @@ final class LookDoTests: XCTestCase {
         let swipe1ShotStartedAt = LockedBox<Double?>(nil)
         let swipe1ShotReturnedAt = LockedBox<Double?>(nil)
         let swipe2CompletedAt = LockedBox<Double?>(nil)
-        let releaseSwipe1Shot = LockedBox(false)
+        let swipe1ShotStarted = SignalGate()
+        let releaseSwipe1Shot = SignalGate()
+        let swipe1ShotReturned = SignalGate()
         wda.set("GET /source") { _ in
             let s = swipes.value
             if s == 1 {
-                await Task.detached { while swipe1ShotStartedAt.value == nil { usleep(5_000) } }.value
+                _ = await swipe1ShotStarted.wait(timeout: 0.5)
             }
             let range = s == 0 ? (1...6) : (s == 1 ? (10...15) : (18...23))
             let children: [JSON] = range.enumerated().map { idx, n in
@@ -1471,10 +1512,14 @@ final class LookDoTests: XCTestCase {
             }
             if s == 1 && swipe1ShotStartedAt.value == nil {
                 swipe1ShotStartedAt.value = now()
-                await Task.detached { while !releaseSwipe1Shot.value { usleep(5_000) } }.value
+                swipe1ShotStarted.open()
+                await releaseSwipe1Shot.wait()
                 swipe1ShotReturnedAt.value = now()
+                swipe1ShotReturned.open()
                 return (200, ["value": .string(page2Picture.base64EncodedString())])
             }
+            releaseSwipe1Shot.open()
+            await swipe1ShotReturned.wait(timeout: 0.5)
             return (200, ["value": .string(page3Picture.base64EncodedString())])
         }
         wda.set("POST /wda/pressAndDragWithVelocity") { _ in
@@ -1483,8 +1528,6 @@ final class LookDoTests: XCTestCase {
                 XCTAssertNotNil(swipe1ShotStartedAt.value, "prepared capture from swipe 1 must already be in flight before swipe 2")
                 XCTAssertNil(swipe1ShotReturnedAt.value, "prepared capture from swipe 1 must still be in flight during swipe 2")
                 swipe2CompletedAt.value = now()
-                releaseSwipe1Shot.value = true
-                await Task.detached { while swipe1ShotReturnedAt.value == nil { usleep(5_000) } }.value
             }
             return (200, ["value": .null])
         }
@@ -1500,6 +1543,52 @@ final class LookDoTests: XCTestCase {
         XCTAssertFalse(result.isError, result.text)
         XCTAssertTrue(result.text.contains("Cell \"Row 20\""), result.text)
         XCTAssertEqual(result.jpeg, Data("jpeg:\(page3Picture.count)".utf8), "stale in-flight capture from earlier swipe must not be delivered: \(result.text)")
+    }
+
+    func testLaunchSystemAlertOmitsStalePreActionScreenshotForNextCoordinateTap() async {
+        let (core, wda, host) = makeCore()
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let launched = LockedBox(false)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.springboard", "name": "SpringBoard"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("GET /source") { _ in
+            guard launched.value else {
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                    ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+                ]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "SpringBoard", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeAlert", "label": "Allow Notifications", "rect": ["x": 60, "y": 300, "width": 270, "height": 180], "children": [
+                    ["type": "XCUIElementTypeStaticText", "label": "Photos Would Like to Send You Notifications", "rect": ["x": 76, "y": 320, "width": 238, "height": 60], "children": []],
+                    ["type": "XCUIElementTypeButton", "label": "Allow", "rect": ["x": 195, "y": 420, "width": 135, "height": 44], "children": []],
+                ]],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(oldPicture.base64EncodedString())])
+        }
+        wda.set("POST /wda/apps/activate") { _ in
+            launched.value = true
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "launch-alert")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+
+        let opened = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true, localTask: "launch-alert")
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.contains("a system alert is in front"), opened.text)
+        XCTAssertNil(opened.jpeg, "stale pre-action picture must not be delivered over a system alert: \(opened.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "launch-alert")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
     }
     #endif
 
