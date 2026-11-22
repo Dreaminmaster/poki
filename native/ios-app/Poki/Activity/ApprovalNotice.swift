@@ -37,7 +37,7 @@ enum ApprovalNotice {
         }
     }
 
-    static func post(_ approval: PendingApproval, after delay: TimeInterval) {
+    static func post(_ approval: PendingApproval, after delay: TimeInterval = 0) {
         guard approval.expires.timeIntervalSinceNow > delay else { return }
         let content = UNMutableNotificationContent()
         // The one question, as on the card: from the rules' kind, never the agent's words.
@@ -65,13 +65,19 @@ final class ApprovalNoticeDelegate: NSObject, UNUserNotificationCenterDelegate, 
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        let id = response.notification.request.content.userInfo["approval"] as? String
+        let action = response.actionIdentifier
         DispatchQueue.main.async {
-            defer { completionHandler() }
-            guard let id = response.notification.request.content.userInfo["approval"] as? String else { return }
-            let action = response.actionIdentifier
-            guard [ApprovalNotice.allow, ApprovalNotice.deny, ApprovalNotice.stopAsking].contains(action) else { return }
-            ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action != ApprovalNotice.deny,
-                                                         stopAsking: action == ApprovalNotice.stopAsking))
+            guard let id, [ApprovalNotice.allow, ApprovalNotice.deny, ApprovalNotice.stopAsking].contains(action) else {
+                completionHandler()
+                return
+            }
+            Task { @MainActor in
+                await ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action != ApprovalNotice.deny,
+                                                                   stopAsking: action == ApprovalNotice.stopAsking,
+                                                                   waitForIslandCollapse: false))
+                completionHandler()
+            }
         }
     }
 
