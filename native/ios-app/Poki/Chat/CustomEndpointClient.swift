@@ -76,8 +76,6 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
     static func routedFallback(_ request: URLRequest, to url: URL, conversationSessionID: String?) -> URLRequest {
         var moved = request
         moved.url = url
-        let hadSessionHeader = (request.allHTTPHeaderFields ?? [:])
-            .contains { $0.key.caseInsensitiveCompare("x-opencode-session") == .orderedSame }
         for name in (moved.allHTTPHeaderFields ?? [:]).keys
             where name.caseInsensitiveCompare("x-opencode-session") == .orderedSame ||
                   name.caseInsensitiveCompare("x-opencode-client") == .orderedSame {
@@ -86,8 +84,7 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
         let host = url.host?.lowercased() ?? ""
         let trustedOpenCode = url.scheme?.lowercased() == "https"
             && (host == "opencode.ai" || host.hasSuffix(".opencode.ai"))
-        if hadSessionHeader && trustedOpenCode,
-           let sessionID = conversationSessionID, !sessionID.isEmpty {
+        if trustedOpenCode, let sessionID = conversationSessionID, !sessionID.isEmpty {
             moved.setValue(sessionID, forHTTPHeaderField: "x-opencode-session")
             moved.setValue("Poki", forHTTPHeaderField: "x-opencode-client")
         }
