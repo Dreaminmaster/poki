@@ -579,6 +579,65 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(second.sourceSession, "mcp-agent-beta")
     }
 
+    /// Reconnecting through a verified connector gives the same named client
+    /// a new MCP session, but not a new authorization principal. Its previously
+    /// approved, identical on-screen action may still be retried once.
+    func testAuthenticatedReconnectRetainsOnlyTheSameCallerApproval() async throws {
+        let (core, wda, _) = makeCore(screenWithDelete()) { $0.approvalWait = 0 }
+        let initialize: JSON = [
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": ["clientInfo": ["name": "Fixture Agent", "version": "1.0"]]
+        ]
+        let look: JSON = ["jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                          "params": ["name": "look", "arguments": [:]]]
+        let delete: JSON = ["jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                            "params": ["name": "do", "arguments": ["actions": [["tap": 1]]]]]
+        let first = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        _ = await core.rpc(look, session: first, connector: "trusted-fixture-A")
+        _ = await core.rpc(delete, session: first, connector: "trusted-fixture-A")
+        let requested = try XCTUnwrap(core.pendingApproval)
+        XCTAssertTrue(requested.sourceSession?.hasPrefix("verified-caller-") == true)
+        core.resolveApproval(id: requested.id, approved: true)
+
+        let reconnect = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        XCTAssertNotEqual(reconnect, first, "a reconnect must allocate a distinct MCP transport session")
+        _ = await core.rpc(look, session: reconnect, connector: "trusted-fixture-A")
+        _ = await core.rpc(delete, session: reconnect, connector: "trusted-fixture-A")
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, "same verified caller lost its approved one-time retry")
+        XCTAssertNil(core.pendingApproval, "a successful reconnect retry must consume, not repeat, the grant")
+
+        _ = await core.rpc(delete, session: reconnect, connector: "trusted-fixture-A")
+        XCTAssertNotNil(core.pendingApproval, "one-time approval was incorrectly reused twice")
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1)
+    }
+
+    /// The connector is part of the authorization boundary. Matching
+    /// self-reported names do not let an unrelated credential reuse the grant.
+    func testUnrelatedConnectorCannotReuseApprovedMCPAction() async throws {
+        let (core, wda, _) = makeCore(screenWithDelete()) { $0.approvalWait = 0 }
+        let initialize: JSON = [
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": ["clientInfo": ["name": "Fixture Agent", "version": "1.0"]]
+        ]
+        let look: JSON = ["jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                          "params": ["name": "look", "arguments": [:]]]
+        let delete: JSON = ["jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                            "params": ["name": "do", "arguments": ["actions": [["tap": 1]]]]]
+        let alice = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        _ = await core.rpc(look, session: alice, connector: "trusted-fixture-A")
+        _ = await core.rpc(delete, session: alice, connector: "trusted-fixture-A")
+        let first = try XCTUnwrap(core.pendingApproval)
+        core.resolveApproval(id: first.id, approved: true)
+
+        let bob = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-B")).session)
+        _ = await core.rpc(look, session: bob, connector: "trusted-fixture-B")
+        _ = await core.rpc(delete, session: bob, connector: "trusted-fixture-B")
+        XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, "different connector reused another caller's approval")
+        let second = try XCTUnwrap(core.pendingApproval)
+        XCTAssertNotEqual(second.sourceSession, first.sourceSession)
+        XCTAssertNotEqual(second.id, first.id)
+    }
+
     /// The chat's model loop in the app calls the tools with JSON text through `callTool`; a deletion
     /// still waits for the owner and taps nothing.
     func testTheInAppChatPathWaitsForTheOwnerToo() async {
