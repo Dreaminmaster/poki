@@ -592,14 +592,16 @@ final class ApprovalTests: XCTestCase {
                           "params": ["name": "look", "arguments": [:]]]
         let delete: JSON = ["jsonrpc": "2.0", "id": 3, "method": "tools/call",
                             "params": ["name": "do", "arguments": ["actions": [["tap": 1]]]]]
-        let first = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        let firstInit = await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")
+        let first = try XCTUnwrap(firstInit.session)
         _ = await core.rpc(look, session: first, connector: "trusted-fixture-A")
         _ = await core.rpc(delete, session: first, connector: "trusted-fixture-A")
         let requested = try XCTUnwrap(core.pendingApproval)
         XCTAssertTrue(requested.sourceSession?.hasPrefix("verified-caller-") == true)
         core.resolveApproval(id: requested.id, approved: true)
 
-        let reconnect = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        let nextInit = await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")
+        let reconnect = try XCTUnwrap(nextInit.session)
         XCTAssertNotEqual(reconnect, first, "a reconnect must allocate a distinct MCP transport session")
         _ = await core.rpc(look, session: reconnect, connector: "trusted-fixture-A")
         _ = await core.rpc(delete, session: reconnect, connector: "trusted-fixture-A")
@@ -623,13 +625,15 @@ final class ApprovalTests: XCTestCase {
                           "params": ["name": "look", "arguments": [:]]]
         let delete: JSON = ["jsonrpc": "2.0", "id": 3, "method": "tools/call",
                             "params": ["name": "do", "arguments": ["actions": [["tap": 1]]]]]
-        let alice = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")).session)
+        let aliceInit = await core.rpc(initialize, session: nil, connector: "trusted-fixture-A")
+        let alice = try XCTUnwrap(aliceInit.session)
         _ = await core.rpc(look, session: alice, connector: "trusted-fixture-A")
         _ = await core.rpc(delete, session: alice, connector: "trusted-fixture-A")
         let first = try XCTUnwrap(core.pendingApproval)
         core.resolveApproval(id: first.id, approved: true)
 
-        let bob = try XCTUnwrap((await core.rpc(initialize, session: nil, connector: "trusted-fixture-B")).session)
+        let bobInit = await core.rpc(initialize, session: nil, connector: "trusted-fixture-B")
+        let bob = try XCTUnwrap(bobInit.session)
         _ = await core.rpc(look, session: bob, connector: "trusted-fixture-B")
         _ = await core.rpc(delete, session: bob, connector: "trusted-fixture-B")
         XCTAssertTrue(wda.bodies("POST /wda/tap").isEmpty, "different connector reused another caller's approval")
