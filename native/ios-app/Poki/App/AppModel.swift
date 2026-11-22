@@ -1946,7 +1946,7 @@ final class AppModel {
     /// A tool call from the chat's model loop. Poki turns on first when it is off (the runner then starts
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
-    func finishTask(switching: Bool = true, then: (@MainActor () -> Void)? = nil) {
+    func finishTask(switching: Bool = true, localTask: String? = nil, then: (@MainActor () -> Void)? = nil) {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
@@ -1955,7 +1955,7 @@ final class AppModel {
         // The phone goes back to where the task began first: that still needs the session.
         endingTasks += 1
         Task { [weak self, core, log] in
-            if let line = await core.finishTask(switching: switching && companion == nil) { log.add("runner", line) }
+            if let line = await core.finishTask(switching: switching && companion == nil, localTask: localTask) { log.add("runner", line) }
             if let companion, self?.duoCompanionTask == companion {
                 PKInProcess.shared().endDuoCompanionTask()
                 self?.duoCompanionTask = nil
@@ -1964,6 +1964,10 @@ final class AppModel {
             self?.closeAfterTask("the task ended")
             then?()
         }
+    }
+
+    func clearTaskScreenshots(localTask: String) {
+        core.clearTaskScreenshots(localTask: localTask)
     }
 
     func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, authorizationDeclined: Bool = false, cancelled: () -> Bool = { false }) async {
@@ -2070,10 +2074,11 @@ final class AppModel {
     }
 
     /// End the task, return to Poki and finish its Live Activity.
-    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil) {
+    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil, localTask: String? = nil) {
         lastShot = nil
         guard acted else {
-            if !inSplitView { finishTask() }
+            if !inSplitView { finishTask(localTask: localTask) }
+            else if let localTask { clearTaskScreenshots(localTask: localTask) }
             // A turn that never touched the phone: nothing ran, so nothing is left showing as working.
             activity.update { state in
                 state.plan = nil
@@ -2087,7 +2092,7 @@ final class AppModel {
         // On a Dynamic Island the activity's own pop-up says the task is over: no banner on top of it.
         let islandTold = activity.finishNow(alert: true, result: result, task: task)
         if !inSplitView {
-            finishTask { [weak self] in
+            finishTask(localTask: localTask) { [weak self] in
                 guard !islandTold else { return }
                 // A task ends in Poki or with a notice that breaks through: when the phone could not be
                 // brought back to Poki, the owner is told where they are.

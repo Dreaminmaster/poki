@@ -3132,10 +3132,18 @@ final class ChatHarnessTests: XCTestCase {
         defer { SessionStore.shared.delete(chat.sessionID) }
         try await Self.ask(chat, "打开设置看看，顺便查一下明天车次")
 
+        func toolNames(in request: [String: Any]) -> Set<String> {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return Set(tools.compactMap { (($0["function"] as? [String: Any]) ?? $0)["name"] as? String })
+        }
         XCTAssertGreaterThanOrEqual(server.requests.count, 3)
+        XCTAssertFalse(toolNames(in: server.requests[0]).contains("get_screenshot"),
+                       "Non-card task omitting screenshot_id should omit get_screenshot")
         let settingsAnswer = Self.toolAnswer(server.requests[1])
         XCTAssertFalse(settingsAnswer.contains("screenshot_id: "),
                        "Settings screen read while finish_task.card is omitted should strip screenshot_id: \(settingsAnswer)")
+        XCTAssertTrue(toolNames(in: server.requests[2]).contains("get_screenshot"),
+                      "Widening to a card-capable app must expose get_screenshot alongside screenshot_id")
         let railAnswer = Self.toolAnswer(server.requests[2])
         XCTAssertTrue(railAnswer.contains("screenshot_id: "),
                       "12306 screen read after widening resultCardMode must preserve screenshot_id: \(railAnswer)")

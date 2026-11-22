@@ -400,6 +400,7 @@ final class PiLoop {
                 tool = cache.tool(resultCardMode: resultCardMode)
             }
             if tool.name == "screen_history", !allowed { return nil }
+            if tool.name == "get_screenshot", resultCardMode == .none { return nil }
             if tool.name == "count_messages", !includeCountedScroll { return nil }
             if tool.name == Harness.countedScrollReplyTool, !(includeCountedScroll && includeCountedScrollReply) { return nil }
             return tool

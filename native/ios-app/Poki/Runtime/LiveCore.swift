@@ -80,8 +80,11 @@ final class LiveCore: CoreSession {
     }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
-    func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
-        await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace)
+    func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
+    }
+    func clearTaskScreenshots(localTask: String) {
+        core.clearTaskScreenshots(localTask: localTask)
     }
     func finishTask(session: String) async -> String? { await core.finishTask(session: session) }
 

@@ -70,6 +70,45 @@ final class ItemPictureTests: XCTestCase {
         XCTAssertEqual(cardPictures.count, 8)
         XCTAssertFalse(cardPictures.contains { $0.png == first.png })
         XCTAssertTrue(cardPictures.contains { $0.png == latest.png })
+
+        _ = await core.finishTask(switching: false, localTask: "long-task")
+        let afterTaskEnded = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "long-task")
+        XCTAssertTrue(afterTaskEnded.isError)
+        XCTAssertNil(afterTaskEnded.jpeg)
+    }
+
+    func testTaskScreenshotStoreExpiresAndDeletesTemporaryFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("poki-screenshot-store-test-\(UUID().uuidString.lowercased())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = LockedBox<Double>(100)
+        let store = TaskScreenshotStore(root: root, clock: { clock.value })
+
+        let firstBytes = Data("jpeg-step-1".utf8)
+        let secondBytes = Data("jpeg-step-2".utf8)
+        let otherTaskBytes = Data("jpeg-other".utf8)
+        store.record(firstBytes, id: "shot-1", task: "task-a")
+        clock.value = 160
+        store.record(secondBytes, id: "shot-2", task: "task-a")
+        store.record(otherTaskBytes, id: "shot-other", task: "task-b")
+
+        let firstFile = root.appendingPathComponent("shot-1.jpg")
+        let secondFile = root.appendingPathComponent("shot-2.jpg")
+        let otherFile = root.appendingPathComponent("shot-other.jpg")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstFile.path))
+        XCTAssertEqual(store.screenshot("shot-1", task: "task-a"), firstBytes)
+        XCTAssertNil(store.screenshot("shot-1", task: "task-b"))
+
+        clock.value = 220
+        XCTAssertNil(store.screenshot("shot-1", task: "task-a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstFile.path))
+        XCTAssertEqual(store.screenshot("shot-2", task: "task-a"), secondBytes)
+
+        store.clear(task: "task-a")
+        XCTAssertNil(store.screenshot("shot-2", task: "task-a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondFile.path))
+        XCTAssertEqual(store.screenshot("shot-other", task: "task-b"), otherTaskBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherFile.path))
     }
 
     func testItemPicturesUseTheScreenThatSuppliedTheirCoordinates() async throws {
