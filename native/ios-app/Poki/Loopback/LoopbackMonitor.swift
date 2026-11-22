@@ -28,11 +28,11 @@ final class LoopbackMonitor {
     private(set) var proxyAnswers = false
     /// The probe epoch in which an answer was last shown to come from this iPhone.
     private var provenEpoch: Int?
-    /// The probe epoch in which a proxy was found answering, and when: the decoy ports are tried
-    /// again only every `proxyRecheck` seconds on the same network, so the timer does not open them
-    /// every 3 s while the proxy keeps answering, and the page still turns green soon after the
-    /// owner fixes the proxy's setting.
-    private var proxyEpoch: Int?
+    /// A proxy was found answering, and when: the extra ports are tried again only every
+    /// `proxyRecheck` seconds until Wi-Fi or cellular comes or goes, so neither the timer nor a
+    /// proxy's tunnel rebinding opens them every 3 s while the proxy keeps answering, and the page
+    /// still turns green soon after the owner fixes the proxy's setting.
+    private var proxyFound = false
     private var proxyCheckedAt = Date.distantPast
     var proxyRecheck: TimeInterval = 30
     /// When the loopback last stopped answering after it had worked; nil while it works.
@@ -92,7 +92,7 @@ final class LoopbackMonitor {
     /// interface came or went: the path summary also changes when a proxy's tunnel rebinds.
     private func networkChanged(physical: Bool) {
         probeEpoch &+= 1
-        if physical { resetPortSearch() }
+        if physical { resetPortSearch(); proxyFound = false }
         if !isWorking { publish(.checking, log: false) }
         check()
     }
@@ -218,15 +218,16 @@ final class LoopbackMonitor {
             // itself accepts any port. Once per network, ports nothing listens on must not connect.
             var proxied = false
             if result.outcome == "connected", Self.forced == nil, provenEpoch != epoch {
-                if proxyEpoch == epoch, Date().timeIntervalSince(proxyCheckedAt) < proxyRecheck {
+                if proxyFound, Date().timeIntervalSince(proxyCheckedAt) < proxyRecheck {
                     proxied = true
                 } else {
                     proxied = await acceptsAnyPort()
                     proxyCheckedAt = Date()
-                    if proxied { proxyEpoch = epoch } else { provenEpoch = epoch; proxyEpoch = nil }
+                    proxyFound = proxied
+                    if !proxied { provenEpoch = epoch }
                 }
             }
-            if result.outcome != "connected" { provenEpoch = nil; proxyEpoch = nil }
+            if result.outcome != "connected" { provenEpoch = nil; proxyFound = false }
             running = false
             // A network change makes this answer stale: ask again. A timer tick or resume() that came
             // while the probe was in flight does not: the answer stands, and one more check follows it.

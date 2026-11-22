@@ -95,13 +95,20 @@ final class LoopbackMonitorTests: XCTestCase {
         let proxy = ProxyFixture()
         let monitor = LoopbackMonitor(probe: { _, port, _ in await proxy.answer(port) })
         defer { monitor.pause() }
-        for _ in 0..<4 {
+        func checkOnce() async {
             let before = monitor.checkedAt
             monitor.check()
             await yield { monitor.checkedAt != before && monitor.state != .checking }
         }
+        // The path monitors report the simulator's network once at start, as a new network.
+        await checkOnce()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        await checkOnce()
         XCTAssertTrue(monitor.proxyAnswers)
-        XCTAssertEqual(proxy.decoys, 2, "one probe of two ports per network, not one per check")
+        let settled = proxy.decoys
+        for _ in 0..<5 { await checkOnce() }
+        XCTAssertTrue(monitor.proxyAnswers)
+        XCTAssertEqual(proxy.decoys, settled, "the extra ports are not opened again on every check")
 
         proxy.fixed = true
         monitor.proxyRecheck = 0
