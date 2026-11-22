@@ -29,23 +29,23 @@ final class MemorySourceNavigationUITests: XCTestCase {
         screenshot(app, name: "Memory Recent Updates before opening row")
         row.tap()
 
-        let source = app.buttons["memory.source.conversation"].firstMatch
+        let source = app.buttons["memory.source.conversation"]
         XCTAssertTrue(source.waitForExistence(timeout: 10), "The actual Memory Source link must appear on the item")
         for _ in 0..<6 where !source.isHittable { app.swipeUp() }
         XCTAssertTrue(source.isHittable, "The owner must be able to tap the actual Source link")
         source.tap()
 
-        let target = app.staticTexts[marker].firstMatch
+        let target = app.staticTexts[marker]
         XCTAssertTrue(target.waitForExistence(timeout: 12), "Opening Source must reveal the saved message, not merely its title")
         screenshot(app, name: "Memory Source actual saved transcript")
         XCTAssertTrue(target.exists)
     }
 
     private func verifyDraftAfterClosing(_ app: XCUIApplication) {
-        let close = app.buttons["details.done"].firstMatch
+        let close = app.buttons["details.done"]
         XCTAssertTrue(close.waitForExistence(timeout: 10), "Settings must stay presented until the owner closes it")
         close.tap()
-        let original = app.staticTexts["Active synthetic chat"].firstMatch
+        let original = app.staticTexts["Active synthetic chat"]
         XCTAssertTrue(original.waitForExistence(timeout: 12), "The active chat must remain after the source preview")
         let editor = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", draft)).firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 10), "The unsent draft must survive the Memory navigation")
