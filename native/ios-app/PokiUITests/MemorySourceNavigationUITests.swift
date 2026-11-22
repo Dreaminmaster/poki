@@ -42,14 +42,16 @@ final class MemorySourceNavigationUITests: XCTestCase {
         XCTAssertTrue(target.exists)
     }
 
-    private func verifyDraftAfterClosing(_ app: XCUIApplication) {
+    private func verifyDraftAfterClosing(_ app: XCUIApplication, expectRunning: Bool) {
         let close = app.buttons["details.done"]
         // The read-only source preview is pushed on Settings' own stack.
         // Return through real back buttons until its Close button is exposed;
         // don't assume a root-only toolbar stays visible on a pushed page.
         for _ in 0..<6 where !close.isHittable {
-            let back = app.navigationBars.buttons
-                .matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH[c] %@", "BackButton", "Back")).firstMatch
+            // SwiftUI may expose its navigation BackButton in the global
+            // accessibility tree, not as a child of a UIKit navigationBar
+            // (observed on iPhone after opening the saved transcript).
+            let back = app.buttons["BackButton"]
             guard back.exists && back.isHittable else { break }
             back.tap()
         }
@@ -61,6 +63,9 @@ final class MemorySourceNavigationUITests: XCTestCase {
         let editor = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", draft)).firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 10), "The unsent draft must survive the Memory navigation")
         XCTAssertTrue(editor.value as? String == draft)
+        // The narrow preview must not cancel the *genuine* held model task.
+        // A wide idle view must not spuriously start one either.
+        XCTAssertEqual(app.buttons["composer.main"].label, expectRunning ? "Stop" : "Send")
     }
 
     func testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft() throws {
@@ -71,7 +76,7 @@ final class MemorySourceNavigationUITests: XCTestCase {
         defer { app.terminate() }
         try XCTSkipUnless(app.frame.width < 750, "Run on an iPhone-size simulator")
         openSource(app)
-        verifyDraftAfterClosing(app)
+        verifyDraftAfterClosing(app, expectRunning: true)
     }
 
     func testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft() throws {
@@ -79,6 +84,6 @@ final class MemorySourceNavigationUITests: XCTestCase {
         defer { app.terminate() }
         try XCTSkipUnless(app.frame.width >= 750, "Run on an iPad-size simulator")
         openSource(app)
-        verifyDraftAfterClosing(app)
+        verifyDraftAfterClosing(app, expectRunning: false)
     }
 }
