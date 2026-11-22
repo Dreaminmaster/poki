@@ -829,7 +829,7 @@ public final class PokiCore: @unchecked Sendable {
             output.text = "earlier, never delivered to you: " + earlier.joined(separator: "\n\n") + "\n\nnow:\n" + output.text
         }
         let line = output.text.split(separator: "\n").first.map(String.init) ?? ""
-        let thumbnail = computer.lastPNG.flatMap { try? host?.jpeg(fromPNG: $0, width: 96, quality: 0.5) }
+        let thumbnail = output.freshPNG.flatMap { try? host?.jpeg(fromPNG: $0, width: 96, quality: 0.5) }
         // The log keeps the error line too: the step's own wording (it names what a field held by case
         // only), or the answer's first `error:` line. What the call typed is taken out of it either way
         // (a runner's error can echo it). A failed action with a read is not an isError answer (the
@@ -842,7 +842,7 @@ public final class PokiCore: @unchecked Sendable {
             }
             errorLine = String(text.prefix(300))
         }
-        emit(.toolFinished(activity, output.isError ? .failed(line) : .done(line), ToolFacts(app: computer.lastForeground?.describe, thumbnail: thumbnail, error: errorLine)))
+        emit(.toolFinished(activity, output.isError ? .failed(line) : .done(line), ToolFacts(app: output.observedApp, thumbnail: thumbnail, error: errorLine)))
         return output
     }
 

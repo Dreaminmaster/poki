@@ -1810,6 +1810,7 @@ final class AppModel {
         switch event {
         case .session(let signal):
             lastShot = nil
+            activity.clearThumbnail()
             if case .ended(let id) = signal {
                 // Only that session's own task ends: the core returns the phone to where it began
                 // (nothing happens when another session holds the task), and the automation session
@@ -1866,7 +1867,7 @@ final class AppModel {
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }
             activity.setThumbnail(thumbnail)
-            if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
+            lastShot = thumbnail.flatMap(UIImage.init(data:))
             closeAfterTalk()
         case .approvalRequested(let approval):
             switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
@@ -1980,6 +1981,7 @@ final class AppModel {
         }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        lastShot = nil
         if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
         activitySplitViewSession = nil
@@ -2015,7 +2017,10 @@ final class AppModel {
     /// Activity's quiet wait finishes the run, as it does an outside agent's.
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
 
-    func chatTaskStopped() { activity.stopRun() }
+    func chatTaskStopped() {
+        lastShot = nil
+        activity.stopRun()
+    }
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
@@ -2030,6 +2035,7 @@ final class AppModel {
             duoCompanionTask = splitViewSession == nil && native.beginDuoCompanionTask() ? UUID() : nil
         }
         lastShot = nil
+        activity.clearThumbnail()
         activitySplitViewSession = splitViewSession
         activity.setChatOwnsCompletion(true)
         if drivesDuoCompanion {
