@@ -832,7 +832,9 @@ struct SetupStepPage: View {
                 }
             }
             Section {
-                Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) }
+                if !hero {
+                    Button("Open Settings", systemImage: "gear") { openSettings(model, for: step) }
+                }
                 Toggle(confirmTitle, isOn: confirmBinding)
             } footer: {
                 Text("iOS doesn’t let Poki check this one, so turn the switch on once it’s done.")
