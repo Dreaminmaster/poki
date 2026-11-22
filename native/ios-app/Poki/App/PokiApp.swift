@@ -30,6 +30,11 @@ struct PokiApp: App {
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
+        #if DEBUG
+        // Only a dedicated UI-test launch flag installs the disposable Memory
+        // source records; production launches never write synthetic conversations.
+        MemorySourceUITestFixture.installIfRequested()
+        #endif
         // Whether this phone gets the first run: not when an earlier version was used here. Read before
         // anything this version writes, like the line above.
         FirstRun.decide()
