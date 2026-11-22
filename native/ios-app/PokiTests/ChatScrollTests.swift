@@ -17,6 +17,25 @@ final class ChatScrollTests: XCTestCase {
         feed = nil
     }
 
+    func testHomeScreenDoesNotMountTranscriptScrollViewUntilConversationStarts() throws {
+        let saved = UserDefaults.standard.object(forKey: "pokiChat")
+        UserDefaults.standard.set("demo", forKey: "pokiChat")
+        defer { UserDefaults.standard.set(saved, forKey: "pokiChat") }
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let window = try show(NavigationStack {
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+        }.environment(app).environment(chat))
+        settle { Self.find(CapsuleTextView.self, in: window) != nil }
+        pump(0.2)
+
+        XCTAssertNil(Self.transcriptScroll(in: window), "The empty home screen must not mount ChatTranscript's scroll view")
+
+        chat.send("Text Mom I’m on my way")
+        settle(for: 5) { Self.transcriptScroll(in: window) != nil }
+        XCTAssertNotNil(Self.transcriptScroll(in: window), "Sending a message must mount ChatTranscript's scroll view")
+    }
+
     func testSendingWhileReadingBackShowsTheNewMessage() throws {
         let (scroll, feed) = try transcript()
         readBack(scroll)
