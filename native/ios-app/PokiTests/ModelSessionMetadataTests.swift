@@ -47,10 +47,12 @@ final class ModelSessionMetadataTests: XCTestCase {
 
         let noOwner = CustomEndpointClient.routedFallback(request, to: trusted, conversationSessionID: nil)
         XCTAssertNil(noOwner.value(forHTTPHeaderField: "x-opencode-session"))
-        // Never let a plain generic endpoint acquire an OpenCode header on fallback.
-        let plain = URLRequest(url: primary)
+        // A generic primary has no OpenCode header, but its trusted backup needs
+        // the owning conversation ID once the actual destination is OpenCode.
+        let plain = URLRequest(url: try XCTUnwrap(URL(string: "https://generic-gateway.example/v1/responses")))
         let plainBackup = CustomEndpointClient.routedFallback(plain, to: trusted, conversationSessionID: actualID)
-        XCTAssertNil(plainBackup.value(forHTTPHeaderField: "x-opencode-session"))
+        XCTAssertEqual(plainBackup.value(forHTTPHeaderField: "x-opencode-session"), actualID)
+        XCTAssertEqual(plainBackup.value(forHTTPHeaderField: "x-opencode-client"), "Poki")
     }
 
     /// Exercise the production fallback HTTP transport, not just the header helper:
@@ -81,6 +83,41 @@ final class ModelSessionMetadataTests: XCTestCase {
         XCTAssertNil(backup.requestHeaders.first?["x-opencode-session"])
         XCTAssertNil(backup.requestHeaders.first?["x-opencode-client"])
         XCTAssertEqual(backup.requests.first?["model"] as? String, "fixture")
+    }
+
+    /// Actual URLSession retry: a generic primary does not attach OpenCode
+    /// metadata, but the OpenCode backup must receive this chat's own ID.
+    func testActualGenericPrimaryToOpenCodeBackupReceivesOwnerHeader() async throws {
+        ModelServerStub.clear()
+        URLProtocol.registerClass(ModelServerStub.self)
+        defer {
+            URLProtocol.unregisterClass(ModelServerStub.self)
+            ModelServerStub.clear()
+        }
+        ModelServerStub.responder = { request, _ in
+            if request.url?.host() == "model-server.test" {
+                return (503, "application/json", #"{"error":"unavailable"}"#)
+            }
+            return (200, "text/event-stream", FakeCompletions.text("Backup OK"))
+        }
+        let client = CustomEndpointClient(
+            primary: "https://model-server.test/v1",
+            backups: ["https://opencode.ai/v1"],
+            conversationSessionID: "saved-owner-4242"
+        )
+        var request = URLRequest(url: try XCTUnwrap(URL(string: "https://model-server.test/v1/chat/completions")))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "model": "fixture", "messages": [["role": "user", "content": "Hello"]], "stream": true
+        ])
+        let response = try await client.send(request)
+        XCTAssertEqual(response.statusCode, 200)
+        let requests = ModelServerStub.requests
+        XCTAssertEqual(requests.map { $0.url?.host() }, ["model-server.test", "opencode.ai"])
+        XCTAssertNil(requests.first?.headers["x-opencode-session"])
+        XCTAssertEqual(requests.last?.headers["x-opencode-session"], "saved-owner-4242")
+        XCTAssertEqual(requests.last?.headers["x-opencode-client"], "Poki")
     }
 
     func testRequestIdentityUsesTheRealPokiProductName() {
