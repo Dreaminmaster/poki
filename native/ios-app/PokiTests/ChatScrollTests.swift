@@ -36,6 +36,20 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertNotNil(Self.transcriptScroll(in: window), "Sending a message must mount ChatTranscript's scroll view")
     }
 
+    func testChatFollowIgnoresGeometryChangesBeforeViewportHasHeight() {
+        let initial = ChatFollow.Frame(offset: 0, top: 0, content: 0, visible: 0)
+        let unlaid = ChatFollow.Frame(offset: 0, top: 0, content: 40, visible: 0)
+        let beforeLayout = ChatFollow.newest.after(initial, unlaid)
+        XCTAssertEqual(beforeLayout.follow, .newest)
+        XCTAssertFalse(beforeLayout.scroll, "A viewport with zero height must not trigger scrollTo(edge: .bottom)")
+
+        let short = ChatFollow.Frame(offset: 0, top: 0, content: 500, visible: 600)
+        let grown = ChatFollow.Frame(offset: 0, top: 0, content: 900, visible: 600)
+        let afterGrowth = ChatFollow.newest.after(short, grown)
+        XCTAssertEqual(afterGrowth.follow, .reaching)
+        XCTAssertTrue(afterGrowth.scroll, "Growing content in a laid-out viewport must keep following the bottom")
+    }
+
     func testSendingWhileReadingBackShowsTheNewMessage() throws {
         let (scroll, feed) = try transcript()
         readBack(scroll)
