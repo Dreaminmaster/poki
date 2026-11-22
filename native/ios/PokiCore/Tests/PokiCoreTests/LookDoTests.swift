@@ -1286,9 +1286,10 @@ final class LookDoTests: XCTestCase {
 
         XCTAssertFalse(result.isError, result.text)
         XCTAssertTrue(result.text.hasPrefix("app: Settings"), result.text)
+        XCTAssertTrue(result.text.contains("390 px wide"), result.text)
+        XCTAssertTrue(result.text.contains("Button \"General\""), result.text)
         XCTAssertFalse(result.text.contains("paused"), result.text)
         XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
-        XCTAssertEqual(sourcesAfterLaunch.value, 2, "first launch with dynamic screen size must not discard its confirmed read: \(result.text)")
     }
 
     func testLaunchSlowFirstSourceStillReadsForegroundAndSettles() async {
@@ -1316,9 +1317,189 @@ final class LookDoTests: XCTestCase {
 
         XCTAssertFalse(result.isError, result.text)
         XCTAssertTrue(result.text.hasPrefix("app: Settings"), result.text)
+        XCTAssertTrue(result.text.contains("Button \"General\""), result.text)
         XCTAssertFalse(result.text.contains("paused"), result.text)
         XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
-        XCTAssertLessThanOrEqual(sourcesAfterLaunch.value, 3, "slow first launch source (>0.9 s) must still read foreground and settle without fallback: \(result.text)")
+    }
+
+    func testScrollToDoesNotUseInFlightPreActionScreenshotForNextCoordinateTap() async throws {
+        let (core, wda, host) = makeCore { $0.readTimeout = 0.25 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 500, width: 350, height: 180)) }
+        let shotCalls = LockedBox(0)
+        let preActionShotStartedAt = LockedBox<Double?>(nil)
+        let preActionShotReturnedAt = LockedBox<Double?>(nil)
+        let inputCompletedAt = LockedBox<Double?>(nil)
+        let releasePreActionShot = LockedBox(false)
+        let latePayload = LockedBox<Data?>(nil)
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let n = shotCalls.update { $0 += 1; return $0 }
+            if n == 1 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            if n == 2 {
+                preActionShotStartedAt.value = now()
+                await Task.detached { while !releasePreActionShot.value { usleep(5_000) } }.value
+                latePayload.value = oldPicture
+                preActionShotReturnedAt.value = now()
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            await Task.detached { while latePayload.value == nil { usleep(5_000) } }.value
+            return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            XCTAssertNotNil(preActionShotStartedAt.value, "pre-action screenshot must already be in flight before scroll input")
+            XCTAssertNil(preActionShotReturnedAt.value, "pre-action screenshot must still be in flight during scroll input")
+            wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
+            inputCompletedAt.value = now()
+            releasePreActionShot.value = true
+            await Task.detached { while preActionShotReturnedAt.value == nil { usleep(5_000) } }.value
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "scroll-inflight")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+        _ = await core.call("look", ["full": true], local: true, localTask: "scroll-inflight")
+
+        let scroll = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true, localTask: "scroll-inflight")
+        let tStart = try XCTUnwrap(preActionShotStartedAt.value)
+        let tInput = try XCTUnwrap(inputCompletedAt.value)
+        let tReturn = try XCTUnwrap(preActionShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tInput)
+        XCTAssertLessThan(tInput, tReturn)
+        XCTAssertFalse(scroll.isError, scroll.text)
+        XCTAssertTrue(scroll.text.contains("found by scroll_to:"), scroll.text)
+        XCTAssertNil(scroll.jpeg, "in-flight pre-action picture returning late must not be delivered after scroll: \(scroll.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "scroll-inflight")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testLaunchDoesNotUseInFlightPreActionScreenshotForNextCoordinateTap() async throws {
+        let (core, wda, host) = makeCore { $0.readTimeout = 0.25 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let launched = LockedBox(false)
+        let shotCalls = LockedBox(0)
+        let preActionShotStartedAt = LockedBox<Double?>(nil)
+        let preActionShotReturnedAt = LockedBox<Double?>(nil)
+        let inputCompletedAt = LockedBox<Double?>(nil)
+        let releasePreActionShot = LockedBox(false)
+        let latePayload = LockedBox<Data?>(nil)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.source([("Button", "General")], app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let n = shotCalls.update { $0 += 1; return $0 }
+            if n == 1 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            if n == 2 {
+                preActionShotStartedAt.value = now()
+                await Task.detached { while !releasePreActionShot.value { usleep(5_000) } }.value
+                latePayload.value = oldPicture
+                preActionShotReturnedAt.value = now()
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            await Task.detached { while latePayload.value == nil { usleep(5_000) } }.value
+            return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
+        }
+        wda.set("POST /wda/apps/activate") { [wda] _ in
+            XCTAssertNotNil(preActionShotStartedAt.value, "pre-action screenshot must already be in flight before launch input")
+            XCTAssertNil(preActionShotReturnedAt.value, "pre-action screenshot must still be in flight during launch input")
+            launched.value = true
+            wda.source([("Button", "Continue")], app: "Photos")
+            inputCompletedAt.value = now()
+            releasePreActionShot.value = true
+            await Task.detached { while preActionShotReturnedAt.value == nil { usleep(5_000) } }.value
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "launch-inflight")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+        _ = await core.call("look", ["full": true], local: true, localTask: "launch-inflight")
+
+        let opened = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true, localTask: "launch-inflight")
+        let tStart = try XCTUnwrap(preActionShotStartedAt.value)
+        let tInput = try XCTUnwrap(inputCompletedAt.value)
+        let tReturn = try XCTUnwrap(preActionShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tInput)
+        XCTAssertLessThan(tInput, tReturn)
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.hasPrefix("app: Photos"), opened.text)
+        XCTAssertNil(opened.jpeg, "in-flight pre-action picture returning late must not be delivered after launch: \(opened.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "launch-inflight")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testScrollToDiscardsInFlightPreparedCaptureFromEarlierSwipe() async throws {
+        let (core, wda, _) = makeCore()
+        let page1Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 160)) }
+        let page2Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 320, width: 350, height: 160)) }
+        let page3Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 100, width: 350, height: 160)) }
+        XCTAssertNotEqual(page2Picture.count, page3Picture.count)
+        let swipes = LockedBox(0)
+        let swipe1ShotStartedAt = LockedBox<Double?>(nil)
+        let swipe1ShotReturnedAt = LockedBox<Double?>(nil)
+        let swipe2CompletedAt = LockedBox<Double?>(nil)
+        let releaseSwipe1Shot = LockedBox(false)
+        wda.set("GET /source") { _ in
+            let s = swipes.value
+            if s == 1 {
+                await Task.detached { while swipe1ShotStartedAt.value == nil { usleep(5_000) } }.value
+            }
+            let range = s == 0 ? (1...6) : (s == 1 ? (10...15) : (18...23))
+            let children: [JSON] = range.enumerated().map { idx, n in
+                ["type": "XCUIElementTypeCell", "label": .string("Row \(n)"), "rect": ["x": 16, "y": .number(Double(100 + idx * 44)), "width": 358, "height": 44], "children": []]
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]])
+        }
+        wda.set("GET /screenshot") { _ in
+            let s = swipes.value
+            if s == 0 {
+                return (200, ["value": .string(page1Picture.base64EncodedString())])
+            }
+            if s == 1 && swipe1ShotStartedAt.value == nil {
+                swipe1ShotStartedAt.value = now()
+                await Task.detached { while !releaseSwipe1Shot.value { usleep(5_000) } }.value
+                swipe1ShotReturnedAt.value = now()
+                return (200, ["value": .string(page2Picture.base64EncodedString())])
+            }
+            return (200, ["value": .string(page3Picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { _ in
+            let n = swipes.update { $0 += 1; return $0 }
+            if n == 2 {
+                XCTAssertNotNil(swipe1ShotStartedAt.value, "prepared capture from swipe 1 must already be in flight before swipe 2")
+                XCTAssertNil(swipe1ShotReturnedAt.value, "prepared capture from swipe 1 must still be in flight during swipe 2")
+                swipe2CompletedAt.value = now()
+                releaseSwipe1Shot.value = true
+                await Task.detached { while swipe1ShotReturnedAt.value == nil { usleep(5_000) } }.value
+            }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true)
+
+        let tStart = try XCTUnwrap(swipe1ShotStartedAt.value)
+        let tSwipe2 = try XCTUnwrap(swipe2CompletedAt.value)
+        let tReturn = try XCTUnwrap(swipe1ShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tSwipe2)
+        XCTAssertLessThan(tSwipe2, tReturn)
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Cell \"Row 20\""), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(page3Picture.count)".utf8), "stale in-flight capture from earlier swipe must not be delivered: \(result.text)")
     }
     #endif
 

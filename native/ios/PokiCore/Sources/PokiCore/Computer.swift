@@ -2051,6 +2051,18 @@ final class Computer: @unchecked Sendable {
         return capture
     }
 
+    private func freshCaptureIfStale(_ capture: ScreenCapture?, treeAt: Double, earliestAllowedAt: Double, deadline: Double) async -> ScreenCapture? {
+        guard let existing = capture else { return nil }
+        guard treeAt - existing.finishedAt > Runner.pictureLagLimit else { return existing }
+        let retakeBudget = deadline - now()
+        guard retakeBudget > 0.4,
+              let retaken = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
+              retaken.companion == nil, retaken.startedAt >= earliestAllowedAt else {
+            return nil
+        }
+        return retaken
+    }
+
     private func stabilityElements(_ elements: [Element], screen: ScreenSize) -> [Element] {
         listable(elements, screen).filter { element in
             guard element.type != "ScrollBar" else { return false }
@@ -2094,6 +2106,7 @@ final class Computer: @unchecked Sendable {
         let requiresPictureChange = beforePicture != nil && beforePicture?.hash == nil
         var result = FreshScreenObservation(kind: "scroll_to", inputAt: scroll.inputAt, targetAt: scroll.targetTreeAt)
         var priorElements = scroll.elements
+        var priorTreeAt = scroll.targetTreeAt
         var priorPicture: PictureSketch?
         var sawCoasting = false
         var sawStalePicture = false
@@ -2122,24 +2135,16 @@ final class Computer: @unchecked Sendable {
                 result.reason = "foreground changed or is unknown"
                 return result
             }
-            if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
-                let retakeBudget = deadline - now()
-                if retakeBudget > 0.4,
-                   let retaken = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
-                   retaken.companion == nil, retaken.startedAt >= earliestAllowedAt {
-                    capture = retaken
-                } else {
-                    capture = nil
-                }
-            }
+            capture = await freshCaptureIfStale(capture, treeAt: treeAt, earliestAllowedAt: earliestAllowedAt, deadline: deadline)
             if let capture, result.firstPictureAt == nil {
                 result.firstPictureAt = capture.finishedAt
             }
 
             let targetNow = visibleTargetMatch(scroll.target, in: tree.elements, screen: screen)
-            if !layoutSettled(previous: priorElements, current: tree.elements, screen: screen) || targetNow == nil {
+            if !layoutSettled(previous: priorElements, current: tree.elements, screen: screen, tolerance: Self.scrollSettleTolerance) || targetNow == nil {
                 sawCoasting = true
                 priorElements = tree.elements
+                priorTreeAt = treeAt
                 priorPicture = capture.map { PictureSketch(png: $0.data) }
                 await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                 continue
@@ -2174,9 +2179,11 @@ final class Computer: @unchecked Sendable {
                 await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                 continue
             }
-            if sawCoasting {
+            if sawCoasting, capture.startedAt < priorTreeAt {
                 guard let previous = priorPicture, !sketch.differs(from: previous) else {
                     priorPicture = sketch
+                    priorElements = tree.elements
+                    priorTreeAt = treeAt
                     await sleep(seconds: max(0, min(deadline, sampleAt + 0.12) - now()))
                     continue
                 }
@@ -2263,16 +2270,7 @@ final class Computer: @unchecked Sendable {
                 stalePictureDeadline = min(now() + Self.idleNumberTapWindow, settleDeadline)
             }
 
-            if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
-                let retakeBudget = settleDeadline - now()
-                if retakeBudget > 0.4,
-                   let retaken = try? await runner.captureScreen(timeout: min(1.5, retakeBudget)),
-                   retaken.companion == nil, retaken.startedAt >= started {
-                    capture = retaken
-                } else {
-                    capture = nil
-                }
-            }
+            capture = await freshCaptureIfStale(capture, treeAt: treeAt, earliestAllowedAt: started, deadline: settleDeadline)
             if let capture, result.firstPictureAt == nil {
                 result.firstPictureAt = capture.finishedAt
             }
@@ -2403,16 +2401,7 @@ final class Computer: @unchecked Sendable {
                 capture = fresh
             }
         }
-        if let existing = capture, treeAt - existing.finishedAt > Runner.pictureLagLimit {
-            let retakeBudget = min(1.5, until - now() - 0.3)
-            if retakeBudget > 0.4,
-               let retaken = try? await runner.captureScreen(timeout: retakeBudget),
-               retaken.companion == nil, retaken.startedAt >= earliestAllowedAt {
-                capture = retaken
-            } else {
-                capture = nil
-            }
-        }
+        capture = await freshCaptureIfStale(capture, treeAt: treeAt, earliestAllowedAt: earliestAllowedAt, deadline: until - 0.3)
         guard let capture else { return nil }
         let requiresPictureChange = beforePicture != nil && beforePicture?.hash == nil
         if requiresPictureChange, let before = beforePicture, !PictureSketch(png: capture.data).differs(from: before) {
@@ -2432,6 +2421,11 @@ final class Computer: @unchecked Sendable {
 
     /// How long `pressNow` reads for two reads in a row that agree.
     static let settleWindow = 2.0
+
+    /// How far, in points, any listed element may still move between two reads after `scroll_to` for
+    /// the list to count as at rest. Settings ends a scroll with a 1 to 2 pt bounce (simulator: the
+    /// target read at y 714, then 716); a list still coasting moves tens of points between reads.
+    static let scrollSettleTolerance = 3.0
 
     /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
     /// nothing could be read.
