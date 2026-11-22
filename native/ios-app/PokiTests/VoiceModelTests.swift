@@ -137,6 +137,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     private(set) var remoteVolume = 1.0
     @MainActor var remoteSpeech = false
     @MainActor var failNetworkPath = false
+    var failSend = false
     @MainActor private(set) var transportOpened = false
     @MainActor private(set) var attachedOpeningCapture: OpeningVoiceCapture?
     @MainActor fileprivate var openingAudio: OpeningAudioProbe?
@@ -169,6 +170,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
         _ = capture.audio.startRecording()
     }
     func send(_ event: [String: Any]) -> Bool {
+        if failSend { return false }
         sent.append(event)
         if let onSend {
             Task { @MainActor in onSend(event) }
@@ -2915,5 +2917,56 @@ extension VoiceModelTests {
         XCTAssertFalse(remote.voice.isOn)
         XCTAssertTrue(remoteAudio.sent.isEmpty)
         XCTAssertTrue(remoteAudio.transcriptions.isEmpty, "a closed call must not start a text task from its cache")
+    }
+
+    func testAppAudioOpeningFailureDoesNotFallBackToOpeningDictation() async {
+        URLProtocol.registerClass(BridgeTroubleStub.self)
+        defer { URLProtocol.unregisterClass(BridgeTroubleStub.self) }
+        do {
+            weak var retainedContextToken: NSObject?
+            let audio = OpeningAudioProbe()
+            audio.transcription = "What did the video just say?"
+            let h = Harness(openingAudio: audio, recentAppAudio: {
+                let token = NSObject()
+                retainedContextToken = token
+                return .transcript("打开微信", stillCapturing: { token.hash != 0 })
+            })
+            _ = h.voice.setBridge(BridgeTroubleStub.slow)
+            await h.voice.start(captureOpening: true)
+            await h.time.settle()
+            XCTAssertFalse(h.voice.isOn, "connect failure with active app audio must not stay open in opening dictation")
+            XCTAssertFalse(h.voice.waitsForOpeningDictation)
+            XCTAssertFalse(h.voice.finishOpeningDictation())
+            await h.time.settle()
+            XCTAssertTrue(audio.transcriptions.isEmpty)
+            XCTAssertTrue(audio.textTasks.isEmpty, "connect failure with active app audio must not send opening speech to text chat")
+            XCTAssertNil(retainedContextToken, "connect failure must clear appAudio instead of retaining the media context")
+            if case .lost = h.voice.phase {} else {
+                XCTFail("expected .lost after connect failure, got \(h.voice.phase)")
+            }
+            h.voice.stop()
+        }
+
+        for live in [false, true] {
+            let audio = OpeningAudioProbe()
+            audio.transcription = "What did the video just say?"
+            let h = Harness(openingAudio: audio, recentAppAudio: {
+                .transcript("打开微信", stillCapturing: { true })
+            })
+            if live { _ = h.voice.setBridge(BridgeStub.liveAddress) }
+            await h.voice.start(captureOpening: true)
+            audio.feed(48_000, sample: 1_000)
+            h.link.failSend = true
+            h.link.play(["type": live ? "session.started" : "session.created"])
+            await h.time.settle()
+            XCTAssertFalse(h.voice.isOn, "media context send failure must not enter opening dictation (live=\(live))")
+            XCTAssertFalse(h.voice.waitsForOpeningDictation)
+            XCTAssertFalse(h.voice.finishOpeningDictation())
+            await h.time.settle()
+            XCTAssertTrue(audio.transcriptions.isEmpty)
+            XCTAssertTrue(audio.textTasks.isEmpty, "media context send failure must not call openingSpeech.sendText (live=\(live))")
+            XCTAssertEqual(h.voice.phase, .lost(TalkState.connectionLost))
+            h.voice.stop()
+        }
     }
 }

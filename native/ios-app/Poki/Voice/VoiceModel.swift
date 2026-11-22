@@ -809,6 +809,7 @@ final class VoiceModel {
                 return
             }
             transcript = nil
+            appAudio = nil
             _ = releaseOpeningCapture(session: number)
             closeConnection("could not connect")
             holdingMicrophone = false
@@ -859,7 +860,8 @@ final class VoiceModel {
     @discardableResult
     private func startOpeningDictation() -> Bool {
         let number = session
-        guard let capture = openingCapture,
+        guard appAudio == nil,
+              let capture = openingCapture,
               let outcome = capture.audio.prepareForOwnerDictation(session: number) else { return false }
         let plan: OpeningVoiceAudio.RecoveryPlan
         switch outcome {
