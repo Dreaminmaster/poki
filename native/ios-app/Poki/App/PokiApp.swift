@@ -290,6 +290,7 @@ struct RootView: View {
             openSession: { id, entryID in openRun(id, entryID: entryID) },
             searchJump: searchJump,
             onSearchJumpApplied: consumeSearchJump,
+            revealedSearchEntryID: { id in searchNavigation.revealedEntry(in: id) },
             sessionStore: sessionStore,
             path: $detailsPath
         )
