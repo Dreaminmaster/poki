@@ -81,7 +81,7 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
 
 - Agent installer skill and Poki Setup: [install-poki skill](skills/install-poki/SKILL.md) and [Poki Setup](desktop/README.md)
 - Verification, limits, and release channels: [Verification](docs/verification.md) and [Release channels](docs/release-channels.md)
-- Earlier computer-driven tools (no longer updated): [Poki MCP and Poki Agent](docs/poki-mcp.md)
+- Earlier computer-driven tools (security maintenance only): [Poki MCP and Poki Agent](docs/poki-mcp.md)
 
 </details>
 
