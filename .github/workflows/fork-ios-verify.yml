@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: 42b5e8ebcba20cf80e0c3d5cee39b5feb948d694
+            ref: 70793206980a241a3a0fc271f21b2d4708713260
             tests: 'ModelSessionMetadataTests:13 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
@@ -114,6 +114,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           swift test --package-path native/ios/PokiCore --filter ApprovalTests.testSensitiveToolApprovalCarriesExactExternalCallerAndLocalSourceIsNil 2>&1 | tee out/core-approval-origin.log
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testLiveVoiceDoApprovalHasNoExternalSource 2>&1 | tee out/core-live-voice-origin.log
           swift test --package-path native/ios/PokiCore --filter ApprovalTests.testADeletionWaitsForTheOwnerAndSendsNothing 2>&1 | tee out/core-legacy-approval-retry.log
       - name: Build simulator launcher and assets
         shell: bash
