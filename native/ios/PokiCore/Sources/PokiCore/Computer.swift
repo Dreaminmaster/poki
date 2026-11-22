@@ -38,10 +38,10 @@ final class Computer: @unchecked Sendable {
     let host: CoreHost
     let config: CoreConfig
     let approvals: Approvals
-    let emit: @Sendable (CoreEvent) -> Void
-    /// Legacy sessionless Core calls keep their own device-local approval identity.
-    /// They are never mistaken for Poki's chat or any explicitly named MCP session.
+    /// Distinguishes an external request without a transport session from
+    /// Poki's own chat. Used for display/routing, never as a grant principal.
     private let anonymousExternalOrigin = "anonymous-external-\(UUID().uuidString)"
+    let emit: @Sendable (CoreEvent) -> Void
     /// Explicit state machine for steps handed to the owner (`{handoff: {kind, text}}`).
     let handoff: HandoffTracker
 
@@ -966,7 +966,7 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, approvalPrincipal: String? = nil) async -> ToolResult {
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
         var actions = actions
         var bound: String?
         if config.appNames() {
@@ -988,7 +988,7 @@ final class Computer: @unchecked Sendable {
             }
             if let kept = sessionApp, kept.session == session { bound = kept.bundle }
         }
-        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, approvalPrincipal: approvalPrincipal))
+        var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
@@ -1033,14 +1033,13 @@ final class Computer: @unchecked Sendable {
         return action
     }
 
-    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, approvalPrincipal: String? = nil) async -> ToolResult {
+    func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
+        // The approval event carries the source that raised it. Grant matching
+        // remains the upstream workspace/action policy until unified Core #609.
+        let sourceSession: String? = local ? nil : (session ?? anonymousExternalOrigin)
         var started = now()
-        // A client can call without mcp-session-id. Its approval remains external,
-        // with a device-local identity distinct from Poki's own chat. Named MCP
-        // sessions never share approvals with each other or this fallback.
-        let sourceSession: String? = local ? nil : (approvalPrincipal ?? session ?? anonymousExternalOrigin)
         let callStarted = started
         var approvalWaited = 0.0
         var until: Double
@@ -1113,7 +1112,7 @@ final class Computer: @unchecked Sendable {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, approvalPrincipal: approvalPrincipal)
+                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
                     result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
@@ -1152,14 +1151,13 @@ final class Computer: @unchecked Sendable {
         let matchingScope = sensitive.map { approvalScope(Array(actions[$0.at...]), afterPrefix: Array(actions[..<$0.at])) }
         // Any other actions withdraw an unconsumed request or grant so stale approvals never carry over.
         // The owner's voice leaves the agent's unused grant in place.
-        approvals.withdrawMismatching(scope: matchingScope, workspaceSession: workspaceSession,
-                                      sourceSession: sourceSession, keepingGrant: byOwnersVoice)
+        approvals.withdrawMismatching(scope: matchingScope, workspaceSession: workspaceSession, keepingGrant: byOwnersVoice)
         // The gated actions on their own, on the screen the model saw, before anything is sent.
         let gatedAlone = sensitive.map { approvalScope(Array(actions[$0.at...])) }
         if let (at, reason) = sensitive {
             let tail = Array(actions[at...])
             let scope = matchingScope!
-            if approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession, sourceSession: sourceSession) != nil {
+            if approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
@@ -1168,7 +1166,7 @@ final class Computer: @unchecked Sendable {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
                 }
-                let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession, sourceSession: sourceSession) ? $0 : nil }
+                let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
                                            stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
                                            sourceSession: sourceSession)
@@ -1197,7 +1195,7 @@ final class Computer: @unchecked Sendable {
                     // the model would send them again. The approval stays; the same actions sent again run at once.
                     return await refusedAwaitingResend(approval, tail: tail, before: gatedAlone!, at: at, until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The owner approved on the phone, but too late for this call to send the actions and read the screen before the relay gives up on it.\(sentFirst) The approval is kept: \(again) and they run at once (within \(Int(approvals.lifetime / 60)) minutes).")
                 case .approved?:
-                    guard approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession, sourceSession: sourceSession) != nil else {
+                    guard approvals.consumeGrant(scope: scope, workspaceSession: workspaceSession) != nil else {
                         return await refused(until: until, full: full, did: did, text: "not_sent from action \(at + 1): approval_required (id \(approval.id)): \(reason). The approval went to another call with the same actions, so nothing was sent from this one.\(sentFirst) To run them, \(again) and ask again.")
                     }
                     approvedNote = "approval: approved on the phone after \(Int(waited.rounded())) s (\(reason))"
