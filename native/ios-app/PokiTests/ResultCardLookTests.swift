@@ -1,5 +1,7 @@
 import Foundation
 import PokiCore
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -181,5 +183,158 @@ final class ResultCardLookTests: XCTestCase {
         card.pictures = ["a": Data([0xFF, 0xD8, 0xFF])]
         let again = try JSONDecoder().decode(ResultCard.self, from: JSONEncoder().encode(card))
         XCTAssertEqual(again.pictures, card.pictures)
+    }
+
+    @MainActor
+    func testTrainCardLayoutSeparatesFareWrapsSeatsAndAlignsSelection() throws {
+        let singleSeat = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G531", "title": "G531", "date": "11月23日",
+            "from": "北京南", "to": "上海虹桥", "depart": "06:08", "arrive": "12:04",
+            "duration": "5小时56分", "price": "498元起",
+            "seats": [["name": "二等", "left": "有票"]],
+        ]])
+        let fiveSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G547", "title": "G547", "date": "11月23日",
+            "from": "北京南", "to": "上海虹桥", "depart": "06:18", "arrive": "12:11",
+            "duration": "5小时53分", "price": "553元起",
+            "seats": [
+                ["name": "二等", "left": "候补"],
+                ["name": "一等", "left": "有票"],
+                ["name": "优选一等", "left": "候补"],
+                ["name": "商务", "left": "11张"],
+                ["name": "无座", "left": "有票"],
+            ],
+        ]])
+        let narrowShortNoSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G3", "title": "G3", "date": "11月23日",
+            "from": "北京南", "to": "上海", "depart": "06:52", "arrive": "11:33",
+            "duration": "4小时41分", "price": "667元起",
+        ]])
+        let narrowLongNoSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G2688", "title": "G2688", "date": "11月23日",
+            "from": "乌鲁木齐南站", "to": "北京首都国际机场", "depart": "08:40", "arrive": "16:55",
+            "duration": "12小时15分", "price": "¥1568起",
+        ]])
+
+        // 1. On iPhone 16 Pro card width (370pt), arrival time and fare have clear horizontal spacing,
+        //    and the selected row's blue left bar aligns with the card's 14pt horizontal inset.
+        let rendered = try renderCard(singleSeat, width: 370)
+        let (fareBox, arriveMaxX, accentMinX) = try inspectTrainCardPixels(rendered)
+        XCTAssertGreaterThanOrEqual(
+            Int(fareBox.minX) - arriveMaxX, 8,
+            "Arrival time and fare must be separated (arriveMaxX=\(arriveMaxX), fareMinX=\(Int(fareBox.minX)))"
+        )
+        XCTAssertGreaterThanOrEqual(
+            accentMinX, 12,
+            "Selected row left bar must align with the card's 14pt inner padding (accentMinX=\(accentMinX))"
+        )
+
+        // 2. On narrow iPhone card width (343pt), 5 seats wrap naturally onto multiple lines instead of
+        //    shrinking into a single line.
+        let oneSeatHeight = try cardHeight(singleSeat, width: 343)
+        let fiveSeatsHeight = try cardHeight(fiveSeats, width: 343)
+        XCTAssertGreaterThanOrEqual(
+            fiveSeatsHeight - oneSeatHeight, 10,
+            "Seats that do not fit on one line must wrap naturally (one=\(oneSeatHeight), five=\(fiveSeatsHeight))"
+        )
+
+        // 3. On narrow iPhone card width (343pt), long stations + 4-digit fare move the fare below the
+        //    journey line instead of colliding or truncating times.
+        let shortHeight = try cardHeight(narrowShortNoSeats, width: 343)
+        let longHeight = try cardHeight(narrowLongNoSeats, width: 343)
+        XCTAssertGreaterThanOrEqual(
+            longHeight - shortHeight, 14,
+            "Overflowing fare on narrow widths must drop to the second row (short=\(shortHeight), long=\(longHeight))"
+        )
+    }
+
+    func testTrainCardNormalizesMixedFareStrings() {
+        XCTAssertEqual(RailwayTrains.normalizedFare("498元起"), "498元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥1568起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("￥1,568 起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("1568起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥553", preferStartingSuffix: true), "553元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥553", preferStartingSuffix: false), "553元")
+        XCTAssertEqual(RailwayTrains.normalizedFare("待公布"), "待公布")
+    }
+
+    @MainActor
+    private func cardHeight(_ card: ResultCard, width: CGFloat) throws -> CGFloat {
+        let host = UIHostingController(rootView: ResultCardView(entry: UUID(), card: card, chosen: nil, actions: nil))
+        let size = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+        return size.height
+    }
+
+    @MainActor
+    private func renderCard(_ card: ResultCard, width: CGFloat) throws -> CGImage {
+        let view = ResultCardView(entry: UUID(), card: card, chosen: nil, actions: nil)
+            .frame(width: width)
+            .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        return try XCTUnwrap(renderer.cgImage, "ImageRenderer must produce a bitmap for ResultCardView")
+    }
+
+    private func inspectTrainCardPixels(_ cg: CGImage) throws -> (fareBox: CGRect, arriveMaxX: Int, accentMinX: Int) {
+        let w = cg.width
+        let h = cg.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = try XCTUnwrap(CGContext(
+            data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var fareMinX = w, fareMaxX = 0, fareMinY = h, fareMaxY = 0
+        for y in 0..<h {
+            for x in (w / 2)..<w {
+                let i = (y * w + x) * 4
+                let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                if r > 180, g > 60, b < 110, r - b > 90 {
+                    fareMinX = min(fareMinX, x)
+                    fareMaxX = max(fareMaxX, x)
+                    fareMinY = min(fareMinY, y)
+                    fareMaxY = max(fareMaxY, y)
+                }
+            }
+        }
+        guard fareMinX < fareMaxX, fareMinY <= fareMaxY else {
+            XCTFail("Expected orange fare pixels in rendered train card (\(w)x\(h))")
+            return (.zero, 0, 0)
+        }
+
+        var arriveMaxX = 0
+        let scanStartX = w / 2
+        if scanStartX < fareMinX {
+            for y in max(0, fareMinY - 4)...min(h - 1, fareMaxY + 4) {
+                for x in scanStartX..<fareMinX {
+                    let i = (y * w + x) * 4
+                    let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                    if r < 140, g < 140, b < 140, abs(r - b) < 35 {
+                        arriveMaxX = max(arriveMaxX, x)
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(arriveMaxX, scanStartX, "Expected arrival time pixels left of the fare")
+
+        var accentMinX = w
+        let accentTop = max(0, fareMinY - 12)
+        let accentBottom = min(h - 1, fareMaxY + 36)
+        if accentTop <= accentBottom {
+            for y in accentTop...accentBottom {
+                for x in 0..<min(40, w) {
+                    let i = (y * w + x) * 4
+                    let r = Int(pixels[i]), b = Int(pixels[i + 2])
+                    if b > 170, r < 150, b - r > 50 {
+                        accentMinX = min(accentMinX, x)
+                    }
+                }
+            }
+        }
+        XCTAssertLessThan(accentMinX, 40, "Expected blue selection bar on the leading edge of the selected row")
+        let fareBox = CGRect(x: fareMinX, y: fareMinY, width: fareMaxX - fareMinX, height: fareMaxY - fareMinY)
+        return (fareBox, arriveMaxX, accentMinX)
     }
 }
