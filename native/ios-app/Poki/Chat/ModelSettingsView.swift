@@ -51,37 +51,37 @@ struct ModelSettingsSections: View {
     var add: () -> Void
 
     var body: some View {
-    // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
-    Section {
-        InUseCard(add: { add() })
-    } header: {
-        Text("In Use").textCase(nil)
-    } footer: {
-        Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
-    }
+        // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
+        Section {
+            InUseCard(add: add)
+        } header: {
+            Text("In Use").textCase(nil)
+        } footer: {
+            Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
+        }
 
-    // With no account yet the card above has Add Account, and an empty group would only be a heading.
-    if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
-    Section {
-        ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
-            let usage = ModelAccounts.uses(provider)
-            NavigationLink { AccountDetail(provider: provider) } label: {
-                AccountRow(provider: provider, name: provider.name, usage: usage)
+        // With no account yet the card above has Add Account, and an empty group would only be a heading.
+        if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
+            Section {
+                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
+                    let usage = ModelAccounts.uses(provider)
+                    NavigationLink { AccountDetail(provider: provider) } label: {
+                        AccountRow(provider: provider, name: provider.name, usage: usage)
+                    }
+                }
+                ForEach(CustomProviders.all) { custom in
+                    let usage = ModelAccounts.uses(custom)
+                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
+                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+                    }
+                }
+                Button("Add Account", systemImage: "plus") { add() }
+            } header: {
+                Text("Accounts").textCase(nil)
+            } footer: {
+                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
             }
         }
-        ForEach(CustomProviders.all) { custom in
-            let usage = ModelAccounts.uses(custom)
-            NavigationLink { CustomProviderDetail(id: custom.id) } label: {
-                AccountRow(provider: .custom, name: custom.displayName, usage: usage)
-            }
-        }
-        Button("Add Account", systemImage: "plus") { add() }
-    } header: {
-        Text("Accounts").textCase(nil)
-    } footer: {
-        Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
-    }
-    }
     }
 }
 
