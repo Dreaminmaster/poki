@@ -1,5 +1,6 @@
 import AppIntents
 import AVFAudio
+import UIKit
 
 /// Talk with Poki without leaving the app you're in: from the Action Button, Shortcuts or Siri, Poki
 /// stays in the background, so the app in front stays in front, and Poki looks at it and works in it
@@ -26,19 +27,40 @@ struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundConti
         guard let app = AskPoki.app, let chat = AskPoki.chat else {
             return try await openPoki(LocalizedStringResource("Poki wasn’t ready. Try again in a moment.", table: "Entry"))
         }
+        if app.voice.finishOpeningDictation() { return .result() }
         if app.voice.isOn {
             AppLog.shared.add("voice", "Poki Anytime ended the talk")
             app.stopFromOutside("Poki Anytime ended the talk")
             return .result()
         }
         if let why = Self.whyPokiOpens(app, chat) { return try await openPoki(why) }
+        VoiceOpeningFeedback.vibrate()
         AppLog.shared.add("voice", "Talk Here: starting a talk with Poki in the background")
         app.prepareForTask()
-        guard await app.talkHere() else {
+        guard await app.talkHere(presentSpeechPermission: presentSpeechPermission) else {
             return try await openPoki(LocalizedStringResource("Poki couldn’t show the talk on the Lock Screen, so it opens to talk.", table: "Entry"))
         }
         if case .lost(let why) = app.voice.phase { throw TalkHereError(why: why) }
         return .result()
+    }
+
+    @MainActor
+    private func presentSpeechPermission(_ request: @MainActor () async -> Bool) async -> Bool {
+        if UIApplication.shared.applicationState == .active { return await request() }
+        let dialog = IntentDialog(LocalizedStringResource("Open Poki to allow on-device speech recognition for when voice can’t connect.", table: "Entry"))
+        do {
+            if #available(iOS 26.0, *) {
+                let mode = systemContext.currentMode
+                if mode != .foreground {
+                    guard mode.canContinueInForeground else { return false }
+                    try await continueInForeground(dialog, alwaysConfirm: false)
+                }
+                return await request()
+            }
+            return try await requestToContinueInForeground(dialog, continuation: request)
+        } catch {
+            return false
+        }
     }
 
     /// Why the talk has to start in Poki instead, in the words the shortcut shows; nil when it can start here.

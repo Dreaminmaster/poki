@@ -277,6 +277,46 @@ enum VoiceDirect {
     }
 }
 
+typealias SpeechPermissionPresenter = @MainActor (@MainActor () async -> Bool) async -> Bool
+
+/// The iOS permission, recognition and text-task boundaries for a captured opening.
+struct OpeningSpeech {
+    let authorizationStatus: @MainActor () -> SFSpeechRecognizerAuthorizationStatus
+    let requestAuthorization: @MainActor () async -> SFSpeechRecognizerAuthorizationStatus
+    let transcribe: @MainActor (AVAudioPCMBuffer) async throws -> String
+    let sendText: @MainActor (String) -> Bool
+    let announce: @MainActor (String) async -> Void
+
+    @MainActor func authorize(present: SpeechPermissionPresenter) async -> Bool {
+        switch authorizationStatus() {
+        case .authorized: return true
+        case .notDetermined:
+            return await present {
+                let status = authorizationStatus()
+                if status != .notDetermined { return status == .authorized }
+                return await requestAuthorization() == .authorized
+            }
+        default: return false
+        }
+    }
+
+    static let system = OpeningSpeech(
+        authorizationStatus: { SFSpeechRecognizer.authorizationStatus() },
+        requestAuthorization: {
+            await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+            }
+        },
+        transcribe: { try await Dictation.transcribeLocally($0) },
+        sendText: { text in
+            guard let chat = AskPoki.chat, !chat.running else { return false }
+            chat.send(text)
+            return true
+        },
+        announce: { await Dictation().speakAndWait($0) }
+    )
+}
+
 /// Hold to dictate, let go to send to Poki's chat, hear the answer: voice for models without Realtime.
 @MainActor
 final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
@@ -298,6 +338,37 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
         let speech = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0 == .authorized) } }
         let microphone = await AVAudioApplication.requestRecordPermission()
         return speech && microphone
+    }
+
+    /// A failed network connection's recording stays on this iPhone.
+    static func transcribeLocally(_ audio: AVAudioPCMBuffer) async throws -> String {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+              let recognizer = SFSpeechRecognizer(), recognizer.isAvailable,
+              recognizer.supportsOnDeviceRecognition else { return "" }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = false
+        let (results, continuation) = AsyncThrowingStream<String, Error>.makeStream()
+        let recognition = recognizer.recognitionTask(with: request) { result, error in
+            if let result, result.isFinal {
+                continuation.yield(result.bestTranscription.formattedString)
+                continuation.finish()
+            } else if let error {
+                continuation.finish(throwing: error)
+            }
+        }
+        request.append(audio)
+        request.endAudio()
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled { continuation.finish() }
+        }
+        defer {
+            timeout.cancel()
+            recognition.cancel()
+        }
+        for try await text in results { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return ""
     }
 
     func listen() throws {
@@ -375,6 +446,19 @@ final class Dictation: NSObject, AVSpeechSynthesizerDelegate {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
         speaker.speak(utterance)
+    }
+
+    func speakAndWait(_ text: String) async {
+        let (finished, continuation) = AsyncStream<Void>.makeStream()
+        onSpoken = { continuation.finish() }
+        speak(text)
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled { continuation.finish() }
+        }
+        for await _ in finished {}
+        timeout.cancel()
+        stopSpeaking()
     }
 
     func stopSpeaking() { speaker.stopSpeaking(at: .immediate) }

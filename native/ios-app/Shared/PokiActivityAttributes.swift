@@ -23,7 +23,7 @@ struct PokiActivityAttributes: ActivityAttributes {
         }
         /// Live voice session state when Poki's voice mode is active.
         enum Voice: String, Codable, Hashable {
-            case listening, thinking, speaking
+            case connecting, listening, thinking, speaking, finishingOpening
         }
         /// Refreshes an existing activity when the shared UI language changes; older states decode nil.
         var uiLanguage: String? = nil
