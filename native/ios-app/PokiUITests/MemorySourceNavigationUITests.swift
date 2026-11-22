@@ -68,6 +68,46 @@ final class MemorySourceNavigationUITests: XCTestCase {
         XCTAssertEqual(app.buttons["composer.main"].label, expectRunning ? "Stop" : "Send")
     }
 
+
+    /// End-to-end search: use the real Settings row, system search field, and
+    /// search-result button. No direct navigation or test-only scroll invocation.
+    private func searchForMessage(_ phrase: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += ["-pokiUITestConversationSearch", "YES",
+                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let conversations = app.descendants(matching: .any)["details.searchConversations"]
+        XCTAssertTrue(conversations.waitForExistence(timeout: 20), "Settings must show Conversations")
+        conversations.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10), "Conversations must provide native search")
+        search.tap()
+        search.typeText(phrase)
+        let result = app.buttons["search.message"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 20), "A full-text matching message must be listed")
+        screenshot(app, name: "Conversation search matching result")
+        result.tap()
+        let target = app.staticTexts[phrase]
+        XCTAssertTrue(target.waitForExistence(timeout: 15), "Search must open the matching transcript message")
+        XCTAssertTrue(target.isHittable, "The exact matching message must settle within the viewport")
+        screenshot(app, name: "Conversation search exact message in viewport")
+        return app
+    }
+
+    func testConversationSearchOpensNormalMessageAtExactHit() throws {
+        let app = searchForMessage("Synthetic ordinary search needle")
+        defer { app.terminate() }
+        XCTAssertFalse(app.staticTexts["Synthetic unrelated approval greeting"].exists,
+                       "An ordinary result must not expose the hidden opening greeting")
+    }
+
+    func testConversationSearchRevealsSelectedGreetingOnly() throws {
+        let app = searchForMessage("Synthetic greeting search needle")
+        defer { app.terminate() }
+        XCTAssertFalse(app.staticTexts["Synthetic unrelated approval greeting"].exists,
+                       "Selecting an opening greeting must not expose unrelated opening content")
+    }
+
     func testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft() throws {
         // Starts a genuine ChatModel.send using a held HTTP fixture request.
         // A narrow idle chat intentionally restores the saved conversation
