@@ -43,4 +43,82 @@ final class PokiFrontTests: XCTestCase {
         XCTAssertTrue(opened.text.contains("New Note"), opened.text)
         XCTAssertNotNil(opened.jpeg, opened.text)
     }
+
+    func testNewTaskFirstStepNeverReusesPreviousTaskCalculatorScreenshot() async throws {
+        let wda = FakeWDA()
+        let calcPNG = Data("calculator-screen-png".utf8)
+        let weatherPNG = Data("weather-screen-png".utf8)
+        let currentPNG = LockedBox<Data?>(calcPNG)
+        let front = LockedBox(("com.apple.calculator", "Calculator"))
+        wda.set("GET /wda/activeAppInfo") { _ in
+            let app = front.value
+            return (200, ["value": ["bundleId": .string(app.0), "name": .string(app.1)]])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard let data = currentPNG.value else {
+                return (500, ["value": ["error": "screenshot unavailable"]])
+            }
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+        wda.source([("Button", "7")], app: "Calculator")
+        let (core, _, host) = makeCore(wda)
+        host.state.value = .automationReady(revision: 1)
+
+        let events = LockedBox<[CoreEvent]>([])
+        let collector = Task { for await event in core.events { events.update { $0.append(event) } } }
+        defer { collector.cancel() }
+
+        func finishedFacts(count: Int) async throws -> ToolFacts {
+            let arrived = await eventually {
+                events.value.filter { if case .toolFinished = $0 { return true }; return false }.count >= count
+            }
+            XCTAssertTrue(arrived, "expected \(count) toolFinished events")
+            let finished = events.value.compactMap { event -> ToolFacts? in
+                if case .toolFinished(_, _, let facts) = event { return facts }
+                return nil
+            }
+            return try XCTUnwrap(finished.last)
+        }
+
+        // Task 1 ends in Calculator with a fresh screenshot cached in Computer.
+        let task1 = await core.callTool("look", arguments: "{}", localTask: "chat#1")
+        XCTAssertNotNil(task1.jpeg)
+        let task1Facts = try await finishedFacts(count: 1)
+        XCTAssertEqual(task1Facts.app, "Calculator")
+        XCTAssertNotNil(task1Facts.thumbnail)
+        _ = await core.finishTask(switching: false)
+
+        // Task 2 step 1 fails before any read after automation re-opens.
+        host.state.value = .automationReady(revision: 2)
+        let blocked = await core.callTool("do", arguments: #"{"actions":[{"tap":[20,100]}]}"#, localTask: "chat#2")
+        XCTAssertTrue(blocked.isError, blocked.text)
+        XCTAssertNil(blocked.jpeg, "early failure must not return previous task's screenshot to the model")
+        let blockedFacts = try await finishedFacts(count: 2)
+        XCTAssertNil(blockedFacts.thumbnail, "task card must not receive Calculator's screenshot on task 2 step 1")
+        XCTAssertNil(blockedFacts.app, "task card must not receive Calculator as task 2 step 1's app")
+
+        // Task 2 stays in Calculator without finishTask, then Task 3 starts when screenshot capture fails.
+        front.value = ("com.apple.calculator", "Calculator")
+        currentPNG.value = calcPNG
+        _ = await core.callTool("look", arguments: "{}", localTask: "chat#2")
+        _ = try await finishedFacts(count: 3)
+
+        front.value = ("com.apple.weather", "Weather")
+        wda.source([("StaticText", "Beijing")], app: "Weather")
+        currentPNG.value = nil
+        let task3Step1 = await core.callTool("look", arguments: "{}", localTask: "chat#3")
+        XCTAssertFalse(task3Step1.isError, task3Step1.text)
+        XCTAssertNil(task3Step1.jpeg, "new task step 1 must not fall back to previous task's Calculator screenshot: \(task3Step1.text)")
+        XCTAssertFalse(task3Step1.text.contains("the screenshot is the one of the read before"), task3Step1.text)
+        let task3Step1Facts = try await finishedFacts(count: 4)
+        XCTAssertNil(task3Step1Facts.thumbnail, "task card must show no screenshot when new task step 1 fails to capture one")
+
+        // Once Task 3 captures a fresh screenshot, both model and task card receive it.
+        currentPNG.value = weatherPNG
+        let task3Step2 = await core.callTool("look", arguments: "{}", localTask: "chat#3")
+        XCTAssertEqual(task3Step2.jpeg, Data("jpeg:\(weatherPNG.count)".utf8))
+        let task3Step2Facts = try await finishedFacts(count: 5)
+        XCTAssertEqual(task3Step2Facts.app, "Weather")
+        XCTAssertEqual(task3Step2Facts.thumbnail, Data("jpeg:\(weatherPNG.count)".utf8))
+    }
 }
