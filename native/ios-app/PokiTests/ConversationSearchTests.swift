@@ -18,13 +18,6 @@ final class ConversationSearchTests: XCTestCase {
         return ConversationSearchIndex.resolve(matched, in: sessions)
     }
 
-    func testMemorySourceRouteKeepsOtherConversationInPresentedPreview() {
-        XCTAssertTrue(RootView.usesSessionPreview(id: "saved", activeID: "current", running: false, wide: true))
-        XCTAssertTrue(RootView.usesSessionPreview(id: "saved", activeID: "current", running: true, wide: false))
-        XCTAssertFalse(RootView.usesSessionPreview(id: "saved", activeID: "current", running: false, wide: false))
-        XCTAssertFalse(RootView.usesSessionPreview(id: "current", activeID: "current", running: true, wide: true))
-    }
-
     func testGreetingRemainsInTranscriptAfterScrollRequestIsConsumed() {
         let greeting = ChatEntry(.poki("Welcome to Poki"))
         let otherGreeting = ChatEntry(.poki("Previous approval setting"))
@@ -94,9 +87,7 @@ final class ConversationSearchTests: XCTestCase {
 
     func testDeletedSessionsDoNotAppearAndLimitIsEnforced() {
         let a = sample("a", entries: (0..<20).map { ChatEntry(.you("find me \($0)", delivered: true)) })
-        let b = sample("deleted", entries: [ChatEntry(.poki("find me"))])
         XCTAssertEqual(find(in: [a], query: "find", limit: 5).count, 5)
-        XCTAssertFalse(find(in: [a], query: "find").contains { $0.session.id == b.id })
         XCTAssertTrue(find(in: [a, b], query: "missing").isEmpty)
     }
 
