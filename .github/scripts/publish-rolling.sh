@@ -6,12 +6,19 @@
 # release, which Poki Setup 0.2.2 and earlier read.
 #
 #   publish-rolling.sh <prealpha|alpha> <version> <build> <dir with Poki-external-unsigned.ipa and Poki-signing.zip> [desktop source release]
+#   publish-rolling.sh prealpha <version> <build> <dir> --versioned
 #
 # Run from the checkout of the built commit with GH_TOKEN set. New files go up before the previous
 # build's are removed, so the release always has an installable IPA. With a desktop source release
 # (alpha takes app-prealpha-latest's), its Poki Setup files are copied in as well.
 set -euo pipefail
 CHANNEL="$1" VERSION="$2" BUILD="$3" SRC="$4" DESKTOP_FROM="${5:-}"
+VERSIONED=false
+if [ "$DESKTOP_FROM" = --versioned ]; then
+  [ "$CHANNEL" = prealpha ] || { echo "::error::--versioned requires prealpha"; exit 2; }
+  VERSIONED=true
+  DESKTOP_FROM=""
+fi
 case "$CHANNEL" in
   prealpha) TITLE=Pre-alpha; BLURB="An untested snapshot of main for the Pre-alpha channel in Poki Setup; it can break." ;;
   alpha) TITLE=Alpha; BLURB="A pre-alpha that passed the alpha tests, for the Alpha channel in Poki Setup; expect rough edges." ;;
@@ -20,6 +27,10 @@ esac
 ROLLING="app-$CHANNEL-latest"
 LEGACY="ios-$CHANNEL-latest"
 TAG="app-$VERSION-$CHANNEL.$BUILD"
+if "$VERSIONED"; then
+  ROLLING="$TAG"
+  BLURB="A hotfix preview for this version."
+fi
 SHA="$(git rev-parse HEAD)"
 git config user.name >/dev/null || git config user.name "github-actions[bot]"
 git config user.email >/dev/null || git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -44,7 +55,11 @@ else
   range=HEAD; since="(latest commits)"; limit=15
 fi
 {
-  echo "$TITLE: Poki $VERSION ($BUILD), built from ${SHA:0:7} (tag $TAG). $BLURB Use the Beta or Stable channel for anything you rely on. This release is updated in place with every $TITLE build."
+  notes_tail=" This release is updated in place with every $TITLE build."
+  if "$VERSIONED"; then
+    notes_tail=" Build run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+  fi
+  echo "$TITLE: Poki $VERSION ($BUILD), built from ${SHA:0:7} (tag $TAG). $BLURB Use the Beta or Stable channel for anything you rely on.$notes_tail"
   echo
   echo "Install Poki-external with Poki Setup, or sign either IPA with your own tool (entitlements in Poki-signing.zip). See native/ios-app/README.md."
   echo
@@ -94,5 +109,19 @@ publish_to() {
   fi
   echo "Published Poki v$VERSION ($BUILD) to $rel: https://github.com/$GITHUB_REPOSITORY/releases/tag/$rel"
 }
-publish_to "$ROLLING"
-publish_to "$LEGACY"
+if "$VERSIONED"; then
+  if draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"; then
+    [ "$draft" = true ] || { echo "::error::$TAG already has a published release"; exit 1; }
+    gh release upload "$TAG" dist/* --clobber
+  else
+    gh release create "$TAG" dist/* --verify-tag --draft \
+      --title "Poki v$VERSION ($BUILD) $TITLE" --notes-file notes.md --prerelease --latest=false
+  fi
+  count="$(find dist -maxdepth 1 -type f | wc -l)"
+  test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -eq "$count"
+  gh release edit "$TAG" --notes-file notes.md --draft=false --prerelease --latest=false
+  echo "Published Poki v$VERSION ($BUILD) to $TAG: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+else
+  publish_to "$ROLLING"
+  publish_to "$LEGACY"
+fi

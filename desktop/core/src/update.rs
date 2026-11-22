@@ -46,11 +46,21 @@ fn check_installed(installed: &Installed, app: &device::install::InstalledApp, r
     Ok(())
 }
 
+fn version_and_build(version: &str, build: &str) -> Option<([u64; 3], u64)> {
+    let mut components = version.splitn(3, '.').map(str::parse::<u64>);
+    let version = [
+        components.next()?.ok()?,
+        components.next()?.ok()?,
+        components.next()?.ok()?,
+    ];
+    Some((version, build.parse().ok()?))
+}
+
 fn check_target(installed: &Installed, unpacked: &sign::Unpacked, channel: release::Channel) -> Result<Target> {
-    let old = installed.build.parse::<u64>().ok();
-    let new = unpacked.build.parse::<u64>().ok();
+    let old = version_and_build(&installed.version, &installed.build);
+    let new = version_and_build(&unpacked.version, &unpacked.build);
     if old.is_none() || new.is_none() || new <= old {
-        return Err(stop("The target build is not newer than the installed build; keep Poki installed and wait for a newer build on the same channel."));
+        return Err(stop("The target release is not newer than the installed release. Keep Poki installed and wait for a newer Beta release."));
     }
     if channel != release::Channel::Beta {
         return Err(stop("The selected release is not a Beta update; keep Poki installed and check for a Beta release."));
@@ -175,12 +185,12 @@ mod tests {
         }
     }
 
-    fn target(build: &str) -> sign::Unpacked {
+    fn target(version: &str, build: &str) -> sign::Unpacked {
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("Poki.app");
         let widget = app.join("PlugIns/PokiWidgets.appex");
         std::fs::create_dir_all(&widget).unwrap();
-        let info = serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki", "CFBundleShortVersionString": "0.4.2", "CFBundleVersion": build, "PokiAppGroup": "group.nz.zheha.poki"});
+        let info = serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki", "CFBundleShortVersionString": version, "CFBundleVersion": build, "PokiAppGroup": "group.nz.zheha.poki"});
         plist::to_file_xml(app.join("Info.plist"), &info).unwrap();
         plist::to_file_xml(widget.join("Info.plist"), &serde_json::json!({"CFBundleIdentifier": "nz.zheha.poki.widgets"})).unwrap();
         let ipa = dir.path().join("target.ipa");
@@ -189,9 +199,33 @@ mod tests {
     }
 
     #[test]
+    fn target_orders_version_before_build() {
+        let mut installed = installed();
+        installed.version = "0.4.7".into();
+        installed.build = "9971".into();
+        let beta = release::Channel::Beta;
+
+        let newer = target("0.5.0", "1931");
+        let older = target("0.4.6", "1930");
+        let older_with_higher_build = target("0.4.6", "9999");
+        let same_version_older_build = target("0.5.0", "1930");
+
+        assert_eq!(
+            check_target(&installed, &newer, beta).unwrap(),
+            Target { version: "0.5.0".into(), build: "1931".into() },
+        );
+        for older in [older, older_with_higher_build] {
+            assert!(check_target(&installed, &older, beta).unwrap_err().to_string().contains("not newer"));
+        }
+        installed.version = "0.5.0".into();
+        installed.build = "1931".into();
+        assert!(check_target(&installed, &same_version_older_build, beta).unwrap_err().to_string().contains("not newer"));
+    }
+
+    #[test]
     fn target_preserves_build_channel_and_extensions() {
-        let installed = installed();
-        let target = target("101");
+        let mut installed = installed();
+        let target = target("0.4.2", "101");
         for version in ["0.4.0", "0.4.1"] {
             for channel in release::Channel::ALL {
                 let mut old = installed.clone();
@@ -200,6 +234,7 @@ mod tests {
                 assert_eq!(check_target(&old, &target, release::Channel::Beta).unwrap(), Target { version: "0.4.2".into(), build: "101".into() });
             }
         }
+        installed.version = "0.4.2".into();
         for build in ["101", "102", "unknown"] {
             let mut changed = installed.clone();
             changed.build = build.into();

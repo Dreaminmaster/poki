@@ -22,6 +22,8 @@ public struct ToolResult: Sendable {
     var screenEvidence: ScreenEvidence? = nil
     var numberedScreen: PokiCore.NumberedScreen? = nil
     var itemPictureSource: ItemPictureSource?
+    var freshPNG: Data? = nil
+    var observedApp: String? = nil
 }
 
 struct ScreenEvidence: OptionSet, Sendable {
@@ -119,6 +121,7 @@ final class Computer: @unchecked Sendable {
     let failureLog = LockedBox<String?>(nil)
     /// When `lastPNG` was taken (it stands in, marked stale, when a read gives no picture at all).
     var lastPNGAt: Double?
+    private var activeLocalTask: String?
     /// How long the last look or do took inside the computer, for the MCP's own accounting.
     var lastCallTook: Double?
     var lastTree: String?
@@ -263,7 +266,7 @@ final class Computer: @unchecked Sendable {
             lines += did.map { "did: \($0)" }
             if let error { lines.append("error: \(error)") }
             lines += extra + kept + staleNote
-            return ToolResult(text: lines.joined(separator: "\n"), jpeg: stale, isError: true, screenEvidence: [])
+            return ToolResult(text: lines.joined(separator: "\n"), jpeg: stale, isError: true, screenEvidence: [], observedApp: reading.foreground?.describe)
         }
         let treeRead = !reading.elements.isEmpty || reading.notes.isEmpty
         if !treeRead { currentBackTarget = BackTarget(in: []) }
@@ -521,7 +524,8 @@ final class Computer: @unchecked Sendable {
         return ToolResult(text: (header + body + footer).joined(separator: "\n"), jpeg: jpeg, isError: error != nil,
                           screen: treeRead ? "\(reading.foreground?.bundleID ?? "")\n\(tree)" + (pictureMoved ? "\npicture moved: \(UUID().uuidString)" : "") : nil,
                           waitingForOwner: handoffWaiting, readApp: treeRead ? reading.foreground?.bundleID : nil,
-                          screenEvidence: evidence, numberedScreen: numberedScreen, itemPictureSource: itemPictureSource)
+                          screenEvidence: evidence, numberedScreen: numberedScreen, itemPictureSource: itemPictureSource,
+                          freshPNG: reading.png, observedApp: lastForeground?.describe)
     }
 
     /// An answer with nothing done but the picture (served apart from WDA's queue), so a busy runner
@@ -532,14 +536,14 @@ final class Computer: @unchecked Sendable {
         guard timeout > 0.3, let png = try? await runner.screenshot(timeout: min(3, timeout)) else {
             // The runner gives none: the host's own path to the screen, when it has one.
             if selectedPane == nil, timeout > 0.3, let fallback = runner.screenshotFallback, let png = (try? await withDeadline(6, "the host's screenshot") { await fallback() }) ?? nil, let jpeg = try? host.jpeg(fromPNG: png, width: Self.pictureWidth(size), quality: 0.6) {
-                return ToolResult(text: text + "\nscreenshot: the screen now, taken apart from the runner (nothing was sent)", jpeg: jpeg, isError: false)
+                return ToolResult(text: text + "\nscreenshot: the screen now, taken apart from the runner (nothing was sent)", jpeg: jpeg, isError: false, freshPNG: png, observedApp: lastForeground?.describe)
             }
             return ToolResult(text: text + "\nscreenshot: none (the runner did not give one either)", jpeg: nil, isError: isErrorWithoutPicture)
         }
         await updateReadSize(until: now() + 1)
         if remember { lastPNG = png }
         let jpeg = try? host.jpeg(fromPNG: png, width: Self.pictureWidth(size), quality: 0.6)
-        return ToolResult(text: text + (jpeg == nil ? "" : "\nscreenshot: the screen now (nothing was sent)"), jpeg: jpeg, isError: jpeg == nil && isErrorWithoutPicture)
+        return ToolResult(text: text + (jpeg == nil ? "" : "\nscreenshot: the screen now (nothing was sent)"), jpeg: jpeg, isError: jpeg == nil && isErrorWithoutPicture, freshPNG: png, observedApp: lastForeground?.describe)
     }
 
     /// The answer when Poki is in front, as when a task asked in Poki's chat begins (ESP-465: the first
@@ -582,6 +586,7 @@ final class Computer: @unchecked Sendable {
     func look(full: Bool, pane: String? = nil, session: String? = nil, local: Bool = false, expectedApps: Set<String>? = nil, localTask: String? = nil) async -> ToolResult {
         let started = now()
         defer { lastCallTook = now() - started }
+        resetScreenForNewTask(session: session, localTask: localTask)
         return await lookNow(full: full, pane: pane, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
     }
 
@@ -802,9 +807,23 @@ final class Computer: @unchecked Sendable {
         swipeUnread = true
     }
 
+    private func clearTaskScreenshotCache() {
+        lastPNG = nil; lastPNGAt = nil; lastPicture = nil; pictureOnlyShare = nil
+    }
+
+    private func resetScreenForNewTask(session: String?, localTask: String?) {
+        guard selectedPane == nil || selectedPane?.session == session else { return }
+        let taskChanged = localTask != activeLocalTask
+        guard beginsTask() || taskChanged else { return }
+        clearTaskScreenshotCache()
+        if taskChanged { origin = nil }
+        activeLocalTask = localTask
+    }
+
     private func clearPaneRead() {
         confirmedPaneRead = false
-        lastPNG = nil; lastPNGAt = nil; lastPicture = nil; lastTree = nil; size = nil
+        clearTaskScreenshotCache()
+        lastTree = nil; size = nil
         refs = [:]; listed = []; lastAll = []; lastTreeAt = nil; lastForeground = nil; skillStepApp = nil
         typedInto = nil; typedText = nil; swipeUnread = false
     }
@@ -852,11 +871,12 @@ final class Computer: @unchecked Sendable {
         }
         if selectedPane == nil { workspaceOwner.value = nil }
         origin = nil
+        activeLocalTask = nil
         workspaceReads.removeAll()
         workspaceDrop = nil
         interruptedDropApp = nil
         workspaceDrags.removeAll()
-        if selectedPane != nil { clearPaneRead() }
+        if selectedPane != nil { clearPaneRead() } else { clearTaskScreenshotCache() }
     }
 
     /// The answer with the reason for a restart this side made, reported once: the model learns why
@@ -1024,6 +1044,7 @@ final class Computer: @unchecked Sendable {
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
     func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+        resetScreenForNewTask(session: session, localTask: localTask)
         let originalActionCount = actions.count
         var actions = actions
         var bound: String?
@@ -1515,6 +1536,7 @@ final class Computer: @unchecked Sendable {
         if let selectedPane {
             let exit = await selectPane("auto", session: selectedPane.session, until: now() + 3)
             origin = nil
+            activeLocalTask = nil
             if exit != nil {
                 approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
                 self.selectedPane = nil
@@ -1525,6 +1547,8 @@ final class Computer: @unchecked Sendable {
                 interruptedDropApp = nil
                 workspaceDrags.removeAll()
                 clearPaneRead()
+            } else {
+                clearTaskScreenshotCache()
             }
             return exit.map { "finish: Split View stays open; \($0.text)" } ?? "finish: both apps stay open in Split View"
         }
@@ -1533,6 +1557,8 @@ final class Computer: @unchecked Sendable {
             return "finish: the phone stays in its current layout"
         }
         approvals.discardAll()
+        clearTaskScreenshotCache()
+        activeLocalTask = nil
         guard let task = origin else { return nil }
         origin = nil
         guard let bundle = task.app.bundleID else { return nil }
@@ -2084,7 +2110,7 @@ final class Computer: @unchecked Sendable {
             // The screen it was refused on, so the model sees what it asked for (gym: the declined
             // answer was the one answer without a picture).
             let read = await readAndReply(until: until, full: full, changes: true)
-            return ToolResult(text: text + " Nothing was sent.\n" + read.text, jpeg: read.jpeg, isError: true)
+            return ToolResult(text: text + " Nothing was sent.\n" + read.text, jpeg: read.jpeg, isError: true, freshPNG: read.freshPNG, observedApp: read.observedApp)
         }
         return await readAndReply(until: until, full: full, changes: true, did: did, error: text)
     }

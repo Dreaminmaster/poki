@@ -38,6 +38,33 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(activity.state.phase, .idle)
     }
 
+    func testNewRunAndNilThumbnailClearPreviousTaskThumbnail() {
+        let activity = ActivityController()
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20))
+        let jpeg = renderer.jpegData(withCompressionQuality: 0.7) { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        }
+
+        activity.update { $0.phase = .working; $0.headline = "Open Calculator" }
+        activity.setThumbnail(jpeg)
+        XCTAssertTrue(activity.state.hasThumbnail)
+        activity.finishNow(alert: false)
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertTrue(activity.state.hasThumbnail, "finished task keeps its final thumbnail on Done")
+
+        activity.update { $0.phase = .working; $0.headline = "Thinking" }
+        XCTAssertFalse(activity.state.hasThumbnail, "a new run must not inherit the previous task's thumbnail")
+        if let url = SharedContainer.thumbnailURL {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+
+        activity.setThumbnail(jpeg)
+        XCTAssertTrue(activity.state.hasThumbnail)
+        activity.setThumbnail(nil)
+        XCTAssertFalse(activity.state.hasThumbnail, "a step without a fresh screenshot clears the thumbnail")
+    }
+
     private var language = AppLocalization.system
 
     override func setUp() async throws {

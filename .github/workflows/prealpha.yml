@@ -4,22 +4,31 @@
 # every later run can read; a run from a tag could only read main's caches, and main had none, so
 # every release build used to start cold (about 20 minutes, 9 of them in PiSwiftAI).
 #
-# The build number is the commit count of main, so it only goes up while main is never rewritten.
+# The build number is the commit count of the source commit, on main or the hotfix branch.
 # Tag: app-<VERSION>-prealpha.<count>; release: the rolling app-prealpha-latest, mirrored to the old
 # ios-prealpha-latest for Poki Setup 0.2.2 and earlier (docs/release-channels.md).
 name: Pre-alpha
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Hotfix Pre-alpha {0}', inputs.version) || '' }}
 
 on:
   push:
     branches: [main]
     paths-ignore: ['**/*.md', 'docs/**', '.github/ISSUE_TEMPLATE/**', '.github/channels.json', '.github/workflows/promote-*.yml']
-  # Re-publish main's head by hand (for example after a failed run).
+  # Dispatch from main so the workflow and publisher come from the trusted branch.
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Hotfix branch to build (hotfix/...)"
+        type: string
+        required: true
+      version:
+        description: "App version (X.Y.Z)"
+        type: string
+        required: true
 
-# One pre-alpha at a time. A merge that lands while one builds waits; if several land, only the
-# newest waits and the ones in between are skipped (each build includes them).
+# Main has one rolling publisher. Hotfixes publish versioned releases in a separate queue.
 concurrency:
-  group: prealpha
+  group: ${{ github.event_name == 'workflow_dispatch' && 'prealpha-hotfix' || 'prealpha' }}
   cancel-in-progress: false
 
 permissions:
@@ -27,7 +36,7 @@ permissions:
 
 jobs:
   prealpha:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # The Xcode 27 image: the iOS 27.1 SDK or later, which the iPhone Duo needs (build-ipa).
     runs-on: xcode-27
     timeout-minutes: 60
@@ -90,3 +99,120 @@ jobs:
         run: |
           echo "## Poki v${{ steps.v.outputs.version }} (${{ steps.v.outputs.build }}) Pre-alpha" >> "$GITHUB_STEP_SUMMARY"
           echo "Rust library from cache: ${{ steps.build.outputs.rust-hit || 'false' }}" >> "$GITHUB_STEP_SUMMARY"
+
+  resolve-hotfix:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ inputs.ref }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REF" != hotfix/?* ]] || ! git check-ref-format "refs/heads/$SOURCE_REF"; then
+            echo "::error::ref must be a hotfix/ branch"; exit 1
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
+          encoded_ref="$(jq -nr --arg ref "$SOURCE_REF" '$ref | split("/") | map(@uri) | join("/")')"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$encoded_ref" |
+            jq -er --arg ref "refs/heads/$SOURCE_REF" 'select(.ref == $ref and .object.type == "commit") | .object.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::hotfix branch did not resolve to a commit"; exit 1; }
+          { echo "sha=$sha"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+          printf '## Poki v%s Pre-alpha from %s at `%s`\n' "$VERSION" "$SOURCE_REF" "$sha" >> "$GITHUB_STEP_SUMMARY"
+
+  build-hotfix:
+    needs: resolve-hotfix
+    outputs:
+      build: ${{ steps.number.outputs.build }}
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-hotfix.outputs.sha }}
+          fetch-depth: 0
+          filter: 'tree:0'
+          persist-credentials: false
+      - name: Count hotfix commits
+        id: number
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+            echo "::error::Hotfix build numbering requires full Git history."
+            exit 1
+          fi
+          build="$(git rev-list --count HEAD)"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "Hotfix build: $build" >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.github/actions/build-ipa
+        with:
+          version: ${{ needs.resolve-hotfix.outputs.version }}
+          build: ${{ steps.number.outputs.build }}
+          editions: external
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Poki-unsigned
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
+  publish-hotfix:
+    needs: [resolve-hotfix, build-hotfix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          ref: ${{ needs.resolve-hotfix.outputs.sha }}
+          fetch-depth: 0
+          filter: 'tree:0'
+      - uses: actions/checkout@v4
+        with:
+          path: pipeline
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Poki-unsigned
+          path: app
+      - name: Verify and record the hotfix IPA
+        working-directory: app
+        env:
+          SOURCE_SHA: ${{ needs.resolve-hotfix.outputs.sha }}
+          VERSION: ${{ needs.resolve-hotfix.outputs.version }}
+          BUILD: ${{ needs.build-hotfix.outputs.build }}
+        run: |
+          set -euo pipefail
+          (cd ../source && test "$(git rev-parse HEAD)" = "$SOURCE_SHA")
+          sha256sum -c SHA256SUMS
+          python3 ../pipeline/.github/scripts/verify-ipa-version.py Poki-external-unsigned.ipa "$VERSION" "$BUILD"
+          ipa_sha="$(sha256sum Poki-external-unsigned.ipa | cut -d ' ' -f 1)"
+          jq -n --arg sha "$SOURCE_SHA" --arg version "$VERSION" --arg build "$BUILD" --arg ipa "$ipa_sha" \
+            '{sha: $sha, version: $version, build: $build, ipa_sha256: $ipa}' > "$RUNNER_TEMP/poki-hotfix-source.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Poki-hotfix-source
+          path: ${{ runner.temp }}/poki-hotfix-source.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+      - name: Publish the versioned hotfix Pre-alpha
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.resolve-hotfix.outputs.version }}
+          BUILD: ${{ needs.build-hotfix.outputs.build }}
+        run: ../pipeline/.github/scripts/publish-rolling.sh prealpha "$VERSION" "$BUILD" ../app --versioned
