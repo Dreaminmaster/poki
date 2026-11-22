@@ -34,10 +34,10 @@ final class LoopbackShortcut: ObservableObject {
         let queue = self.queue
         listener.newConnectionHandler = { [weak self, weak model] connection in
             connection.start(queue: queue)
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { bytes, _, _, _ in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self, weak model] bytes, _, _, _ in
                 let line = bytes.flatMap { String(data: $0, encoding: .utf8) }?.split(whereSeparator: \.isNewline).first
                 let parts = line?.split(separator: " ") ?? []
-                Task { @MainActor in
+                Task { @MainActor [weak self, weak model] in
                     guard let self, let model, parts.count == 3, ["GET", "POST"].contains(parts[0]),
                           ["/ready", "/reconnect"].contains(parts[1]) else {
                         Self.reply("404 Not Found", body: "false", to: connection)

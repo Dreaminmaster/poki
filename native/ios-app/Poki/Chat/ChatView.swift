@@ -1600,31 +1600,7 @@ struct ComposerInputView: View {
     /// whole composer.
     private var ways: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                ForEach(Array(KnownApps.all.prefix(3)), id: \.id) { app in
-                    Button { pickApp(app) } label: {
-                        VStack(spacing: 4) {
-                            if let icon = AppIconStore.shared.icon(app.id, dark: false) {
-                                Image(uiImage: icon).resizable().scaledToFit().frame(width: 29, height: 29)
-                                    .clipShape(.rect(cornerRadius: 6))
-                            } else { DefaultAppIcon(size: 29) }
-                            Text(verbatim: app.name(in: AppLanguage.current)).lineLimit(1)
-                        }
-                        .font(.caption2)
-                        .frame(width: 60, minHeight: 50)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button("More", systemImage: "ellipsis") {
-                    adding = false
-                    showingAllApps = true
-                }
-                .labelStyle(.iconOnly)
-                .frame(width: 44, height: 44)
-                .buttonStyle(.plain)
-                .accessibilityLabel("More Apps")
-            }
-            .padding(.horizontal, 8)
+            appChoices
             way("Photos", "photo", "composer.photos", enabled: attachments.count < Self.most) { choosingPhotos = true }
             way("Take Photo", "camera", "composer.camera", enabled: attachments.count < Self.most && UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
             way("Files", "folder", "composer.files", enabled: attachments.count < Self.most) { choosingFiles = true }
@@ -1640,6 +1616,39 @@ struct ComposerInputView: View {
         .onTapGesture { adding = false }
         .accessibilityElement(children: .contain)
         .accessibilityAction(.escape) { adding = false }
+    }
+
+    private var appChoices: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(KnownApps.all.prefix(3)), id: \.id) { app in
+                Button { pickApp(app) } label: { appChoice(app) }
+                    .buttonStyle(.plain)
+            }
+            Button("More", systemImage: "ellipsis") {
+                adding = false
+                showingAllApps = true
+            }
+            .labelStyle(.iconOnly)
+            .frame(width: 44, height: 44)
+            .buttonStyle(.plain)
+            .accessibilityLabel("More Apps")
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func appChoice(_ app: KnownApp) -> some View {
+        VStack(spacing: 4) {
+            if let icon = AppIconStore.shared.icon(app.id, dark: false) {
+                Image(uiImage: icon).resizable().scaledToFit().frame(width: 29, height: 29)
+                    .clipShape(.rect(cornerRadius: 6))
+            } else {
+                DefaultAppIcon(size: 29)
+            }
+            Text(verbatim: app.name(in: AppLanguage.current)).lineLimit(1)
+        }
+        .font(.caption2)
+        .frame(width: 60)
+        .frame(minHeight: 50)
     }
 
     private func way(_ title: LocalizedStringKey, _ symbol: String, _ id: String, enabled: Bool = true,
