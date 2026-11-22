@@ -55,6 +55,7 @@ export async function runBatch(ctx, args) {
   const blocks = [];
   let stopReason, failed = false, ran = 0, failure, unchanged;
   ctx.inBatch = true;
+  ctx.beginInputGroup?.();
   try {
     for (const [index, command] of commands.entries()) {
       const started = performance.now();
@@ -85,7 +86,7 @@ export async function runBatch(ctx, args) {
       if (stopReason) break;
       if (changesDevice.has(command.tool)) ctx.resolved = undefined;
     }
-  } finally { ctx.inBatch = false; ctx.batchStep = undefined; }
+  } finally { ctx.inBatch = false; ctx.batchStep = undefined; await ctx.endInputGroup?.(); }
   const summary = unverified ? { verified: false } : {};
   // Reading a simulator that a step just shut down would boot it again.
   const last = commands.slice(0, ran).findLast(command => !offDevice.has(command.tool));
