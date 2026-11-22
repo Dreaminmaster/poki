@@ -29,9 +29,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     private static let sampleRate = 48_000.0
     private static let framesPerMillisecond = Int(sampleRate / 1_000)
+    private static let deliveryChunkFrames = 480
     // Covers two connection attempts plus fallback dictation without unbounded memory growth.
     static let maxOpeningFrames = Int(sampleRate) * 180
-    private static let maxReplayBurst = Int(sampleRate / 10)
     private static let channelFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true
     )!
@@ -57,6 +57,12 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         case silence
     }
 
+    private enum Delivery {
+        case none
+        case live(RTCAudioDeviceDelegate)
+        case queued(RTCAudioDeviceDelegate, [Int16])
+    }
+
     private var delegate: RTCAudioDeviceDelegate?
     private var recording = false
     private var playing = false
@@ -73,7 +79,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var lastNonZeroOpeningFrame = 0
     private var deliveredFrames = 0
     private var confirmedFrames = 0
-    private var hasServerFrameProgress = false
     private var phoneActionStarted = false
     private var remoteReplied = false
     private var openingConfirmed = false
@@ -159,19 +164,8 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         guard endMilliseconds > 0 else { return }
         lock.withLock {
             guard session == self.session, case .sending = state, deliveredFrames > 0 else { return }
-            hasServerFrameProgress = true
             let frames = min(deliveredFrames, endMilliseconds * Self.framesPerMillisecond)
             confirmedFrames = max(confirmedFrames, frames)
-            evaluateOpeningConfirmedLocked()
-        }
-    }
-
-    func confirmRemoteTranscription(session: Int) {
-        lock.withLock {
-            guard session == self.session, case .sending = state, deliveredFrames > 0 else { return }
-            if !hasServerFrameProgress {
-                confirmedFrames = max(confirmedFrames, deliveredFrames)
-            }
             evaluateOpeningConfirmedLocked()
         }
     }
@@ -205,12 +199,15 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                     evaluateOpeningConfirmedLocked()
                     guard !openingConfirmed else { return nil }
                     guard !overflow, !recoveryOverflow else { return nil }
-                    if phoneActionStarted {
-                        let tailStart = hasServerFrameProgress ? min(confirmedFrames, deliveredFrames) : deliveredFrames
+                    if confirmedFrames > 0, remoteReplied || phoneActionStarted {
+                        let tailStart = min(confirmedFrames, deliveredFrames)
                         let hasUnconfirmedSpeech = tailStart < lastNonZeroOpeningFrame
                         let hasUnsentAudio = deliveredFrames < recovery.count
                         guard tailStart < recovery.count, hasUnconfirmedSpeech || hasUnsentAudio else { return nil }
                         queued = Array(recovery[tailStart...])
+                        kind = .unconfirmedTail
+                    } else if phoneActionStarted, deliveredFrames < recovery.count {
+                        queued = Array(recovery[deliveredFrames...])
                         kind = .unconfirmedTail
                     } else {
                         queued = recovery
@@ -293,7 +290,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         let count = Int(pcm.frameLength)
         let sourceFrames = UnsafeBufferPointer(start: source, count: count)
         sendLock.withLock {
-            let (delegate, audio): (RTCAudioDeviceDelegate?, [Int16]?) = lock.withLock {
+            let delivery: Delivery = lock.withLock {
                 switch state {
                 case .buffering:
                     let previousEnd = queued.count
@@ -304,38 +301,47 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                             lastNonZeroOpeningFrame = max(lastNonZeroOpeningFrame, previousEnd + nonZeroEnd)
                         }
                     }
-                    return (nil, nil)
+                    return .none
                 case .waitingForOwner(let completion):
                     bufferLocked(sourceFrames)
                     if overflow {
                         state = .readyForDictation
                         completion.finish()
                     }
-                    return (nil, nil)
+                    return .none
                 case .sending:
                     rememberForRecoveryLocked(sourceFrames)
                     guard recording, let delegate else {
                         bufferLocked(sourceFrames)
-                        return (nil, nil)
+                        return .none
                     }
-                    guard !overflow else { return (nil, nil) }
-                    let drainingQueue = readIndex < queued.count
-                    let packet = drainingQueue ? drainLocked(with: sourceFrames) : nil
-                    if drainingQueue, !openingConfirmed, !recoveryOverflow {
-                        openingEndFrame = recovery.count
+                    guard !overflow else { return .none }
+                    if readIndex < queued.count {
+                        queued.append(contentsOf: sourceFrames)
+                        let pending = readIndex == 0 ? queued : Array(queued[readIndex...])
+                        queued.removeAll(keepingCapacity: false)
+                        readIndex = 0
+                        if !openingConfirmed, !recoveryOverflow {
+                            openingEndFrame = recovery.count
+                        }
+                        deliveredFrames += pending.count
+                        evaluateOpeningConfirmedLocked()
+                        return .queued(delegate, pending)
                     }
-                    deliveredFrames += packet?.count ?? count
+                    deliveredFrames += count
                     evaluateOpeningConfirmedLocked()
-                    return (delegate, packet)
+                    return .live(delegate)
                 case .readyForDictation, .stopped:
-                    return (nil, nil)
+                    return .none
                 }
             }
-            guard let delegate else { return }
-            if let audio {
-                audio.withUnsafeBufferPointer { deliver($0, to: delegate, at: time) }
-            } else {
-                deliver(sourceFrames, to: delegate, at: time)
+            switch delivery {
+            case .none:
+                return
+            case .live(let delegate):
+                deliverChunked(sourceFrames, to: delegate, at: time)
+            case .queued(let delegate, let pending):
+                pending.withUnsafeBufferPointer { deliverChunked($0, to: delegate, at: time) }
             }
         }
     }
@@ -343,13 +349,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private func evaluateOpeningConfirmedLocked() {
         guard !openingConfirmed, case .sending = state, deliveredFrames > 0 else { return }
         guard readIndex == queued.count, deliveredFrames >= openingEndFrame else { return }
-        let inputCovered = hasServerFrameProgress
-            ? confirmedFrames >= lastNonZeroOpeningFrame
-            : (confirmedFrames >= lastNonZeroOpeningFrame || phoneActionStarted)
-        if inputCovered && (remoteReplied || phoneActionStarted) {
-            openingConfirmed = true
-            recovery.removeAll(keepingCapacity: false)
-        }
+        guard confirmedFrames >= lastNonZeroOpeningFrame, remoteReplied || phoneActionStarted else { return }
+        openingConfirmed = true
+        recovery.removeAll(keepingCapacity: false)
     }
 
     private func rememberForRecoveryLocked(_ frames: UnsafeBufferPointer<Int16>) {
@@ -381,30 +383,22 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         queued.append(contentsOf: frames)
     }
 
-    private func drainLocked(with frames: UnsafeBufferPointer<Int16>) -> [Int16] {
-        queued.append(contentsOf: frames)
-        let burst = min(frames.count, Self.maxReplayBurst)
-        let end = min(readIndex + frames.count + burst, queued.count)
-        let packet = Array(queued[readIndex..<end])
-        readIndex = end
-        if readIndex == queued.count {
-            queued.removeAll(keepingCapacity: true)
-            readIndex = 0
-        } else if readIndex >= Int(Self.sampleRate), readIndex >= queued.count / 2 {
-            queued.removeFirst(readIndex)
-            readIndex = 0
-        }
-        return packet
-    }
-
-    private func deliver(_ samples: UnsafeBufferPointer<Int16>, to delegate: RTCAudioDeviceDelegate, at time: AVAudioTime) {
-        var flags: AudioUnitRenderActionFlags = []
+    private func deliverChunked(_ samples: UnsafeBufferPointer<Int16>, to delegate: RTCAudioDeviceDelegate, at time: AVAudioTime) {
+        guard let base = samples.baseAddress, !samples.isEmpty else { return }
         var timestamp = time.audioTimeStamp
-        var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
-            mNumberChannels: 1, mDataByteSize: UInt32(samples.count * MemoryLayout<Int16>.stride),
-            mData: UnsafeMutableRawPointer(mutating: samples.baseAddress)
-        ))
-        _ = delegate.deliverRecordedData(&flags, &timestamp, 0, UInt32(samples.count), &audio, nil, nil)
+        var offset = 0
+        while offset < samples.count {
+            let chunkCount = min(Self.deliveryChunkFrames, samples.count - offset)
+            var flags: AudioUnitRenderActionFlags = []
+            var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                mNumberChannels: 1,
+                mDataByteSize: UInt32(chunkCount * MemoryLayout<Int16>.stride),
+                mData: UnsafeMutableRawPointer(mutating: base.advanced(by: offset))
+            ))
+            _ = delegate.deliverRecordedData(&flags, &timestamp, 0, UInt32(chunkCount), &audio, nil, nil)
+            timestamp.mSampleTime += Double(chunkCount)
+            offset += chunkCount
+        }
     }
 
     func renderPlayout(silent: UnsafeMutablePointer<ObjCBool>, timestamp: UnsafePointer<AudioTimeStamp>,

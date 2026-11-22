@@ -316,6 +316,7 @@ final class VoiceModel {
     private var connectionOpen = false
     private var openingCapture: OpeningVoiceCapture?
     private var openingSpeechAuthorized = false
+    private var openingTiming: (started: Date, firstTimeAuth: Bool, authMS: Int, connectedMS: Int?, logged: Bool)?
     private var startedCallIDs: Set<String> = []
     private var abortedOpeningCallIDs: Set<String> = []
     private(set) var waitsForOpeningDictation = false
@@ -736,11 +737,16 @@ final class VoiceModel {
         do {
             let openingLink = captureOpening && microphone ? makeLink(attempt: 1, direct: false) : nil
             if let openingLink {
+                let captureStarted = time.now()
                 holdingMicrophone = true
                 openingCapture = try openingLink.startOpeningCapture(session: number)
                 if openingCapture != nil {
+                    let firstTimeAuth = openingSpeech.authorizationStatus() == .notDetermined
+                    let authStart = time.now()
                     let authorized = await openingSpeech.authorize(present: presentSpeechPermission)
                     guard number == session else { return }
+                    let authMS = max(0, Int(time.now().timeIntervalSince(authStart) * 1000))
+                    openingTiming = (captureStarted, firstTimeAuth, authMS, nil, false)
                     openingSpeechAuthorized = authorized
                 }
             }
@@ -767,6 +773,10 @@ final class VoiceModel {
             }
             guard number == session, liveCloseTimeout == nil, let link else { return }
             connectionOpen = true
+            if var timing = openingTiming {
+                timing.connectedMS = max(0, Int(time.now().timeIntervalSince(timing.started) * 1000))
+                openingTiming = timing
+            }
             trace("connection open")
             if !sendOpeningAudioIfReady() {
                 if !waitsForOpeningDictation { await openingDictation?.value }
@@ -803,7 +813,17 @@ final class VoiceModel {
 
     private func sendOpeningAudioIfReady() -> Bool {
         guard ready, connectionOpen, let capture = openingCapture else { return true }
-        if capture.audio.allowSending(session: session) { return true }
+        if capture.audio.allowSending(session: session) {
+            if var timing = openingTiming, !timing.logged {
+                timing.logged = true
+                openingTiming = timing
+                let mode = timing.firstTimeAuth ? "first-time-auth" : "pre-authorized"
+                let readyMS = max(0, Int(time.now().timeIntervalSince(timing.started) * 1000))
+                let connectMS = timing.connectedMS ?? readyMS
+                trace("opening timing (\(mode)): auth \(timing.authMS) ms, connect \(connectMS) ms, ready \(readyMS) ms")
+            }
+            return true
+        }
         if startOpeningDictation() { return false }
         let number = session
         transcript = nil
@@ -997,6 +1017,7 @@ final class VoiceModel {
 
     private func endVoiceConnection() {
         keepOpen()
+        openingTiming = nil
         livePlayback?.cancel()
         livePlayback = nil
         loggedLiveInputDuringPlayback = false
@@ -1384,6 +1405,9 @@ final class VoiceModel {
             }
             endIfDone()
         case "session.delegation.created":
+            if let offset = event["offset_ms"] as? Int, offset > 0 {
+                openingCapture?.audio.confirmRemoteAudio(session: number, endMilliseconds: offset)
+            }
             if let id = (event["delegation"] as? [String: Any])?["id"] as? String, liveDelegations[id] == nil {
                 if liveCallerSpeech.alreadyHandled {
                     liveCallerSpeech.clearPendingSpeech()
@@ -1459,6 +1483,9 @@ final class VoiceModel {
             awaitingAnswer = true
             clock = TurnClock(said: Date())
         case "input_audio_buffer.committed":
+            if let end = event["audio_end_ms"] as? Int, end > 0 {
+                openingCapture?.audio.confirmRemoteAudio(session: number, endMilliseconds: end)
+            }
             if usesLive {
                 liveCallerSpeech.recordInput(id: (event["item_id"] as? String) ?? (event["event_id"] as? String))
                 return
@@ -1471,7 +1498,6 @@ final class VoiceModel {
             if (event["item"] as? [String: Any])?["role"] as? String == "user" { clock.heard = clock.heard ?? Date() }
         case "conversation.item.input_audio_transcription.completed":
             if let text = event["transcript"] as? String, !text.isEmpty {
-                openingCapture?.audio.confirmRemoteTranscription(session: number)
                 lines.append(VoiceLine(role: .you, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
             }
         case "response.created":

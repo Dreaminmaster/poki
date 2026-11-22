@@ -337,18 +337,18 @@
         }
       }
     },
-    "Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk." : {
+    "Starts talking with Poki without leaving the app you’re in. Poki can see that app and work in it. Run it again to end the talk, or to send your recording as text if voice couldn’t connect." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "不离开当前 App，直接和 Poki 说话。Poki 能看到这个 App，也能在里面操作。再运行一次就结束对话。"
+            "value" : "不离开当前 App，直接和 Poki 说话。Poki 能看到这个 App，也能在里面操作。再运行一次可结束对话；若语音没连上，再运行一次会把录音转成文字发出。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "不離開目前的 App，直接和 Poki 說話。Poki 能看到這個 App，也能在裡面操作。再執行一次就結束對話。"
+            "value" : "不離開目前的 App，直接和 Poki 說話。Poki 能看到這個 App，也能在裡面操作。再執行一次可結束對話；若語音沒連上，再執行一次會把錄音轉成文字送出。"
           }
         }
       }
