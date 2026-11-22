@@ -5,7 +5,7 @@ Poki MCP is the earlier way to use Poki: an agent on your Mac, such as Claude Co
 **Let your agent install it.** Copy this to your agent:
 
 ```text
-Install https://github.com/JosssphZhou/poki following its root AGENTS.md, including the MCP skill, and stop whenever you need me to act.
+Install https://github.com/JosssphZhou/poki following docs/install-with-an-agent.md, including the MCP skill, and stop whenever you need me to act.
 ```
 
 **Poki MCP.** Already using Claude Code, Codex, or another MCP client? Connect Poki MCP and use your own subscription. No extra model account needed.
@@ -58,7 +58,7 @@ Poki Agent uses GPT-6.1 Terra (`gpt-6.1-terra`) with low reasoning by default. W
 
 For a physical iPhone, pair it with your Mac over USB first. See [Physical iPhone setup](physical-iphone.md).
 
-`./bin/poki update` still pulls the newest `main` and rebuilds. See [Update](../AGENTS.md#update) for the restart steps and the optional update check.
+`./bin/poki update` still pulls the newest `main` and rebuilds. See [Update](install-with-an-agent.md#update) for the restart steps and the optional update check.
 
 ## Try a task with Poki Agent
 

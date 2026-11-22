@@ -6,7 +6,7 @@ license: AGPL-3.0-only
 
 # Install or update Poki on an iPhone
 
-This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in the repository's `AGENTS.md`. Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
+This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in [docs/install-with-an-agent.md](../../docs/install-with-an-agent.md). Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
 
 For a first install, start the installer, relay its person stops, and verify its result. For an update, complete the preservation checks below before any installation command.
 
