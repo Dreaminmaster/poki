@@ -20,8 +20,8 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: e92004d25bf4bb1438d2b39d9c21ab28d5ed9b2c
-            tests: 'ModelSessionMetadataTests:12 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
+            ref: efb604a50b2af5e5d0f38be5e2d012c24bf87942
+            tests: 'ModelSessionMetadataTests:13 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
           - pr: 322-baseline
             ref: 32aa5346c9a4c72bb03baa3306c5eb093da5696a
             tests: 'SessionRoutingBaselineTests:2'
@@ -144,6 +144,8 @@ jobs:
           mkdir -p out
           swift test --package-path native/ios/PokiCore --filter ApprovalTests.testSensitiveToolApprovalCarriesExactExternalCallerAndLocalSourceIsNil 2>&1 | tee out/core-approval-origin.log
           swift test --package-path native/ios/PokiCore --filter ApprovalTests.testApprovedSensitiveActionCannotBeReusedByAnotherMCPCaller 2>&1 | tee out/core-approval-cross-session.log
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testAuthenticatedReconnectRetainsOnlyTheSameCallerApproval 2>&1 | tee out/core-approval-reconnect.log
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testUnrelatedConnectorCannotReuseApprovedMCPAction 2>&1 | tee out/core-approval-connector-isolation.log
       - name: Build simulator launcher and assets
         shell: bash
         run: |
@@ -212,6 +214,9 @@ jobs:
           APP="build/history-review/Build/Products/Debug-iphonesimulator/Poki.app"
           xcrun simctl install "$UDID" "$APP" || exit 1
           TIMEOUT=$(command -v timeout || command -v gtimeout)
+          # The two known-negative baseline assertions return 65; keep the shell
+          # alive long enough to verify both failed for the expected reason.
+          set +e
           "$TIMEOUT" 600 xcodebuild test-without-building \
             -project native/ios-app/Poki.xcodeproj -scheme Poki \
             -destination "id=$UDID" -derivedDataPath build/history-review \
@@ -220,6 +225,7 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee out/baseline.log
           code=${PIPESTATUS[0]}
+          set -e
           if [ "$code" -eq 0 ]; then echo 'Baseline unexpectedly passed both session routing regressions'; exit 1; fi
           xcrun xcresulttool get test-results summary --path out/baseline.xcresult | tee out/baseline.json || exit 1
           python3 - <<'PY'
