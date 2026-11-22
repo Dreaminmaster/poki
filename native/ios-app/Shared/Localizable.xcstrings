@@ -5560,22 +5560,6 @@
         }
       }
     },
-    "Agents ›" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智能体 ›"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "智慧體 ›"
-          }
-        }
-      }
-    },
     "All Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -8026,22 +8010,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸密碼以啟動 Runner"
-          }
-        }
-      }
-    },
-    "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先在“设置 › 智能体 › 服务地址”中填写远程连接服务地址。Poki 没有默认远程连接服务。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "請先在「設定 › 智慧體 › 服務位址」中填寫遠端連線服務位址。Poki 沒有預設遠端連線服務。"
           }
         }
       }
@@ -12891,28 +12859,6 @@
         }
       }
     },
-    "Poki can tap, type, and scroll on this iPhone." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 可在此 iPhone 上点按、输入和滑动。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki can tap, type, and scroll on this iPhone."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 可在此 iPhone 上點按、輸入和滑動。"
-          }
-        }
-      }
-    },
     "Poki can't reach this iPhone. Check in this order: Setup › Loopback (your proxy app or LocalDevVPN is connected, with 10.7.0.1 set), then Setup › Pairing (pair again with the loopback on), then Developer Mode in Settings → Privacy & Security." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13222,28 +13168,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Poki 已關閉"
-          }
-        }
-      }
-    },
-    "Poki is off. Agents can’t reach this iPhone." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 已关闭，智能体无法连接此 iPhone。"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki is off. Agents can’t reach this iPhone."
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 已關閉，智慧體無法連線此 iPhone。"
           }
         }
       }
@@ -36209,22 +36133,6 @@
         }
       }
     },
-    "Security" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安全"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安全性"
-          }
-        }
-      }
-    },
     "Self test" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42188,54 +42096,6 @@
         }
       }
     },
-    "Show Ready" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示就绪"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "顯示就緒"
-          }
-        }
-      }
-    },
-    "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 等待任务时，会在锁定屏幕和灵动岛上显示“就绪”。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 等待任務時，會在鎖定畫面和動態島上顯示「就緒」。"
-          }
-        }
-      }
-    },
-    "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 会在后台保持就绪，锁定屏幕上不显示任何内容。你在 Poki 中开始的任务仍会显示进度。智能体的任务和批准请求将以通知形式送达。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 會在背景保持就緒，鎖定畫面上不顯示任何內容。你在 Poki 中開始的任務仍會顯示進度。智慧體的任務和批准請求將以通知形式送達。"
-          }
-        }
-      }
-    },
     "Used: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -44818,54 +44678,6 @@
         }
       }
     },
-    "Let Poki Act" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 Poki 操作"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許 Poki 操作"
-          }
-        }
-      }
-    },
-    "The disk image is downloaded, but its developer tools are not available on this iPhone. Try turning on Let Poki Act. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "磁盘映像已下载，但这台 iPhone 的开发者工具尚不可用。请尝试打开「允许 Poki 操作」。如果仍然失败，请连接电脑，在 Poki Setup 中重新准备这台 iPhone。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "磁碟映像已下載，但這台 iPhone 的開發者工具尚不可用。請嘗試開啟「允許 Poki 操作」。如果仍然失敗，請連接電腦，在 Poki Setup 中重新準備這台 iPhone。"
-          }
-        }
-      }
-    },
-    "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki and turn on Let Poki Act." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 无法加载开发者工具。请将这台 iPhone 连接到电脑，在 Poki Setup 中重新准备，然后重新打开 Poki 并开启「允许 Poki 操作」。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Poki 無法載入開發者工具。請將這台 iPhone 連接到電腦，在 Poki Setup 中重新準備，然後重新開啟 Poki 並開啟「允許 Poki 操作」。"
-          }
-        }
-      }
-    },
     "Local models can be used for decisions and for Senses, which reads the screen and checks privacy on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
@@ -46512,6 +46324,228 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "還沒有"
+          }
+        }
+      }
+    },
+    "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重新启动后首次启动 Poki Runner 时，iOS 会要求输入锁屏密码以允许自动化操作。只需输入一次，Poki 无法读取该密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 重新啟動後首次啟動 Poki Runner 時，iOS 會要求輸入鎖屏密碼以允許自動化操作。只需輸入一次，Poki 無法讀取該密碼。"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The first time Poki Runner starts after a restart, iOS asks for your passcode to allow automation. Enter it once. Poki never sees it."
+          }
+        }
+      }
+    },
+    "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重启后首次开启 Poki 时，iOS 会要求输入锁屏密码以允许自动化。输入一次即可，Poki 无法读取密码。"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The first time Poki turns on after a restart, iOS asks for your passcode to allow automation. Enter it once; Poki never sees it."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重啟後首次開啟 Poki 時，iOS 會要求輸入鎖定畫面密碼以允許自動化。輸入一次即可，Poki 無法讀取密碼。"
+          }
+        }
+      }
+    },
+    "Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离开应用时也可在通知中回复。外部智能体无对话界面，会显示“允许”或“不允许”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "離開應用程式時也可在通知中回覆。外部智慧體無對話介面，會顯示「允許」或「不允許」。"
+          }
+        }
+      }
+    },
+    "Add each agent as a remote MCP server in Claude, Codex or any MCP client." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Claude、Codex 或任意 MCP 客户端中，将每个智能体添加为远程 MCP 服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Claude、Codex 或任意 MCP 用戶端中，將每個智慧體新增為遠端 MCP 伺服器。"
+          }
+        }
+      }
+    },
+    "The disk image is downloaded, but its developer tools are not available on this iPhone. Try reopening Poki. If it still fails, connect to a computer and prepare this iPhone again in Poki Setup." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁盘映像已下载，但这台 iPhone 的开发者工具尚不可用。请尝试重新打开 Poki。如果仍然失败，请连接电脑，在 Poki Setup 中重新准备这台 iPhone。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁碟映像已下載，但這台 iPhone 的開發者工具尚不可用。請嘗試重新開啟 Poki。如果仍然失敗，請連接電腦，在 Poki Setup 中重新準備這台 iPhone。"
+          }
+        }
+      }
+    },
+    "Poki could not load the developer tools. Connect this iPhone to a computer and prepare it again in Poki Setup, then reopen Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 无法加载开发者工具。请将这台 iPhone 连接到电脑，在 Poki Setup 中重新准备，然后重新打开 Poki。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 無法載入開發者工具。請將這台 iPhone 連接到電腦，在 Poki Setup 中重新準備，然後重新開啟 Poki。"
+          }
+        }
+      }
+    },
+    "External Connections" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部連線"
+          }
+        }
+      }
+    },
+    "Computers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦"
+          }
+        }
+      }
+    },
+    "External Connections ›" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部连接 ›"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部連線 ›"
+          }
+        }
+      }
+    },
+    "Enter your relay’s address first in Settings › External Connections › Address. Poki has no default relay." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在“设置 › 外部连接 › 服务地址”中填写远程连接服务地址。Poki 没有默认远程连接服务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先在「設定 › 外部連線 › 服務位址」中填寫遠端連線服務位址。Poki 沒有預設遠端連線服務。"
+          }
+        }
+      }
+    },
+    "Shared" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已分享"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已分享"
+          }
+        }
+      }
+    },
+    "Not Shared" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Shared"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分享"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分享"
           }
         }
       }

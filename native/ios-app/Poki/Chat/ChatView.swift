@@ -575,7 +575,7 @@ extension SetupIssueHint {
         guard model.relayStatus.isOffline else { return nil }
         return SetupIssueHint(
             message: AppLocalization.text(LocalizedStringResource("MCP Relay is offline: agents can’t reach this iPhone.")),
-            link: AppLocalization.text(LocalizedStringResource("Agents ›")),
+            link: AppLocalization.text(LocalizedStringResource("External Connections ›")),
             target: .agents
         )
     }

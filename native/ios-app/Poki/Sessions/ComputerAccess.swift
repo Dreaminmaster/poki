@@ -3,7 +3,7 @@ import Observation
 import PokiCore
 import SwiftUI
 
-/// Agents › Computers (the owner, Nov 21 2026): the computers running Poki MCP (bundled in Poki Setup)
+/// External Connections › Computers (the owner, Nov 21 2026): the computers running Poki MCP (bundled in Poki Setup)
 /// that came to this iPhone, each allowed or turned off by the owner. A computer is known by its key's
 /// fingerprint from its hello (issue #609), so turning one off leaves every other computer and every
 /// relay agent as it was. A computer seen for the first time is refused until it is allowed here.
@@ -83,7 +83,9 @@ struct ComputersSection: View {
             Section {
                 ForEach(access.computers) { known in
                     Toggle(isOn: Binding(get: { known.allowed == true }, set: { access.set(known.id, allowed: $0) })) {
-                        SettingsRow(title: LocalizedStringKey(stringLiteral: known.computer.name), caption: caption(known),
+                        // The name, and Waiting until the owner decides; the switch says the rest.
+                        SettingsRow(title: LocalizedStringKey(stringLiteral: known.computer.name),
+                                    caption: known.allowed == nil ? "Waiting" : nil,
                                     symbol: "laptopcomputer", warns: known.allowed == nil)
                     }
                     .accessibilityIdentifier("agents.computer")
@@ -95,26 +97,8 @@ struct ComputersSection: View {
                     SettingsHeader("Computers")
                 }
                 .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Computers with Poki MCP from Poki Setup. A new computer can’t act on this iPhone until you turn it on here. Turning one off stops it at its next step.")
-                }
-                .settingsFooter()
             }
         }
-    }
-
-    private func caption(_ known: Known) -> LocalizedStringKey {
-        let way: String = switch known.computer.transport {
-        case "usb": AppLocalization.text("USB")
-        case "wifi": AppLocalization.text("Wi-Fi")
-        default: AppLocalization.text("Relay")
-        }
-        let agent = known.computer.agent.map(AgentName.pretty) ?? AppLocalization.text("Poki MCP")
-        if known.allowed == nil {
-            return LocalizedStringKey(stringLiteral: AppLocalization.text(LocalizedStringResource("Waiting for you, \(agent) over \(way)")))
-        }
-        return LocalizedStringKey(stringLiteral: AppLocalization.text(LocalizedStringResource("\(agent) over \(way), \(ChatTime.row(known.lastSeen))")))
     }
 
     private typealias Known = ComputerAccess.Known

@@ -4,7 +4,7 @@ import SwiftUI
 // Settings (ESP-469; before it Poki's profile, ESP-326 board "09 Poki") opens from the bottom of the
 // conversations. It replaced the earlier details screen and its "More Settings" layer. Every part of Poki a
 // person looks for by name is a row of its own on this page (Connection, Models, Dictation & Mute,
-// Security, Agents, Senses, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance, Language), and
+// Approvals, Screen History, Activity Log, Face ID & Passcode, Agents, Senses, Memory, Archived Conversations, Signing & Updates, Notifications, Appearance, Language), and
 // what only a few need is on one page, Advanced, by where it came from. Nothing has two ways in: the
 // approval method is changed on Poki's card in the chat only. The rows are PokiSettingsKit's.
 
@@ -19,6 +19,8 @@ struct PokiDetailsView: View {
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String) -> Void = { _ in }
     @Binding var path: NavigationPath
+    @ObservedObject private var capture = HistoryCapture.shared
+    @ObservedObject private var lock = HistoryLock.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
 
@@ -94,14 +96,29 @@ struct PokiDetailsView: View {
 
                 // What Poki may do and read, and who else may use it.
                 Section {
-                    // Approvals, Screen History, the Activity Log and Face ID & Passcode, a page each
-                    // (the owner, Nov 21 2026). The approval method in use shows here.
-                    NavigationLink(value: DetailsRoute.security) {
-                        SettingsRow(title: "Security", symbol: "checkmark.shield", value: model.approvalMode.title)
+                    // Approvals, Screen History, the Activity Log and Face ID & Passcode, a page each, right
+                    // here rather than under a Security row (the owner, Nov 21 2026). A row that leads
+                    // behind the lock asks the system prompt before it opens its page.
+                    NavigationLink(value: DetailsRoute.approvals) {
+                        SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: model.approvalMode.title)
                     }
                     .accessibilityIdentifier("moreSettings.approvals")
+                    UnlockLink(whenOff: true, go: { path.append(DetailsRoute.screenHistorySettings) }) {
+                        SettingsRow(title: "Screen History", symbol: "rectangle.stack",
+                                    value: AppLocalization.text(capture.enabled ? LocalizedStringResource("On") : LocalizedStringResource("Off")))
+                    }
+                    .accessibilityIdentifier("security.screenHistory")
+                    NavigationLink(value: DetailsRoute.history) {
+                        SettingsRow(title: "Activity Log", symbol: "list.bullet.rectangle")
+                    }
+                    .accessibilityIdentifier("details.activity")
+                    UnlockLink(go: { path.append(DetailsRoute.lockSettings) }) {
+                        SettingsRow(title: LocalizedStringKey(lock.biometricsName == "Touch ID" ? "Touch ID & Passcode" : "Face ID & Passcode"),
+                                    symbol: lock.biometricsSymbol, warns: !lock.biometricsReady)
+                    }
+                    .accessibilityIdentifier("security.lock")
                     NavigationLink(value: DetailsRoute.agents) {
-                        SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
+                        SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
                 } header: {
@@ -204,8 +221,6 @@ struct PokiDetailsView: View {
                     AgentsAndRelayView(path: $path)
                 case .updates:
                     SigningUpdatesPage()
-                case .security:
-                    SecuritySettingsView(path: $path)
                 case .approvals:
                     ApprovalsSettingsView()
                 case .screenHistorySettings:
@@ -284,9 +299,8 @@ struct PokiDetailsView: View {
 
 enum DetailsRoute: Hashable {
     case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
-    /// Security's own page (its four rows), Screen History's settings (the page the Senses gear opens
-    /// too) and Face ID & Passcode.
-    case security, screenHistorySettings, lockSettings
+    /// Screen History's settings (the page the Senses gear opens too) and Face ID & Passcode.
+    case screenHistorySettings, lockSettings
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey
@@ -414,19 +428,26 @@ struct SetupSettingsPage: View {
     @Environment(ChatModel.self) private var chat
     @Binding var path: NavigationPath
 
-    private var on: Bool { model.sessionOn && !model.ownerPaused }
+    /// Why Poki could not start, as it would have shown under a switch. Poki has none here (the owner,
+    /// Nov 21 2026: it starts by itself for a task or an agent's request, and the switch asked for the
+    /// passcode and left the automation banner up when turned back on).
+    private var failure: Text? {
+        if let failure = model.developerToolsFailure { return Text(failure).foregroundStyle(.red) }
+        guard !model.sessionOn, !model.sessionStarting else { return nil }
+        if let problem = model.problem {
+            return Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil)).foregroundStyle(.red)
+        }
+        if model.isDone(.pairing), case .downloaded = model.diskImage.state {
+            return Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
+        }
+        return nil
+    }
 
     var body: some View {
         List {
-            Section {
-                Toggle(isOn: Binding(get: { on }, set: set)) {
-                    // Poki itself, on or off. Not the "UI Automation" step below, which is the iOS
-                    // setting (Settings › Developer) Poki needs once; the same name and hand made the
-                    // two look like one thing (Nov 20 2026).
-                    SettingsRow(title: "Let Poki Act", symbol: "power")
-                }
-                .accessibilityIdentifier("hands.on")
-                if model.passcodeConfirmationPending {
+            // The passcode note when a task's start is waiting on it (the system alert can be dismissed).
+            if model.passcodeConfirmationPending {
+                Section {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Enter Your Passcode Next").font(.allo(.headline))
                         Text(AppModel.passcodeHeadsUpMessage).font(.allo(.subheadline))
@@ -434,69 +455,20 @@ struct SetupSettingsPage: View {
                     Button("Continue") { model.continueAfterPasscodeHeadsUp() }
                     Button("Cancel", role: .cancel) { model.cancelPasscodeHeadsUp() }
                 }
-            } footer: {
-                Group {
-                    VStack(alignment: .leading, spacing: 6) {
-                        // Paused is not a lock: an agent's request, or a task you send, starts Poki again.
-                        if model.passcodeConfirmationPending {
-                            Text(AppModel.passcodeConfirmationMessage)
-                        } else {
-                            Text(model.sessionStarting ? "Poki is turning on."
-                                 : on ? "Poki can tap, type, and scroll on this iPhone."
-                                 : model.sessionOn ? "Poki is paused. It resumes automatically upon a new task or agent request."
-                                 : "Poki is off. Agents can’t reach this iPhone.")
-                        }
-                        // Why turning on failed, under the switch that was turned on (not only on Poki's
-                        // page). Poki's own sentences are localized; PokiCore's stay as they came.
-                        if let failure = model.developerToolsFailure {
-                            Text(failure).foregroundStyle(.red)
-                        } else if !on, !model.sessionStarting, let problem = model.problem {
-                            Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
-                                .foregroundStyle(.red)
-                        } else if !on, !model.sessionStarting, model.isDone(.pairing), case .downloaded = model.diskImage.state {
-                            Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
-                        }
-                    }
+            } else if let failure {
+                Section {
+                    failure.font(.allo(.subheadline))
                 }
-                .settingsFooter()
+                .accessibilityIdentifier("connection.problem")
             }
 
+            // The setup list the guide's last page shows, with Guide Me (onboarding). Show Ready is gone
+            // (Security, Nov 21 2026: no Show Ready switch).
             SetupSections(path: $path, guideMe: true)
-
-            Section {
-                Toggle(isOn: Binding(get: { model.showsReadyActivity }, set: { model.setShowsReadyActivity($0) })) {
-                    SettingsRow(title: "Show Ready", symbol: "platter.filled.top.iphone")
-                }
-                .accessibilityIdentifier("liveActivity.ready")
-            } header: {
-                Group {
-                    SettingsHeader("Live Activity")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text(model.showsReadyActivity
-                         ? "Poki shows Ready on the Lock Screen and in the Dynamic Island while it waits for a task."
-                         : "Poki stays ready in the background with nothing on the Lock Screen. Tasks you start in Poki still show their progress. Agents’ tasks and approvals arrive as notifications.")
-                }
-                .settingsFooter()
-            }
-
         }
         .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
-    }
-
-    private func set(_ on: Bool) {
-        if !on {
-            chat.stop()
-            model.pauseByOwner()
-        } else if model.sessionOn {
-            model.wakeRunner()
-        } else {
-            model.startSession()
-        }
     }
 }
 
@@ -781,13 +753,11 @@ struct SecurityApprovalSections: View {
                         case .off: Text("Optional steps run automatically without asking.")
                         }
                         if more {
-                            switch model.approvalMode {
-                            case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                            case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                            case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                            // Only what the line above and the banner do not already say.
+                            if model.approvalMode == .reply {
+                                Text("Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
                             }
                             Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
-                            Text("Changes apply right away, starting from Poki’s next step.")
                         } else {
                             Button("Learn More") { withAnimation(.snappy) { more = true } }
                                 .font(.allo(.footnote, .semibold))
@@ -826,7 +796,7 @@ struct SecurityApprovalSections: View {
     }
 }
 
-/// Security › Approvals: what Poki and agents may do without asking, and Automatic Unlock with it
+/// Settings › Approvals: what Poki and agents may do without asking, and Automatic Unlock with it
 /// (what Poki may do by itself, the owner, Nov 21 2026).
 struct ApprovalsSettingsView: View {
     @Environment(AppModel.self) private var model
@@ -918,6 +888,10 @@ struct AgentsAndRelayView: View {
     var body: some View {
         @Bindable var model = model
         List {
+            // Computers with Poki MCP (issue #609) first, each allowed or turned off on its own (the
+            // owner, Nov 21 2026: computer access lives in External Connections).
+            ComputersSection()
+
             Section {
                 Toggle(isOn: Binding(get: { model.relayEnabled && model.relayAddress != nil }, set: { model.setRelayEnabled($0) })) {
                     SettingsLabel {
@@ -983,15 +957,12 @@ struct AgentsAndRelayView: View {
                 Group {
                     Text(model.relayAddress == nil
                          ? "Set your relay first. Each agent gets its own MCP address on it."
-                         : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                         : "Add each agent as a remote MCP server in Claude, Codex or any MCP client.")
                 }
                 .settingsFooter()
             }
-
-            // Computers with Poki MCP (issue #609), each allowed or turned off on its own.
-            ComputersSection()
         }
-        .navigationTitle(AppLocalization.text("Agents"))
+        .navigationTitle(AppLocalization.text("External Connections"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

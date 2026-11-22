@@ -24,7 +24,7 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode }
-        // Agents › Computers: a computer the owner turned off, or has not answered yet, is refused.
+        // External Connections › Computers: a computer the owner turned off, or has not answered yet, is refused.
         config.computerAccess = { ComputerAccess.decision($0.id) }
         // Read at each run, from Settings › Models › Fast Decisions: nil until a model is picked, and
         // a routine then stops where the screen differs, as it always did.

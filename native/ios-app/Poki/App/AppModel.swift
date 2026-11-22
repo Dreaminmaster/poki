@@ -19,17 +19,6 @@ final class AppModel {
     /// The relay Poki connects to: the address, while the relay is on.
     var activeRelay: RelayAddress? { relayEnabled ? relayAddress : nil }
 
-    /// Settings › Connection › Show Ready. Off, no Live Activity stays while Poki waits for work.
-    var showsReadyActivity: Bool { _ = readySetting; return !ActivityController.hidesReady }
-    func setShowsReadyActivity(_ on: Bool) {
-        UserDefaults.standard.set(!on, forKey: ActivityController.hidesReadyKey)
-        readySetting += 1
-        log.add("activity", on ? "Ready Live Activity turned on" : "Ready Live Activity turned off: shown only for work that starts while Poki is in front")
-        activity.idleSettingChanged()
-    }
-    /// Bumped so views reading `showsReadyActivity` update.
-    private(set) var readySetting = 0
-
     func setRelayEnabled(_ on: Bool) {
         guard on != relayEnabled, relayAddress != nil || !on else { return }
         relayEnabled = on
@@ -1824,7 +1813,7 @@ final class AppModel {
         if case .session(.started(_, let client, _, let connector?, _)) = event {
             identity.noteAgent(hash: connector, client: AgentName.pretty(client))
         }
-        // A computer running Poki MCP is listed on Agents › Computers; a new one waits for the owner.
+        // A computer running Poki MCP is listed on External Connections › Computers; a new one waits for the owner.
         if case .session(.started(_, _, _, _, let computer?)) = event { ComputerAccess.shared.seen(computer) }
         // Events after Turn off (the core's own "stopped") are not for the screen. An approval is
         // the exception: a call that asks one (the on-device chat, the gym probe) waits on the
@@ -2788,7 +2777,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Settings › External Connections › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

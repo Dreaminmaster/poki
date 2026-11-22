@@ -91,10 +91,11 @@ final class AutomationStartupTests: XCTestCase {
             }, object: nil)
             await fulfillment(of: [active], timeout: 5)
             try capture(window, named: "fallback-before-\(choice)")
-            try await tapScreenElement("hands.on")
+            // Poki starts by itself for work; there is no switch on Connection any more.
+            model.startSession()
             let requested = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in model.passcodeHeadsUp }, object: nil)
             await fulfillment(of: [requested], timeout: 3)
-            XCTAssertTrue(model.passcodeHeadsUp, "The Automation switch must reach the first-boot explanation gate")
+            XCTAssertTrue(model.passcodeHeadsUp, "Starting automation must reach the first-boot explanation gate")
             model.passcodeHeadsUp = false
             XCTAssertNil(Self.alert(in: host), "The recovery path must work without a presented alert")
             XCTAssertFalse(model.sessionOn)
@@ -164,7 +165,7 @@ final class AutomationStartupTests: XCTestCase {
     private func tapScreenElement(_ name: String) async throws {
         let elements = try await screenElements()
         let element = try XCTUnwrap(elements.first { $0.name == name || $0.label == name }, "Connection must expose \(name) even when the passcode alert is absent")
-        let point = CGPoint(x: name == "hands.on" ? element.frame.maxX - 32 : element.frame.midX, y: element.frame.midY)
+        let point = CGPoint(x: element.frame.midX, y: element.frame.midY)
         let delivered = await Task.detached {
             PKInProcess.shared().touch([[PKTouchPoint.at(point, offset: 0), PKTouchPoint.at(point, offset: 0.08)]], timeout: 5).delivery
         }.value
