@@ -1695,6 +1695,7 @@ extension VoiceModelTests {
 
         do {
             var executed = 0
+            var endedLines: [VoiceLine] = []
             let audio = OpeningAudioProbe()
             audio.transcribeSamples = { samples in
                 let hasPrefix = samples.contains(1_000)
@@ -1708,6 +1709,7 @@ extension VoiceModelTests {
                 executed += 1
                 return ("WeChat is open", false, nil)
             })
+            h.voice.onConversationEnded = { lines, _ in endedLines = lines }
             _ = h.voice.setBridge(BridgeStub.liveAddress)
             await h.voice.start(captureOpening: true)
             audio.feed(96_000, sample: 1_000)
@@ -1723,7 +1725,10 @@ extension VoiceModelTests {
             XCTAssertEqual(audio.sent.count, 96_480)
             h.link.onClosed?("transport dropped with strictly unsent tail")
             await h.time.settle()
+            let expectedMixedNote = AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Only the unsent end will be sent as text. Check whether the earlier part was already handled.", table: "Entry"))
             XCTAssertTrue(h.voice.isOn, "strictly unsent tail must remain recoverable even without server timing")
+            XCTAssertTrue(endedLines.contains { $0.role == .note && $0.text == expectedMixedNote },
+                          "conversation must ask the user to confirm whether the earlier untimed audio was already handled")
             XCTAssertTrue(h.voice.finishOpeningDictation())
             await h.time.settle()
             let expectedUnsentTail = [Int16](repeating: 500, count: 38_400)
@@ -1731,6 +1736,56 @@ extension VoiceModelTests {
             XCTAssertEqual(audio.transcriptions.first, expectedUnsentTail,
                            "only the exact 38,400 strictly unsent tail frames may go to dictation")
             XCTAssertEqual(audio.textTasks, ["and message Mom"])
+            XCTAssertEqual(audio.notices, [expectedMixedNote])
+            XCTAssertEqual(executed, 1)
+            h.voice.stop()
+        }
+
+        do {
+            var executed = 0
+            var endedLines: [VoiceLine] = []
+            let audio = OpeningAudioProbe()
+            audio.transcribeSamples = { samples in
+                let hasPrefix = samples.contains(1_000)
+                let hasInFlightTail = samples.contains(600)
+                let hasUnsentTail = samples.contains(500)
+                if hasPrefix || hasInFlightTail { return "unexpected earlier audio" }
+                if hasUnsentTail { return "and send it" }
+                return ""
+            }
+            let h = Harness(openingAudio: audio, phoneTool: { _, _ in
+                executed += 1
+                return ("WeChat is open", false, nil)
+            })
+            h.voice.onConversationEnded = { lines, _ in endedLines = lines }
+            _ = h.voice.setBridge(BridgeStub.liveAddress)
+            await h.voice.start(captureOpening: true)
+            audio.feed(96_000, sample: 1_000)
+            audio.feed(19_200, sample: 600)
+            h.link.play(["type": "session.started"])
+            audio.feed(480, sample: 0)
+            XCTAssertEqual(audio.sent.count, 115_680)
+            h.link.play(["type": "session.delegation.created", "delegation": ["id": "d1"]])
+            h.link.call("prefix-untimed-mixed-tail", "open_app", arguments: #"{"app":"WeChat"}"#, delegation: "d1")
+            await h.time.settle()
+            XCTAssertEqual(executed, 1)
+            _ = audio.audio.stopRecording()
+            audio.feed(19_200, sample: 500)
+            XCTAssertEqual(audio.sent.count, 115_680)
+            h.link.onClosed?("transport dropped with partial in-flight tail and strictly unsent tail")
+            await h.time.settle()
+            let expectedMixedNote = AppLocalization.text(LocalizedStringResource("Connection lost after Poki started working. Only the unsent end will be sent as text. Check whether the earlier part was already handled.", table: "Entry"))
+            XCTAssertTrue(h.voice.isOn, "strictly unsent 19,200-frame tail must remain recoverable")
+            XCTAssertTrue(endedLines.contains { $0.role == .note && $0.text == expectedMixedNote },
+                          "conversation must warn the user to confirm whether the in-flight earlier tail was already handled")
+            XCTAssertTrue(h.voice.finishOpeningDictation())
+            await h.time.settle()
+            let expectedUnsentTail = [Int16](repeating: 500, count: 19_200)
+            XCTAssertEqual(audio.transcriptions.count, 1)
+            XCTAssertEqual(audio.transcriptions.first, expectedUnsentTail,
+                           "only the exact 19,200 strictly unsent tail frames may go to dictation")
+            XCTAssertEqual(audio.textTasks, ["and send it"])
+            XCTAssertEqual(audio.notices, [expectedMixedNote])
             XCTAssertEqual(executed, 1)
             h.voice.stop()
         }
