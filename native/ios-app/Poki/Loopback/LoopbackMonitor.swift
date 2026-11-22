@@ -22,6 +22,12 @@ final class LoopbackMonitor {
     /// The interfaces the system path lists, for Diagnostics: a proxy app's tunnel can change what the path reports.
     private(set) var pathSummary = ""
     private(set) var checkedAt: Date?
+    /// Something answered at 10.7.0.1, and also on ports nothing on this iPhone listens on: a proxy
+    /// app (Karing, for one) accepts the connection itself instead of reflecting it to this iPhone, so
+    /// the connect proves nothing. Shown as no answer, with the proxy's setting to change.
+    private(set) var proxyAnswers = false
+    /// The probe epoch in which an answer was last shown to come from this iPhone.
+    private var provenEpoch: Int?
     /// When the loopback last stopped answering after it had worked; nil while it works.
     private(set) var droppedAt: Date?
     /// Called on every change of state, with the old and the new one.
@@ -201,6 +207,14 @@ final class LoopbackMonitor {
                     result = lockdown
                 }
             }
+            // A connect alone is not an answer from this iPhone: a proxy that takes 10.7.0.1 for
+            // itself accepts any port. Once per network, ports nothing listens on must not connect.
+            var proxied = false
+            if result.outcome == "connected", Self.forced == nil, provenEpoch != epoch {
+                proxied = await acceptsAnyPort()
+                if !proxied { provenEpoch = epoch }
+            }
+            if result.outcome != "connected" { provenEpoch = nil }
             running = false
             // A network change makes this answer stale: ask again. A timer tick or resume() that came
             // while the probe was in flight does not: the answer stands, and one more check follows it.
@@ -208,7 +222,9 @@ final class LoopbackMonitor {
                 check()
                 return
             }
-            let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer
+            if proxied { AppLog.shared.add("loopback", "10.7.0.1 accepts ports nothing listens on: a proxy answers, not this iPhone") }
+            proxyAnswers = proxied
+            let probed: State = result.outcome == "connected" && !proxied ? .working(ms: result.milliseconds) : proxied || loopbackInterface() != nil ? .noAnswer : .off
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
@@ -217,6 +233,23 @@ final class LoopbackMonitor {
             if checkQueued { check() }
         }
     }
+
+    /// Two ports nothing on this iPhone listens on both connect: whatever answers is not this iPhone.
+    /// The iPhone itself refuses them (or, through a reflection, they time out). One that connects
+    /// may be a port the iPhone picked for a tunnel, so a second is asked before deciding.
+    private func acceptsAnyPort() async -> Bool {
+        for _ in 0..<2 {
+            let decoy = await connect("10.7.0.1", Self.decoyPort(), 1.5)
+            if decoy.outcome != "connected" { return false }
+        }
+        return true
+    }
+
+    /// A port in the range iOS does not give its developer services.
+    nonisolated static func decoyPort() -> UInt16 { UInt16.random(in: decoyPorts) }
+    nonisolated static let decoyPorts: ClosedRange<UInt16> = 50000...59999
+
+    static var proxyHint: String { AppLocalization.text(LocalizedStringResource("Something answers at 10.7.0.1, but it is not this iPhone. A proxy app is taking the address for itself. In Karing, set TUN › Loopback address to 10.7.0.1. In other proxy apps, turn on the loopback or reflect setting for 10.7.0.1.")) }
 
     private func publish(_ next: State, log: Bool) {
         guard !Self.same(next, state) else { return }
@@ -253,6 +286,7 @@ final class LoopbackMonitor {
         switch state {
         case .checking: AppLocalization.text(LocalizedStringResource("Looking for this iPhone at 10.7.0.1."))
         case .working(let ms): AppLocalization.text(LocalizedStringResource("This iPhone answers at 10.7.0.1 (\(ms) ms)."))
+        case .noAnswer where proxyAnswers: Self.proxyHint
         case .noAnswer where cellularOnly: Self.cellularHint
         case .noAnswer: AppLocalization.text(LocalizedStringResource("The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode."))
         case .off: AppLocalization.text(LocalizedStringResource("This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup."))
