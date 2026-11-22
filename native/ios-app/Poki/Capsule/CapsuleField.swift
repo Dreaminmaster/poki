@@ -17,6 +17,7 @@ struct CapsuleField: UIViewRepresentable {
     /// gesture around it while it has the keyboard, so the field reads the swipe itself as well.
     var onSwipe: ((Bool) -> Void)? = nil
     /// Return: the keyboard's Send key, as on the current field.
+    var onMentionReady: ((Bool) -> Void)? = nil
     var onSubmit: () -> Void
 
     func makeUIView(context: Context) -> CapsuleTextView {
@@ -88,6 +89,19 @@ struct CapsuleField: UIViewRepresentable {
             guard let view = textView as? CapsuleTextView else { return }
             view.reconcile()
             if parent.text != view.plainText { parent.text = view.plainText }
+            mentionReadiness(view)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            mentionReadiness(textView)
+        }
+
+        private func mentionReadiness(_ view: UITextView) {
+            let selection = view.selectedRange
+            let ready = view.isFirstResponder && view.markedTextRange == nil &&
+                selection.length == 0 && selection.location == view.textStorage.length
+            guard parent.onMentionReady != nil else { return }
+            DispatchQueue.main.async { self.parent.onMentionReady?(ready) }
         }
 
         @objc func swiped(_ pan: UIPanGestureRecognizer) {

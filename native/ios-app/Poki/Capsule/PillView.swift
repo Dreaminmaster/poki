@@ -18,7 +18,7 @@ struct PillMetrics {
     var labelFont: UIFont { .systemFont(ofSize: (pointSize * 0.88).rounded(), weight: .semibold) }
     var leading: CGFloat { 3 }
     var gap: CGFloat { 5 }
-    var trailing: CGFloat { 8 }
+    var trailing: CGFloat { leading + 2 }
 
     func size(for text: String) -> CGSize {
         let label = (text as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up)
@@ -58,7 +58,7 @@ struct PillView: View {
         .padding(.trailing, metrics.trailing)
         .frame(height: metrics.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08), in: .capsule)
+        .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08), in: RoundedRectangle(cornerRadius: metrics.icon * 0.225 + metrics.leading, style: .continuous))
         .accessibilityLabel(Text(verbatim: data.label))
     }
 

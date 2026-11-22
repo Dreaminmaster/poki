@@ -1312,6 +1312,9 @@ struct ComposerInputView: View {
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
     @State private var fieldScroll = CapsuleScroll()
+    @State private var mentionReady = false
+    @State private var showingAllApps = false
+    @State private var appSearch = ""
     /// A swipe down that started on a message scrolled away from its first line: it scrolls the message.
     @State private var swipeScrolls: Bool?
     @Environment(\.colorScheme) private var scheme
@@ -1350,7 +1353,10 @@ struct ComposerInputView: View {
                     withAnimation(.snappy) { attachments.removeAll { $0.id == item.id } }
                 }
             }
-            if adding, voice.talkState == nil, !needsKey, attachments.count < Self.most { ways }
+            if adding, voice.talkState == nil, !needsKey { ways }
+            if focused, mentionReady, !adding, let mention, !mention.apps.isEmpty {
+                MentionPicker(apps: mention.apps) { pickApp($0, replacing: mention.length) }
+            }
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
             Group {
@@ -1376,7 +1382,8 @@ struct ComposerInputView: View {
                         plus
                         // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                         CapsuleField(text: $input, focused: $focused, maxLines: 6, maxHeight: min(200, fieldHeight), scroll: fieldScroll,
-                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit)
+                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } },
+                                     onMentionReady: { mentionReady = $0 }, onSubmit: submit)
                             .overlay(alignment: .topLeading) {
                                 if input.isEmpty {
                                     Text(dictation.on ? "Listening…" : attachments.isEmpty ? "Message Poki" : "Add a message")
@@ -1441,6 +1448,19 @@ struct ComposerInputView: View {
             guard problem != nil else { return }
             try? await Task.sleep(for: .seconds(3))
             if !Task.isCancelled { problem = nil }
+        }
+        .sheet(isPresented: $showingAllApps, onDismiss: { appSearch = "" }) {
+            NavigationStack {
+                List(searchedApps, id: \.id) { app in
+                    Button(app.name(in: AppLanguage.current)) {
+                        showingAllApps = false
+                        pickApp(app)
+                    }
+                }
+                .searchable(text: $appSearch)
+                .navigationTitle(AppLocalization.text("Apps"))
+                .toolbar { Button("Close") { showingAllApps = false } }
+            }
         }
         .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: Self.most - attachments.count, matching: .images)
         .onChange(of: picked) { _, items in
@@ -1567,12 +1587,11 @@ struct ComposerInputView: View {
                 .contentShape(.interaction, Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(attachments.count >= Self.most)
-        .accessibilityLabel(Text("Add Photos or Files"))
+        .accessibilityLabel(Text("Add Apps, Photos or Files"))
         .accessibilityAddTraits(adding ? .isSelected : [])
         .accessibilityIdentifier("composer.plus")
         .accessibilityShowsLargeContentViewer {
-            Label("Add Photos or Files", systemImage: "plus")
+            Label("Add Apps, Photos or Files", systemImage: "plus")
         }
     }
 
@@ -1581,9 +1600,34 @@ struct ComposerInputView: View {
     /// whole composer.
     private var ways: some View {
         VStack(alignment: .leading, spacing: 0) {
-            way("Photos", "photo", "composer.photos") { choosingPhotos = true }
-            way("Take Photo", "camera", "composer.camera", enabled: UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
-            way("Files", "folder", "composer.files") { choosingFiles = true }
+            HStack(spacing: 4) {
+                ForEach(Array(KnownApps.all.prefix(3)), id: \.id) { app in
+                    Button { pickApp(app) } label: {
+                        VStack(spacing: 4) {
+                            if let icon = AppIconStore.shared.icon(app.id, dark: false) {
+                                Image(uiImage: icon).resizable().scaledToFit().frame(width: 29, height: 29)
+                                    .clipShape(.rect(cornerRadius: 6))
+                            } else { DefaultAppIcon(size: 29) }
+                            Text(verbatim: app.name(in: AppLanguage.current)).lineLimit(1)
+                        }
+                        .font(.caption2)
+                        .frame(width: 60, minHeight: 50)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button("More", systemImage: "ellipsis") {
+                    adding = false
+                    showingAllApps = true
+                }
+                .labelStyle(.iconOnly)
+                .frame(width: 44, height: 44)
+                .buttonStyle(.plain)
+                .accessibilityLabel("More Apps")
+            }
+            .padding(.horizontal, 8)
+            way("Photos", "photo", "composer.photos", enabled: attachments.count < Self.most) { choosingPhotos = true }
+            way("Take Photo", "camera", "composer.camera", enabled: attachments.count < Self.most && UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
+            way("Files", "folder", "composer.files", enabled: attachments.count < Self.most) { choosingFiles = true }
         }
         .padding(.vertical, 6)
         .fixedSize()
@@ -1612,6 +1656,36 @@ struct ComposerInputView: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityIdentifier(id)
+    }
+
+    private var searchedApps: [KnownApp] {
+        KnownApps.all.filter { app in
+            appSearch.isEmpty || app.names.contains { $0.localizedCaseInsensitiveContains(appSearch) }
+        }
+        .sorted { $0.name(in: AppLanguage.current).localizedCompare($1.name(in: AppLanguage.current)) == .orderedAscending }
+    }
+
+    private var mention: (length: Int, apps: [KnownApp])? {
+        let word = input.reversed().prefix { !$0.isWhitespace }.reversed()
+        guard !word.isEmpty else { return nil }
+        let explicit = word.first == "@"
+        let query = explicit ? String(word.dropFirst()) : String(word)
+        guard explicit || query.count >= 3 else { return nil }
+        let lower = query.lowercased()
+        let matches = KnownApps.all.filter { app in
+            lower.isEmpty || app.names.contains {
+                let name = $0.lowercased()
+                return name.hasPrefix(lower) && (explicit || name != lower)
+            }
+        }
+        return (word.count, Array(matches.prefix(6)))
+    }
+
+    private func pickApp(_ app: KnownApp, replacing length: Int = 0) {
+        let prefix = String(input.dropLast(length))
+        let separator = prefix.last.map { !$0.isWhitespace } == true ? " " : ""
+        input = prefix + separator + app.name(in: AppLanguage.current) + " "
+        adding = false
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {

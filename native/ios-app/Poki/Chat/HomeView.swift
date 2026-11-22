@@ -36,7 +36,7 @@ enum HomeMotion {
     static func flight(_ reduce: Bool) -> Animation { paced(reduce ? fade : .smooth(duration: 0.35)) }
     /// The message field taking the home page up, or letting it down: the greeting and Poki's picture
     /// over it move on this one animation.
-    static let lift = Animation.smooth(duration: 0.3)
+    static let lift = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
 
     static func ground(_ reduce: Bool) -> Animation { paced(reduce ? fade : .easeInOut(duration: 0.45).delay(0.06)) }
     static func pills(_ home: Bool, _ reduce: Bool) -> Animation {
@@ -573,6 +573,7 @@ struct HomePage<Footer: View>: View {
             .opacity(home ? 1 : 0)
             .offset(y: home || reduceMotion ? 0 : -rise)
             .animation(HomeMotion.flight(reduceMotion), value: home)
+            .animation(reduceMotion ? nil : HomeMotion.lift, value: writing)
             .onChange(of: home) { _, shown in if shown { greetedAt = .now } }
 
             Spacer(minLength: 24)
@@ -596,7 +597,7 @@ struct HomePage<Footer: View>: View {
                 .opacity(home ? 1 : 0)
                 .offset(y: home || reduceMotion ? 0 : 14)
                 .animation(HomeMotion.pills(home, reduceMotion), value: home)
-                .transition(.opacity)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)).combined(with: .offset(y: 10)))
             }
             Spacer().frame(height: 34)
         }
