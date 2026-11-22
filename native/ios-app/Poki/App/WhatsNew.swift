@@ -42,139 +42,139 @@ enum WhatsNewCatalog {
                 symbol: "person.crop.circle",
                 title: WhatsNewText(
                     en: "Sign In with ChatGPT",
-                    zhHans: "用 ChatGPT 账号登录",
-                    zhHant: "用 ChatGPT 帳號登入"
+                    zhHans: "ChatGPT 账号直接登录",
+                    zhHant: "ChatGPT 帳號直接登入"
                 ),
                 summary: WhatsNewText(
-                    en: "Log in with your Plus, Pro, or Codex account to unlock chat and live voice without keys.",
-                    zhHans: "免填密钥，直接用你的 Plus、Pro 或 Codex 账号登录，即刻开启文字和实时语音对话。",
-                    zhHant: "免填金鑰，直接用你的 Plus、Pro 或 Codex 帳號登入，即刻開啟文字與即時語音對話。"
+                    en: "Skip the API key and sign in with your Plus, Pro, or Codex account to unlock text chat and live voice.",
+                    zhHans: "免填 API 密钥，直接用你的 Plus、Pro 或 Codex 账号登录，即可开启文字对话与实时语音。",
+                    zhHant: "免填 API 金鑰，直接用你的 Plus、Pro 或 Codex 帳號登入，即可開啟文字對話與即時語音。"
                 )
             ),
             WhatsNewItem(
                 id: "watch-and-ask",
                 symbol: "play.rectangle",
                 title: WhatsNewText(
-                    en: "Watch and Ask Live",
+                    en: "Ask While Watching Videos",
                     zhHans: "边看视频边问 Poki",
                     zhHant: "邊看影片邊問 Poki"
                 ),
                 summary: WhatsNewText(
-                    en: "Poki listens along to videos and audio from other apps during live voice so you can ask anytime.",
-                    zhHans: "实时语音时可同步收听其他 App 的音视频内容，边看边聊，随时提问。",
-                    zhHant: "即時語音時可同步收聽其他 App 的影音內容，邊看邊聊，隨時提問。"
+                    en: "On iOS 27 or later, live voice hears audio and video from other apps during screen sharing, letting you watch and ask.",
+                    zhHans: "在 iOS 27 及以上开启屏幕共享后，实时语音能同步听见其他 App 播放的音视频内容，随时边看边问。",
+                    zhHant: "在 iOS 27 及以上開啟螢幕共享後，即時語音能同步聽見其他 App 播放的影音內容，隨時邊看邊問。"
                 )
             ),
             WhatsNewItem(
                 id: "smarter-live-voice",
                 symbol: "waveform",
                 title: WhatsNewText(
-                    en: "Smarter Live Voice",
+                    en: "Smarter, Smoother Live Voice",
                     zhHans: "实时语音全面升级",
                     zhHant: "即時語音全面升級"
                 ),
                 summary: WhatsNewText(
-                    en: "Catch your first word, share your screen live, and enjoy briefer voice updates without extra cards.",
-                    zhHans: "按下即录不漏掉第一句，通话中能直接看懂屏幕，语音播报更简短自然，告别多余完成卡片。",
-                    zhHant: "按下即錄不漏掉第一句，通話中能直接看懂螢幕，語音播報更簡短自然，告別多餘完成卡片。"
+                    en: "Hold to talk records instantly, updating naturally without extra completion cards. Chat replies directly, actions check latest screens, and \"stop\" mutes voice, not tasks.",
+                    zhHans: "按住即录不漏首句，播报更自然且不弹多余完成卡片。闲聊直接回，操作前核对最新画面，说「停」只静音不误停任务。",
+                    zhHant: "按住即錄不漏首句，播報更自然且不彈多餘完成卡片。閒聊直接回，操作前核對最新畫面，說「停」只靜音不誤停任務。"
                 )
             ),
             WhatsNewItem(
-                id: "bear-wardrobe",
-                symbol: "hanger",
+                id: "rich-result-cards",
+                symbol: "rectangle.grid.1x2",
                 title: WhatsNewText(
-                    en: "New Poki Bear Wardrobe",
-                    zhHans: "全新 Poki 小熊衣橱",
-                    zhHant: "全新 Poki 小熊衣櫥"
+                    en: "Rich Native Result Cards",
+                    zhHans: "多 App 实景结果卡片",
+                    zhHant: "多 App 實景結果卡片"
                 ),
                 summary: WhatsNewText(
-                    en: "Tap the avatar status card to open the dressing room and pick outfits and accessories in one place.",
-                    zhHans: "轻点头像状态卡片直达专属装扮页，一站式给小熊换新衣、挑配饰。",
-                    zhHant: "輕點頭像狀態卡片直達專屬裝扮頁，一站式幫小熊換新衣、挑配件。"
+                    en: "Cropped photo cards cover hotels and flights on Trip.com, Taobao, Dianping, Uber Eats, lists, and China Railway 12306 transfers, fixing fare and button layout.",
+                    zhHans: "新增携程酒店机票、淘宝、大众点评、Uber Eats、12306 换乘与通用列表卡，自动裁剪商品门店图，并修复 12306 票价对齐与底部按钮遮挡。",
+                    zhHant: "新增攜程酒店機票、淘寶、大眾點評、Uber Eats、12306 轉乘與通用列表卡，自動裁切商品門市圖，並修復 12306 票價對齊與底部按鈕遮擋。"
                 )
             ),
             WhatsNewItem(
-                id: "setup-and-settings",
+                id: "memory-and-skills",
+                symbol: "bookmark",
+                title: WhatsNewText(
+                    en: "See Reused Memories and Skills",
+                    zhHans: "任务卡片展示记忆与技能",
+                    zhHant: "任務卡片展示記憶與技能"
+                ),
+                summary: WhatsNewText(
+                    en: "Task cards highlight \"Used\" memories and skills. Poki prioritizes target app memories, saves new learnings only after success, and assigns skills more accurately.",
+                    zhHans: "任务卡片新增「已使用」标注，清晰展示复用记忆与技能。优先调用目标 App 记忆，成功后才记录新经验，技能归属更准。",
+                    zhHant: "任務卡片新增「已使用」標註，清晰展示複用記憶與技能。優先取用目標 App 記憶，成功後才記錄新經驗，技能歸屬更準。"
+                )
+            ),
+            WhatsNewItem(
+                id: "quick-app-picker",
+                symbol: "at",
+                title: WhatsNewText(
+                    en: "Quickly Mention and Pick Apps",
+                    zhHans: "输入框快捷选 App",
+                    zhHant: "輸入框快捷選 App"
+                ),
+                summary: WhatsNewText(
+                    en: "Type \"@\" or start an app name for quick suggestions, or tap \"+\" to pick frequent apps horizontally or expand more apps.",
+                    zhHans: "在输入框键入「@」或 App 名称前缀即可弹出候选填入，点「+」菜单还能横向直选常用 App 或展开更多 App。",
+                    zhHant: "在輸入框鍵入「@」或 App 名稱前綴即可彈出候選填入，點「+」選單還能橫向直選常用 App 或展開更多 App。"
+                )
+            ),
+            WhatsNewItem(
+                id: "refreshed-setup-menu",
                 symbol: "slider.horizontal.3",
                 title: WhatsNewText(
-                    en: "Refreshed Setup and Settings",
-                    zhHans: "全新引导与精简设置",
-                    zhHant: "全新引導與精簡設定"
+                    en: "Refreshed Setup and Avatar Menu",
+                    zhHans: "全新引导、设置与头像菜单",
+                    zhHant: "全新引導、設定與頭像選單"
                 ),
                 summary: WhatsNewText(
-                    en: "Sail through a cleaner setup guide and find options faster in a unified, streamlined settings page.",
-                    zhHans: "首次设置引导焕然一新，设置页统一名称并合并重复入口，查找选项更顺手。",
-                    zhHant: "首次設定引導煥然一新，設定頁統一名稱並合併重複入口，尋找選項更順手。"
+                    en: "Refreshed onboarding, cleaner security and connection settings, plus import and pairing confirmations. Tap the native avatar menu for models, approvals, and your current outfit.",
+                    zhHans: "焕新首次引导，精简安全与外部连接项，导入配对前确认。点顶部头像原生菜单切换模型、操作确认并看当前装扮。",
+                    zhHant: "煥新首次引導，精簡安全與外部連線項，匯入配對前確認。點頂部頭像原生選單切換模型、操作確認並看目前裝扮。"
                 )
             ),
             WhatsNewItem(
                 id: "faster-phone-actions",
                 symbol: "bolt",
                 title: WhatsNewText(
-                    en: "Faster Phone Actions",
-                    zhHans: "操作手机更快更准",
-                    zhHant: "操作手機更快更準"
+                    en: "Faster Actions and Accurate Scrolling",
+                    zhHans: "操作全面提速与精准翻屏",
+                    zhHant: "操作全面提速與精準翻頁"
                 ),
                 summary: WhatsNewText(
-                    en: "Taps, swipes, and app launches respond faster with direct navigation and quicker screen updates.",
-                    zhHans: "点击、滑动和打开 App 响应更快，路线更直接，画面刷新无需多等。",
-                    zhHant: "點擊、滑動與打開 App 回應更快，路線更直接，畫面更新無需多等。"
+                    en: "Taps, swipes, and app launches respond faster, reading recent messages without skips or repeats. Failed launches recover via Home search, and replies keep paragraphs.",
+                    zhHans: "点按滑动、开 App 更快少等待，看消息逐屏核对不重不漏。打开失败自动回主屏搜索恢复，回复保留换行分段更易读。",
+                    zhHant: "點按滑動、開 App 更快少等待，讀訊息逐頁核對不重不漏。開啟失敗自動回主畫面搜尋恢復，回覆保留換行分段更易讀。"
                 )
             ),
             WhatsNewItem(
-                id: "cleaner-result-cards",
-                symbol: "rectangle.grid.1x2",
-                title: WhatsNewText(
-                    en: "Cleaner Result Cards",
-                    zhHans: "结果与车次卡片更清晰",
-                    zhHant: "結果與車次卡片更清晰"
-                ),
-                summary: WhatsNewText(
-                    en: "View clearer native result cards with fixed fare spacing and visible buttons on China Railway 12306 cards.",
-                    zhHans: "优化原生结果卡片排版，修复 12306 车次卡片票价挤压和底部查看按钮遮挡问题。",
-                    zhHant: "優化原生結果卡片排版，修復 12306 車次卡片票價擠壓與底部查看按鈕遮擋問題。"
-                )
-            ),
-            WhatsNewItem(
-                id: "smarter-approvals",
+                id: "ipad-and-duo-fixes",
                 symbol: "checkmark.shield",
                 title: WhatsNewText(
-                    en: "Smarter Approvals",
-                    zhHans: "灵动岛与 iPad 确认升级",
-                    zhHant: "動態島與 iPad 確認升級"
+                    en: "iPad Approvals and Compatibility Fixes",
+                    zhHans: "iPad 确认、复制与兼容修复",
+                    zhHant: "iPad 確認、複製與相容修復"
                 ),
                 summary: WhatsNewText(
-                    en: "Dynamic Island approvals wait without duplicate prompts, fixing iPad floating approvals and copying browser instructions.",
-                    zhHans: "灵动岛确认等你点选才收起且不重复弹窗，并修复 iPad 悬浮确认与浏览器说明复制问题。",
-                    zhHant: "動態島確認等你點選才收起且不重複彈窗，並修復 iPad 懸浮確認與瀏覽器說明複製問題。"
+                    en: "Fixed iPadOS floating Live Activity approvals with alerts after banners disappear, made browser instructions selectable to copy, and fixed iPhone Duo display and taps.",
+                    zhHans: "修复 iPadOS 悬浮实时活动操作确认，横幅消失补发通知。内置浏览器说明可选中复制，并修复 iPhone Duo 兼容模式画面与点击识别。",
+                    zhHant: "修復 iPadOS 懸浮即時動態操作確認，橫幅消失補發通知。內建瀏覽器說明可選取複製，並修復 iPhone Duo 相容模式畫面與點擊識別。"
                 )
             ),
             WhatsNewItem(
-                id: "clean-mic-release",
+                id: "mic-and-home-stability",
                 symbol: "mic",
                 title: WhatsNewText(
-                    en: "Clean Mic Release",
-                    zhHans: "自动归还麦克风",
-                    zhHant: "自動歸還麥克風"
+                    en: "Mic Recovery, Smoothness, and Safety",
+                    zhHans: "麦克风恢复与安全流畅升级",
+                    zhHant: "麥克風恢復與安全流暢升級"
                 ),
                 summary: WhatsNewText(
-                    en: "Remote sessions free your mic immediately for WeChat, and new tasks start without old screenshots.",
-                    zhHans: "远程控制结束即释放麦克风，微信语音秒恢复，开启新任务也不再带入旧截图。",
-                    zhHant: "遠端控制結束即釋放麥克風，微信語音秒恢復，開啟新任務也不再帶入舊截圖。"
-                )
-            ),
-            WhatsNewItem(
-                id: "smoother-launch",
-                symbol: "iphone",
-                title: WhatsNewText(
-                    en: "Smoother App Launch",
-                    zhHans: "启动与首页滑动更流畅",
-                    zhHant: "啟動與首頁滑動更流暢"
-                ),
-                summary: WhatsNewText(
-                    en: "Enjoy steadier cold starts on iPhone 17 Pro and smoother scrolling on an empty home screen.",
-                    zhHans: "优化 iPhone 17 Pro 等机型的冷启动表现，空白首页上下滑动也更顺滑稳定。",
-                    zhHant: "優化 iPhone 17 Pro 等機型的冷啟動表現，空白首頁上下滑動也更順滑穩定。"
+                    en: "Remote control frees your mic, restoring WeChat voice. New tasks drop old screenshots, Home starts and scrolls smoother, blocking misleading screen and web text.",
+                    zhHans: "远程控制完即释放麦克风，微信语音秒恢复。新任务不带旧截图，首页启动滑动更流畅，加强屏幕网页文字防误导。",
+                    zhHant: "遠端控制完即釋放麥克風，微信語音秒恢復。新任務不帶舊截圖，首頁啟動滑動更流暢，加強螢幕網頁文字防誤導。"
                 )
             ),
         ]
