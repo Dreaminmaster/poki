@@ -77,6 +77,8 @@ enum MemorySourceUITestFixture {
 }
 
 final class MemorySourceLiveModelProtocol: URLProtocol {
+    private var heartbeat: DispatchSourceTimer?
+
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host() == "model-server.test"
     }
@@ -93,12 +95,26 @@ final class MemorySourceLiveModelProtocol: URLProtocol {
             return
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        // Deliberately send neither [DONE] nor didFinishLoading: the active
-        // chat really waits on its model request during Memory navigation.
-        // Simulator teardown cancels the URLSession request.
+        // Keep the actual streaming HTTP request alive throughout a slower
+        // XCUITest navigation. A header-only response could time out before
+        // the owner returns to the composer and create a false failure.
+        // SSE comments do not terminate the provider stream or complete a turn.
+        let ticker = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "poki-uitest-live-model-heartbeat"))
+        ticker.schedule(deadline: .now() + .milliseconds(100), repeating: .seconds(1))
+        ticker.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.client?.urlProtocol(self, didLoad: Data(": fixture keepalive\n\n".utf8))
+        }
+        heartbeat = ticker
+        ticker.resume()
+        // Neither [DONE] nor didFinishLoading is sent: the ChatModel request
+        // stays genuinely in flight, not just marked running by test state.
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        heartbeat?.cancel()
+        heartbeat = nil
+    }
 }
 
 #endif
