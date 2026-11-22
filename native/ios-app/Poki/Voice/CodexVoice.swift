@@ -60,6 +60,14 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var nextRequest = 0
     @ObservationIgnored private var onEvent: ((String, JSON) -> Void)?
     @ObservationIgnored private var onTool: ((String, String) async -> PhoneAnswer)?
+    @ObservationIgnored private let startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)?
+    @ObservationIgnored private let sendBridge: ((String) -> Bool)?
+
+    init(startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)? = nil,
+         sendBridge: ((String) -> Bool)? = nil) {
+        self.startBridge = startBridge
+        self.sendBridge = sendBridge
+    }
 
     private var homePath: String { CodexAccount.home.path(percentEncoded: false) }
 
@@ -222,11 +230,15 @@ final class CodexVoice: SubscriptionVoice {
 
     private func startRuntime() throws {
         if running { return }
-        running = homePath.withCString { path in
-            poki_codex_start(path) { value in
-                guard let value else { return }
-                let text = String(cString: value)
-                Task { @MainActor in CodexVoice.shared.receive(text) }
+        if let startBridge {
+            running = startBridge(homePath) { [weak self] text in self?.receive(text) }
+        } else {
+            running = homePath.withCString { path in
+                poki_codex_start(path) { value in
+                    guard let value else { return }
+                    let text = String(cString: value)
+                    Task { @MainActor in CodexVoice.shared.receive(text) }
+                }
             }
         }
         if !running { throw Failure.unavailable }
@@ -235,7 +247,9 @@ final class CodexVoice: SubscriptionVoice {
     private func send(_ message: JSON) -> Bool {
         guard running, JSONSerialization.isValidJSONObject(message),
               let bytes = try? JSONSerialization.data(withJSONObject: message) else { return false }
-        return String(decoding: bytes, as: UTF8.self).withCString { poki_codex_send($0) }
+        let payload = String(decoding: bytes, as: UTF8.self)
+        if let sendBridge { return sendBridge(payload) }
+        return payload.withCString { poki_codex_send($0) }
     }
 
     private func receive(_ text: String) {
