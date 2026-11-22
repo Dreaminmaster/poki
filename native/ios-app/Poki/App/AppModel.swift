@@ -163,7 +163,7 @@ final class AppModel {
     var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
     var passcodeHeadsUp = false
     private(set) var passcodeConfirmationPending = false
-    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Connection and tap Continue."
+    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Setup and tap Continue."
     /// The note's text (PokiApp's alert). Its translations are looked up by this exact English key.
     static let passcodeHeadsUpMessage: LocalizedStringResource = "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode. It may ask only when Poki first operates the phone. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart."
     private var passcodeHeadsUpReconnect = true

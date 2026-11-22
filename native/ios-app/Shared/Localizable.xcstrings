@@ -2479,25 +2479,25 @@
         }
       }
     },
-    "To turn on automation, open Settings › Connection and tap Continue." : {
+    "To turn on automation, open Settings › Setup and tap Continue." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "To turn on automation, open Settings › Connection and tap Continue."
+            "value" : "To turn on automation, open Settings › Setup and tap Continue."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要开启自动化，请前往设置 › 连接并轻点“继续”。"
+            "value" : "要开启自动化，请前往设置 › 配置并轻点“继续”。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "若要開啟自動化，請前往設定 › 連線並點一下「繼續」。"
+            "value" : "若要開啟自動化，請前往設定 › 配置並點一下「繼續」。"
           }
         }
       }
