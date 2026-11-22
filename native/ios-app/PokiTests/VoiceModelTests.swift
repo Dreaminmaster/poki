@@ -309,6 +309,17 @@ final class FakeTime {
     func settle() async { for _ in 0..<50 { await Task.yield() } }
 }
 
+@MainActor
+private final class FakeSubscriptionVoice: SubscriptionVoice {
+    private var onEvent: ((String, [String: Any]) -> Void)?
+    func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
+        self.onEvent = onEvent
+    }
+    func start(offer: String) async throws -> String { "fixture-sdp-answer" }
+    func stop() { onEvent = nil }
+    func notify(_ method: String, _ params: [String: Any]) { onEvent?(method, params) }
+}
+
 private actor VoiceRunnerTransport: HTTPTransport {
     let firstStarted: XCTestExpectation
     let firstMayFinish: AsyncStream<Void>
@@ -1521,6 +1532,7 @@ final class VoiceModelTests: XCTestCase {
         @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false, openingAudio: OpeningAudioProbe? = nil,
                         onBeforeStartOpeningCapture: (@MainActor () -> Void)? = nil,
                         recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { nil },
+                        codex: (any SubscriptionVoice)? = nil,
                         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = time ?? FakeTime()
             self.time = time
@@ -1530,7 +1542,7 @@ final class VoiceModelTests: XCTestCase {
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link },
-                               time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio)
+                               time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
             made = { [unowned self] in
                 let link = FakeConnection()
                 link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
@@ -1596,6 +1608,206 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(openedApps.isEmpty)
             h.voice.stop()
         }
+    }
+
+    func testSubscriptionVoiceClosesTheMicrophoneAfterSilenceOrAnUnansweredTurn() async throws {
+        try await withChatGPTSelected {
+            for spoke in [false, true] {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                await h.connect()
+                XCTAssertEqual(h.links.last?.liveAnswer, "fixture-sdp-answer")
+                guard let link = h.links.last else { continue }
+                if spoke {
+                    codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
+                }
+                NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+                let deadline: Double = spoke ? 30 : 8
+                await h.time.advance(deadline - 1)
+                XCTAssertTrue(h.voice.isOn)
+                await h.time.advance(1)
+                XCTAssertFalse(h.voice.isOn)
+                XCTAssertEqual(h.voice.phase, .off)
+                XCTAssertTrue(link.closed)
+                XCTAssertEqual(h.microphone, [true, false])
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+        }
+    }
+
+    func testSubscriptionVoiceAuthorizationFailureShowsSignInAndClosesTheMicrophone() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            codex.notify("thread/realtime/error", ["kind": "signInRequired"])
+            XCTAssertTrue(h.voice.needsChatGPTSignIn)
+            XCTAssertEqual(h.voice.talkState?.reason, AppLocalization.text("Sign in to ChatGPT again to start a voice conversation."))
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertTrue(link.closed)
+            XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
+    func testSubscriptionVoiceClosesOnTimeIfTheAnswerTranscriptArrivesAfterPlayback() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            defer { h.voice.stop() }
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
+            link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.voice.phase, .speaking)
+
+            link.remoteSpeech = false
+            for _ in 0..<3 { await h.time.advance(0.2) }
+            XCTAssertEqual(h.voice.phase, .listening)
+            await h.time.advance(7)
+            XCTAssertTrue(h.voice.isOn)
+            codex.notify("thread/realtime/transcript/done", ["role": "assistant", "text": "Hi there."])
+            XCTAssertTrue(h.voice.lines.contains { $0.role == .poki && $0.text == "Hi there." })
+
+            await h.time.advance(1)
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertNil(TalkActivity.state(of: h.voice))
+            XCTAssertTrue(link.closed)
+            XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
+    func testSubscriptionVoiceStartupIncludesRealtimeInstructionsAndPhoneTools() async throws {
+        try await withChatGPTSelected {
+            let expectedInstructions = try XCTUnwrap(VoiceDirect.session["instructions"] as? String)
+            let expectedTools = try XCTUnwrap(VoiceDirect.session["tools"] as? [[String: Any]])
+            var sent: [[String: Any]] = []
+            var emit: (@MainActor (String) -> Void)?
+            func push(_ payload: [String: Any]) {
+                guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            }
+            let codex = CodexVoice(
+                startBridge: { _, next in
+                    emit = next
+                    return true
+                },
+                sendBridge: { text in
+                    guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return false }
+                    sent.append(object)
+                    guard let method = object["method"] as? String, let id = object["id"] else { return true }
+                    switch method {
+                    case "account/read":
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    case "thread/start":
+                        push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
+                    case "thread/realtime/start":
+                        push(["id": id, "result": [:]])
+                        push(["method": "thread/realtime/sdp", "params": ["threadId": "fixture-thread", "sdp": "fixture-sdp-answer"]])
+                    default:
+                        push(["id": id, "result": [:]])
+                    }
+                    return true
+                }
+            )
+            var called: [(name: String, arguments: String)] = []
+            let marker = UUID().uuidString
+            AppLog.shared.add("test", marker)
+            @MainActor func newLogs() -> String {
+                AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
+            }
+            let h = Harness(codex: codex, phoneTool: { name, arguments in
+                called.append((name, arguments))
+                return ("Opened Settings", false, nil)
+            })
+            defer { h.voice.stop() }
+            await h.connect()
+
+            let threadStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/start" })
+            let threadParams = try XCTUnwrap(threadStart["params"] as? [String: Any])
+            XCTAssertEqual(threadParams["developerInstructions"] as? String, expectedInstructions)
+
+            let dynamicTools = try XCTUnwrap(threadParams["dynamicTools"] as? [[String: Any]])
+            XCTAssertEqual(dynamicTools.count, expectedTools.count)
+            XCTAssertEqual(dynamicTools.compactMap { $0["name"] as? String }, expectedTools.compactMap { $0["name"] as? String })
+            for (actual, expected) in zip(dynamicTools, expectedTools) {
+                XCTAssertEqual(actual["name"] as? String, expected["name"] as? String)
+                XCTAssertEqual(actual["description"] as? String, expected["description"] as? String)
+                let actualSchema = try XCTUnwrap(actual["inputSchema"] as? NSDictionary)
+                let expectedSchema = try XCTUnwrap(expected["parameters"] as? NSDictionary)
+                XCTAssertEqual(actualSchema, expectedSchema, "schema mismatch for \(expected["name"] ?? "")")
+            }
+
+            let realtimeStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/realtime/start" })
+            let realtimeParams = try XCTUnwrap(realtimeStart["params"] as? [String: Any])
+            XCTAssertEqual(realtimeParams["prompt"] as? String, expectedInstructions)
+            XCTAssertEqual(realtimeParams["includeStartupContext"] as? Bool, false)
+
+            push(["id": 901, "method": "item/tool/call", "params": [
+                "threadId": "fixture-thread", "tool": "open_app",
+                "arguments": ["app": "Settings", "privateSpeech": "do-not-log-this-phrase"],
+            ]])
+            push(["id": 902, "method": "item/tool/call", "params": [
+                "threadId": "fixture-thread", "tool": "get_ios_version",
+                "arguments": [:],
+            ]])
+            push(["id": 903, "method": "item/tool/call", "params": [
+                "threadId": "fixture-thread", "tool": "shell_command",
+                "arguments": ["cmd": "secret-cmd"],
+            ]])
+            await h.time.settle()
+
+            XCTAssertEqual(called.map(\.name), ["open_app"])
+            let openReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 901 }?["result"] as? [String: Any])
+            XCTAssertEqual(openReply["success"] as? Bool, true)
+            let versionReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 902 }?["result"] as? [String: Any])
+            XCTAssertEqual(versionReply["success"] as? Bool, true)
+            let versionText = ((versionReply["contentItems"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
+            XCTAssertTrue(versionText.contains("ios_version"), versionText)
+            let rejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 903 }?["result"] as? [String: Any])
+            XCTAssertEqual(rejectedReply["success"] as? Bool, false)
+
+            let logs = newLogs()
+            XCTAssertTrue(logs.contains("\(expectedTools.count) tools"), logs)
+            XCTAssertTrue(logs.contains("\(expectedInstructions.count) chars"), logs)
+            XCTAssertTrue(logs.contains("Codex tool requested: open_app"), logs)
+            XCTAssertTrue(logs.contains("Codex tool executed: open_app"), logs)
+            XCTAssertTrue(logs.contains("Codex tool requested: shell_command"), logs)
+            XCTAssertTrue(logs.contains("Codex tool rejected: shell_command"), logs)
+            XCTAssertFalse(logs.contains("do-not-log-this-phrase"), logs)
+            XCTAssertFalse(logs.contains("secret-cmd"), logs)
+
+            push(["method": "thread/realtime/itemAdded", "params": [
+                "threadId": "fixture-thread", "item": ["type": "handoff_request"],
+            ]])
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "fixture-thread"]])
+            push(["method": "poki/backend/turnCompleted", "params": ["threadId": "fixture-thread", "status": "completed"]])
+            push(["method": "poki/tool/rejected", "params": [
+                "threadId": "fixture-thread", "requestMethod": "item/commandExecution/requestApproval", "reason": "unsupportedServerRequest",
+            ]])
+            await h.time.settle()
+            let afterEvents = newLogs()
+            XCTAssertTrue(afterEvents.contains("Codex realtime handoff requested"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex backend turn started"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex backend turn completed: completed"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex tool rejected: item/commandExecution/requestApproval (unsupportedServerRequest)"), afterEvents)
+        }
+    }
+
+    private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
+        let selected = UserDefaults.standard.object(forKey: "chat.provider")
+        let saved = ModelKeys.key(.chatgpt)
+        defer {
+            ModelKeys.remove(.chatgpt)
+            if let saved { try? ModelKeys.save(saved, for: .chatgpt) }
+            UserDefaults.standard.set(selected, forKey: "chat.provider")
+        }
+        try ModelKeys.save(#"{"access":"fixture-access","refresh":"fixture-refresh","expires":1,"clientId":"fixture-registration"}"#, for: .chatgpt)
+        ModelKeys.selectedProvider = .chatgpt
+        try await run()
     }
 
     /// Said once, answered once: the conversation waits 8 s for the person to go on, then ends and lets

@@ -40,6 +40,10 @@ The on-phone runner is built from [appium/WebDriverAgent](https://github.com/app
 
 The Poki app's Voice tab links Google's [WebRTC](https://webrtc.googlesource.com/src) through the unmodified prebuilt framework from [stasel/WebRTC](https://github.com/stasel/WebRTC) 155.0.0 (Swift Package Manager, `native/ios-app/project.yml`). WebRTC is BSD-3-Clause licensed (Copyright (c) 2011, The WebRTC project authors); its license and patent grant ship inside the framework (`WebRTC.xcframework/LICENSE`). The framework is downloaded at build time and not stored in this repository.
 
+## ChatGPT voice trust roots
+
+The Poki app's iOS Codex voice build links the Mozilla public CA roots from [webpki-roots 1.0.10](https://crates.io/crates/webpki-roots/1.0.10) through its [0.26.11 compatibility crate](https://crates.io/crates/webpki-roots/0.26.11). Both versions are licensed under [CDLA-Permissive-2.0](https://cdla.dev/permissive-2-0/) and pinned in the generated Codex build lockfile.
+
 ## JavaScript packages
 
 The exact installed versions come from `package-lock.json`. These packages provide the MCP server/client transports, image processing and input validation:
