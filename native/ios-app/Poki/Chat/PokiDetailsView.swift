@@ -19,6 +19,7 @@ struct PokiDetailsView: View {
     /// Opens a run in the chat (from the Activity Log).
     var openSession: (String) -> Void = { _ in }
     @Binding var path: NavigationPath
+    @ObservedObject private var historyLock = HistoryLock.shared
     @ObservedObject private var historyCapture = HistoryCapture.shared
     /// Bumped when the chosen model changes, so the Models row's value redraws (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -38,10 +39,6 @@ struct PokiDetailsView: View {
                     SettingsRow(title: "Status", symbol: "dot.radiowaves.left.and.right", value: PokiStatusCopy.word(status), dot: status.mood.dot)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("details.status")
-                    NavigationLink(value: DetailsRoute.history) {
-                        SettingsRow(title: "Activity Log", symbol: "clock")
-                    }
-                    .accessibilityIdentifier("details.activity")
                 }
 
                 if !isSample {
@@ -59,7 +56,7 @@ struct PokiDetailsView: View {
                 // What Poki works with.
                 Section {
                     NavigationLink(value: DetailsRoute.connection) {
-                        SettingsRow(title: "Connection", symbol: "iphone.gen3", value: connectionValue,
+                        SettingsRow(title: "Setup", symbol: "iphone.gen3", value: connectionValue,
                                     valueIsAction: !isSample && !model.setupReadyForUse)
                     }
                     .accessibilityIdentifier("details.hands")
@@ -73,20 +70,36 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Dictation & Mute", symbol: "mic")
                     }
                     .accessibilityIdentifier("details.voice")
-                    // What always asks, what each method does and the sensitivity. The method in use shows
-                    // here; it is changed on Poki's card in the chat.
+                }
+
+                Section {
                     NavigationLink(value: DetailsRoute.approvals) {
                         SettingsRow(title: "Approvals", symbol: "checkmark.shield", value: model.approvalMode.title)
                     }
                     .accessibilityIdentifier("moreSettings.approvals")
-                }
-
-                // Who else uses it, and what it keeps.
-                Section {
+                    NavigationLink(value: DetailsRoute.screenHistory) {
+                        SettingsRow(title: "Screen History", caption: "Experimental Feature",
+                                    symbol: "rectangle.stack", value: screenHistoryValue)
+                    }
+                    .accessibilityIdentifier("details.screenHistory")
+                    NavigationLink(value: DetailsRoute.history) {
+                        SettingsRow(title: "Activity Log", symbol: "clock")
+                    }
+                    .accessibilityIdentifier("details.activity")
+                    NavigationLink(value: DetailsRoute.lockSettings) {
+                        SettingsRow(title: historyLock.biometricsName == "Touch ID" ? "Touch ID & Passcode" : "Face ID & Passcode",
+                                    symbol: historyLock.biometricsName == "Touch ID" ? "touchid" : "faceid")
+                    }
+                    .accessibilityIdentifier("security.lock")
                     NavigationLink(value: DetailsRoute.agents) {
-                        SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
+                        SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right", value: agentsValue)
                     }
                     .accessibilityIdentifier("moreSettings.agentsAndRelay")
+                } header: {
+                    SettingsHeader("Safety and Access")
+                }
+
+                Section {
                     NavigationLink(value: SettingsRoute.memory) {
                         SettingsRow(title: "Memory Library", symbol: "bookmark", value: "\(isSample ? 10 : RoutineStore.shared.notes.count + RoutineStore.shared.usableSkills.count)")
                     }
@@ -127,11 +140,6 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
-                    NavigationLink(value: DetailsRoute.screenHistory) {
-                        SettingsRow(title: "Screen History", caption: "Experimental Feature",
-                                    symbol: "rectangle.stack", value: screenHistoryValue)
-                    }
-                    .accessibilityIdentifier("details.screenHistory")
                     .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
@@ -170,10 +178,12 @@ struct PokiDetailsView: View {
                     ConversationsSettingsView(openSession: { id in dismiss(); openSession(id) })
                 case .screenHistory:
                     ScreenHistorySettingsView()
+                case .lockSettings:
+                    HistoryGate { HistoryLockSettings() }
                 case .voice:
                     VoiceView(embedded: true)
                 case .connection:
-                    ConnectionView()
+                    SetupSettingsPage(path: $path)
                 case .advanced:
                     AdvancedSettingsView()
                 case .agents:
@@ -251,7 +261,7 @@ enum DetailsRoute: Hashable {
     case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
-    case voiceKey
+    case voiceKey, lockSettings
 }
 
 /// Settings > Archived Conversations: the archived conversations, each one line as in the drawer, to open, bring
@@ -365,10 +375,10 @@ struct PressedDimStyle: ButtonStyle {
 
 /// Connection: whether Poki may act on this iPhone and each thing the phone needs for it (the setup
 /// items, each opening its own page), with the guide that walks through them and the first run.
-struct ConnectionView: View {
+struct SetupSettingsPage: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
-    @State private var guiding = false
+    @Binding var path: NavigationPath
     @State private var showsAutoUnlockPasscode = false
 
     private var on: Bool { model.sessionOn && !model.ownerPaused }
@@ -417,31 +427,11 @@ struct ConnectionView: View {
                                   showsPasscode: $showsAutoUnlockPasscode)
             }
 
-            Section {
-                ForEach(SetupStep.shown) { step in
-                    let done = model.stepReadyForUse(step)
-                    NavigationLink(value: step) {
-                        SettingsRow(title: step.rowTitle, symbol: step.symbol, value: done ? nil : AppLocalization.text(LocalizedStringResource("Turn On")),
-                                    warns: !done, accessory: done ? .done : nil)
-                    }
-                }
-                Button { guiding = true } label: {
-                    SettingsRow(title: model.setupReadyForUse ? "Set Up Again" : "Continue Setup", symbol: "checklist")
-                }
-                .accessibilityIdentifier("moreSettings.setup")
-                FirstRunAgain(row: true)
-            } header: {
-                SettingsHeader("This iPhone")
-            } footer: {
-                Text("Poki uses Apple’s developer tools on this iPhone. Keep all of these on.")
-            }
+            SetupSections(path: $path, guideMe: true)
         }
-        .navigationTitle(AppLocalization.text("Connection"))
+        .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
-        .sheet(isPresented: $guiding) {
-            SetupGuide(start: SetupStep.shown.first { !model.stepReadyForUse($0) })
-        }
         .sheet(isPresented: $showsAutoUnlockPasscode) {
             AutoUnlockPasscodeForm(setting: model.autoUnlock)
         }
@@ -857,7 +847,7 @@ struct AgentsAndRelayView: View {
                      : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
             }
         }
-        .navigationTitle(AppLocalization.text("Agents"))
+        .navigationTitle(AppLocalization.text("External Connections"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

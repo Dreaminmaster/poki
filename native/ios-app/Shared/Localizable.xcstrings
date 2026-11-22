@@ -2479,25 +2479,25 @@
         }
       }
     },
-    "To turn on automation, open Settings › Connection and tap Continue." : {
+    "To turn on automation, open Settings › Setup and tap Continue." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "To turn on automation, open Settings › Connection and tap Continue."
+            "value" : "To turn on automation, open Settings › Setup and tap Continue."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要开启自动化，请前往设置 › 连接并轻点“继续”。"
+            "value" : "要开启自动化，请前往设置 › 配置并轻点“继续”。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "若要開啟自動化，請前往設定 › 連線並點一下「繼續」。"
+            "value" : "若要開啟自動化，請前往設定 › 配置並點一下「繼續」。"
           }
         }
       }
@@ -13966,13 +13966,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用准备"
+            "value" : "配置"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用準備"
+            "value" : "配置"
           }
         },
         "en" : {
@@ -28055,13 +28055,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "离开 Wi-Fi 后继续工作。下次开启 Poki 时生效。"
+            "value" : "离开 Wi-⁠Fi 后继续工作。下次开启 Poki 时生效。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "離開 Wi-Fi 後繼續運作。下次開啟 Poki 時生效。"
+            "value" : "離開 Wi-⁠Fi 後繼續運作。下次開啟 Poki 時生效。"
           }
         }
       }
@@ -39425,6 +39425,1645 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法儲存這則記憶。"
+          }
+        }
+      }
+    },
+    "See what is set up and what is new." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "See what is set up and what is new."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看看哪些已设置好，有哪些新功能。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看看哪些已設定好，有哪些新功能。"
+          }
+        }
+      }
+    },
+    "Set Up Later" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up Later"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍后设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍後設定"
+          }
+        }
+      }
+    },
+    "I do what you ask, right on your iPhone." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I do what you ask, right on your iPhone."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你说一声，我就在 iPhone 上帮你做。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你說一聲，我就在 iPhone 上幫你做。"
+          }
+        }
+      }
+    },
+    "1. Pick One App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. 选一个 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. 選一個 App"
+          }
+        }
+      }
+    },
+    "Just one. If you already use one of these apps, pick it. No app yet? Pick LocalDevVPN, it is free." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只选一个就够了。已经在用其中某个 App，就选它。还没有？选 LocalDevVPN，它是免费的。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只選一個就夠了。已經在用其中某個 App，就選它。還沒有？選 LocalDevVPN，它是免費的。"
+          }
+        }
+      }
+    },
+    "Show All Apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示所有 App"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示所有 App"
+          }
+        }
+      }
+    },
+    "2. Do What It Says" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. 按步骤做"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. 按步驟做"
+          }
+        }
+      }
+    },
+    "Other people say this works in %@. Step 3 tells you if it works for you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他用户说这在 %@ 里可行。第 3 步会告诉你是否成功。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他使用者說這在 %@ 裡可行。第 3 步會告訴你是否成功。"
+          }
+        }
+      }
+    },
+    "Check" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢查"
+          }
+        }
+      }
+    },
+    "3. Check" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3. 检查"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "3. 檢查"
+          }
+        }
+      }
+    },
+    "The loopback is on, but this iPhone does not answer through it yet. Turn %@ off and on again, then pair again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机通道已开启，但这台 iPhone 还没有通过它应答。请把 %@ 关掉再打开，然后重新配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機通道已開啟，但這台 iPhone 還沒有透過它應答。請把 %@ 關掉再打開，然後重新配對。"
+          }
+        }
+      }
+    },
+    "It works. You are done with this step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成功了。这一步完成。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成功了。這一步完成。"
+          }
+        }
+      }
+    },
+    "Not yet. Finish step 2 in %@, then come back. This turns green by itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没好。在 %@ 里完成第 2 步再回来。成功后这里会自己变绿。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒好。在 %@ 裡完成第 2 步再回來。成功後這裡會自己變綠。"
+          }
+        }
+      }
+    },
+    "Pick an app first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先选一个 App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先選一個 App。"
+          }
+        }
+      }
+    },
+    "Install Module" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装模块"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝模組"
+          }
+        }
+      }
+    },
+    "Install Plugin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装插件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝外掛"
+          }
+        }
+      }
+    },
+    "Get LocalDevVPN" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "获取 LocalDevVPN"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取得 LocalDevVPN"
+          }
+        }
+      }
+    },
+    "Poki needs one helper app to reach this iPhone. Pick one, do its steps, and watch it turn green." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要一个助手 App 来连接这台 iPhone。选一个，按步骤做，等它变绿。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要一個助手 App 來連接這台 iPhone。選一個，按步驟做，等它變綠。"
+          }
+        }
+      }
+    },
+    "How It Is Set Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看设置步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看設定步驟"
+          }
+        }
+      }
+    },
+    "Set It Up Step by Step" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一步一步设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一步一步設定"
+          }
+        }
+      }
+    },
+    "It turns the loopback back on by itself when it stops, on Wi-Fi or cellular. Set it up once." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机通道断开时，它会自动重新打开，无论 Wi-Fi 还是蜂窝网络。只需设置一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機通道中斷時，它會自動重新打開，無論 Wi-Fi 還是行動網路。只需設定一次。"
+          }
+        }
+      }
+    },
+    "Tap Get the Shortcut below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“获取快捷指令”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「取得捷徑」。"
+          }
+        }
+      }
+    },
+    "Tap Add Shortcut." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“添加快捷指令”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下「加入捷徑」。"
+          }
+        }
+      }
+    },
+    "When it asks for a VPN, pick %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "询问 VPN 时，选 %@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詢問 VPN 時，選 %@。"
+          }
+        }
+      }
+    },
+    "When it asks for a VPN, pick the app from the loopback step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "询问 VPN 时，选本机通道那一步里选的 App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詢問 VPN 時，選本機通道那一步裡選的 App。"
+          }
+        }
+      }
+    },
+    "When it asks about the automation, turn it on. Leave Ask Before Running off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "询问自动化时，把它打开。“运行前询问”保持关闭。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詢問自動化時，把它打開。「執行前詢問」保持關閉。"
+          }
+        }
+      }
+    },
+    "1. Add the Shortcut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. 添加快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. 加入捷徑"
+          }
+        }
+      }
+    },
+    "2. Try It Once" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. 试运行一次"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2. 試執行一次"
+          }
+        }
+      }
+    },
+    "It works. From now on it fixes the loopback by itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成功了。以后它会自动修复本机通道。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "成功了。以後它會自動修復本機通道。"
+          }
+        }
+      }
+    },
+    "It ran but the loopback did not come on. Check step 2 of the loopback, then run it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行了，但本机通道没有打开。检查本机通道的第 2 步，然后再运行一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行了，但本機通道沒有打開。檢查本機通道的第 2 步，然後再執行一次。"
+          }
+        }
+      }
+    },
+    "Run it once. When Last Run shows a time, it works." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行一次。“上次运行”显示时间就说明成功了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "執行一次。「上次執行」顯示時間就表示成功了。"
+          }
+        }
+      }
+    },
+    "No Automation? Add It by Hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有自动化？手动添加"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有自動化？手動加入"
+          }
+        }
+      }
+    },
+    "Only if Shortcuts did not ask about an automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有快捷指令没有询问自动化时才需要。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有捷徑沒有詢問自動化時才需要。"
+          }
+        }
+      }
+    },
+    "Open Shortcuts and tap Automation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开快捷指令，轻点“自动化”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開捷徑，點一下「自動化」。"
+          }
+        }
+      }
+    },
+    "Tap the plus button, then tap Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点加号按钮，然后轻点“无线局域网”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下加號按鈕，然後點一下「Wi-Fi」。"
+          }
+        }
+      }
+    },
+    "Pick Any Network, and pick the choice for when this iPhone leaves Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选“任意网络”，再选这台 iPhone 离开 Wi-⁠Fi 时的选项。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選「任何網路」，再選這台 iPhone 離開 Wi-⁠Fi 時的選項。"
+          }
+        }
+      }
+    },
+    "Pick Run Immediately, then tap Next." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选“立即运行”，然后轻点“下一步”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選「立即執行」，然後點一下「下一步」。"
+          }
+        }
+      }
+    },
+    "Pick Poki Loopback, then tap Done." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选 Poki Loopback，然后轻点“完成”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選 Poki Loopback，然後點一下「完成」。"
+          }
+        }
+      }
+    },
+    "Open Shortcuts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开快捷指令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開捷徑"
+          }
+        }
+      }
+    },
+    "On older iOS, Automation is a tab at the bottom of Shortcuts." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在较早的 iOS 上，“自动化”是快捷指令底部的一个标签。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在較舊的 iOS 上，「自動化」是捷徑底部的一個標籤。"
+          }
+        }
+      }
+    },
+    "Add It by Hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动添加"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手動加入"
+          }
+        }
+      }
+    },
+    "If the loopback stops, this shortcut turns it back on by itself. Set it up once." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机通道断开时，这个快捷指令会自动把它重新打开。只需设置一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機通道中斷時，這個捷徑會自動把它重新打開。只需設定一次。"
+          }
+        }
+      }
+    },
+    "Connect a Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接模型"
+          }
+        }
+      }
+    },
+    "Poki needs an AI account to think. Pick one way below. One is enough." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要一个 AI 账户来思考。在下面选一种方式，一种就够了。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要一個 AI 帳號來思考。在下面選一種方式，一種就夠了。"
+          }
+        }
+      }
+    },
+    "Change or Add Another" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改或再添加一个"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改或再加入一個"
+          }
+        }
+      }
+    },
+    "Use your ChatGPT plan. No key to copy." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 套餐，不用复制密钥。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你的 ChatGPT 方案，不用複製金鑰。"
+          }
+        }
+      }
+    },
+    "Paste an API Key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴 API 密钥"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "貼上 API 金鑰"
+          }
+        }
+      }
+    },
+    "Anthropic, OpenAI, Gemini and more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anthropic、OpenAI、Gemini 等"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anthropic、OpenAI、Gemini 等"
+          }
+        }
+      }
+    },
+    "Your Model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的模型"
+          }
+        }
+      }
+    },
+    "Pick One Way" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选一种方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選一種方式"
+          }
+        }
+      }
+    },
+    "Your sign in or key stays on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的登录信息或密钥只保存在这台 iPhone 上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的登入資訊或金鑰只儲存在這台 iPhone 上。"
+          }
+        }
+      }
+    },
+    "Optional. A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选。这台 iPhone 上的小模型负责快速判断并写屏幕历史笔记，它读到的内容不会离开手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可選。這台 iPhone 上的小模型負責快速判斷並寫螢幕歷史筆記，它讀到的內容不會離開手機。"
+          }
+        }
+      }
+    },
+    "Tap Open Karing below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“打开 Karing”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「打開 Karing」。"
+          }
+        }
+      }
+    },
+    "In Karing, go to Settings, then TUN." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Karing 里，进入“设置”，再进入 TUN。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Karing 裡，進入「設定」，再進入 TUN。"
+          }
+        }
+      }
+    },
+    "Set Loopback Address to 10.7.0.1." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 Loopback Address 设为 10.7.0.1。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 Loopback Address 設為 10.7.0.1。"
+          }
+        }
+      }
+    },
+    "Turn Karing off and on again, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 Karing 关掉再打开，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把 Karing 關掉再打開，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "Tap Install Module below, then tap OK in Surge." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“安装模块”，然后在 Surge 里轻点“好”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「安裝模組」，然後在 Surge 裡點一下「好」。"
+          }
+        }
+      }
+    },
+    "In Surge, turn on the Poki Device Loopback module." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Surge 里，打开 Poki Device Loopback 模块。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Surge 裡，打開 Poki Device Loopback 模組。"
+          }
+        }
+      }
+    },
+    "Turn on Enhanced Mode, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开增强模式，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開增強模式，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "Tap Install Plugin below, then tap OK in Loon." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“安装插件”，然后在 Loon 里轻点“好”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「安裝外掛」，然後在 Loon 裡點一下「好」。"
+          }
+        }
+      }
+    },
+    "Make sure the plugin is on and Loon is connected." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认插件已打开，Loon 已连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認外掛已打開，Loon 已連線。"
+          }
+        }
+      }
+    },
+    "Come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到這裡。"
+          }
+        }
+      }
+    },
+    "Tap Open Shadowrocket below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“打开 Shadowrocket”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「打開 Shadowrocket」。"
+          }
+        }
+      }
+    },
+    "Go to Settings, then Other." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进入“设置”，再进入“其他”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進入「設定」，再進入「其他」。"
+          }
+        }
+      }
+    },
+    "Turn on Include route 10.7.0.1/32. Update Shadowrocket if you do not see it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Include route 10.7.0.1/32。看不到的话，先更新 Shadowrocket。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開 Include route 10.7.0.1/32。看不到的話，先更新 Shadowrocket。"
+          }
+        }
+      }
+    },
+    "Make sure Shadowrocket is connected, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认 Shadowrocket 已连接，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認 Shadowrocket 已連線，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "Tap Copy below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“拷贝”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「拷貝」。"
+          }
+        }
+      }
+    },
+    "In Stash, go to Settings, then Overrides, and add a new override with what you copied." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Stash 里，进入“设置”再进入“覆写”，用拷贝的内容新建一个覆写。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Stash 裡，進入「設定」再進入「覆寫」，用拷貝的內容新增一個覆寫。"
+          }
+        }
+      }
+    },
+    "Turn the override on and reconnect Stash, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开这个覆写并重新连接 Stash，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開這個覆寫並重新連線 Stash，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "In Quantumult X, edit your profile, paste the line under [general] and save." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Quantumult X 里编辑配置，把这一行粘贴到 [general] 下面并保存。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Quantumult X 裡編輯設定檔，把這一行貼到 [general] 下面並儲存。"
+          }
+        }
+      }
+    },
+    "Reconnect Quantumult X, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新连接 Quantumult X，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新連線 Quantumult X，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "In Clash Mi, paste the lines into the tun part of your profile and import it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Clash Mi 里，把这几行粘贴到配置的 tun 部分并导入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Clash Mi 裡，把這幾行貼到設定檔的 tun 部分並匯入。"
+          }
+        }
+      }
+    },
+    "Connect Clash Mi, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接 Clash Mi，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線 Clash Mi，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "In sing-box, paste the line into the tun inbound of your profile and reload it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 sing-box 里，把这一行粘贴到配置的 tun inbound 里并重新载入。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 sing-box 裡，把這一行貼到設定檔的 tun inbound 裡並重新載入。"
+          }
+        }
+      }
+    },
+    "Keep IPv6 out of the tun addresses, then come back here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tun 地址里不要放 IPv6，然后回到这里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tun 位址裡不要放 IPv6，然後回到這裡。"
+          }
+        }
+      }
+    },
+    "Tap Get LocalDevVPN below and install it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点下方的“获取 LocalDevVPN”并安装。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下下方的「取得 LocalDevVPN」並安裝。"
+          }
+        }
+      }
+    },
+    "Open LocalDevVPN and tap Connect. It may turn off another VPN app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 LocalDevVPN，轻点 Connect。它可能会关掉别的 VPN App。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開 LocalDevVPN，點一下 Connect。它可能會關掉別的 VPN App。"
+          }
+        }
+      }
+    },
+    "Optional" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可選"
+          }
+        }
+      }
+    },
+    "A small model on this iPhone makes quick choices and writes Screen History notes. Nothing it reads leaves the phone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 上的小模型负责快速判断并写屏幕历史笔记，它读到的内容不会离开手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台 iPhone 上的小模型負責快速判斷並寫螢幕歷史筆記，它讀到的內容不會離開手機。"
+          }
+        }
+      }
+    },
+    "Poki Loopback Shortcut" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback Shortcut"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback 快⁠捷⁠指⁠令"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki Loopback 捷⁠徑"
+          }
+        }
+      }
+    },
+    "Not Yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有"
+          }
+        }
+      }
+    },
+    "Allow Location" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许定位"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許定位"
+          }
+        }
+      }
+    },
+    "While Using" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 App 期间"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 App 期間"
+          }
+        }
+      }
+    },
+    "Choose Always" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择“始终”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇「永遠」"
+          }
+        }
+      }
+    },
+    "Poki counts this as set up only with Always, and never records your location." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有选择“始终”，Poki 才算配置完成。Poki 从不记录你的位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有選擇「永遠」，Poki 才算配置完成。Poki 從不記錄你的位置。"
+          }
+        }
+      }
+    },
+    "Poki never records your location." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 从不记录你的位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 從不記錄你的位置。"
+          }
+        }
+      }
+    },
+    "Keeps Poki running in the background." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Poki 在后台保持运行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Poki 在背景保持執行。"
+          }
+        }
+      }
+    },
+    "Set location to Always, and keep Live Activities on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将位置设为“始终”，并保持实时活动开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將位置設為「永遠」，並保持即時動態開啟。"
+          }
+        }
+      }
+    },
+    "Poki needs an AI account to think. Add one provider below. One is enough." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要 AI 账户来思考，添加一个就够。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 需要 AI 帳號來思考，新增一個就夠。"
+          }
+        }
+      }
+    },
+    "Required Steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必需步骤"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必要步驟"
+          }
+        }
+      }
+    },
+    "%lld of %lld Done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %1$lld/%2$lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 %1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "Guide Me" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一步步带我做"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一步步帶我做"
+          }
+        }
+      }
+    },
+    "Safety and Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全与访问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全與存取"
+          }
+        }
+      }
+    },
+    "External Connections" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外部連線"
+          }
+        }
+      }
+    },
+    "Face ID & Passcode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID & Passcode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "面容 ID 与密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID 與密碼"
+          }
+        }
+      }
+    },
+    "Touch ID & Passcode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch ID & Passcode"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控 ID 与密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch ID 與密碼"
+          }
+        }
+      }
+    },
+    "Add Apps, Photos or Files" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Apps, Photos or Files"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加应用、照片或文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入 App、照片或檔案"
+          }
+        }
+      }
+    },
+    "More Apps" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Apps"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多应用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多 App"
+          }
+        }
+      }
+    },
+    "Outfits" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Outfits"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "装扮"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "裝扮"
           }
         }
       }

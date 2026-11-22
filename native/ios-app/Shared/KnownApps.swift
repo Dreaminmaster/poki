@@ -149,6 +149,7 @@ enum KnownApps {
 
     /// US store artwork.
     private static let english: [KnownApp] = [
+        KnownApp("com.asana.Asana", icon: "asana", "Asana"),
         KnownApp("com.tinyspeck.chatlyio", icon: "slack", "Slack"),
         KnownApp("com.ubercab.UberClient", icon: "uber", "Uber"),
         KnownApp("com.starbucks.mystarbucks", icon: "starbucks", "Starbucks", "星巴克"),

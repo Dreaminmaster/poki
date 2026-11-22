@@ -54,7 +54,6 @@ extension PowerTile {
 /// reads. Each choice acts at once.
 struct PokiMenu<Face: View>: View {
     @Environment(AppModel.self) private var model
-    @Environment(ChatModel.self) private var chat
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
     /// The tap that opens the menu, for the bear to answer.
@@ -115,13 +114,17 @@ struct PokiMenu<Face: View>: View {
                         Text("Payments, deletions and actions in Wallet always need your confirmation.")
                     }
                 } label: {
-                    Label("Approval Method", systemImage: "checkmark.shield")
+                    Label("Approval", systemImage: "checkmark.shield")
                     Text(verbatim: model.approvalMode.title)
                 }
                 .accessibilityIdentifier("status.approvals")
-            } header: {
-                // Where Poki stands, which the top bar no longer says in words: its face shows it there.
-                Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
+                if let openCustomization {
+                    Button(action: openCustomization) {
+                        Label("Outfits", systemImage: "hanger")
+                        Text(verbatim: outfitName)
+                    }
+                    .accessibilityIdentifier("status.customizePoki")
+                }
             }
             .id(modelVersion)
             if model.supportsAutoUnlock {
@@ -129,10 +132,6 @@ struct PokiMenu<Face: View>: View {
                     Label("Automatic Unlock", systemImage: "lock.open")
                 }
                 .accessibilityIdentifier("status.autoUnlock")
-            }
-            if let openCustomization {
-                Button("Customize Poki", systemImage: "hanger", action: openCustomization)
-                    .accessibilityIdentifier("status.customizePoki")
             }
         } label: {
             face()
@@ -159,6 +158,17 @@ struct PokiMenu<Face: View>: View {
                 }
             }
         }
+    }
+
+    private var outfitName: String {
+        let worn = BearWardrobe.shared.selection
+        if let clothes = worn.clothes, worn.headwear == clothes {
+            return AppLocalization.text(clothes.name)
+        }
+        let pieces = BearOutfitSlot.allCases.compactMap { slot in
+            worn[slot].map { AppLocalization.text($0.piece(slot).name) }
+        }
+        return pieces.isEmpty ? AppLocalization.text("None") : ListFormatter.localizedString(byJoining: pieces)
     }
 
     private func modelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {

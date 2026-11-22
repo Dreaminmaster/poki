@@ -163,7 +163,7 @@ final class AppModel {
     var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
     var passcodeHeadsUp = false
     private(set) var passcodeConfirmationPending = false
-    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Connection and tap Continue."
+    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Setup and tap Continue."
     /// The note's text (PokiApp's alert). Its translations are looked up by this exact English key.
     static let passcodeHeadsUpMessage: LocalizedStringResource = "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode. It may ask only when Poki first operates the phone. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart."
     private var passcodeHeadsUpReconnect = true
@@ -864,6 +864,7 @@ final class AppModel {
         }
         switch app.install {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
+        case .appStore: return "Install LocalDevVPN from the App Store and tap Connect in it."
         case .toggle(let setting): return "In \(app.name), set \(setting), and keep \(app.name) connected."
         case .snippet: return "In Poki, open Setup > Connect to this iPhone > \(app.name) and add the lines it shows to \(app.name)."
         }
@@ -2634,7 +2635,7 @@ final class AppModel {
         // The disk image downloads by itself (and is checked again when Poki turns on): it does not hold the step open.
         case .pairing: pairingPath != nil && pairingTrouble == nil
         case .automation: setup.uiAutomation
-        case .background: background.allowed
+        case .background: background.always
         }
     }
 
@@ -2736,7 +2737,7 @@ final class AppModel {
 
     // MARK: Relay and connectors
 
-    static let noRelay = "Enter your relay’s address first in Settings › Agents › Address. Poki has no default relay."
+    static let noRelay = "Enter your relay’s address first in Settings › External Connections › Address. Poki has no default relay."
 
     /// Saves the relay address the person entered; false when it is not one. A running session moves
     /// to the new relay at once.

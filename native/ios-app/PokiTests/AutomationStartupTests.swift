@@ -66,7 +66,7 @@ final class AutomationStartupTests: XCTestCase {
             covered.forEach { $0.accessibilityElementsHidden = true }
             let window = UIWindow(windowScene: scene)
             window.frame = scene.screen.bounds
-            let host = UIHostingController(rootView: NavigationStack { ConnectionView() }.environment(model).environment(chat)
+            let host = UIHostingController(rootView: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }.environment(model).environment(chat)
                 .environment(\.locale, AppLocalization.locale))
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -102,7 +102,7 @@ final class AutomationStartupTests: XCTestCase {
             for _ in 0..<2 {
                 let answer = await model.runTool("look", arguments: "{}")
                 XCTAssertTrue(answer.isError)
-                XCTAssertEqual(answer.text, "not_sent: To turn on automation, open Settings › Connection and tap Continue. Nothing was sent.")
+                XCTAssertEqual(answer.text, "not_sent: To turn on automation, open Settings › Setup and tap Continue. Nothing was sent.")
                 XCTAssertFalse(model.sessionOn)
                 XCTAssertFalse(model.passcodeHeadsUp, "A repeated tool request must not request another alert")
             }
