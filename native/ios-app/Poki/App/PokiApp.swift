@@ -384,7 +384,12 @@ struct RootView: View {
                 for window in scene.windows { AppInterfaceSize.updateNavigationFonts(in: window) }
             }
         }
-        .onAppear(perform: openLaunchScreen)
+        .onAppear {
+            openLaunchScreen()
+            #if DEBUG
+            MemorySourceUITestFixture.beginActualLiveTaskIfRequested(chat)
+            #endif
+        }
         // A conversation archived or deleted (in the list or in Settings) is not left open on screen.
         .onChange(of: SessionStore.shared.removed) { _, removed in
             if let removed { leave(removed.id) }
