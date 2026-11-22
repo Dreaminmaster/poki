@@ -167,14 +167,14 @@ enum WhatsNewCatalog {
                 id: "mic-and-home-stability",
                 symbol: "mic",
                 title: WhatsNewText(
-                    en: "Mic Recovery, Smoothness, and Safety",
-                    zhHans: "麦克风恢复与安全流畅升级",
-                    zhHant: "麥克風恢復與安全流暢升級"
+                    en: "Smoother Everyday Experience",
+                    zhHans: "日常体验细节优化",
+                    zhHant: "日常體驗細節最佳化"
                 ),
                 summary: WhatsNewText(
-                    en: "Remote control frees your mic, restoring WeChat voice. New tasks drop old screenshots, Home starts and scrolls smoother, blocking misleading screen and web text.",
-                    zhHans: "远程控制完即释放麦克风，微信语音秒恢复。新任务不带旧截图，首页启动滑动更流畅，加强屏幕网页文字防误导。",
-                    zhHant: "遠端控制完即釋放麥克風，微信語音秒恢復。新任務不帶舊截圖，首頁啟動滑動更流暢，加強螢幕網頁文字防誤導。"
+                    en: "Instantly frees your mic after voice or remote sessions, clears old screenshots in new tasks, and makes home scrolling smoother.",
+                    zhHans: "语音和远程控制结束即刻归还麦克风，微信语音立即恢复。新任务不再带入旧截图，首页滑动更流畅。",
+                    zhHant: "語音與遠端控制結束即刻歸還麥克風，微信語音立即恢復。新任務不再帶入舊截圖，首頁滑動更流暢。"
                 )
             ),
         ]
@@ -365,13 +365,7 @@ struct WhatsNewView: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("whatsNew.screen")
-        .onAppear {
-            if reduceMotion {
-                appeared = true
-            } else {
-                appeared = true
-            }
-        }
+        .onAppear { appeared = true }
     }
 
     private var backdrop: some View {

@@ -334,6 +334,9 @@ struct RootView: View {
         .onChange(of: model.pairingUnderWay) { _, pairing in
             if !pairing { scheduleWhatsNewIfDue() }
         }
+        .onChange(of: model.signer.installMessage == nil) { _, cleared in
+            if cleared { scheduleWhatsNewIfDue() }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Tint.page.ignoresSafeArea())
         .overlay {
