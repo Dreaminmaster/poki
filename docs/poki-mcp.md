@@ -77,7 +77,7 @@ Gets faster with use: Poki Agent remembers past tasks and runs them faster on re
 
 **MCP clients:** Claude Code, Codex, and any client supporting `mcpServers` JSON.
 
-On physical devices, app container export and direct links to Settings subpages are unavailable. See [verification and known limits](verification.md).
+On physical devices, app container export and direct links to Settings subpages are unavailable. While Poki MCP sends remote input to a physical iPhone, iOS mutes the phone's microphone and restores it once the input session closes. See [verification and known limits](verification.md).
 
 
 ## Reference
