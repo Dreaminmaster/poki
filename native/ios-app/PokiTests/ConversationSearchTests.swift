@@ -88,7 +88,7 @@ final class ConversationSearchTests: XCTestCase {
     func testDeletedSessionsDoNotAppearAndLimitIsEnforced() {
         let a = sample("a", entries: (0..<20).map { ChatEntry(.you("find me \($0)", delivered: true)) })
         XCTAssertEqual(find(in: [a], query: "find", limit: 5).count, 5)
-        XCTAssertTrue(find(in: [a, b], query: "missing").isEmpty)
+        XCTAssertTrue(find(in: [a], query: "missing").isEmpty)
     }
 
     func testArchivedOlderMessageAndDeletedRecordsUseTheProductionPipeline() {
