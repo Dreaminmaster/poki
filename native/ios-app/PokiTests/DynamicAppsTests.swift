@@ -182,4 +182,27 @@ final class DynamicAppsTests: XCTestCase {
         XCTAssertNil(AppIconStore.bundleID("Strava"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
+
+    func testInstalledLaunchIDResolvesDynamicAppsWithoutApplicationProxy() async throws {
+        let answer = Data(#"{"v":{"apps":[{"id":"com.apple.calculator","name":"计算器","type":"System"},{"id":"cn.12306.rails12306","name":"铁路12306","type":"User"},{"id":"com.strava.stravaride","name":"Strava","type":"User"}]}}"#.utf8)
+        let apps = InstalledApps()
+        apps.phone = { ["device_address": "10.7.0.1"] }
+        apps.call = { _ in answer }
+        defer { try? FileManager.default.removeItem(at: InstalledApps.cacheFile) }
+        _ = await apps.list()
+
+        XCTAssertEqual(KnownApps.installedLaunchID("com.apple.calculator"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("cn.12306.rails12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("计算器"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("铁路12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("Strava"), "com.strava.stravaride")
+        XCTAssertNil(KnownApps.installedLaunchID("tutti.ch"))
+        XCTAssertNil(KnownApps.installedLaunchID("com.example.notinstalled"))
+
+        // Reloading only the disk cache (without a live phone refresh) must not bypass launch preflight.
+        DynamicApps.set([])
+        _ = InstalledApps()
+        XCTAssertNil(KnownApps.installedLaunchID("com.apple.calculator"))
+        XCTAssertNil(KnownApps.installedLaunchID("Strava"))
+    }
 }

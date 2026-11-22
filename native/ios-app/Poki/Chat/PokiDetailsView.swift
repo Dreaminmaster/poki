@@ -116,14 +116,8 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Signing & Updates", symbol: "signature", value: updatesValue, warns: updateWaits)
                     }
                     .accessibilityIdentifier("moreSettings.updates")
-                    Button {
-                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        SettingsRow(title: "Notifications", symbol: "bell.badge", accessory: .leaves)
-                    }
-                    .accessibilityIdentifier("moreSettings.notifications")
+                    SettingsNotificationsRow()
+                        .accessibilityIdentifier("moreSettings.notifications")
                     NavigationLink(value: DetailsRoute.appearance) {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
@@ -433,7 +427,7 @@ struct SetupSettingsPage: View {
                                   showsPasscode: $showsAutoUnlockPasscode)
             }
 
-            SetupSections(path: $path, guideMe: true)
+            SetupSections(path: $path, guideMe: true, includeOptionalGroups: false)
         }
         .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.inline)

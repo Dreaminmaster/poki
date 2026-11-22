@@ -189,7 +189,7 @@ enum ConnectionCheck {
     }
 
     /// The status in pi's words for a failed request: "(401)" or "(HTTP 401)".
-    private static func statusIn(_ message: String) -> Int? {
+    static func statusIn(_ message: String) -> Int? {
         guard let match = message.firstMatch(of: #/\((?:HTTP )?([1-5]\d\d)\)/#) else { return nil }
         return Int(match.1)
     }

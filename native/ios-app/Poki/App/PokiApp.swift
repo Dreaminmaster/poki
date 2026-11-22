@@ -117,6 +117,8 @@ struct RootView: View {
     @State private var wide: HomeRoute = .chat
     @State private var threadsOpen = false
     @State private var detailsOpen = false
+    @State private var signingInForVoice = false
+    @State private var resumeVoiceAfterSignIn = false
     @State private var detailsPath = NavigationPath()
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
@@ -181,6 +183,7 @@ struct RootView: View {
         ChatView(
             sharedDraft: $draft,
             openVoice: openLiveVoice,
+            openChatGPTSignIn: { signingInForVoice = true },
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
@@ -256,6 +259,14 @@ struct RootView: View {
             }
             .sheet(isPresented: Binding(get: { detailsOpen && showsSidebar }, set: { detailsOpen = $0 })) {
                 profilePage.presentationSizing(.page).presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $signingInForVoice, onDismiss: {
+                if resumeVoiceAfterSignIn {
+                    resumeVoiceAfterSignIn = false
+                    openLiveVoice()
+                }
+            }) {
+                ChatGPTSignIn { resumeVoiceAfterSignIn = true }
             }
             .onChange(of: PokiEntry.shared.pending, initial: true) { takeEntry() }
             .onChange(of: scenePhase) { takeEntry() }

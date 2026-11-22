@@ -589,7 +589,9 @@ final class ChatModel {
         waitingForSplitView = false
         if kind == .poki { Haptics.sent() }
         let provider = ModelKeys.selectedProvider
-        guard provider.wired, let key = ModelKeys.key(provider) ?? (provider == .custom && ModelKeys.hasUsableKey ? "none" : nil) else {
+        let key = ModelKeys.key(provider)
+        let available = provider.signsIn ? ChatGPTAccount.signedIn : key != nil || provider == .custom && ModelKeys.hasUsableKey
+        guard provider.wired, available else {
             add(.poki(provider.signsIn ? AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT first. Open Settings, then Models."))
                                        : AppLocalization.text(LocalizedStringResource("Add a model key first. Open Settings, then Models."))))
             return nil
@@ -610,7 +612,7 @@ final class ChatModel {
         let images = lastImages
         let namedApps = chooseWorkspace && kind == .poki && app.canPlanSplitView
             ? AppIconStore.bundleIDs(namedIn: text) : []
-        if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai {
+        if !inSplitView, namedApps.count < 2, Self.direct, provider == .anthropic || provider == .openai, let key {
             let context = Harness.taskInstructions(for: taskRequest,
                                                    includeMemoryAttribution: !SkillStore.shared.notes.isEmpty,
                                                    includeCountedScroll: countedScroll != nil,
@@ -1469,6 +1471,10 @@ final class ChatModel {
                     phoneArgs.removeValue(forKey: "app")
                     countedDistance = bounded.distance
                 }
+            }
+            if call.name == "do", actions.isEmpty, args["finish"] as? Bool == true, args["app"] == nil {
+                let line = await app.finishEmptyDo(localSession: splitViewSession)
+                return PokiCore.ToolAnswer(text: line ?? "finish: Poki will return when the task ends.", jpeg: nil, isError: false)
             }
             phoneStepUnderWay = true
             defer { phoneStepUnderWay = false }

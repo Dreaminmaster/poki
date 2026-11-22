@@ -12,6 +12,7 @@ struct ChatView: View {
     @Environment(ChatModel.self) private var chat
     var sharedDraft: Binding<String>? = nil
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
@@ -129,16 +130,18 @@ struct ChatView: View {
         let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
             ? .leading : []
         ZStack {
-            ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
-                           handedOver: model.handoffText != nil || sampleScene == "handoff",
-                           plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
-                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
-                           cardActions: cardActions) {
-                if !home, let hint = currentSetupHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
+            if !home {
+                ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+                               live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
+                               handedOver: model.handoffText != nil || sampleScene == "handoff",
+                               plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
+                               shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
+                               cardActions: cardActions) {
+                    if let hint = currentSetupHint {
+                        SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
+                    }
+                    LiveVoiceTranscript(voice: voice)
                 }
-                LiveVoiceTranscript(voice: voice)
             }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
@@ -197,7 +200,7 @@ struct ChatView: View {
                                       let reply = scrollReplyQuestion == chat.countedScrollQuestion ? scrollReplyQuestion : nil
                                       scrollReplyQuestion = nil
                                       chat.send(text, attachments: attachments, replyingTo: reply)
-                                  }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
+                                  }, stop: chat.stop, openVoice: openVoice, openChatGPTSignIn: openChatGPTSignIn, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
                     .logStartupAppearance(.composer)
             }
@@ -654,6 +657,8 @@ struct ChatTranscript<Footer: View>: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
 
+    private var tracksScroll: Bool { !entries.isEmpty || typing || canRetry || live || Footer.self != EmptyView.self }
+
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
         entries.last { if case .you = $0.kind { true } else { false } }?.id
@@ -698,26 +703,29 @@ struct ChatTranscript<Footer: View>: View {
         // nothing moves under you (ESP-468). The bottom anchor alone did neither: a new conversation,
         // still shorter than the screen, stayed at its top while the keyboard and the approval card
         // covered its task card, and a reader further up was dragged down by every reply.
-        .defaultScrollAnchor(follow == .reading ? nil : .bottom, for: .sizeChanges)
+        .defaultScrollAnchor(tracksScroll && follow != .reading ? .bottom : nil, for: .sizeChanges)
         .onScrollGeometryChange(for: ChatFollow.Frame.self, of: ChatFollow.Frame.init) { old, new in
+            guard tracksScroll else { return }
             let next = follow.after(old, new)
             follow = next.follow
             if next.scroll { position.scrollTo(edge: .bottom) }
         }
         // Your finger stops the chat on its way down to the newest: from there on you are reading.
         .onScrollPhaseChange { _, phase, context in
+            guard tracksScroll else { return }
             if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
         }
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
-        // Under the bars the system's soft scroll edge takes the messages (`softTopEdge`). No mask of
-        // our own here: one made the messages vanish in a short straight ramp above the bar, which
-        // read as a hard edge, and left the system's effect nothing to blur.
-        .overlay(alignment: .bottom) {
+        // Reserve the scroll-to-bottom button's height in the bottom bar while reading back so it
+        // never sits over a result card's action button.
+        .bottomBar(softEdge: true) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
+                    .padding(.top, 4)
                     .padding(.bottom, 10)
+                    .frame(maxWidth: .infinity)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
@@ -899,6 +907,7 @@ enum ChatFollow: Equatable {
     /// back into view unless you are reading; a scroll that leaves the end is yours, unless the chat
     /// itself is on its way down.
     func after(_ old: Frame, _ new: Frame) -> (follow: ChatFollow, scroll: Bool) {
+        if new.visible <= 0 { return (self, false) }
         if new.atEnd { return (.newest, false) }
         let resized = old.content != new.content || old.visible != new.visible
         switch self {
@@ -1289,6 +1298,7 @@ struct ComposerInputView: View {
     var stop: () -> Void
     /// Starts the live voice conversation.
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     /// Settings, where the OpenAI key that Talk with Poki needs is added (or Live Voice turned on).
     var openVoiceKey: () -> Void = {}
     /// Leave conversation context above a long voice notice; its content remains scrollable.
@@ -1366,7 +1376,11 @@ struct ComposerInputView: View {
                             if let talk = voice.talkState {
                                 TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
                                         interrupt: voice.stopTalking, end: voice.stop,
-                                        retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
+                                        retry: {
+                                            let needsSignIn = voice.needsChatGPTSignIn
+                                            voice.dismissProblem()
+                                            if needsSignIn { openChatGPTSignIn() } else { openVoice() }
+                                        }, dismiss: voice.dismissProblem, signInAgain: voice.needsChatGPTSignIn)
                             } else {
                                 VoiceKeyNotice(addKey: { needsKey = false; openVoiceKey() }, close: { needsKey = false })
                             }

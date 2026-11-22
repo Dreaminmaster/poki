@@ -30,7 +30,7 @@ enum ApprovalClassifier {
     /// A chat model with a key: without one there is nobody to ask.
     static var hasModel: Bool {
         let provider = ModelKeys.selectedProvider
-        return provider.wired && (ModelKeys.key(provider) != nil || provider == .custom) && provider.piModel(ModelKeys.selectedModel) != nil
+        return ModelKeys.hasUsableKey && provider.piModel(ModelKeys.selectedModel) != nil
     }
 
     /// Who answers an approval first.
@@ -137,7 +137,7 @@ enum ApprovalClassifier {
 
     private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine]) async -> Verdict {
         let provider = ModelKeys.selectedProvider
-        guard provider.wired, ModelKeys.key(provider) != nil || provider == .custom,
+        guard ModelKeys.hasUsableKey,
               let model = provider.piModel(ModelKeys.selectedModel) else {
             return Verdict(allowed: false, reason: "no chat model to ask")
         }

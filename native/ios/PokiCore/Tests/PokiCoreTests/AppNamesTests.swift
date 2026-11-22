@@ -185,20 +185,27 @@ final class AppNamesTests: XCTestCase {
         let (core, wda) = core()
         _ = await core.call("look", [:])
         wda.set("POST /wda/apps/activate") { [wda] _ in
+            wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]]) }
             wda.tree([Node("Button", "World Clock", [16, 100, 358, 44]), Node("Button", "Alarms", [16, 144, 358, 44])], app: "Clock")
             return (200, ["value": .null])
         }
+        let started = Date()
         let result = await core.call("do", ["actions": [["launch": "Clock"]]])
+        let elapsed = Date().timeIntervalSince(started)
         XCTAssertFalse(result.isError, result.text)
-        XCTAssertTrue(result.text.contains("the screen had changed and held still"), result.text)
+        XCTAssertTrue(result.text.contains("World Clock"), result.text)
         XCTAssertFalse(result.text.contains("paused 900 ms"), result.text)
+        XCTAssertLessThan(elapsed, 0.85, "Changed launch screen should settle before the 900 ms fixed pause (\(elapsed) s): \(result.text)")
     }
 
     func testAScreenThatDidNotChangeGetsTheWholePause() async {
         let (core, _) = core()
         _ = await core.call("look", [:])
+        let started = Date()
         let result = await core.call("do", ["actions": [["launch": "Clock"]]])
-        XCTAssertTrue(result.text.contains("paused 9"), result.text)
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertGreaterThanOrEqual(elapsed, 0.85, "Unchanged launch screen should get the whole 900 ms pause (\(elapsed) s): \(result.text)")
+        XCTAssertTrue(result.text.contains("paused "), result.text)
     }
 
     /// Clock in front from its launch on: its screen is drawn `after` seconds later.
@@ -240,9 +247,12 @@ final class AppNamesTests: XCTestCase {
 
         XCTAssertFalse(result.isError, result.text)
         XCTAssertTrue(result.text.contains("World Clock"), result.text)
-        let waited = try XCTUnwrap(["paused ", "read after "].lazy.compactMap { key in result.text.range(of: key).flatMap { Int(result.text[$0.upperBound...].prefix(while: \.isNumber)) } }.first, result.text)
-        // The launch's fixed pause is 900 ms; a read let run past it made it 1.4 s.
-        XCTAssertLessThanOrEqual(waited, 1200, result.text)
+        // The launch's fixed pause is 900 ms; when reads already run past it, no extra fixed pause is added.
+        if let waited = ["paused ", "read after "].lazy.compactMap({ key in result.text.range(of: key).flatMap { Int(result.text[$0.upperBound...].prefix(while: \.isNumber)) } }).first {
+            XCTAssertLessThanOrEqual(waited, 1200, result.text)
+        } else {
+            XCTAssertFalse(result.text.contains("paused "), result.text)
+        }
     }
 
     func testWithTheQuickReadOffThePauseIsTheFixedOne() async {

@@ -1945,6 +1945,10 @@ final class AppModel {
 
     // MARK: The chat's tools
 
+    func finishEmptyDo(localSession: String? = nil) async -> String? {
+        await core.finishTask(switching: duoCompanionTask == nil, localSession: localSession)
+    }
+
     /// A tool call from the chat's model loop. Poki turns on first when it is off (the runner then starts
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.

@@ -119,6 +119,10 @@ targets:
         product: PiSwiftAgent
       - package: PiSwift
         product: PiSwiftAI
+    preBuildScripts:
+      - name: Build Codex Voice
+        script: '"$SRCROOT/../codex-voice/build.sh" build "$POKI_CODEX_RUST_TARGET"'
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID)
@@ -130,9 +134,12 @@ targets:
         HEADER_SEARCH_PATHS: $(SRCROOT)/../launcher/include $(SRCROOT)/Poki/Native
         # The XCTest libraries of the mounted developer disk image, loaded at run time (Poki/Native).
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks /System/Developer/usr/lib /System/Developer/Library/PrivateFrameworks /System/Developer/Library/Frameworks
-        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../launcher/target/aarch64-apple-ios/release
-        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": $(SRCROOT)/../launcher/target/aarch64-apple-ios-sim/release
-        OTHER_LDFLAGS: [-lpoki_launcher, -lc++, -framework, Security, -framework, SystemConfiguration]
+        POKI_CODEX_RUST_TARGET: aarch64-apple-ios
+        "POKI_CODEX_RUST_TARGET[sdk=iphonesimulator*]": aarch64-apple-ios-sim
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/../launcher/target/$(POKI_CODEX_RUST_TARGET)/release
+          - $(SRCROOT)/../../build/codex-voice/$(POKI_CODEX_RUST_TARGET)/target/$(POKI_CODEX_RUST_TARGET)/release
+        OTHER_LDFLAGS: [-lpoki_launcher, -lpoki_codex_voice, -lc++, -framework, Security, -framework, SystemConfiguration]
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
   PokiTests:
