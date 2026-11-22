@@ -285,6 +285,9 @@ final class CodexVoice: SubscriptionVoice {
         case "thread/realtime/sdp":
             finish("sdp:\(thread)", .success(params), retain: true)
         case "thread/realtime/error", "thread/realtime/closed":
+            if method == "thread/realtime/error", let diagnostic = params["diagnostic"] as? String {
+                AppLog.shared.add("voice", diagnostic)
+            }
             finish("sdp:\(thread)", .failure(Self.failure(in: params, fallback: .ended)), retain: true)
             onEvent?(method, params)
         default:

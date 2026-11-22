@@ -187,13 +187,18 @@ async fn serve(
                 Some(InProcessServerEvent::ServerNotification(event)) => {
                     let Ok(mut value) = serde_json::to_value(event) else { continue; };
                     let method = value.get("method").and_then(Value::as_str).unwrap_or_default();
+                    let realtime_error = method == "thread/realtime/error";
                     if method.starts_with("thread/realtime/") || matches!(method, "account/login/completed" | "account/updated") {
                         if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) {
-                            if let Some(kind) = params.get("message").and_then(Value::as_str).and_then(auth_failure_kind) {
-                                params.insert("kind".into(), json!(kind));
+                            if let Some(Value::String(message)) = params.remove("message") {
+                                if let Some(kind) = auth_failure_kind(&message) {
+                                    params.insert("kind".into(), json!(kind));
+                                }
+                                if realtime_error {
+                                    params.insert("diagnostic".into(), json!(realtime_error_diagnostic(&message)));
+                                }
                             }
                             params.remove("error");
-                            params.remove("message");
                         }
                         publish(emit, value);
                     }
@@ -233,6 +238,45 @@ fn auth_failure_kind(message: &str) -> Option<&'static str> {
     .iter()
     .any(|marker| message.contains(marker))
     .then_some("signInRequired")
+}
+
+fn realtime_error_diagnostic(message: &str) -> String {
+    // Server messages can include account details, URLs, or credentials. Keep only known
+    // transport errors verbatim and copy only the status number from a failed upgrade.
+    const STREAM: &str = "stream disconnected before completion: ";
+    const CONNECT: &str = "failed to connect realtime websocket: ";
+    let cause = message.strip_prefix(STREAM).unwrap_or(message);
+    if let Some(transport) = cause.strip_prefix(CONNECT) {
+        if matches!(transport,
+            "IO error: no native root CA certificates found (errors: [])"
+                | "IO error: invalid peer certificate: UnknownIssuer"
+                | "IO error: operation timed out"
+                | "IO error: connection reset by peer"
+        ) {
+            return message.to_owned();
+        }
+        return "failed to connect realtime websocket (transport details withheld)".into();
+    }
+    if cause.starts_with("realtime websocket closed unexpectedly without a status code") {
+        return "realtime websocket closed unexpectedly without a status code".into();
+    }
+    if let Some((code, _)) = cause.strip_prefix("realtime websocket closed unexpectedly: code=")
+        .and_then(|detail| detail.split_once(" reason="))
+    {
+        if matches!(code, "Away" | "Protocol" | "Unsupported" | "Abnormal" | "Invalid"
+            | "Policy" | "Size" | "Extension" | "Error" | "Restart" | "Again") {
+            return format!("realtime websocket closed unexpectedly: code={code}");
+        }
+        return "realtime websocket closed unexpectedly".into();
+    }
+    if let Some(status) = cause.strip_prefix("unexpected status ")
+        .and_then(|text| text.split_whitespace().next())
+        .and_then(|text| text.parse::<u16>().ok())
+        .filter(|status| (400..=599).contains(status))
+    {
+        return format!("unexpected status {status} in realtime voice");
+    }
+    "realtime voice error (upstream details withheld)".into()
 }
 
 fn publish(emit: Event, value: Value) {

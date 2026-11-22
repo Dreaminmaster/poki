@@ -75,6 +75,44 @@ PY
 fi
 
 workspace="$source_dir/codex-rs"
+# Extend the pinned upstream lockfile in both fresh and previously prepared build trees.
+python3 - "$workspace/Cargo.lock" <<'PY'
+from pathlib import Path
+import sys
+
+lock = Path(sys.argv[1])
+contents = lock.read_text()
+header, *packages = contents.split('[[package]]\n')
+
+def update_dependency(package, dependency):
+    prefix = f'name = "{package}"\n'
+    index = next(i for i, entry in enumerate(packages) if entry.startswith(prefix))
+    entry = packages[index]
+    if dependency not in entry:
+        packages[index] = entry.replace('\n]\n', f'\n {dependency},\n]\n', 1)
+
+update_dependency('poki-codex-voice', '"tokio-tungstenite"')
+update_dependency('tokio-tungstenite', '"webpki-roots 0.26.11"')
+
+roots = next(i for i, entry in enumerate(packages) if entry.startswith('name = "webpki-roots"\nversion = "1.0.10"\n'))
+if not any(entry.startswith('name = "webpki-roots"\nversion = "0.26.11"\n') for entry in packages):
+    # The connector's 0.26 package re-exports the 1.0.10 roots pinned in the upstream lockfile.
+    for entry_index, entry in enumerate(packages):
+        packages[entry_index] = entry.replace('\n "webpki-roots",\n', '\n "webpki-roots 1.0.10",\n')
+    packages.insert(roots, '''name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.10",
+]
+
+''')
+
+updated = '[[package]]\n'.join([header, *packages])
+if updated != contents:
+    lock.write_text(updated)
+PY
 mkdir -p "$workspace/poki-codex-voice/src"
 for file in Cargo.toml src/lib.rs; do
     cmp -s "$adapter_dir/$file" "$workspace/poki-codex-voice/$file" \
