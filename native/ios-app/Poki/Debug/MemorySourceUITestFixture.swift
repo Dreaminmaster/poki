@@ -10,6 +10,9 @@ enum MemorySourceUITestFixture {
     static let activeID = "poki-uitest-active-chat"
     static let marker = "Synthetic saved source transcript"
     static let draft = "Synthetic unsent composer draft"
+    static let normalSearchMarker = "Synthetic ordinary search needle"
+    static let greetingSearchMarker = "Synthetic greeting search needle"
+    static let unrelatedGreeting = "Synthetic unrelated approval greeting"
     private static var wantsLiveTask: Bool {
         let args = ProcessInfo.processInfo.arguments
         return args.contains("-pokiUITestMemorySource") && args.contains("-pokiUITestLiveTask")
@@ -23,9 +26,11 @@ enum MemorySourceUITestFixture {
     }
 
     static func installIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("-pokiUITestMemorySource") else { return }
+        let args = ProcessInfo.processInfo.arguments
+        let searchFixture = args.contains("-pokiUITestConversationSearch")
+        guard args.contains("-pokiUITestMemorySource") || searchFixture else { return }
         let defaults = UserDefaults.standard
-        defaults.set("memoryRecent", forKey: "pokiScreen")
+        defaults.set(searchFixture ? "details" : "memoryRecent", forKey: "pokiScreen")
         defaults.set(draft, forKey: "pokiDraft")
         defaults.set(FirstRun.Record.done.rawValue, forKey: FirstRun.key)
         defaults.set(true, forKey: SessionStore.archivedEarlierKey)
@@ -59,8 +64,21 @@ enum MemorySourceUITestFixture {
                 live: false, outcome: .done,
                 entries: [ChatEntry(.you(marker, delivered: true))], calls: []
             )
+            // Search acceptance fixture: an opening greeting and a separate ordinary
+            // match, followed by enough content to make an exact-message jump observable.
+            let searchEntries: [ChatEntry] = [
+                ChatEntry(.poki(greetingSearchMarker)),
+                ChatEntry(.poki(unrelatedGreeting)),
+                ChatEntry(.you(normalSearchMarker, delivered: true))
+            ] + (0..<35).map { ChatEntry(.you("Synthetic later message \($0)", delivered: true)) }
+            let searchable = SavedSession(
+                id: "poki-uitest-search-target", kind: .poki,
+                title: "Synthetic search destination",
+                started: now.addingTimeInterval(-10000), updated: now.addingTimeInterval(-5000),
+                live: false, outcome: .done, entries: searchEntries, calls: []
+            )
             let encoder = JSONEncoder()
-            for session in [active, source] {
+            for session in (searchFixture ? [active, source, searchable] : [active, source]) {
                 try encoder.encode(session).write(
                     to: folder.appendingPathComponent(session.id + ".json"),
                     options: .atomic
