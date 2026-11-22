@@ -46,8 +46,9 @@ struct SensesShare: Codable, Equatable {
     }
 
     /// The model's reply read into an answer, an item, and the apps of `entries` the answer is
-    /// about. Nil when nothing is left of it: the model said NONE, or only that. A stray NONE after a
-    /// real answer (the model saying there is nothing more) is taken out.
+    /// about. Nil when nothing is left of it: the model said NONE, or only that. A NONE on its own
+    /// line, or ending the answer after a sentence (the model saying there is nothing more), is taken
+    /// out; a NONE inside a title or a sentence ("NONE left to lose") stays.
     static func parse(_ raw: String, entries: [HistoryEntry]) -> SensesShare? {
         var kept: [String] = []
         var itemLine: String?
@@ -55,46 +56,63 @@ struct SensesShare: Codable, Equatable {
             let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "-*• ").union(.whitespaces))
             if trimmed.uppercased().hasPrefix("ITEM:") || trimmed.uppercased().hasPrefix("ITEM：") {
                 itemLine = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            } else if !trimmed.isEmpty {
+            } else if !trimmed.isEmpty, !isSentinel(trimmed) {
                 kept.append(trimmed)
             }
         }
         let answer = String(clean(kept.joined(separator: " ")).prefix(700))
         guard !answer.isEmpty else { return nil }
-        let apps = uses(entries, about: answer)
-        return SensesShare(answer: answer, apps: apps, item: itemLine.flatMap { item($0, entries: entries, apps: apps) })
+        let found = itemLine.flatMap { item($0, entries: entries) }
+        return SensesShare(answer: answer, apps: uses(entries, about: answer, item: found), item: found)
     }
 
-    /// Without the sentinel NONE and the space it leaves.
+    /// A line that is only the sentinel.
+    static func isSentinel(_ line: String) -> Bool {
+        line.range(of: #"^NONE[.。!！]?$"#, options: .regularExpression) != nil
+    }
+
+    /// Without a trailing sentinel NONE (after the answer's last sentence) and the space it leaves.
     static func clean(_ text: String) -> String {
-        var out = text.replacingOccurrences(of: #"(?<![A-Za-z])NONE(?![A-Za-z])[.。!！]?"#, with: "", options: .regularExpression)
+        var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        out = out.replacingOccurrences(of: #"(?<=[.!?。！？])\s*NONE[.。!！]?$"#, with: "", options: .regularExpression)
         out = out.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
-        out = out.replacingOccurrences(of: #"\s+([.,。，])"#, with: "$1", options: .regularExpression)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The apps of the reads the answer came from: those the answer names, or the three used
-    /// longest when it names none, in the order they were first used.
-    static func uses(_ entries: [HistoryEntry], about answer: String) -> [Use] {
-        var byApp: [String: [Date]] = [:]
+    /// The apps the answer's evidence came from, in the order they were first used: the item's app
+    /// and the apps the answer names. When neither names one, the apps whose own screen text shares
+    /// the most words with the answer. Never apps that were merely used around the same time (review
+    /// of #627: a Reddit answer listed Spotify and Notes because they were used longest).
+    static func uses(_ entries: [HistoryEntry], about answer: String, item: Item? = nil) -> [Use] {
+        var byApp: [String: [HistoryEntry]] = [:]
         var order: [String] = []
         for entry in entries.sorted(by: { $0.at < $1.at }) where !entry.app.isEmpty && !HistoryCapture.isPoki(entry.app) {
             let key = entry.app.lowercased()
             if byApp[key] == nil { order.append(entry.app) }
-            byApp[key, default: []].append(entry.at)
+            byApp[key, default: []].append(entry)
         }
-        var all: [Use] = []
-        for app in order {
-            let times = byApp[app.lowercased()] ?? []
-            guard let first = times.first, let last = times.last else { continue }
+        func use(_ app: String) -> Use? {
+            let times = (byApp[app.lowercased()] ?? []).map(\.at)
+            guard let first = times.first, let last = times.last else { return nil }
             var seconds: TimeInterval = 0
             for (a, b) in zip(times, times.dropFirst()) where b.timeIntervalSince(a) < visitGap { seconds += b.timeIntervalSince(a) }
-            all.append(Use(app: app, from: first, to: last, minutes: max(1, Int((seconds / 60).rounded()))))
+            return Use(app: app, from: first, to: last, minutes: max(1, Int((seconds / 60).rounded())))
         }
         let low = answer.lowercased()
-        let named = all.filter { names($0.app).contains { mentions(low, $0) } }
-        let chosen = named.isEmpty ? Array(all.sorted { $0.minutes > $1.minutes }.prefix(3)) : named
-        return Array(chosen.sorted { $0.from < $1.from }.prefix(maxApps))
+        var chosen = order.filter { app in
+            app.lowercased() == item?.app.lowercased() || names(app).contains { mentions(low, $0) }
+        }
+        if chosen.isEmpty {
+            let words = Set(SensesContext.terms(answer))
+            let scores = order.map { app -> (String, Int) in
+                let seen = (byApp[app.lowercased()] ?? []).map { ($0.title + " " + $0.text).lowercased() }.joined(separator: " ")
+                return (app, words.filter { seen.contains($0) }.count)
+            }
+            if let best = scores.map(\.1).max(), best > 0 {
+                chosen = scores.filter { $0.1 == best }.map(\.0)
+            }
+        }
+        return Array(chosen.compactMap(use).sorted { $0.from < $1.from }.prefix(maxApps))
     }
 
     /// An app's display name and the last part of its id, lowercased, as an answer may name it.
@@ -113,13 +131,13 @@ struct SensesShare: Codable, Equatable {
     }
 
     /// "APP NAME | title" when the app is one the owner used in these reads and the title is a title.
-    private static func item(_ line: String, entries: [HistoryEntry], apps: [Use]) -> Item? {
+    private static func item(_ line: String, entries: [HistoryEntry]) -> Item? {
         let parts = line.split(separator: "|", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
         guard parts.count == 2 else { return nil }
-        let title = clean(parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’「」《》")))
-        guard (2...120).contains(title.count) else { return nil }
+        let title = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’「」《》").union(.whitespaces))
+        guard (2...120).contains(title.count), !isSentinel(title) else { return nil }
         let name = parts[0].lowercased()
-        let candidates = apps.map(\.app) + entries.map(\.app)
+        let candidates = entries.map(\.app)
         guard let app = candidates.first(where: { names($0).contains(name) }) else { return nil }
         return Item(app: app, title: title)
     }
