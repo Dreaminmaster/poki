@@ -89,7 +89,9 @@ final class MemorySourceNavigationUITests: XCTestCase {
         result.tap()
         let target = app.staticTexts[phrase]
         XCTAssertTrue(target.waitForExistence(timeout: 15), "Search must open the matching transcript message")
-        XCTAssertTrue(target.isHittable, "The exact matching message must settle within the viewport")
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: target)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 12), .completed,
+                       "The exact matching message must settle within the viewport")
         screenshot(app, name: "Conversation search exact message in viewport")
         return app
     }
