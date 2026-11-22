@@ -43,7 +43,17 @@ final class MemorySourceNavigationUITests: XCTestCase {
 
     private func verifyDraftAfterClosing(_ app: XCUIApplication) {
         let close = app.buttons["details.done"]
+        // The read-only source preview is pushed on Settings' own stack.
+        // Return through real back buttons until its Close button is exposed;
+        // don't assume a root-only toolbar stays visible on a pushed page.
+        for _ in 0..<6 where !close.isHittable {
+            let back = app.navigationBars.buttons
+                .matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH[c] %@", "BackButton", "Back")).firstMatch
+            guard back.exists && back.isHittable else { break }
+            back.tap()
+        }
         XCTAssertTrue(close.waitForExistence(timeout: 10), "Settings must stay presented until the owner closes it")
+        XCTAssertTrue(close.isHittable, "The source preview must let the owner return and close Settings")
         close.tap()
         let original = app.staticTexts["Active synthetic chat"]
         XCTAssertTrue(original.waitForExistence(timeout: 12), "The active chat must remain after the source preview")
