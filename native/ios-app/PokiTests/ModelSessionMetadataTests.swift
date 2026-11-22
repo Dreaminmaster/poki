@@ -413,6 +413,11 @@ final class ModelSessionMetadataTests: XCTestCase {
 
             let outsideID = store.handoffID(for: "external-fixture-session")
             XCTAssertNotEqual(outsideID, ownerID)
+            XCTAssertTrue(outsideID.hasPrefix("ask-"), "handoff should have a dedicated model-facing conversation")
+            XCTAssertFalse(outsideID.contains("external-fixture-session"),
+                           "MCP transport IDs must not be embedded in model-facing routing IDs")
+            XCTAssertNotEqual(outsideID, store.handoffID(for: "external-fixture-session"),
+                              "separate delegated tasks must not share model session routing")
             let handoff = ChatModel(app: app, kind: .handoff, requester: "Synthetic external agent",
                                     sessionID: outsideID, store: store)
             defer { handoff.stop() }
