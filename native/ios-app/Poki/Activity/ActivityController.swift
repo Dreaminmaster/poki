@@ -243,9 +243,17 @@ final class ActivityController {
 
     /// Writes a thumbnail, at most about 160 points wide, to the App Group container for the widget.
     func setThumbnail(_ jpeg: Data?) {
-        guard let jpeg, let url = SharedContainer.thumbnailURL, let small = Self.shrink(jpeg, maxPixels: 260) else { return }
+        guard let jpeg else { clearThumbnail(); return }
+        guard let url = SharedContainer.thumbnailURL, let small = Self.shrink(jpeg, maxPixels: 260) else { return }
         try? small.write(to: url, options: .atomic)
         update { $0.thumbnailVersion += 1 }
+    }
+
+    func clearThumbnail() {
+        if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
+        if state.thumbnailVersion != 0 {
+            update { $0.thumbnailVersion = 0 }
+        }
     }
 
     // MARK: Transitions
@@ -267,6 +275,8 @@ final class ActivityController {
         let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
             state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.previous = nil
+            state.thumbnailVersion = 0
+            if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
             // The app belongs to its run: a run that never reads the screen must not finish in the last run's app.
             if state.app == old.app { state.app = nil }
             tally = Tally()
@@ -398,6 +408,8 @@ final class ActivityController {
             state.event = nil
             state.previous = nil
             state.since = nil
+            state.thumbnailVersion = 0
+            if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
         }
         armFold()
     }
