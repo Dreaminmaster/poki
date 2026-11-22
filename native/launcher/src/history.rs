@@ -324,6 +324,15 @@ struct Waits {
     safety: Duration,
     /// The round found an app whose screens are never kept, or the Home Screen.
     left_out: bool,
+    /// The notices ran and were never found wrong in this run: a screen that drew nothing may
+    /// wait the quiet time. Once one was found wrong, the safety pace alone decides.
+    proven: bool,
+}
+
+/// How long a screen that drew nothing waits for its safety look: the quiet time while the
+/// notices were never found wrong, the safety pace once one was.
+fn quiet(waits: &Waits) -> Duration {
+    if waits.proven { QUIET.max(waits.safety) } else { waits.safety }
 }
 
 /// Why a round is made. It goes into the round's line as "due", so the app's log shows what
@@ -361,12 +370,16 @@ fn due(waited: Duration, waits: &Waits, hint: &Hint) -> Option<Why> {
         // An app came to the front: it is read, whatever was read before.
         (Shown::App, _) if hint.changed.is_some() => hint.changed.filter(|ago| *ago >= ARRIVE).map(|_| Why::Arrived),
         // Nothing to read, and nothing was drawn since the last round: no app can have come.
-        (Shown::Home | Shown::LeftOut, Some(moves)) if moves.unstirred => after(QUIET.max(waits.safety), Why::Safety),
-        (Shown::Home | Shown::LeftOut, _) => after(waits.safety, Why::Safety),
+        (Shown::Home | Shown::LeftOut, Some(moves)) if moves.unstirred => after(quiet(waits), Why::Safety),
+        // The screen drew since the last round while the notice still names the app it left: a
+        // notice may have been missed, so the look is kept at the short safety pace (review of
+        // #624: a visit from 500 s to 900 s was lost at the half hour pace).
+        (Shown::Home | Shown::LeftOut, Some(_)) => after(waits.safety.min(SAFETY_MAX), Why::Safety),
+        (Shown::Home | Shown::LeftOut, None) => after(waits.safety, Why::Safety),
         // No app can have come to the front on a screen that drew nothing: the one the last
         // round found is still there, and is read again only when it drew since it was read.
         (Shown::Unknown, Some(moves)) if moves.unstirred => {
-            if waits.left_out || moves.still { after(QUIET.max(waits.safety), Why::Safety) } else { after(waits.again, Why::Pace) }
+            if waits.left_out || moves.still { after(quiet(waits), Why::Safety) } else { after(waits.again, Why::Pace) }
         }
         (Shown::Unknown, _) => after(waits.blind.min(waits.again), Why::Blind),
         (Shown::App, None) => after(waits.again, Why::Pace),
@@ -376,7 +389,7 @@ fn due(waited: Duration, waits: &Waits, hint: &Hint) -> Option<Why> {
                 return Some(Why::Woke);
             }
             // A screen that drew nothing since it was read shows what was read.
-            let wait = if moves.still { waits.again.max(QUIET) } else { waits.again };
+            let wait = if moves.still { waits.again.max(if waits.proven { QUIET } else { IDLE_MAX }) } else { waits.again };
             (waited >= wait && (!moves.moving || waited >= wait + HOLD)).then_some(Why::Pace)
         }
     }
@@ -1136,16 +1149,18 @@ async fn run(request: &Value, emit: impl Fn(Value), me: u64) -> Result<Value, Fa
                 let since_read = last_read.map(|(_, read)| asked.saturating_duration_since(read)).unwrap_or_default();
                 // Taken in first: a look that found the notices wrong ends the longer safety pace.
                 hints.looked(look != Look::Skipped, &emit);
-                let safety = paced(SAFETY, steady, if hints.proven() { SAFETY_PROVEN_MAX } else { SAFETY_MAX });
+                let proven = hints.proven();
+                let safety = paced(SAFETY, steady, if proven { SAFETY_PROVEN_MAX } else { SAFETY_MAX });
                 waits = Some(match look {
                     // An app that is never kept is in front: nothing of it is to be read again.
-                    Look::Skipped => Waits { blind, again: blind, afresh: blind, safety, left_out: true },
+                    Look::Skipped => Waits { blind, again: blind, afresh: blind, safety, left_out: true, proven },
                     Look::Read | Look::Same => Waits {
                         blind,
                         again: reread.saturating_sub(since_read).max(least),
                         afresh: reread_after(0, last_snapshot).saturating_sub(since_read).max(least),
                         safety,
                         left_out: false,
+                        proven,
                     },
                 });
             }
@@ -1615,7 +1630,7 @@ mod tests {
         assert_eq!(second_after(Duration::from_millis(900)).as_secs(), 9);
     }
 
-    const WAITS: Waits = Waits { blind: Duration::from_secs(15), again: Duration::from_secs(10), afresh: Duration::from_secs(10), safety: Duration::from_secs(60), left_out: false };
+    const WAITS: Waits = Waits { blind: Duration::from_secs(15), again: Duration::from_secs(10), afresh: Duration::from_secs(10), safety: Duration::from_secs(60), left_out: false, proven: true };
 
     fn seconds(seconds: u64) -> Duration {
         Duration::from_secs(seconds)
@@ -1704,6 +1719,47 @@ mod tests {
         assert_eq!(due(seconds(59), &left_out, &frames(false, true)), None);
         assert_eq!(due(seconds(1799), &left_out, &frames(false, true)), None);
         assert_eq!(due(seconds(1800), &left_out, &frames(false, true)), Some(Why::Safety));
+    }
+
+    #[test]
+    fn a_missed_notice_never_loses_a_visit() {
+        // Review of #624: the notices were never wrong, so the safety pace has grown to half an
+        // hour. The owner is on the Home Screen, opens an app that is read at 500 s, and the
+        // notice for it is missed: it still says the Home Screen. The frames show the screen
+        // drawing. The owner leaves at 900 s. The visit must be looked at before then.
+        let waits = Waits { safety: paced(SAFETY, 10, SAFETY_PROVEN_MAX), left_out: true, ..WAITS };
+        assert_eq!(waits.safety, seconds(1800));
+        let at = |t: u64| {
+            let drew = t >= 500;
+            Hint { shown: Shown::Home, changed: None, moves: Some(Moves { still: !drew, unstirred: !drew, woke: None, moving: false }) }
+        };
+        let first = (0..=1800).find(|&t| due(seconds(t), &waits, &at(t)).is_some());
+        assert_eq!(first, Some(600));
+        assert!(first.unwrap() < 900);
+        // The same in a left-out app whose notice was missed.
+        let left = |t: u64| Hint { shown: Shown::LeftOut, ..at(t) };
+        assert_eq!((0..=1800).find(|&t| due(seconds(t), &waits, &left(t)).is_some()), Some(600));
+        // Without the miss, a screen that drew nothing is still left alone for the half hour.
+        let quiet = Hint { shown: Shown::Home, changed: None, moves: Some(Moves { still: true, unstirred: true, woke: None, moving: false }) };
+        assert_eq!((0..=1800).find(|&t| due(seconds(t), &waits, &quiet).is_some()), Some(1800));
+    }
+
+    #[test]
+    fn once_a_notice_was_wrong_a_quiet_screen_keeps_the_short_safety_pace() {
+        // Review of #624: after a look found a notice wrong, the quiet time must not override
+        // the short safety look, even when the frames show nothing drawn.
+        let doubted = Waits { proven: false, ..WAITS };
+        let still = |shown: Shown| Hint { shown, changed: None, moves: Some(Moves { still: true, unstirred: true, woke: None, moving: false }) };
+        for shown in [Shown::Unknown, Shown::Home, Shown::LeftOut] {
+            assert_eq!(due(seconds(59), &doubted, &still(shown)), None);
+            assert_eq!(due(seconds(60), &doubted, &still(shown)), Some(Why::Safety));
+            // While proven, the same screen waits the quiet time.
+            assert_eq!(due(seconds(60), &WAITS, &still(shown)), None);
+        }
+        // An app in front that drew nothing since it was read: the idle pace, not the quiet time.
+        let app = Hint { shown: Shown::App, changed: None, moves: Some(Moves { still: true, unstirred: true, woke: None, moving: false }) };
+        assert_eq!(due(IDLE_MAX, &doubted, &app), Some(Why::Pace));
+        assert_eq!(due(IDLE_MAX, &WAITS, &app), None);
     }
 
     #[tokio::test]
