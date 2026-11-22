@@ -961,18 +961,37 @@ final class Computer: @unchecked Sendable {
         case .type:
             return action["ref"] == nil && action["into"] == nil ? !evidence.isEmpty : evidence.contains(.references)
         case .scrollTo:
-            return evidence.contains(.references)
+            // Scrolling to a text reads the screen as it goes; a number is the latest read's.
+            return target?.string != nil || (target?["ref"] == nil && target?["in"] == nil && target?["text"] != nil) || evidence.contains(.references)
         case .swipe:
             return (target?["in"] ?? action["in"]) == nil ? !evidence.isEmpty : evidence.contains(.references)
         case .path:
+            // A path's steps name their targets by text and each waits for its target on the screen it
+            // lands on, so no earlier read is needed for them; only a point in one is the screenshot's.
             let steps = target?["steps"]?.array ?? target?.array ?? []
-            return !evidence.isEmpty && steps.allSatisfy {
-                ActionKind($0) != .path && hasRequiredScreenEvidence($0, evidence: evidence)
-            }
+            return steps.allSatisfy { canActInPathAfterAuthorization($0, evidence: evidence) }
         case .back:
             return currentBackTarget.button == nil ? !evidence.isEmpty : evidence.contains(.references)
-        case .run, .key:
+        case .run:
+            // A saved skill waits for each target and acts on a single match, as a path does.
+            return true
+        case .key:
             return !evidence.isEmpty
+        }
+    }
+
+    private func canActInPathAfterAuthorization(_ step: JSON, evidence: ScreenEvidence) -> Bool {
+        guard let kind = ActionKind(step), kind != .path else { return false }
+        let target = step[kind.rawValue]
+        switch kind {
+        case .tap, .longPress:
+            return target?.array == nil && target?["x"] == nil ? true : evidence.contains(.screenshot)
+        case .type:
+            return step["into"] != nil || !evidence.isEmpty
+        case .swipe:
+            return true
+        default:
+            return hasRequiredScreenEvidence(step, evidence: evidence)
         }
     }
 
@@ -1054,7 +1073,9 @@ final class Computer: @unchecked Sendable {
         var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: actionSucceeded))
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
-            authorizationRead = (read.revision, localTask, result.isError ? [] : evidence)
+            let keepErrorEvidence = result.isError && actions.contains { $0["run"] != nil || $0["path"] != nil }
+                && lastForeground.map { !config.isPoki($0) } == true
+            authorizationRead = (read.revision, localTask, result.isError && !keepErrorEvidence ? [] : evidence)
         }
         if finish { sessionApp = nil }
         else if let bound, let kept = sessionApp, let front = lastForeground?.bundleID, front != bound, !config.isPoki(lastForeground) {
@@ -1320,6 +1341,14 @@ final class Computer: @unchecked Sendable {
                 did.append("paused \(Int((pause * 1000).rounded())) ms before reading")
             }
         }
+        if local, finish, actions.isEmpty, error == nil {
+            let line = await returnToOrigin() ?? "finish: the app this task began in is not known, so the phone stays here"
+            var lines = [line]
+            if trace.count >= 2, !skillRanWhole {
+                lines.append("learn: this task took \(trace.count) recorded steps; if it worked and may be asked for again, skills {action: \"save\", name, description} keeps them so do {run: name} repeats them in one call next time")
+            }
+            return ToolResult(text: lines.joined(separator: "\n"), jpeg: nil)
+        }
         let readStarted = now()
         let checkingTouch = actions.count == 1 && error == nil
             && (moreKind == ActionKind.tap.rawValue || moreKind == ActionKind.longPress.rawValue)
@@ -1395,10 +1424,13 @@ final class Computer: @unchecked Sendable {
         let openedApp = launched.map { lastForeground?.bundleID == $0 } ?? false
         let openedHome = toRun.count == 1 && toRun.first?["button"]?.text?.lowercased() == "home"
             && lastForeground?.bundleID == "com.apple.springboard"
+        let ranAutonomous = toRun.contains { $0["run"] != nil || $0["path"] != nil }
+            && lastForeground.map { !config.isPoki($0) } == true
         // Voice can open a Settings link before asking the runner to wait for its screen.
         let settledVoiceScreen = byOwnersVoice && actions.count == 1 && actions.first?["wait_until"]?["settled"]?.bool == true
-        if local, !finish, let revision, !result.isError, openedApp || openedHome || settledVoiceScreen,
-           let evidence = result.screenEvidence, host.currentRunner.automationRevision == revision {
+        if local, !finish, let revision,
+           (!result.isError && (openedApp || openedHome || settledVoiceScreen)) || ranAutonomous,
+           let evidence = result.screenEvidence, !evidence.isEmpty, host.currentRunner.automationRevision == revision {
             authorizationRead = (revision, localTask, evidence)
         }
         // The read above is the work's last screen; the owner then sees their own app again.

@@ -27,7 +27,7 @@ final class LiveCore: CoreSession {
         // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
         // their Testing Options switch.
         config.resolveApp = { KnownApps.launchID($0) }
-        config.resolveInstalledApp = { KnownApps.installedLaunchID($0) }
+        config.resolveInstalledApp = { KnownApps.installedLaunchID($0, isInstalled: Self.isInstalledOnPhone) }
         config.appNames = { SpeedOptions.appNames }
         config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource
@@ -42,6 +42,16 @@ final class LiveCore: CoreSession {
 
     /// 0.3.1's Ask Before Sensitive Steps switch, which `ApprovalChoice.resolve` still reads.
     static let askKey = "approvals.ask"
+
+    private static func isInstalledOnPhone(_ id: String) -> Bool {
+        if KnownApps.isInstalledOnPhone(id) { return true }
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated { AppIconStore.installedOnPhone(id) == true }
+        }
+        return DispatchQueue.main.sync {
+            MainActor.assumeIsolated { AppIconStore.installedOnPhone(id) == true }
+        }
+    }
 
     deinit { pump?.cancel() }
 

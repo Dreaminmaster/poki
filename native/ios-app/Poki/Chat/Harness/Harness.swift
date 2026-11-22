@@ -128,8 +128,17 @@ enum Harness {
         )
     }
 
+    private static let externalFinishInstruction = " When the owner's task is done, put finish: true on the last do (its actions may be empty): the phone then goes back to the app the owner asked from, where they read your reply."
+    private static let externalFinishToolClause = " finish: true on the do that completes the owner's task (actions may be empty): after the actions and the read, the phone goes back to the app the task began in, where the owner asked, so they see your reply there; leave it off while more steps follow."
+    private static let externalFinishAppReleaseClause = " or finish"
+
+    nonisolated static func chatToolInstructions(includeScreenHistory: Bool) -> String {
+        PokiCore.toolInstructions(includeScreenHistory: includeScreenHistory)
+            .replacingOccurrences(of: externalFinishInstruction, with: "")
+    }
+
     static var instructions: String {
-        [system, PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
+        [system, chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -267,7 +276,7 @@ enum Harness {
         let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
         var parts = [systemPrompt(for: task, includeAutomaticUnlock: includeAutomaticUnlock), screenScrollInstruction]
         if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
-        parts.append(PokiCore.toolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed))
+        parts.append(chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed))
         parts.append(WebTools.instructions)
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
@@ -391,12 +400,25 @@ enum Harness {
         return tool
     }
 
+    private nonisolated static func withoutExternalFinish(_ tool: ToolSpec) -> ToolSpec {
+        guard tool.name == "do" else { return tool }
+        var tool = tool
+        tool.description = tool.description
+            .replacingOccurrences(of: externalFinishToolClause, with: "")
+            .replacingOccurrences(of: externalFinishAppReleaseClause, with: "")
+        if var properties = tool.schema["properties"] as? [String: Any],
+           properties.removeValue(forKey: "finish") != nil {
+            tool.schema["properties"] = properties
+        }
+        return tool
+    }
+
     private static func catalogTools(includeScreenHistory: Bool, includeMemoryAttribution: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            let spec = ToolSpec(name: name, description: description, schema: schema)
+            let spec = withoutExternalFinish(ToolSpec(name: name, description: description, schema: schema))
             return includeMemoryAttribution ? withActionMemoryIDs(spec) : spec
         }
     }

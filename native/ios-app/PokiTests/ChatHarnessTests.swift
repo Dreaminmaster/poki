@@ -3524,6 +3524,42 @@ final class ChatHarnessTests: XCTestCase {
             step-by-step calls: \(calendarCalls.map(\.name).joined(separator: " -> "))
         """)
     }
+
+    func testInAppChatOmitsExternalFinishGuidanceAndSkipsScreenReadOnEmptyFinish() async throws {
+        let prompt = Harness.taskInstructions(for: "打开计算器，计算 123 乘以 45，告诉我结果。").text
+        XCTAssertFalse(prompt.contains("put finish: true on the last do"), "In-app chat must not tell the model to send finish: true on do")
+        XCTAssertTrue(PokiCore.toolInstructions.contains("put finish: true on the last do"), "External MCP instructions must remain unchanged")
+
+        let chatDo = try XCTUnwrap(Harness.tools.first { $0.name == "do" })
+        XCTAssertFalse(chatDo.description.contains("finish: true on the do"), "In-app chat do description must omit external finish: true guidance")
+        let chatProperties = try XCTUnwrap(chatDo.schema["properties"] as? [String: Any])
+        XCTAssertNil(chatProperties["finish"], "In-app chat do schema must not expose finish")
+        XCTAssertTrue(PokiCore.toolCatalogJSON.contains(#""finish""#), "External MCP tool catalog must keep finish")
+
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Opened Settings.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.tool("do", ["actions": [], "finish": true]),
+            FakeCompletions.text("Opened Settings."),
+        ])
+        let marker = "empty-finish-check-\(UUID().uuidString)"
+        AppLog.shared.add("test", marker)
+        let chat = chat(on: server, transport: transport, automation: automation, kind: .poki)
+        let readsBeforeFinish = transport.screenReads
+        let done = expectation(description: "Task finished")
+        ChatModel.afterTask = { _ in done.fulfill() }
+        chat.send("Open Settings")
+        await fulfillment(of: [done], timeout: 10)
+
+        let taskLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }))
+        XCTAssertEqual(transport.screenReads - readsBeforeFinish, 1, "Empty finish do must not trigger an extra screen read")
+        XCTAssertFalse(taskLogs.contains { $0.contains("[agent] started: Look at the screen") }, "Empty finish do must not log a Look at the screen step: \(taskLogs)")
+        XCTAssertFalse(taskLogs.contains { $0.contains("a tap hit the Live Activity") }, "Returning to Poki on empty finish must not misreport a Live Activity tap: \(taskLogs)")
+    }
 }
 
 /// An OpenAI chat completions endpoint on 127.0.0.1: each request is kept and answered with the next
