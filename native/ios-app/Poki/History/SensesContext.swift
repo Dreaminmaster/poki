@@ -253,7 +253,7 @@ enum SensesContext {
     }
 
     /// The question's words, and for Chinese and Japanese its pairs of characters.
-    private static func terms(_ question: String) -> [String] {
+    static func terms(_ question: String) -> [String] {
         var out = Set<String>()
         for word in question.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted) where !word.isEmpty {
             let wide = word.unicodeScalars.contains { $0.value >= 0x2E80 }
