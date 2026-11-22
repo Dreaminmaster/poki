@@ -902,7 +902,11 @@ final class VoiceModelTests: XCTestCase {
                 }
             )
             var called: [(name: String, arguments: String)] = []
-            let priorLogCount = AppLog.shared.lines.count
+            let marker = UUID().uuidString
+            AppLog.shared.add("test", marker)
+            @MainActor func newLogs() -> String {
+                AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
+            }
             let h = Harness(codex: codex, phoneTool: { name, arguments in
                 called.append((name, arguments))
                 return ("Opened Settings", false, nil)
@@ -954,7 +958,7 @@ final class VoiceModelTests: XCTestCase {
             let rejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 903 }?["result"] as? [String: Any])
             XCTAssertEqual(rejectedReply["success"] as? Bool, false)
 
-            let logs = AppLog.shared.lines.dropFirst(priorLogCount).joined(separator: "\n")
+            let logs = newLogs()
             XCTAssertTrue(logs.contains("\(expectedTools.count) tools"), logs)
             XCTAssertTrue(logs.contains("\(expectedInstructions.count) chars"), logs)
             XCTAssertTrue(logs.contains("Codex tool requested: open_app"), logs)
@@ -963,7 +967,67 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(logs.contains("Codex tool rejected: shell_command"), logs)
             XCTAssertFalse(logs.contains("do-not-log-this-phrase"), logs)
             XCTAssertFalse(logs.contains("secret-cmd"), logs)
+
+            push(["method": "thread/realtime/itemAdded", "params": [
+                "threadId": "fixture-thread", "item": ["type": "handoff_request"],
+            ]])
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "fixture-thread"]])
+            push(["method": "poki/backend/turnCompleted", "params": ["threadId": "fixture-thread", "status": "completed"]])
+            push(["method": "poki/tool/rejected", "params": [
+                "threadId": "fixture-thread", "requestMethod": "item/commandExecution/requestApproval", "reason": "unsupportedServerRequest",
+            ]])
+            await h.time.settle()
+            let afterEvents = newLogs()
+            XCTAssertTrue(afterEvents.contains("Codex realtime handoff requested"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex backend turn started"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex backend turn completed: completed"), afterEvents)
+            XCTAssertTrue(afterEvents.contains("Codex tool rejected: item/commandExecution/requestApproval (unsupportedServerRequest)"), afterEvents)
         }
+    }
+
+    func testEmbeddedCodexRuntimeBootsWithExternalToolsDisabled() async throws {
+        let tempHome = FileManager.default.temporaryDirectory.appending(path: "codex-voice-config-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: tempHome) }
+        final class Receiver: @unchecked Sendable {
+            static let lock = NSLock()
+            static var continuation: CheckedContinuation<String, Never>?
+            static var messages: [String] = []
+            static func deliver(_ text: String) {
+                lock.lock()
+                if let cont = continuation, text.contains(#""id":777"#) || text.contains("poki/runtime/closed") {
+                    continuation = nil
+                    lock.unlock()
+                    cont.resume(returning: text)
+                } else {
+                    messages.append(text)
+                    lock.unlock()
+                }
+            }
+        }
+        Receiver.lock.withLock {
+            Receiver.continuation = nil
+            Receiver.messages.removeAll()
+        }
+        let started = tempHome.path(percentEncoded: false).withCString { path in
+            poki_codex_start(path) { value in
+                guard let value else { return }
+                Receiver.deliver(String(cString: value))
+            }
+        }
+        XCTAssertTrue(started)
+        let response: String = await withCheckedContinuation { continuation in
+            Receiver.lock.withLock {
+                if let existing = Receiver.messages.first(where: { $0.contains(#""id":777"#) || $0.contains("poki/runtime/closed") }) {
+                    continuation.resume(returning: existing)
+                } else {
+                    Receiver.continuation = continuation
+                }
+            }
+            let sent = #"{"id":777,"method":"account/read","params":{"refreshToken":false}}"#.withCString { poki_codex_send($0) }
+            XCTAssertTrue(sent)
+        }
+        XCTAssertFalse(response.contains("poki/runtime/closed"), "Codex runtime closed during startup: \(response)")
+        XCTAssertTrue(response.contains(#""id":777"#) && response.contains(#""result""#), response)
     }
 
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {

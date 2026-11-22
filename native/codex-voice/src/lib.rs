@@ -81,24 +81,49 @@ pub unsafe extern "C" fn poki_codex_send(message: *const c_char) -> bool {
         .is_some_and(|requests| requests.try_send(message).is_ok())
 }
 
-async fn serve(
-    home: PathBuf,
-    mut incoming: mpsc::Receiver<Value>,
-    emit: Event,
-) -> anyhow::Result<()> {
-    std::fs::create_dir_all(&home).context("app support directory")?;
-    let overrides = vec![
+fn codex_overrides() -> Vec<(String, toml::Value)> {
+    vec![
         (
             "cli_auth_credentials_store".into(),
             toml::Value::String("keyring".into()),
         ),
         ("features.shell_tool".into(), toml::Value::Boolean(false)),
         ("features.plugins".into(), toml::Value::Boolean(false)),
+        ("features.apps".into(), toml::Value::Boolean(false)),
+        ("features.tool_suggest".into(), toml::Value::Boolean(false)),
+        ("features.multi_agent".into(), toml::Value::Boolean(false)),
+        ("agents.enabled".into(), toml::Value::Boolean(false)),
+        ("features.view_image".into(), toml::Value::Boolean(false)),
+        ("features.sleep_tool".into(), toml::Value::Boolean(false)),
+        (
+            "features.image_generation".into(),
+            toml::Value::Boolean(false),
+        ),
+        ("features.hooks".into(), toml::Value::Boolean(false)),
+        ("web_search".into(), toml::Value::String("disabled".into())),
+        (
+            "tools.experimental_request_user_input.enabled".into(),
+            toml::Value::Boolean(false),
+        ),
+        ("skills.bundled.enabled".into(), toml::Value::Boolean(false)),
+        (
+            "skills.include_instructions".into(),
+            toml::Value::Boolean(false),
+        ),
         (
             "features.secret_auth_storage".into(),
             toml::Value::Boolean(false),
         ),
-    ];
+    ]
+}
+
+async fn serve(
+    home: PathBuf,
+    mut incoming: mpsc::Receiver<Value>,
+    emit: Event,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(&home).context("app support directory")?;
+    let overrides = codex_overrides();
     let loader = LoaderOverrides::default();
     let mut config = ConfigBuilder::default()
         .codex_home(home.clone())
@@ -186,31 +211,81 @@ async fn serve(
             event = client.next_event() => match event {
                 Some(InProcessServerEvent::ServerNotification(event)) => {
                     let Ok(mut value) = serde_json::to_value(event) else { continue; };
-                    let method = value.get("method").and_then(Value::as_str).unwrap_or_default();
+                    let method = value
+                        .get("method")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned();
                     let realtime_error = method == "thread/realtime/error";
-                    if method.starts_with("thread/realtime/") || matches!(method, "account/login/completed" | "account/updated") {
-                        if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut) {
+                    if method.starts_with("thread/realtime/")
+                        || matches!(method.as_str(), "account/login/completed" | "account/updated")
+                    {
+                        if let Some(params) = value.get_mut("params").and_then(Value::as_object_mut)
+                        {
                             if let Some(Value::String(message)) = params.remove("message") {
                                 if let Some(kind) = auth_failure_kind(&message) {
                                     params.insert("kind".into(), json!(kind));
                                 }
                                 if realtime_error {
-                                    params.insert("diagnostic".into(), json!(realtime_error_diagnostic(&message)));
+                                    params.insert(
+                                        "diagnostic".into(),
+                                        json!(realtime_error_diagnostic(&message)),
+                                    );
                                 }
                             }
                             params.remove("error");
+                            if method == "thread/realtime/itemAdded" {
+                                let item_type = params
+                                    .get("item")
+                                    .and_then(|item| item.get("type"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or_default()
+                                    .to_owned();
+                                params.insert("item".into(), json!({"type": item_type}));
+                            }
                         }
                         publish(emit, value);
+                    } else if let Some(summary) = backend_diagnostic_notification(&method, &value) {
+                        publish(emit, summary);
                     }
                 }
                 Some(InProcessServerEvent::ServerRequest(event)) => {
                     let Ok(value) = serde_json::to_value(event) else { continue; };
-                    if value.get("method").and_then(Value::as_str) == Some("item/tool/call") {
+                    let method = value
+                        .get("method")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if method == "item/tool/call" {
                         publish(emit, value);
-                    } else if let Some(id) = value.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()) {
-                        let _ = sender.fail_server_request(id, JSONRPCErrorError {
-                            code: -32601, message: "Tool unavailable".into(), data: None,
-                        });
+                    } else {
+                        if let Some(id) = value
+                            .get("id")
+                            .and_then(|id| serde_json::from_value(id.clone()).ok())
+                        {
+                            let _ = sender.fail_server_request(
+                                id,
+                                JSONRPCErrorError {
+                                    code: -32601,
+                                    message: "Tool unavailable".into(),
+                                    data: None,
+                                },
+                            );
+                        }
+                        if let Some(thread_id) =
+                            value.pointer("/params/threadId").and_then(Value::as_str)
+                        {
+                            publish(
+                                emit,
+                                json!({
+                                    "method": "poki/tool/rejected",
+                                    "params": {
+                                        "threadId": thread_id,
+                                        "requestMethod": method,
+                                        "reason": "unsupportedServerRequest",
+                                    }
+                                }),
+                            );
+                        }
                     }
                 }
                 Some(InProcessServerEvent::Lagged { .. }) | None => break,
@@ -219,6 +294,54 @@ async fn serve(
     }
     client.shutdown().await.context("app server shutdown")?;
     Ok(())
+}
+
+fn backend_diagnostic_notification(method: &str, value: &Value) -> Option<Value> {
+    let thread_id = value.pointer("/params/threadId").and_then(Value::as_str)?;
+    match method {
+        "turn/started" => Some(json!({
+            "method": "poki/backend/turnStarted",
+            "params": { "threadId": thread_id }
+        })),
+        "turn/completed" => {
+            let status = value
+                .pointer("/params/turn/status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Some(json!({
+                "method": "poki/backend/turnCompleted",
+                "params": { "threadId": thread_id, "status": status }
+            }))
+        }
+        "error" => {
+            let will_retry = value
+                .pointer("/params/willRetry")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let code = match value.pointer("/params/error/codexErrorInfo") {
+                Some(Value::String(name)) => name.as_str(),
+                Some(Value::Object(map)) => map.keys().next().map(String::as_str).unwrap_or("unknown"),
+                _ => "unknown",
+            };
+            let kind = value
+                .pointer("/params/error/message")
+                .and_then(Value::as_str)
+                .and_then(auth_failure_kind);
+            let mut params = json!({
+                "threadId": thread_id,
+                "willRetry": will_retry,
+                "code": code,
+            });
+            if let (Some(kind), Some(obj)) = (kind, params.as_object_mut()) {
+                obj.insert("kind".into(), json!(kind));
+            }
+            Some(json!({
+                "method": "poki/backend/error",
+                "params": params
+            }))
+        }
+        _ => None,
+    }
 }
 
 fn auth_failure_kind(message: &str) -> Option<&'static str> {

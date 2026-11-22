@@ -694,6 +694,9 @@ final class VoiceModel {
                     guard let self, number == session, VoiceDirect.localTools.contains(name) else {
                         return ("This voice session has ended or cannot run that tool.", true, nil)
                     }
+                    guard Self.phoneTools.contains(name) else {
+                        return (Self.localTool(name), false, nil)
+                    }
                     return await phoneTool(name, arguments, nil)
                 })
                 return VoiceBridge.Token(value: nil, model: CodexVoice.model, local_tools: [], live: true)

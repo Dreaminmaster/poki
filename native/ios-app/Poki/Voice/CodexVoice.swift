@@ -57,6 +57,7 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var loginAttempt: UUID?
     @ObservationIgnored private var loginID: String?
     @ObservationIgnored private var thread: String?
+    @ObservationIgnored private var sessionInstructions: String?
     @ObservationIgnored private var nextRequest = 0
     @ObservationIgnored private var onEvent: ((String, JSON) -> Void)?
     @ObservationIgnored private var onTool: ((String, String) async -> PhoneAnswer)?
@@ -77,20 +78,28 @@ final class CodexVoice: SubscriptionVoice {
         self.onEvent = onEvent
         self.onTool = onTool
         try await requireAccount(generation)
+        let instructions = VoiceDirect.realtimeInstructions
+        let tools = VoiceDirect.codexTools
+        sessionInstructions = instructions
         let answer = try await request("thread/start", [
             "cwd": homePath, "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true,
-            "dynamicTools": VoiceDirect.codexTools,
+            "developerInstructions": instructions,
+            "dynamicTools": tools,
         ])
         try check(generation)
         guard let thread = (answer["thread"] as? JSON)?["id"] as? String else { throw Failure.unavailable }
         self.thread = thread
+        AppLog.shared.add("voice", "Codex session prepared: \(tools.count) tools, developer instructions \(instructions.count) chars")
     }
 
     func start(offer: String) async throws -> String {
         guard let thread, let active else { throw Failure.ended }
         let answerKey = "sdp:\(thread)"
+        let instructions = sessionInstructions ?? VoiceDirect.realtimeInstructions
+        AppLog.shared.add("voice", "Codex realtime starting: prompt \(instructions.count) chars, startup context off")
         try await request("thread/realtime/start", [
             "threadId": thread, "model": Self.model, "version": "v3", "outputModality": "audio",
+            "includeStartupContext": false, "prompt": instructions,
             "voiceSessionId": active.uuidString,
             "transport": ["type": "webrtc", "sdp": offer],
         ])
@@ -103,6 +112,7 @@ final class CodexVoice: SubscriptionVoice {
 
     func stop() {
         active = nil
+        sessionInstructions = nil
         onEvent = nil
         onTool = nil
         cancelLogin()
@@ -283,19 +293,61 @@ final class CodexVoice: SubscriptionVoice {
         guard let thread, params["threadId"] as? String == thread else { return }
         switch method {
         case "item/tool/call":
-            guard let id = message["id"], let name = params["tool"] as? String, let active,
-                  let arguments = params["arguments"], JSONSerialization.isValidJSONObject(arguments),
-                  let bytes = try? JSONSerialization.data(withJSONObject: arguments), let onTool else { return }
+            let id = message["id"]
+            let name = params["tool"] as? String ?? "unknown"
+            AppLog.shared.add("voice", "Codex tool requested: \(name)")
+            func reject(_ reason: String, text: String = "This voice session has ended or cannot run that tool.") {
+                AppLog.shared.add("voice", "Codex tool rejected: \(name) (\(reason))")
+                if let id {
+                    _ = send(["id": id, "result": ["success": false, "contentItems": [["type": "inputText", "text": text]]]])
+                }
+            }
+            guard let id else { reject("missing request id"); return }
+            guard let active, let onTool else { reject("session inactive"); return }
+            guard VoiceDirect.localTools.contains(name) else { reject("disallowed tool"); return }
+            let argumentsText: String
+            switch params["arguments"] {
+            case nil, is NSNull:
+                argumentsText = "{}"
+            case let text as String:
+                argumentsText = text
+            case let object?:
+                guard JSONSerialization.isValidJSONObject(object),
+                      let bytes = try? JSONSerialization.data(withJSONObject: object) else {
+                    reject("invalid arguments")
+                    return
+                }
+                argumentsText = String(decoding: bytes, as: UTF8.self)
+            }
             Task {
-                guard self.active == active else { return }
-                let answer = await onTool(name, String(decoding: bytes, as: UTF8.self))
-                guard self.active == active else { return }
-                var content = [["type": "inputText", "text": String(answer.text.prefix(6000))]]
+                guard self.active == active else { reject("session ended"); return }
+                let answer = await onTool(name, argumentsText)
+                guard self.active == active else { reject("session ended"); return }
+                AppLog.shared.add("voice", "Codex tool executed: \(name) (\(answer.failed ? "failed" : "ok"), image: \(answer.screen != nil))")
+                var content: [[String: Any]] = [["type": "inputText", "text": String(answer.text.prefix(6000))]]
                 if let screen = answer.screen {
                     content.append(["type": "inputImage", "imageUrl": "data:image/jpeg;base64,\(screen.base64EncodedString())"])
                 }
                 _ = send(["id": id, "result": ["success": !answer.failed, "contentItems": content]])
             }
+        case "thread/realtime/itemAdded":
+            if (params["item"] as? JSON)?["type"] as? String == "handoff_request" {
+                AppLog.shared.add("voice", "Codex realtime handoff requested")
+            }
+            onEvent?(method, params)
+        case "poki/backend/turnStarted":
+            AppLog.shared.add("voice", "Codex backend turn started")
+        case "poki/backend/turnCompleted":
+            let status = params["status"] as? String ?? "unknown"
+            AppLog.shared.add("voice", "Codex backend turn completed: \(status)")
+        case "poki/backend/error":
+            let code = params["code"] as? String ?? "unknown"
+            let willRetry = params["willRetry"] as? Bool ?? false
+            AppLog.shared.add("voice", "Codex backend error: \(code), retry: \(willRetry)")
+        case "poki/tool/rejected":
+            let requestMethod = params["requestMethod"] as? String ?? "unknown"
+            let reason = params["reason"] as? String ?? "rejected"
+            AppLog.shared.add("voice", "Codex tool rejected: \(requestMethod) (\(reason))")
         case "thread/realtime/sdp":
             finish("sdp:\(thread)", .success(params), retain: true)
         case "thread/realtime/error", "thread/realtime/closed":
