@@ -2,6 +2,7 @@ import XCTest
 @testable import Poki
 
 /// The Screen History card's parts, read from the on-device model's reply (2026-11-21).
+@MainActor
 final class SensesShareTests: XCTestCase {
     private func reads(_ app: String, from start: Date, count: Int, every: TimeInterval) -> [HistoryEntry] {
         (0..<count).map { HistoryEntry(id: Int64($0), at: start.addingTimeInterval(Double($0) * every), app: app, title: "", text: "") }
