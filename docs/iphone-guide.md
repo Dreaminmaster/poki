@@ -102,11 +102,11 @@ More limits, with test results, are in [Verification and known limits](verificat
 If Poki shows **Turn On Loopback** after an iPhone restart even though Clash Mi is connected, use LocalDevVPN for the first startup of automation.
 
 1. Unlock your iPhone, connect to Wi-Fi, and disconnect Clash Mi.
-2. Connect LocalDevVPN. In Poki, open **Settings > Connection** and turn on **Automation** if it is off.
+2. Connect LocalDevVPN. In Poki, open **Settings > Setup** and turn on **Automation** if it is off.
 3. Open a chat and tap the message field to start preparing the developer disk image. In **Settings > Advanced > Log**, wait for a new `[runner] running` entry from this attempt before switching VPNs.
 4. Leave **Automation** on. Disconnect LocalDevVPN and reconnect Clash Mi. Ask Poki to calculate 37 × 19 in Calculator and check that Calculator shows 703.
 
-If Poki shows **Enter Your Passcode Next** when you turn on automation or run the first task, tap **Continue**. If Poki is waiting for confirmation and the alert does not appear, open **Settings > Connection** and tap **Continue** there. Enter your iPhone passcode when iOS asks.
+If Poki shows **Enter Your Passcode Next** when you turn on automation or run the first task, tap **Continue**. If Poki is waiting for confirmation and the alert does not appear, open **Settings > Setup** and tap **Continue** there. Enter your iPhone passcode when iOS asks.
 
 Poki needs to reach the iPhone's developer services to mount the developer disk image after a restart. Once the image is mounted, Poki can use it for local automation. If the prompt returns after the next restart, repeat these steps. If the switch still fails, open **Settings > Advanced > Diagnostics** and compare the **Reflected RemotePairing** results with each VPN.
 
