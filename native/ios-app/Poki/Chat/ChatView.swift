@@ -39,8 +39,6 @@ struct ChatView: View {
     var openUpdates: () -> Void = {}
     var sessionStore: SessionStore = .shared
     var shortcutStore: HomeShortcutStore = .shared
-    /// Optional observational hook for hosted UI tests, reporting the rows the view actually supplies
-    /// to its transcript. Never changes navigation or message filtering; nil in production.
 
     private var voice: VoiceModel { model.voice }
     /// The taps on Poki's picture, for the bear to answer.
