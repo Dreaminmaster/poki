@@ -2071,7 +2071,10 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "a computer's pairing file")
         XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, a computer's pairing file")
         let refused = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
-        XCTAssertTrue(refused.contains { $0.contains("with the loopback on") }, "the loopback page, a computer's pairing file: \(refused)")
+        XCTAssertTrue(refused.contains { $0.contains("Tunnel On, No Answer") },
+                      "The computer pairing must still require a working loopback: \(refused)")
+        XCTAssertTrue(refused.contains { $0.contains("Finish step 2 in LocalDevVPN") },
+                      "Setup must show the VPN repair steps for a computer pairing: \(refused)")
     }
 
     private func waitOnMain(_ condition: @escaping () -> Bool) async {
