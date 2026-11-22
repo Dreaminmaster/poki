@@ -116,11 +116,12 @@ public struct Approval: Sendable, Equatable {
     /// What it covers: the same actions sent again on the same controls run once it is granted.
     var scope: ApprovalScope
     var workspaceSession: String?
-    /// The MCP call that actually raised this approval, never inferred from the chat screen.
+    /// Raw source of the request, for app-level approval display/routing only.
+    /// Grant ownership is deliberately unchanged; unified Core #609 handles it.
     public var sourceSession: String? = nil
 
-    func covers(_ other: ApprovalScope, workspaceSession session: String?, sourceSession source: String?) -> Bool {
-        workspaceSession == session && sourceSession == source && scope.covers(other)
+    func covers(_ other: ApprovalScope, workspaceSession session: String?) -> Bool {
+        workspaceSession == session && scope.covers(other)
     }
 }
 
@@ -205,11 +206,11 @@ final class Approvals: @unchecked Sendable {
         case withdraw(id: String)
         case withdrawPending
         case rekey(id: String, scope: ApprovalScope)
-        case withdrawIfMismatch(scope: ApprovalScope?, workspaceSession: String?, sourceSession: String?, keepingGrant: Bool)
+        case withdrawIfMismatch(scope: ApprovalScope?, workspaceSession: String?, keepingGrant: Bool)
         case discardWorkspace(session: String)
         case discardAll
         case resolve(id: String, approved: Bool)
-        case consumeGrant(scope: ApprovalScope, workspaceSession: String?, sourceSession: String?)
+        case consumeGrant(scope: ApprovalScope, workspaceSession: String?)
         case registerWaiter(id: String, token: UUID, continuation: CheckedContinuation<Decision?, Never>, cancelled: Bool)
         case cancelWaiter(id: String, token: UUID)
     }
@@ -316,9 +317,9 @@ final class Approvals: @unchecked Sendable {
                 break
             }
 
-        case .withdrawIfMismatch(let scope, let workspaceSession, let sourceSession, let keepingGrant):
+        case .withdrawIfMismatch(let scope, let workspaceSession, let keepingGrant):
             func matches(_ approval: Approval) -> Bool {
-                scope.map { approval.covers($0, workspaceSession: workspaceSession, sourceSession: sourceSession) } ?? false
+                scope.map { approval.covers($0, workspaceSession: workspaceSession) } ?? false
             }
             switch state {
             case .pending(let approval, _) where !matches(approval):
@@ -351,9 +352,9 @@ final class Approvals: @unchecked Sendable {
             effects.resumed.append(contentsOf: waiters.values.map { ($0, decision) })
             effects.events.append(.approvalEnded(id: id, approved: approved))
 
-        case .consumeGrant(let scope, let workspaceSession, let sourceSession):
+        case .consumeGrant(let scope, let workspaceSession):
             if case .granted(let approval) = state,
-               approval.covers(scope, workspaceSession: workspaceSession, sourceSession: sourceSession) {
+               approval.covers(scope, workspaceSession: workspaceSession) {
                 state = .idle
                 effects.consumed = approval
             }
@@ -392,8 +393,8 @@ final class Approvals: @unchecked Sendable {
     }
 
     /// A granted approval for these exact actions and screen context, consumed once.
-    func consumeGrant(scope: ApprovalScope, workspaceSession: String? = nil, sourceSession: String? = nil) -> Approval? {
-        apply(.consumeGrant(scope: scope, workspaceSession: workspaceSession, sourceSession: sourceSession)).consumed
+    func consumeGrant(scope: ApprovalScope, workspaceSession: String? = nil) -> Approval? {
+        apply(.consumeGrant(scope: scope, workspaceSession: workspaceSession)).consumed
     }
 
     func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil,
@@ -436,8 +437,8 @@ final class Approvals: @unchecked Sendable {
     }
 
     /// Withdraws a request, and unless `keepingGrant` an unused grant, for other actions than these.
-    func withdrawMismatching(scope: ApprovalScope?, workspaceSession: String?, sourceSession: String? = nil, keepingGrant: Bool = false) {
-        apply(.withdrawIfMismatch(scope: scope, workspaceSession: workspaceSession, sourceSession: sourceSession, keepingGrant: keepingGrant))
+    func withdrawMismatching(scope: ApprovalScope?, workspaceSession: String?, keepingGrant: Bool = false) {
+        apply(.withdrawIfMismatch(scope: scope, workspaceSession: workspaceSession, keepingGrant: keepingGrant))
     }
 
     func discardWorkspaceDecisions(session: String?) {
