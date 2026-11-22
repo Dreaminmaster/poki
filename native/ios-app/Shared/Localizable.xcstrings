@@ -41017,6 +41017,22 @@
         }
       }
     },
+    "Each one is turned on once. They tick themselves as you go." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每项只需开启一次，完成后会自动打勾。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每項只需開啟一次，完成後會自動打勾。"
+          }
+        }
+      }
+    },
     "Safety and Access" : {
       "localizations" : {
         "zh-Hans" : {
