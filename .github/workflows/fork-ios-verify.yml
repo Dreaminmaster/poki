@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - pr: 322
-            ref: db1a94440a1f7f1d74aaa92da77224f37c678a99
+            ref: 42b5e8ebcba20cf80e0c3d5cee39b5feb948d694
             tests: 'ModelSessionMetadataTests:13 ConnectionCheckTests:9 ChatHarnessTests:39 CustomModelDiscoveryTests:21'
     name: PR ${{ matrix.pr }}
     runs-on: xcode-27
@@ -108,15 +108,13 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b 2>&1 | tee out/simulator-boot.log
-      - name: Verify core approval origin and cross-session isolation
+      - name: Verify Core approval origin and preserve original one-time retry
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           swift test --package-path native/ios/PokiCore --filter ApprovalTests.testSensitiveToolApprovalCarriesExactExternalCallerAndLocalSourceIsNil 2>&1 | tee out/core-approval-origin.log
-          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testApprovedSensitiveActionCannotBeReusedByAnotherMCPCaller 2>&1 | tee out/core-approval-cross-session.log
-          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testAuthenticatedReconnectRetainsOnlyTheSameCallerApproval 2>&1 | tee out/core-approval-reconnect.log
-          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testUnrelatedConnectorCannotReuseApprovedMCPAction 2>&1 | tee out/core-approval-connector-isolation.log
+          swift test --package-path native/ios/PokiCore --filter ApprovalTests.testADeletionWaitsForTheOwnerAndSendsNothing 2>&1 | tee out/core-legacy-approval-retry.log
       - name: Build simulator launcher and assets
         shell: bash
         run: |

@@ -20,10 +20,10 @@ jobs:
       matrix:
         include:
           - device: iphone
-            ref: a84fa2841b732b9d30fb60846ccc6f3c7b63baa1
+            ref: 5d71a6eb8cc756694a5482623d589401a5ff913d
             test: testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft
           - device: ipad
-            ref: a84fa2841b732b9d30fb60846ccc6f3c7b63baa1
+            ref: 5d71a6eb8cc756694a5482623d589401a5ff913d
             test: testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft
     name: PR 249 real UI (${{ matrix.device }})
     runs-on: xcode-27
