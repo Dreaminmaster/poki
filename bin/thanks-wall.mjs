@@ -45,6 +45,13 @@ function people() {
     if (!user || user.type === 'Bot' || user.login.endsWith('[bot]') || user.login === owner || !listed.has(user.login)) continue;
     byLogin.set(user.login, { login: user.login, display: curated[user.login].display ?? user.login, profile: user.html_url, avatar: user.avatar_url });
   }
+  // Counted for work that leaves no trace in the repository (for example promotion on social media): take them from their profile.
+  for (const login of [...listed].filter(login => !byLogin.has(login))) {
+    const user = spawnSync('gh', ['api', `users/${login}`], { encoding: 'utf8' });
+    if (user.status !== 0) continue;
+    const profile = JSON.parse(user.stdout);
+    if (profile.login === login) byLogin.set(login, { login, display: curated[login].display ?? login, profile: profile.html_url, avatar: profile.avatar_url });
+  }
   const missing = [...listed].filter(login => !byLogin.has(login));
   if (missing.length) throw new Error(`No issue or pull request found for: ${missing.join(', ')}`);
   const rank = login => { const index = pinned.indexOf(login); return index === -1 ? pinned.length : index; };
