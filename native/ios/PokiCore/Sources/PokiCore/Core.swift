@@ -330,6 +330,11 @@ public final class PokiCore: @unchecked Sendable {
     private let sessions = LockedBox<Set<String>>([])
     /// Each MCP session's client, by the name it gave at initialize (skills and notes say who saved them).
     let clientNames = LockedBox<[String: String]>([:])
+    /// One opaque grant owner per verified connector/client pair. A new MCP
+    /// transport session for the same authenticated agent may retry its
+    /// approved step; a different connector (or unauthenticated caller)
+    /// cannot use that grant.
+    private let approvalCallers = LockedBox<[String: String]>([:])
     var relay: RelayClient?
     /// The app's tools, after look, do, skills and status in tools/list.
     private let hostTools = LockedBox<[HostTool]>([])
@@ -518,6 +523,23 @@ public final class PokiCore: @unchecked Sendable {
         ["jsonrpc": "2.0", "id": id ?? .null, "error": ["code": .number(Double(code)), "message": .string(message)]]
     }
 
+    private func approvalCaller(session: String?, connector: String?) -> String? {
+        guard let session else { return nil }
+        guard let connector, !connector.isEmpty,
+              let client = clientNames.value[session], !client.isEmpty else {
+            // A reconnect cannot be authenticated from a self-reported name
+            // alone. Preserve strict raw-session isolation for these callers.
+            return session
+        }
+        let key = connector + ":" + client
+        return approvalCallers.update { identities in
+            if let existing = identities[key] { return existing }
+            let issued = "verified-caller-" + UUID().uuidString.lowercased()
+            identities[key] = issued
+            return issued
+        }
+    }
+
     func rpc(_ message: JSON, session: String?, answerBy: Double? = nil, connector: String? = nil) async -> (reply: JSON?, session: String?) {
         let id = message["id"]
         guard let method = message["method"]?.string else { return (id == nil ? nil : rpcError(id, -32600, "Invalid Request"), nil) }
@@ -551,7 +573,8 @@ public final class PokiCore: @unchecked Sendable {
                 clientNames.update { $0[session] = "" }
                 sessionSignal.value?(.started(id: session, client: "", version: nil, connector: connector))
             }
-            let output = await call(name, args, session: session, answerBy: answerBy)
+            let output = await call(name, args, session: session, answerBy: answerBy,
+                                    approvalPrincipal: approvalCaller(session: session, connector: connector))
             var content: [JSON] = [["type": "text", "text": .string(output.text)]]
             if let jpeg = output.jpeg { content.append(["type": "image", "data": .string(jpeg.base64EncodedString()), "mimeType": "image/jpeg"]) }
             return (result(["content": .array(content), "isError": .bool(output.isError)]), nil)
@@ -675,7 +698,7 @@ public final class PokiCore: @unchecked Sendable {
         return try await runner.call("POST", "/poki/workspace-launcher", request, timeout: 12, countsAsMiss: false)
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, approvalPrincipal: String? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
@@ -731,7 +754,7 @@ public final class PokiCore: @unchecked Sendable {
                     }
                     return await computer.look(full: args["full"]?.bool ?? false, pane: args["pane"]?.string, session: session, local: local, expectedApps: expectedApps, localTask: localTask)
                 }
-                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
+                return await computer.act(actions: actions, full: args["full"]?.bool ?? false, finish: args["finish"]?.bool ?? false, session: session, answerBy: answerBy, app: args["app"], byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, approvalPrincipal: approvalPrincipal)
             }
         } catch {
             // Never reached in practice (every step has its own deadline), but a call always answers.
