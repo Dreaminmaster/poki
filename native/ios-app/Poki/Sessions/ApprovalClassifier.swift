@@ -75,7 +75,7 @@ enum ApprovalClassifier {
     static func route(_ approval: PendingApproval, voiceOn: Bool, origin suppliedOrigin: Origin? = nil) -> Route {
         if let known = routes[approval.id] { return known }
         let mode = Self.mode
-        let own = (suppliedOrigin ?? origin(voiceOn: voiceOn)).belongsToOwner
+        let own = (suppliedOrigin ?? origin(voiceOn: voiceOn, outsideSession: approval.sourceSession)).belongsToOwner
         let reply = mode == .reply && own
         let route: Route
         if requiresOwner(approval) { route = .owner }
@@ -112,7 +112,7 @@ enum ApprovalClassifier {
     static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine],
                        origin suppliedOrigin: Origin? = nil) async -> Verdict {
         let verdict = await ask(approval, level: level, voice: voice,
-                                origin: suppliedOrigin ?? origin(voiceOn: !voice.isEmpty))
+                                origin: suppliedOrigin ?? origin(voiceOn: !voice.isEmpty, outsideSession: approval.sourceSession))
         verdicts[approval.id] = verdict
         if verdicts.count > 50 { verdicts.removeAll() }
         return verdict
