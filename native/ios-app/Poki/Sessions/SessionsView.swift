@@ -497,6 +497,8 @@ struct SessionView: View {
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
     var sessionStore: SessionStore = .shared
+    /// Settings search/source previews may inspect another session but must never mutate it.
+    var readOnly = false
 
     @State private var renaming = false
     @State private var newName = ""
@@ -518,7 +520,7 @@ struct SessionView: View {
         // them and the bars keep their scroll-edge behaviour (as in the chat).
         .bottomBar {
             let asking = session?.live == true && (!model.approvals.isEmpty || model.handoffText != nil)
-            if asking || running != nil || sample {
+            if !readOnly && (asking || running != nil || sample) {
                 VStack(spacing: 8) {
                     if session?.live == true, let approval = model.approvals.first {
                         ApprovalAskCard(title: approval.question, expires: approval.expires,
@@ -545,7 +547,9 @@ struct SessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sessionSubtitle(caption(session))
         .toolbarTitleMenu {
-            Button("Rename", systemImage: "pencil") { newName = session?.name ?? ""; renaming = true }
+            if !readOnly {
+                Button("Rename", systemImage: "pencil") { newName = session?.name ?? ""; renaming = true }
+            }
         }
         .alert("Rename Session", isPresented: $renaming) {
             TextField("Name", text: $newName)
