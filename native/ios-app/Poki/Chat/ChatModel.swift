@@ -651,10 +651,11 @@ final class ChatModel {
     private func executePreparedSend(_ prepared: PreparedSend, token: Int) async {
         persist()
         store.flush(sessionID: sessionID)
+        let localTask = "\(prepared.runSession)#\(token)"
         switch prepared.engine {
         case .direct(let client, let instructions, let notes):
             await began("direct", prepared.provider, prepared.model, task: prepared.text, countedScroll: prepared.countedScroll, isRetry: prepared.isRetry)
-            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
+            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false, localTask: localTask); return }
             awaitingModel = true
             client.say(prepared.message)
             offeredMemories = notes
@@ -664,7 +665,10 @@ final class ChatModel {
             finishTaskSaves(completed: completed, stopped: stopAsked || countedScrollReplyQuestion != nil, token: token)
             if current { finishPlan(stopped: stopAsked) }
             // The direct engine does not say when its task ends: the quiet wait finishes the run.
-            if !current || app.drivesDuoCompanion { app.finishTask() } else { app.chatReleasesRun() }
+            if !current || app.drivesDuoCompanion { app.finishTask(localTask: localTask) } else {
+                app.chatReleasesRun()
+                app.clearTaskScreenshots(localTask: localTask)
+            }
             logEnd("direct", outcome: nil, session: prepared.runSession, text: prepared.text, stopped: !current)
             if current { running = false; awaitingModel = false }
         case .pi(let piModel):
@@ -699,7 +703,7 @@ final class ChatModel {
             let splitSession = splitViewSession
             await began("pi", prepared.provider, prepared.model, task: prepared.text,
                         countedScroll: prepared.countedScroll, isRetry: prepared.isRetry, splitViewSession: splitSession)
-            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false); return }
+            guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false, localTask: localTask); return }
             awaitingModel = true
             if let splitSession, pair.count == 2 {
                 phoneStepUnderWay = true
@@ -762,8 +766,9 @@ final class ChatModel {
             finishTaskSaves(completed: outcome == .done,
                             stopped: outcome == .stopped || outcome == .authorizationDeclined || outcome == .waitingForReply,
                             token: token)
-            if current { ended(outcome, delivered: prepared.you.id) }
-            else if splitSession == nil { app.finishTask() }
+            if current { ended(outcome, delivered: prepared.you.id, localTask: localTask) }
+            else if splitSession == nil { app.finishTask(localTask: localTask) }
+            else { app.clearTaskScreenshots(localTask: localTask) }
             logEnd("pi", outcome: outcome, session: prepared.runSession, text: prepared.text, stopped: !current || outcome == .authorizationDeclined)
             guard current else { return }
             running = false
@@ -1084,7 +1089,7 @@ final class ChatModel {
     /// The display name of the agent whose hand-off is running, while one runs.
     static var delegatedBusy: String?
 
-    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID) {
+    private func ended(_ outcome: PiLoop.Outcome, delivered youID: UUID, localTask: String? = nil) {
         let stopped = outcome == .stopped || outcome == .authorizationDeclined
         // The turn is over: the phone goes back to the app the task began in (Poki's chat, where the
         // reply is), or stays where it is and the reply goes out as a notification that can be answered
@@ -1119,12 +1124,13 @@ final class ChatModel {
         finishPlan(stopped: stopped || waitingForReply)
         if stopped {
             app.chatTaskStopped()
-            if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined) }
+            if !usesSplitView { app.finishTask(switching: outcome != .authorizationDeclined, localTask: localTask) }
+            else if let localTask { app.clearTaskScreenshots(localTask: localTask) }
         } else {
             // A finished run on the Live Activity says what it came to: finish_task's summary when the
             // task succeeded, else the task itself. A failure's summary under Done would read as success.
             app.chatTaskEnded(reply: reply, session: sessionID, acted: toolCalls > 0, inSplitView: usesSplitView,
-                              result: taskResult.flatMap { $0.success ? $0.summary : nil }, task: taskText)
+                              result: taskResult.flatMap { $0.success ? $0.summary : nil }, task: taskText, localTask: localTask)
         }
     }
 
@@ -1382,6 +1388,8 @@ final class ChatModel {
             let answer = scroll.count(refs, in: messageScreen, pane: messagePane)
             messageScroll = scroll
             return answer
+        case "get_screenshot":
+            return await app.runTool(call.name, arguments: call.arguments, localTask: localTask)
         case "finish_task":
             guard var result = try? JSONDecoder().decode(TaskResult.self, from: Data(call.arguments.utf8)) else {
                 return PokiCore.ToolAnswer(text: Harness.invalidResult, jpeg: nil, isError: true)

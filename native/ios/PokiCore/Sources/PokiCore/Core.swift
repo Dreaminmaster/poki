@@ -337,6 +337,7 @@ public final class PokiCore: @unchecked Sendable {
     public let events: AsyncStream<CoreEvent>
     private let gate = Gate()
     private var itemPictureSources = ItemPictureSources()
+    private let taskScreenshots = TaskScreenshotStore()
     private let sessions = LockedBox<Set<String>>([])
     /// Each MCP session's client, by the name it gave at initialize (skills and notes say who saved them).
     let clientNames = LockedBox<[String: String]>([:])
@@ -461,8 +462,12 @@ public final class PokiCore: @unchecked Sendable {
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back
     /// to the app the task began in. Nothing happens while a tool call runs or when no task is open.
     /// `switching: false` only forgets the task, for a runner the owner stopped: nothing is sent to it.
-    public func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
-        await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace)
+    public func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
+    }
+
+    public func clearTaskScreenshots(localTask: String) {
+        taskScreenshots.clear(task: localTask)
     }
 
     /// The task of one session is over (its client ended the session): nothing happens when another
@@ -470,11 +475,13 @@ public final class PokiCore: @unchecked Sendable {
     public func finishTask(session: String) async -> String? { await endTask(session: session) }
 
     /// Only the session that began the task ends it; nil ends any.
-    func endTask(session: String?, switching: Bool = true, ifNoLocalWorkspace: Bool = false) async -> String? {
+    func endTask(session: String?, switching: Bool = true, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        if let localTask { taskScreenshots.clear(task: localTask) }
         guard await gate.enter(waiting: config.busyWait) else { return nil }
         defer { gate.leave() }
         if ifNoLocalWorkspace, computer.hasLocalWorkspace { return nil }
         if let session, !computer.ownsTask(session: session) { return nil }
+        if let activeTask = computer.recordingTask { taskScreenshots.clear(task: activeTask) }
         guard switching else {
             if session != nil, computer.hasLocalWorkspace { return await computer.returnToOrigin() }
             computer.forgetTask()
@@ -719,6 +726,19 @@ public final class PokiCore: @unchecked Sendable {
     func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args) }
+        if name == "get_screenshot", local, !byOwnersVoice {
+            guard let id = args["screenshot_id"]?.string, !id.isEmpty, let localTask else {
+                return ToolResult(text: "Use a screenshot_id from this task.", jpeg: nil, isError: true)
+            }
+            guard await gate.enter(waiting: 2) else {
+                return ToolResult(text: "Poki is busy. Try retrieving the screenshot again.", jpeg: nil, isError: true)
+            }
+            defer { gate.leave() }
+            guard !Task.isCancelled, let jpeg = taskScreenshots.screenshot(id, task: localTask) else {
+                return ToolResult(text: "This screenshot is no longer available in this task.", jpeg: nil, isError: true)
+            }
+            return ToolResult(text: "Earlier screenshot \(id). Use a current screen read for taps.", jpeg: jpeg, isError: false)
+        }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
             // Outside the gate: the app's tool makes its own look and do calls, one at a time as any.
             let answer = await tool.run(args.serialized(), session, answerBy.map { max(0, $0 - now() - 3) })
@@ -789,6 +809,9 @@ public final class PokiCore: @unchecked Sendable {
         }
         if local, let localTask, let source = output.itemPictureSource {
             let id = itemPictureSources.record(source, task: localTask)
+            if let jpeg = output.jpeg {
+                taskScreenshots.record(jpeg, id: id, task: localTask)
+            }
             output.text += "\nscreenshot_id: \(id)"
         }
         gate.current = nil

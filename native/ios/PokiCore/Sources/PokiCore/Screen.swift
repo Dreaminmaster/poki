@@ -34,6 +34,7 @@ public struct Element: Equatable, Sendable {
     public var identifier: String?
     public var frame: Rect
     public var depth: Int
+    public var isDisabled: Bool
     /// The element's place in the tree, in document order, and the last place inside it: an element
     /// whose `node` is in `node+1...end` is inside this one.
     public var node = 0
@@ -41,13 +42,14 @@ public struct Element: Equatable, Sendable {
     /// Not in the tree: text read from the screenshot.
     public var fromPicture = false
 
-    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false) {
+    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false, isDisabled: Bool = false) {
         self.type = type
         self.label = label
         self.value = value
         self.identifier = identifier
         self.frame = frame
         self.depth = depth
+        self.isDisabled = isDisabled
         self.node = node
         self.end = end
         self.fromPicture = fromPicture
@@ -103,6 +105,10 @@ public struct Reading: Sendable {
     }
 }
 
+private func reportsDisabled(_ enabled: String?) -> Bool {
+    enabled == "false" || enabled == "0"
+}
+
 /// WDA's JSON source as a flat list of the elements worth listing: not the application root, with a
 /// frame and something to say.
 func flatten(_ root: JSON) -> [Element] {
@@ -120,7 +126,9 @@ func flatten(_ root: JSON) -> [Element] {
             let type = (node["type"]?.string ?? "Other").replacingOccurrences(of: "XCUIElementType", with: "")
             let name = node["name"]?.text
             index = out.count
-            out.append(Element(type: type, label: node["label"]?.text ?? name, value: node["value"]?.text, identifier: name, frame: frame, depth: depth, node: place, end: place))
+            let enabled = (node["isEnabled"] ?? node["enabled"])?.text
+            out.append(Element(type: type, label: node["label"]?.text ?? name, value: node["value"]?.text, identifier: name, frame: frame, depth: depth, node: place, end: place,
+                               isDisabled: reportsDisabled(enabled)))
         }
         for child in node["children"]?.array ?? [] { walk(child, depth + 1) }
         if let index { out[index].end = counter }
@@ -152,7 +160,8 @@ func flattenXML(_ data: Data) -> (elements: [Element], root: (label: String?, na
                 let type = name.replacingOccurrences(of: "XCUIElementType", with: "")
                 let id = attributes["name"]
                 index = out.count
-                out.append(Element(type: type, label: attributes["label"] ?? id, value: attributes["value"], identifier: id, frame: frame, depth: depth, node: place, end: place))
+                out.append(Element(type: type, label: attributes["label"] ?? id, value: attributes["value"], identifier: id, frame: frame, depth: depth, node: place, end: place,
+                                   isDisabled: reportsDisabled(attributes["enabled"])))
             }
             open.append(index)
         }

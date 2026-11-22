@@ -191,6 +191,32 @@ final class PiLoop {
                     guard case .toolResult(let result) = message else { return message }
                     return .toolResult(grants.validated(result, revision: revision))
                 }
+                let isPicture: (ContentBlock) -> Bool = { block in
+                    if case .image = block { return true }
+                    return false
+                }
+                var keptObservationPicture = false
+                var keptRetrievedPicture = false
+                for index in messages.indices.reversed() {
+                    guard case .toolResult(var result) = messages[index] else { continue }
+                    let keep: Bool
+                    switch result.toolName {
+                    case "look", "do":
+                        guard result.content.contains(where: isPicture) else { continue }
+                        keep = !keptObservationPicture
+                        keptObservationPicture = true
+                    case "get_screenshot":
+                        guard result.content.contains(where: isPicture) else { continue }
+                        keep = !keptObservationPicture && !keptRetrievedPicture
+                        keptRetrievedPicture = true
+                    default:
+                        continue
+                    }
+                    if !keep {
+                        result.content.removeAll(where: isPicture)
+                        messages[index] = .toolResult(result)
+                    }
+                }
                 if let index = messages.indices.first, case .system(var system) = messages[index],
                    case .text(let text) = system.content {
                     system.content = .text(Harness.historyInstructions(text, allowed: allowed))
@@ -374,6 +400,7 @@ final class PiLoop {
                 tool = cache.tool(resultCardMode: resultCardMode)
             }
             if tool.name == "screen_history", !allowed { return nil }
+            if tool.name == "get_screenshot", resultCardMode == .none { return nil }
             if tool.name == "count_messages", !includeCountedScroll { return nil }
             if tool.name == Harness.countedScrollReplyTool, !(includeCountedScroll && includeCountedScrollReply) { return nil }
             return tool

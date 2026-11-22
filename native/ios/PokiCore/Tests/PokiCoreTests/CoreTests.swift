@@ -242,6 +242,32 @@ final class ToolTests: XCTestCase {
         XCTAssertNotNil(result.jpeg)
     }
 
+    func testScreenSummaryReportsDisabledControlsAndZeroValues() async throws {
+        let xml = """
+            <AppiumAUT><XCUIElementTypeApplication label="Settings">
+              <XCUIElementTypeButton label="Apply" enabled="false" x="16" y="100" width="358" height="44"/>
+              <XCUIElementTypeSlider label="Volume" value="0" x="16" y="150" width="358" height="44"/>
+              <XCUIElementTypeSwitch label="Sounds" value="0" x="16" y="200" width="358" height="44"/>
+            </XCUIElementTypeApplication></AppiumAUT>
+            """
+        let json = try JSON.parse("""
+            {"type":"XCUIElementTypeApplication","label":"Settings","children":[
+              {"type":"XCUIElementTypeButton","label":"Apply","isEnabled":false,"rect":{"x":16,"y":100,"width":358,"height":44}},
+              {"type":"XCUIElementTypeSlider","label":"Volume","value":0,"rect":{"x":16,"y":150,"width":358,"height":44}},
+              {"type":"XCUIElementTypeSwitch","label":"Sounds","value":false,"rect":{"x":16,"y":200,"width":358,"height":44}}
+            ]}
+            """)
+        for (format, source, switchValue) in [("xml", JSON.string(xml), "0"), ("json", json, "false")] {
+            let (core, wda, _) = makeCore { $0.treeFormat = format }
+            wda.set("GET /source") { _ in (200, ["value": source]) }
+            let result = await core.call("look", [:])
+            XCTAssertFalse(result.isError, result.text)
+            XCTAssertTrue(result.text.contains("Button \"Apply\" [16,100,358,44] [disabled]"), result.text)
+            XCTAssertTrue(result.text.contains("Slider \"Volume = 0\""), result.text)
+            XCTAssertTrue(result.text.contains("Switch \"Sounds = \(switchValue)\""), result.text)
+        }
+    }
+
     func testAStuckTreeStillAnswersInTimeWithThePicture() async {
         let (core, wda, _) = makeCore()
         wda.set("GET /source") { _ in await hang() }

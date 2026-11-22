@@ -2762,6 +2762,7 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
             if (name.length) [xml appendFormat:@" name=\"%@\"", PKEscape(name)];
             if (label.length) [xml appendFormat:@" label=\"%@\"", PKEscape(label)];
             if (value.length) [xml appendFormat:@" value=\"%@\"", PKEscape(value)];
+            if ([node respondsToSelector:@selector(isEnabled)] && ![node isEnabled]) [xml appendString:@" enabled=\"false\""];
             if (CGRectIsNull(f) || CGRectIsInfinite(f)) f = CGRectZero;
             else {
                 if (paneRead) f = CGRectIntersection(CGRectOffset(f, treeOffset, 0), clip);
