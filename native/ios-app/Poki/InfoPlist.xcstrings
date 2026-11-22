@@ -145,6 +145,30 @@
         }
       }
     },
+    "NSScreenCaptureUsageDescription" : {
+      "comment" : "Info.plist",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki listens to app audio you choose to share so it can answer questions about it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 会听你选择共享的 App 声音，用来回答相关问题。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 會聽你選擇共享的 App 聲音，用來回答相關問題。"
+          }
+        }
+      }
+    },
     "NSMicrophoneUsageDescription" : {
       "comment" : "Info.plist",
       "extractionState" : "manual",

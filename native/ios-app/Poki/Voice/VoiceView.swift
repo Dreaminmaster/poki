@@ -41,6 +41,11 @@ struct VoiceView: View {
                         Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Settings › Models. Dictation in the message field works with every model.")
                     }
                 }
+                #if canImport(ScreenCaptureKit)
+                if #available(iOS 27, *) {
+                    AppAudioSettings(talkIsOn: voice.isOn)
+                }
+                #endif
                 ActionButtonSection()
             }
             .navigationTitle(AppLocalization.text("Dictation & Mute"))
@@ -69,6 +74,38 @@ struct VoiceView: View {
         }
     }
 }
+
+#if canImport(ScreenCaptureKit)
+@available(iOS 27, *)
+private struct AppAudioSettings: View {
+    private let capture = AppAudioCapture.shared
+    let talkIsOn: Bool
+
+    var body: some View {
+        Section {
+            if capture.buffer != nil {
+                Button(role: .destructive) { capture.stop() } label: {
+                    SettingsLabel("Stop Listening to App Audio", systemImage: "stop.circle")
+                }
+                .accessibilityIdentifier("voice.stopAppAudio")
+            } else {
+                Button { capture.choose() } label: {
+                    SettingsLabel("Listen to App Audio", systemImage: "waveform")
+                }
+                .disabled(capture.isTransitioning || talkIsOn)
+                .accessibilityIdentifier("voice.startAppAudio")
+            }
+        } footer: {
+            if capture.didFail {
+                Text("App audio capture is unavailable.")
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Share your screen to let Poki hear app audio during your next voice conversation. Poki keeps the last minute on this iPhone and sends only the transcript to answer your question. Phone actions are off during that conversation.")
+            }
+        }
+    }
+}
+#endif
 
 /// Voice's rows on Settings › Advanced: how long the last answer took, and the voice bridge on a Mac
 /// (live voice without an OpenAI key on this iPhone). They were Voice's own Advanced.

@@ -18667,6 +18667,98 @@
         }
       }
     },
+    "Listen to App Audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listen to App Audio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听 App 声音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聽 App 聲音"
+          }
+        }
+      }
+    },
+    "Stop Listening to App Audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop Listening to App Audio"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止听 App 声音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止聽 App 聲音"
+          }
+        }
+      }
+    },
+    "App audio capture is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App audio capture is unavailable."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在无法获取 App 声音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在無法取得 App 聲音。"
+          }
+        }
+      }
+    },
+    "Share your screen to let Poki hear app audio during your next voice conversation. Poki keeps the last minute on this iPhone and sends only the transcript to answer your question. Phone actions are off during that conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share your screen to let Poki hear app audio during your next voice conversation. Poki keeps the last minute on this iPhone and sends only the transcript to answer your question. Phone actions are off during that conversation."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启屏幕共享后，下次语音对话可以问 Poki 刚才听到的内容。最近一分钟的声音保留在这部 iPhone 上，答疑时只发送转写文字。该语音对话无法操作手机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟螢幕共享後，下次語音對話可以問 Poki 剛才聽到的內容。最近一分鐘的聲音保留在這部 iPhone 上，答疑時只傳送轉寫文字。該語音對話無法操作手機。"
+          }
+        }
+      }
+    },
     "Dictation & Mute" : {
       "localizations" : {
         "zh-Hans" : {
