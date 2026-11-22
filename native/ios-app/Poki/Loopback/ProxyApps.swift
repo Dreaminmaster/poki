@@ -5,7 +5,7 @@ import UIKit
 /// keep their own VPN. Detected with canOpenURL (their schemes are listed in LSApplicationQueriesSchemes).
 /// The module files live in deploy/proxy-modules/.
 struct ProxyApp: Identifiable, Hashable {
-    enum Install: Hashable { case url(URL), toggle(String), snippet(String) }
+    enum Install: Hashable { case url(URL), toggle(String), snippet(String), appStore(URL) }
     let id: String
     let name: String
     let scheme: String
@@ -17,7 +17,7 @@ struct ProxyApp: Identifiable, Hashable {
     var documented = true
 
     var isInstalled: Bool {
-        guard let url = URL(string: "\(scheme)://") else { return false }
+        guard !scheme.isEmpty, let url = URL(string: "\(scheme)://") else { return false }
         return UIApplication.shared.canOpenURL(url)
     }
 }
@@ -31,34 +31,51 @@ enum ProxyApps {
         url.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? url.absoluteString
     }
 
+    // Each app's steps are what a child could follow (the owner, Nov 21 2026): one thing per line,
+    // the button under them named the way the first line names it, and "come back here" at the end.
     static let all: [ProxyApp] = [
         ProxyApp(id: "karing", name: "Karing", scheme: "karing", minimumVersion: "1.2.4.862",
                  install: .toggle("TUN > Loopback address > 10.7.0.1"),
-                 steps: ["Open Karing's settings, then TUN.", "Set Loopback address (loopback_address) to 10.7.0.1, then reconnect Karing.", "Keep Karing connected. Choose External app in Poki; do not enable Poki's built-in connection."]),
+                 steps: ["Tap Open Karing below.", "In Karing, go to Settings, then TUN.", "Set Loopback Address to 10.7.0.1.", "Turn Karing off and on again, then come back here."]),
         ProxyApp(id: "surge", name: "Surge", scheme: "surge", minimumVersion: "5.23.0",
                  install: .url(URL(string: "surge:///install-module?url=\(encoded(modulesBase.appendingPathComponent("poki-loopback.sgmodule")))")!),
-                 steps: ["Tap Install Module, then confirm in Surge.", "Turn on the Poki Device Loopback module.", "Turn on Enhanced Mode (required for loopback)."]),
+                 steps: ["Tap Install Module below, then tap OK in Surge.", "In Surge, turn on the Poki Device Loopback module.", "Turn on Enhanced Mode, then come back here."]),
         ProxyApp(id: "loon", name: "Loon", scheme: "loon", minimumVersion: "3.5.3",
                  install: .url(URL(string: "loon://import?plugin=\(encoded(modulesBase.appendingPathComponent("poki-loopback.lpx")))")!),
-                 steps: ["Tap Install Plugin, then confirm in Loon.", "Make sure the plugin and Loon VPN are turned on."]),
+                 steps: ["Tap Install Plugin below, then tap OK in Loon.", "Make sure the plugin is on and Loon is connected.", "Come back here."]),
         ProxyApp(id: "shadowrocket", name: "Shadowrocket", scheme: "shadowrocket", minimumVersion: "",
-                 install: .toggle("Settings › Other › Include route 10.7.0.1/32"),
-                 steps: ["Open Shadowrocket.", "Go to Settings › Other and turn on Include route 10.7.0.1/32 (update Shadowrocket if missing).", "Keep Shadowrocket connected."],
+                 install: .toggle("Settings > Other > Include route 10.7.0.1/32"),
+                 steps: ["Tap Open Shadowrocket below.", "Go to Settings, then Other.", "Turn on Include route 10.7.0.1/32. Update Shadowrocket if you do not see it.", "Make sure Shadowrocket is connected, then come back here."],
                  documented: false),
         ProxyApp(id: "stash", name: "Stash", scheme: "stash", minimumVersion: "",
                  install: .snippet("tun:\n  loopback-address:\n    - 10.7.0.1"),
-                 steps: ["Open Stash. If its TUN or override settings have a loopback or 10.7.0.1 option, turn it on.", "Otherwise add the lines below to an override (Settings › Overrides) and enable it.", "Reconnect Stash and keep it connected."],
+                 steps: ["Tap Copy below.", "In Stash, go to Settings, then Overrides, and add a new override with what you copied.", "Turn the override on and reconnect Stash, then come back here."],
                  documented: false),
         ProxyApp(id: "quantumult-x", name: "Quantumult X", scheme: "quantumult-x", minimumVersion: "",
                  install: .snippet("reflected_routes = 10.7.0.1/32"),
-                 steps: ["Copy the line below.", "Add it to the [general] section of your Quantumult X profile and save.", "Reconnect Quantumult X and keep it connected."],
+                 steps: ["Tap Copy below.", "In Quantumult X, edit your profile, paste the line under [general] and save.", "Reconnect Quantumult X, then come back here."],
                  documented: false),
         ProxyApp(id: "clashmi", name: "Clash Mi", scheme: "clashmi", minimumVersion: "",
                  install: .snippet("tun:\n  loopback-address:\n    - 10.7.0.1"),
-                 steps: ["Copy the lines below.", "Add them to the tun section of your Clash Mi profile, import it, then connect.", "Keep Clash Mi connected. Users report this works on iOS 26.3 and failed on 26.4; the check above tells."],
+                 steps: ["Tap Copy below.", "In Clash Mi, paste the lines into the tun part of your profile and import it.", "Connect Clash Mi, then come back here."],
                  documented: false),
         ProxyApp(id: "sing-box", name: "sing-box", scheme: "sing-box", minimumVersion: "1.12.0",
                  install: .snippet("\"loopback_address\": [\"10.7.0.1\"]"),
-                 steps: ["Copy the line below.", "Add it to the tun inbound in your sing-box profile, then reload the profile.", "Keep IPv6 out of the tun address list."]),
+                 steps: ["Tap Copy below.", "In sing-box, paste the line into the tun inbound of your profile and reload it.", "Keep IPv6 out of the tun addresses, then come back here."]),
     ]
+}
+
+/// What the loopback page offers: every proxy app, and LocalDevVPN for people who have none.
+typealias LoopbackChoice = ProxyApp
+
+extension ProxyApp {
+    /// The free loopback app, for a person with no proxy app. Poki cannot see whether it is installed.
+    static let free = ProxyApp(id: "localdevvpn", name: "LocalDevVPN", scheme: "", minimumVersion: "",
+                               install: .appStore(URL(string: "https://apps.apple.com/app/id6755608044")!),
+                               steps: ["Tap Get LocalDevVPN below and install it.", "Open LocalDevVPN and tap Connect. It may turn off another VPN app.", "Come back here."])
+
+    /// LocalDevVPN first, then the proxy apps.
+    static var all: [ProxyApp] { [free] + ProxyApps.all }
+
+    static func chosen(_ id: String?) -> ProxyApp? { all.first { $0.id == id } }
 }

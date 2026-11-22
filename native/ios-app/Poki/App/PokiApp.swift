@@ -310,7 +310,10 @@ struct RootView: View {
                 .modifier(LinkAskAlert())
         }
         .modifier(LinkAskAlert(active: !welcoming))
-        .task { InProcessProbe.shared.startFromLaunchArguments(model: model) }
+        .task {
+            LoopbackShortcut.shared.start(model: model)
+            InProcessProbe.shared.startFromLaunchArguments(model: model)
+        }
         .alert(model.connectionAsk.map { AppLocalization.text(LocalizedStringResource("Allow \($0.client) to connect?")) } ?? "",
                isPresented: Binding(get: { model.connectionAsk != nil }, set: { if !$0 { model.answerConnection(false) } }),
                presenting: model.connectionAsk) { _ in

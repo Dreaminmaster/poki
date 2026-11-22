@@ -25,37 +25,7 @@ struct ModelSettingsView: View {
 
     var body: some View {
         List {
-            // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
-            Section {
-                InUseCard(add: { adding = true })
-            } header: {
-                Text("In Use").textCase(nil)
-            } footer: {
-                Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
-            }
-
-            // With no account yet the card above has Add Account, and an empty group would only be a heading.
-            if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
-            Section {
-                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
-                    let usage = ModelAccounts.uses(provider)
-                    NavigationLink { AccountDetail(provider: provider) } label: {
-                        AccountRow(provider: provider, name: provider.name, usage: usage)
-                    }
-                }
-                ForEach(CustomProviders.all) { custom in
-                    let usage = ModelAccounts.uses(custom)
-                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
-                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
-                    }
-                }
-                Button("Add Account", systemImage: "plus") { adding = true }
-            } header: {
-                Text("Accounts").textCase(nil)
-            } footer: {
-                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
-            }
-            }
+            ModelSettingsSections { adding = true }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
@@ -73,6 +43,45 @@ struct ModelSettingsView: View {
             openedForVoice = true
             if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if VoiceDirect.account == nil { showingLiveVoice = true }
         }
+    }
+}
+
+/// Shared by Settings and the setup guide. Both use the same installed models and providers.
+struct ModelSettingsSections: View {
+    var add: () -> Void
+
+    var body: some View {
+    // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
+    Section {
+        InUseCard(add: { add() })
+    } header: {
+        Text("In Use").textCase(nil)
+    } footer: {
+        Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
+    }
+
+    // With no account yet the card above has Add Account, and an empty group would only be a heading.
+    if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
+    Section {
+        ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
+            let usage = ModelAccounts.uses(provider)
+            NavigationLink { AccountDetail(provider: provider) } label: {
+                AccountRow(provider: provider, name: provider.name, usage: usage)
+            }
+        }
+        ForEach(CustomProviders.all) { custom in
+            let usage = ModelAccounts.uses(custom)
+            NavigationLink { CustomProviderDetail(id: custom.id) } label: {
+                AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+            }
+        }
+        Button("Add Account", systemImage: "plus") { add() }
+    } header: {
+        Text("Accounts").textCase(nil)
+    } footer: {
+        Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+    }
+    }
     }
 }
 

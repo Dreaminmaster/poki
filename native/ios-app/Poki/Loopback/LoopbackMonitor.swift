@@ -212,6 +212,7 @@ final class LoopbackMonitor {
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
+            checkedAt = Date()
             publish(next, log: true)
             if checkQueued { check() }
         }
