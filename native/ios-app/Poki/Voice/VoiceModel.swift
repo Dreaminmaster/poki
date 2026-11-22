@@ -136,7 +136,12 @@ struct VoiceBridge: Equatable {
 
     private static func check(_ response: URLResponse, _ data: Data) throws {
         guard let http = response as? HTTPURLResponse, http.statusCode != 200 else { return }
-        let reason = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let reason = json?["error"] as? String
+        if json?["source"] as? String == "upstream" {
+            let code = json?["upstream_status"] as? Int ?? http.statusCode
+            throw VoiceError.realtime(code, reason ?? "upstream error (\(code))")
+        }
         throw VoiceError.bridge(http.statusCode, reason)
     }
 }
@@ -214,8 +219,8 @@ struct VoiceCall: Identifiable, Equatable {
     var delegation: String? = nil
     var state = State.running
     var output = ""
-    /// The screen when the call finished (look, do, open_app): the model sees it next to the output.
-    var screen: Data?
+    /// The encoded screen when the call finished (look, do, open_app): Realtime sends it next to the output.
+    var screenDataURL: String?
     /// The model has the result (as a function_call_output, or in a reconnect note).
     var delivered = false
     var silentResult = false
@@ -1219,6 +1224,7 @@ final class VoiceModel {
                 if liveCallerSpeech.alreadyHandled {
                     liveCallerSpeech.clearPendingSpeech()
                     liveDelegations[id] = .duplicate
+                    log.add("voice", "delegation \(id) ignored (duplicate)")
                     return
                 }
                 let parts = Self.liveSpeechParts(liveCallerSpeech.text)
@@ -1227,16 +1233,20 @@ final class VoiceModel {
                 liveCallerSpeech.markHandled()
                 if !parts.isEmpty, parts.allSatisfy(Self.liveBackchannels.contains) {
                     liveDelegations[id] = .acknowledgment
+                    log.add("voice", "delegation \(id) ignored (acknowledgment)")
                     return
                 }
                 let request = parts.filter { !Self.liveBackchannels.contains($0) }
                 let newRequest = !request.isEmpty && !Self.liveRequestsStop(request)
                 if liveHasCancellation && !newRequest {
                     liveDelegations[id] = .cancelled
+                    log.add("voice", "delegation \(id) ignored (cancelled)")
                 } else if let audio {
                     liveDelegations[id] = .awaitingFirstTool(audio: audio, fallback: fallback)
+                    log.add("voice", "delegation \(id) created")
                 } else {
                     liveDelegations[id] = .active
+                    log.add("voice", "delegation \(id) created")
                 }
             }
             link.send(["type": "session.thinking.append", "event_id": UUID().uuidString, "delegation_id": NSNull(), "content": ""])
@@ -1443,6 +1453,30 @@ final class VoiceModel {
         liveAwaitingPlayback = false
     }
 
+    private enum ScreenAttachmentOutcome {
+        case none
+        case liveDescribed(chars: Int)
+        case liveFailed(String)
+        case liveUnavailable(String)
+        case liveSkipped(String)
+        case realtimeImageFailed(String)
+
+        var logTag: String? {
+            switch self {
+            case .none: nil
+            case .liveDescribed(let chars): "desc=ok(\(chars)c)"
+            case .liveFailed(let reason): "desc=failed(\(reason))"
+            case .liveUnavailable(let reason): "desc=unavailable(\(reason))"
+            case .liveSkipped(let reason): "desc=skipped(\(reason))"
+            case .realtimeImageFailed(let reason): "image=failed(\(reason))"
+            }
+        }
+    }
+
+    private static func screenFailureNote(_ prefix: String, reason: String) -> String {
+        "\n\(prefix): \(reason). Use the screen elements above if available, and tell the user honestly if visual details are missing."
+    }
+
     private func completeLiveControl(_ call: VoiceCall, state: VoiceCall.State, output: String) {
         var result = call
         result.state = state
@@ -1453,6 +1487,7 @@ final class VoiceModel {
         ]]) == true
         if let index = calls.firstIndex(where: { $0.id == call.id }) { calls[index] = result }
         else { calls.append(result) }
+        log.add("voice", "tool \(call.name) \(state == .done ? "done" : "failed") | control: \(Self.sanitizeLogText(output, limit: 120))")
         if phase == .thinking, !answerDue { phase = .listening }
         endIfDone()
     }
@@ -1526,6 +1561,10 @@ final class VoiceModel {
                 output = answer.text.count > 6000 ? String(answer.text.prefix(6000)) + "…" : answer.text
                 screen = answer.screen
                 if answer.failed { state = .failed }
+                if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    state = .failed
+                    output = "error: \(call.name) returned empty output"
+                }
             } else if local {
                 output = Self.localTool(call.name)
             } else if let bridge {
@@ -1565,34 +1604,193 @@ final class VoiceModel {
                 output = "error: no voice bridge"
                 state = .failed
             }
+            let rawToolOutput = output
+            var screenOutcome = ScreenAttachmentOutcome.none
+            let screenBytes = screen?.count
+            var deliveredScreenURL: String?
             if live, let screen {
                 if let describeScreen {
-                    if call.session == session, ready, !stopped(call), let image = VoiceScreen.dataURL(screen),
-                       let description = try? await describeScreen(image) {
-                        output += "\nCurrent screen description: " + description
+                    if call.session != session || !ready || stopped(call) {
+                        screenOutcome = .liveSkipped(stopped(call) ? "cancelled" : "session closed")
+                    } else {
+                        switch VoiceScreen.encodeDataURL(screen) {
+                        case .ok(let image):
+                            do {
+                                let description = try await describeScreen(image).trimmingCharacters(in: .whitespacesAndNewlines)
+                                if description.isEmpty {
+                                    let reason = "screen description returned empty text"
+                                    output += Self.screenFailureNote("Current screen description failed", reason: reason)
+                                    screenOutcome = .liveFailed(reason)
+                                } else {
+                                    output += "\nCurrent screen description: " + description
+                                    screenOutcome = .liveDescribed(chars: description.count)
+                                }
+                            } catch {
+                                let reason = Self.screenDescriptionFailureReason(for: error)
+                                output += Self.screenFailureNote("Current screen description failed", reason: reason)
+                                screenOutcome = .liveFailed(reason)
+                            }
+                        case .empty:
+                            let reason = "screenshot image was empty"
+                            output += Self.screenFailureNote("Current screen description failed", reason: reason)
+                            screenOutcome = .liveFailed(reason)
+                        case .invalidImage(let bytes):
+                            let reason = "screenshot (\(bytes) bytes) could not be encoded as JPEG"
+                            output += Self.screenFailureNote("Current screen description failed", reason: reason)
+                            screenOutcome = .liveFailed(reason)
+                        case .tooLarge(let bytes):
+                            let reason = "screenshot (\(bytes) bytes) exceeded the upload size limit after compression"
+                            output += Self.screenFailureNote("Current screen description failed", reason: reason)
+                            screenOutcome = .liveFailed(reason)
+                        }
                     }
                 } else {
                     output += "\nScreenshot descriptions require an HTTPS voice bridge. Use the screen elements."
+                    screenOutcome = .liveUnavailable("HTTPS voice bridge required")
+                }
+            } else if !live, let screen {
+                switch VoiceScreen.encodeDataURL(screen) {
+                case .ok(let image):
+                    deliveredScreenURL = image
+                case .empty:
+                    let reason = "screenshot image was empty"
+                    output += Self.screenFailureNote("Screenshot unavailable", reason: reason)
+                    screenOutcome = .realtimeImageFailed(reason)
+                case .invalidImage(let bytes):
+                    let reason = "screenshot (\(bytes) bytes) could not be encoded as JPEG"
+                    output += Self.screenFailureNote("Screenshot unavailable", reason: reason)
+                    screenOutcome = .realtimeImageFailed(reason)
+                case .tooLarge(let bytes):
+                    let reason = "screenshot (\(bytes) bytes) exceeded the data channel size limit after compression"
+                    output += Self.screenFailureNote("Screenshot unavailable", reason: reason)
+                    screenOutcome = .realtimeImageFailed(reason)
                 }
             }
-            finish(call.id, state: state, output: output, screen: live ? nil : screen)
+            finish(call.id, state: state, output: output, rawToolOutput: rawToolOutput,
+                   screenDataURL: deliveredScreenURL, screenBytes: screenBytes, screenOutcome: screenOutcome)
         }
     }
 
-    private func finish(_ id: String, state: VoiceCall.State, output: String, screen: Data? = nil) {
+    private func finish(_ id: String, state: VoiceCall.State, output: String, rawToolOutput: String? = nil,
+                        screenDataURL: String? = nil, screenBytes: Int? = nil, screenOutcome: ScreenAttachmentOutcome = .none) {
         guard let index = calls.firstIndex(where: { $0.id == id }) else { return }
         calls[index].state = state
         calls[index].output = output
-        calls[index].screen = screen
+        calls[index].screenDataURL = screenDataURL
         calls[index].finished = Date()
         clock.toolDone = Date()
-        log.add("voice", "tool \(calls[index].name) \(state == .done ? "done" : "failed")")
+        let summary = Self.summarizeToolOutput(tool: calls[index].name, rawOutput: rawToolOutput ?? output,
+                                               outputChars: output.count, state: state,
+                                               screenBytes: screenBytes, screenOutcome: screenOutcome)
+        log.add("voice", "tool \(calls[index].name) \(state == .done ? "done" : "failed") | \(summary)")
         if calls[index].silentResult {
             if phase == .thinking, !answerDue { phase = .listening }
             endIfDone()
             return
         }
         deliver(index)
+    }
+
+    private static func sanitizeLogText(_ text: String, limit: Int) -> String {
+        let scrubbed = VoiceDirect.scrubSecrets(text)
+        let compact = scrubbed.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard compact.count > limit else { return compact }
+        return String(compact.prefix(limit)) + "…"
+    }
+
+    private static func screenDescriptionFailureReason(for error: Error) -> String {
+        if let voiceError = error as? VoiceError {
+            switch voiceError {
+            case .realtime(let code, let reason):
+                let clean = sanitizeLogText(reason, limit: 140)
+                switch code {
+                case 400: return "vision request was rejected (400: \(clean))"
+                case 401, 403: return "authentication failed (\(code): \(clean))"
+                case 404: return "vision model or endpoint unavailable (404: \(clean))"
+                case 408, 504: return "vision service timed out (\(code): \(clean))"
+                case 429: return "rate limit reached (429: \(clean))"
+                case 502 where clean.localizedCaseInsensitiveContains("no screen description"):
+                    return "empty screen description (\(clean))"
+                default: return "vision service failed (\(code): \(clean))"
+                }
+            case .bridge(let code, let reason):
+                let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let clean = sanitizeLogText(trimmed?.isEmpty == false ? trimmed! : "no reason given", limit: 140)
+                if (300..<400).contains(code) {
+                    return "the HTTPS voice bridge redirected the screenshot request, which Poki blocks"
+                }
+                if code == 400 {
+                    return "the voice bridge rejected the screenshot request (400: \(clean))"
+                }
+                if code == 404 {
+                    let lower = trimmed?.lowercased() ?? ""
+                    if lower.isEmpty || lower == "not found" || lower == "unknown token" {
+                        return "the voice bridge address or token was not recognized (404)"
+                    }
+                    return "upstream or bridge endpoint unavailable (404: \(clean))"
+                }
+                return "the voice bridge failed (\(code): \(clean))"
+            default:
+                return sanitizeLogText(voiceError.localizedDescription, limit: 180)
+            }
+        }
+        if error is DecodingError {
+            return "the voice bridge returned an unreadable screen description response"
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "the screenshot description request timed out"
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
+                 .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff:
+                return "could not reach the screenshot description server (network error)"
+            case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateHasUnknownRoot:
+                return "TLS connection failed for screenshot description"
+            default:
+                return sanitizeLogText(urlError.localizedDescription, limit: 180)
+            }
+        }
+        return sanitizeLogText(error.localizedDescription, limit: 180)
+    }
+
+    private static func summarizeToolOutput(tool: String, rawOutput: String, outputChars: Int, state: VoiceCall.State,
+                                            screenBytes: Int?, screenOutcome: ScreenAttachmentOutcome) -> String {
+        let lines = rawOutput.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        let isElementLine: (String) -> Bool = { line in
+            guard let space = line.firstIndex(of: " "), space != line.startIndex else { return false }
+            return line[..<space].allSatisfy(\.isASCII) && line[..<space].allSatisfy(\.isNumber)
+        }
+        let elementCount = lines.filter(isElementLine).count
+        var metrics = ["chars=\(outputChars)", "elements=\(elementCount)", "screen=\(screenBytes.map { "\($0)B" } ?? "none")"]
+        if let tag = screenOutcome.logTag { metrics.append(tag) }
+
+        var headers: [String] = []
+        for line in lines {
+            if isElementLine(line) { break }
+            if line.hasPrefix("app: ") {
+                let appHeader = line.components(separatedBy: "   read:").first ?? line
+                headers.append(sanitizeLogText(appHeader, limit: 100))
+            } else if line.hasPrefix("poki: ") {
+                let firstSentence = line.firstIndex(of: ".").map { String(line[...$0]) } ?? line
+                headers.append(sanitizeLogText(firstSentence, limit: 100))
+            } else if line.hasPrefix("screen: ") {
+                headers.append(sanitizeLogText(line, limit: 80))
+            } else if line.hasPrefix("screenshot: none") {
+                headers.append(sanitizeLogText(line, limit: 100))
+            } else if line.hasPrefix("error: ") || line.hasPrefix("not_sent: ") || line.hasPrefix("unknown: ") {
+                headers.append(sanitizeLogText(line, limit: 160))
+            }
+        }
+        if headers.isEmpty {
+            if state == .failed, let first = lines.first(where: { !$0.isEmpty }) {
+                headers.append(sanitizeLogText(first, limit: 160))
+            } else if tool == "get_ios_version", let first = lines.first(where: { !$0.isEmpty }) {
+                headers.append(sanitizeLogText(first, limit: 120))
+            }
+        }
+        let metricText = metrics.joined(separator: " ")
+        return headers.isEmpty ? metricText : "\(metricText) | \(headers.joined(separator: "; "))"
     }
 
     /// Hands a finished call to the model: as its function_call_output in the session that asked, or as a
@@ -1611,8 +1809,8 @@ final class VoiceModel {
             ? link.send(["type": itemEvent, "item": ["type": "function_call_output", "call_id": call.id, "output": call.output]])
             : link.send(note(reconnect, spoken: true))
         guard sent else { return }
-        if !usesLive, sameSession, let screen = call.screen { show(screen, on: link) }
-        calls[index].screen = nil
+        if !usesLive, sameSession, let imageURL = call.screenDataURL { show(imageURL, on: link) }
+        calls[index].screenDataURL = nil
         calls[index].delivered = true
         lastActivity = time.now()
         clock.delivered = Date()
@@ -1641,11 +1839,7 @@ final class VoiceModel {
 
     /// A function_call_output carries text only, so the screenshot behind it follows as an image in a
     /// user message. Only the latest stays: the one before is deleted, as it no longer shows the screen.
-    private func show(_ jpeg: Data, on link: VoiceConnection) {
-        guard let image = VoiceScreen.dataURL(jpeg) else {
-            log.add("voice", "screenshot of \(jpeg.count) bytes does not fit a data channel message; the model reads the elements only")
-            return
-        }
+    private func show(_ image: String, on link: VoiceConnection) {
         if let old = screenItem { link.send(["type": "conversation.item.delete", "item_id": old, "event_id": "delete-\(old)"]) }
         let id = "screen-\(UUID().uuidString.prefix(8).lowercased())"
         let item: [String: Any] = ["id": id, "type": "message", "role": "user", "content": [["type": "input_image", "image_url": image]]]
