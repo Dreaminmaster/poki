@@ -211,7 +211,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: poki-pr-${{ matrix.pr }}-results
+          name: poki-pr-${{ matrix.pr }}-${{ matrix.device }}-results
           path: out/
           if-no-files-found: warn
       - name: Delete only the temporary simulator
