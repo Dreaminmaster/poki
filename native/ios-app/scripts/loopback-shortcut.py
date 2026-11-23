@@ -17,11 +17,38 @@ from typing import Any
 
 LEGACY_SHORTCUT_ID = "cef403d76ef04d0586d03dd69476b96e"
 EXPECTED_SHORTCUT_NAME = "Poki Loopback"
+ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+NEUTRAL_WFVPN_PLACEHOLDER: dict[str, Any] = {
+    "serverAddress": "",
+    "title": "VPN",
+    "appDescriptor": {
+        "BundleIdentifier": "",
+        "Name": "",
+        "TeamIdentifier": "",
+    },
+    "identifier": ZERO_UUID,
+    "connected": False,
+    "onDemandEnabled": False,
+}
+FORBIDDEN_VPN_CLIENTS = (
+    "com.nssurge.inc.surge-ios",
+    "com.jkcoxson.localdevvpn",
+    "surge",
+    "karing",
+    "shadowrocket",
+    "localdevvpn",
+    "stosvpn",
+    "stash",
+    "loon",
+    "quantumult",
+    "clash",
+)
+
 ICLOUD_URL_RE = re.compile(
     r"^(?:https://www\.icloud\.com/shortcuts/)?([0-9a-fA-F]{32})/?$"
 )
 SWIFT_LINK_RE = re.compile(
-    r'https://www\.icloud\.com/shortcuts/[0-9a-fA-F]{32}'
+    r"https://www\.icloud\.com/shortcuts/[0-9a-fA-F]{32}"
 )
 
 DEFAULT_FIXTURE = (
@@ -46,6 +73,38 @@ EXPECTED_ACTION_IDS = [
     "is.workflow.actions.wifi.set",
     "is.workflow.actions.conditional",
 ]
+
+
+def is_neutral_wfvpn_placeholder(value: Any) -> bool:
+    """Return True when value is the neutral non-nil WFVPNConfiguration placeholder.
+
+    iOS 27.3 ActionKit's `-[WFVPNConfiguration wfSerializedRepresentation]` crashes
+    with SIGABRT during `prepareForSharingWithOptions:` when a WFVPN import question
+    has no DefaultValue. A neutral placeholder avoids the crash without binding any
+    VPN client or device UUID.
+    """
+    if not isinstance(value, dict):
+        return False
+    allowed_keys = {
+        "serverAddress",
+        "title",
+        "appDescriptor",
+        "identifier",
+        "connected",
+        "onDemandEnabled",
+    }
+    if not set(value.keys()).issubset(allowed_keys):
+        return False
+    app_desc = value.get("appDescriptor")
+    return (
+        value.get("serverAddress", "") == ""
+        and value.get("title") == "VPN"
+        and value.get("identifier") == ZERO_UUID
+        and value.get("connected") is False
+        and value.get("onDemandEnabled") is False
+        and app_desc
+        == {"BundleIdentifier": "", "Name": "", "TeamIdentifier": ""}
+    )
 
 
 def extract_shortcut_id(target: str) -> str | None:
@@ -212,13 +271,17 @@ def validate_workflow(
         return errors
 
     action0_params = actions[0].get("WFWorkflowActionParameters") or {}
-    if "WFVPN" in action0_params:
+    if "WFVPN" in action0_params and not is_neutral_wfvpn_placeholder(
+        action0_params["WFVPN"]
+    ):
         errors.append(
             f"WFWorkflowActions[0] hardcodes WFVPN: {action0_params['WFVPN']!r}"
         )
-    action0_blob = json.dumps(action0_params, ensure_ascii=False, default=str)
-    if "com.nssurge.inc.surge-ios" in action0_blob or '"Surge"' in action0_blob:
-        errors.append("WFWorkflowActions[0] still references Surge")
+    action0_blob = json.dumps(action0_params, ensure_ascii=False, default=str).lower()
+    for client in FORBIDDEN_VPN_CLIENTS:
+        if client in action0_blob:
+            errors.append(f"WFWorkflowActions[0] still references {client}")
+            break
 
     ready_url = actions[1].get("WFWorkflowActionParameters", {}).get("WFURL")
     if ready_url != "http://127.0.0.1:47684/ready":
@@ -283,9 +346,13 @@ def validate_workflow(
             errors.append(
                 f"WFVPN import question ActionIndex is {vq.get('ActionIndex')!r}, expected 0"
             )
-        if "DefaultValue" in vq:
+        if "DefaultValue" not in vq:
             errors.append(
-                f"WFVPN import question carries device-specific DefaultValue: {vq['DefaultValue']!r}"
+                "WFVPN import question missing neutral DefaultValue placeholder (crashes iOS 27.3 Shortcuts on share)"
+            )
+        elif not is_neutral_wfvpn_placeholder(vq["DefaultValue"]):
+            errors.append(
+                f"WFVPN import question carries non-neutral DefaultValue: {vq['DefaultValue']!r}"
             )
 
     by_key = {q.get("ParameterKey"): q for q in questions}
@@ -312,7 +379,7 @@ def fix_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
     for question in fixed.get("WFWorkflowImportQuestions") or []:
         if question.get("ParameterKey") == "WFVPN":
             question["ActionIndex"] = 0
-            question.pop("DefaultValue", None)
+            question["DefaultValue"] = copy.deepcopy(NEUTRAL_WFVPN_PLACEHOLDER)
             vpn_fixed = True
 
     if not vpn_fixed:
@@ -346,6 +413,14 @@ def sign_shortcut(unsigned_path: Path, signed_path: Path) -> None:
         )
 
 
+def _wfvpn_state(container: dict[str, Any], key: str) -> str:
+    if key not in container:
+        return "absent"
+    if is_neutral_wfvpn_placeholder(container[key]):
+        return "neutral-placeholder"
+    return "hardcoded"
+
+
 def summarize(workflow: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
     vpn_q = next(
         (
@@ -356,15 +431,19 @@ def summarize(workflow: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
         None,
     )
     action0 = (workflow.get("WFWorkflowActions") or [{}])[0]
+    params0 = action0.get("WFWorkflowActionParameters") or {}
     return {
         "source": meta.get("source"),
         "name": meta.get("name"),
         "format": meta.get("format"),
+        "signing_status": meta.get("signing_status"),
         "action_count": len(workflow.get("WFWorkflowActions") or []),
         "action0_identifier": action0.get("WFWorkflowActionIdentifier"),
-        "action0_has_wfvpn": "WFVPN" in (action0.get("WFWorkflowActionParameters") or {}),
+        "action0_wfvpn_state": _wfvpn_state(params0, "WFVPN"),
         "wfvpn_question_action_index": vpn_q.get("ActionIndex") if vpn_q else None,
-        "wfvpn_question_has_default": "DefaultValue" in vpn_q if vpn_q else None,
+        "wfvpn_question_default_state": _wfvpn_state(vpn_q, "DefaultValue")
+        if vpn_q
+        else None,
         "trigger_count": len(workflow.get("WFWorkflowTriggers") or []),
     }
 

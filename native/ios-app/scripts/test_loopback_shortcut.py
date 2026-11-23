@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
+import copy
 import importlib.util
-import plistlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -131,18 +131,40 @@ class LoopbackShortcutTests(unittest.TestCase):
         errors = MOD.validate_workflow(make_legacy_workflow(), name="Poki Loopback")
         joined = "\n".join(errors)
         self.assertIn("hardcodes WFVPN", joined)
-        self.assertIn("references Surge", joined)
+        self.assertIn("references com.nssurge.inc.surge-ios", joined)
         self.assertIn("ActionIndex is 1, expected 0", joined)
-        self.assertIn("device-specific DefaultValue", joined)
+        self.assertIn("non-neutral DefaultValue", joined)
 
-    def test_fix_workflow_clears_hardcoded_vpn_and_fixes_index(self):
+    def test_missing_default_value_fails_to_prevent_ios27_share_crash(self):
+        fixed = MOD.fix_workflow(make_legacy_workflow())
+        vpn_q = [q for q in fixed["WFWorkflowImportQuestions"] if q["ParameterKey"] == "WFVPN"][0]
+        vpn_q.pop("DefaultValue")
+        errors = MOD.validate_workflow(fixed, name="Poki Loopback")
+        self.assertTrue(
+            any("missing neutral DefaultValue placeholder" in e for e in errors),
+            errors,
+        )
+
+    def test_fix_workflow_sets_neutral_placeholder_and_index_zero(self):
         fixed = MOD.fix_workflow(make_legacy_workflow())
         errors = MOD.validate_workflow(fixed, name="Poki Loopback")
         self.assertEqual(errors, [])
         self.assertNotIn("WFVPN", fixed["WFWorkflowActions"][0]["WFWorkflowActionParameters"])
         vpn_q = [q for q in fixed["WFWorkflowImportQuestions"] if q["ParameterKey"] == "WFVPN"][0]
         self.assertEqual(vpn_q["ActionIndex"], 0)
-        self.assertNotIn("DefaultValue", vpn_q)
+        self.assertEqual(vpn_q["DefaultValue"], MOD.NEUTRAL_WFVPN_PLACEHOLDER)
+
+    def test_icloud_exported_neutral_placeholder_in_action0_is_accepted(self):
+        exported = MOD.fix_workflow(make_legacy_workflow())
+        neutral_action0 = copy.deepcopy(MOD.NEUTRAL_WFVPN_PLACEHOLDER)
+        neutral_action0.pop("serverAddress")
+        exported["WFWorkflowActions"][0]["WFWorkflowActionParameters"]["WFVPN"] = neutral_action0
+        self.assertEqual(MOD.validate_workflow(exported, name="Poki Loopback"), [])
+
+        bad = copy.deepcopy(exported)
+        bad["WFWorkflowActions"][0]["WFWorkflowActionParameters"]["WFVPN"]["title"] = "Karing"
+        errors = MOD.validate_workflow(bad, name="Poki Loopback")
+        self.assertTrue(any("hardcodes WFVPN" in e for e in errors), errors)
 
     def test_update_loopback_swift_rejects_legacy_id_and_replaces_valid_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -162,7 +184,7 @@ class LoopbackShortcutTests(unittest.TestCase):
             self.assertIn(updated_url, swift.read_text(encoding="utf-8"))
             self.assertNotIn(MOD.LEGACY_SHORTCUT_ID, swift.read_text(encoding="utf-8"))
 
-    def test_committed_signed_shortcut_passes_verification(self):
+    def test_committed_signed_shortcut_and_app_url_pass_verification(self):
         self.assertTrue(
             MOD.DEFAULT_FIXTURE.exists(),
             f"missing committed signed shortcut at {MOD.DEFAULT_FIXTURE}",
@@ -175,6 +197,13 @@ class LoopbackShortcutTests(unittest.TestCase):
             actual_format=meta.get("format"),
         )
         self.assertEqual(errors, [])
+
+        swift_text = MOD.DEFAULT_SWIFT.read_text(encoding="utf-8")
+        self.assertNotIn(MOD.LEGACY_SHORTCUT_ID, swift_text)
+        self.assertIn(
+            "https://www.icloud.com/shortcuts/f8ff9cd906194fbf8a58ed51137f6c0a",
+            swift_text,
+        )
 
 
 if __name__ == "__main__":
