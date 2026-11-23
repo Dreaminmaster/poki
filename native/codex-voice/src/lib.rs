@@ -541,45 +541,120 @@ mod tests {
         (format!("http://{addr}/v1"), rx)
     }
 
-    fn collect_tool_names(request_body: &Value) -> BTreeSet<String> {
-        fn record_tool(tool: &Value, names: &mut BTreeSet<String>) {
-            if let Some(name) = tool.get("name").and_then(Value::as_str) {
-                names.insert(name.to_owned());
-            } else if let Some(kind) = tool.get("type").and_then(Value::as_str) {
-                names.insert(kind.to_owned());
-            }
-            if let Some(description) = tool.get("description").and_then(Value::as_str) {
-                for line in description.lines() {
-                    if let Some(rest) = line.strip_prefix("### `")
-                        && let Some(declared) = rest.strip_suffix('`')
-                    {
-                        names.insert(declared.to_owned());
-                    }
-                }
-            }
-            if let Some(nested) = tool.get("tools").and_then(Value::as_array) {
+    fn collect_declared_tools(request_body: &Value) -> Vec<&Value> {
+        fn push_tool<'a>(tool: &'a Value, out: &mut Vec<&'a Value>) {
+            if tool.get("type").and_then(Value::as_str) == Some("namespace")
+                && let Some(nested) = tool.get("tools").and_then(Value::as_array)
+            {
                 for item in nested {
-                    record_tool(item, names);
+                    push_tool(item, out);
                 }
+                return;
             }
+            out.push(tool);
         }
 
-        let mut names = BTreeSet::new();
+        let mut declared = Vec::new();
         if let Some(tools) = request_body.get("tools").and_then(Value::as_array) {
             for tool in tools {
-                record_tool(tool, &mut names);
+                push_tool(tool, &mut declared);
             }
         }
         if let Some(input) = request_body.get("input").and_then(Value::as_array) {
             for item in input {
                 if let Some(tools) = item.get("tools").and_then(Value::as_array) {
                     for tool in tools {
-                        record_tool(tool, &mut names);
+                        push_tool(tool, &mut declared);
                     }
                 }
             }
         }
+        declared
+    }
+
+    fn collect_direct_function_tool_names(request_body: &Value) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for tool in collect_declared_tools(request_body) {
+            if tool.get("type").and_then(Value::as_str) == Some("function")
+                && let Some(name) = tool.get("name").and_then(Value::as_str)
+            {
+                names.insert(name.to_owned());
+            }
+        }
         names
+    }
+
+    fn collect_top_level_tool_names(request_body: &Value) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for tool in collect_declared_tools(request_body) {
+            if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                names.insert(name.to_owned());
+            } else if let Some(kind) = tool.get("type").and_then(Value::as_str) {
+                names.insert(kind.to_owned());
+            }
+        }
+        names
+    }
+
+    fn spawn_mock_tool_call_responses_server() -> (String, std_mpsc::Receiver<Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let (tx, rx) = std_mpsc::channel();
+        std::thread::spawn(move || {
+            let mut responses_turn = 0usize;
+            for incoming in listener.incoming() {
+                let Ok(mut stream) = incoming else { break };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                let Some((request_line, body)) = read_http_request(&mut stream) else {
+                    continue;
+                };
+                if request_line.starts_with("POST ") && request_line.contains("/responses") {
+                    responses_turn += 1;
+                    if let Ok(json) = serde_json::from_slice::<Value>(&body) {
+                        let _ = tx.send(json);
+                    }
+                    let sse = if responses_turn == 1 {
+                        concat!(
+                            "event: response.created\n",
+                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+                            "event: response.output_item.done\n",
+                            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_open_wechat\",\"name\":\"open_app\",\"arguments\":\"{\\\"app\\\":\\\"微信\\\"}\"}}\n\n",
+                            "event: response.completed\n",
+                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_open_wechat\",\"name\":\"open_app\",\"arguments\":\"{\\\"app\\\":\\\"微信\\\"}\"}]}}\n\n"
+                        )
+                    } else {
+                        concat!(
+                            "event: response.created\n",
+                            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\"}}\n\n",
+                            "event: response.output_item.done\n",
+                            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"已为你打开微信。\"}]}}\n\n",
+                            "event: response.completed\n",
+                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"已为你打开微信。\"}]}]}}\n\n"
+                        )
+                    };
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        sse.len(),
+                        sse
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                    if responses_turn >= 2 {
+                        break;
+                    }
+                } else {
+                    let payload = "{}";
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        payload.len(),
+                        payload
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                }
+            }
+        });
+        (format!("http://{addr}/v1"), rx)
     }
 
     #[test]
@@ -659,7 +734,10 @@ mod tests {
                             "description": "Open an app on this iPhone.",
                             "inputSchema": {
                                 "type": "object",
-                                "properties": { "app": { "type": "string" } },
+                                "properties": {
+                                    "app": { "type": "string" },
+                                    "page": { "type": "string", "enum": ["wifi", "bluetooth"] }
+                                },
                                 "required": ["app"],
                                 "additionalProperties": false
                             }
@@ -709,15 +787,18 @@ mod tests {
             let request_body = captured_rx
                 .recv_timeout(Duration::from_secs(15))
                 .expect("receive /v1/responses request body");
-            let tool_names = collect_tool_names(&request_body);
+            let direct_tool_names = collect_direct_function_tool_names(&request_body);
+            let tool_names = collect_top_level_tool_names(&request_body);
 
             for expected in ["get_ios_version", "look", "open_app", "do"] {
                 assert!(
-                    tool_names.contains(expected),
-                    "expected phone tool `{expected}` in model request, got {tool_names:?}"
+                    direct_tool_names.contains(expected),
+                    "expected direct top-level function tool `{expected}` in model request, got direct={direct_tool_names:?}, all={tool_names:?}"
                 );
             }
             let leaked: Vec<&str> = [
+                "exec",
+                "wait",
                 "exec_command",
                 "write_stdin",
                 "shell",
@@ -747,7 +828,7 @@ mod tests {
             .collect();
             assert!(
                 leaked.is_empty(),
-                "unrelated tools {leaked:?} leaked into model request: {tool_names:?}"
+                "unrelated or unavailable code-mode tools {leaked:?} leaked into model request: {tool_names:?}"
             );
 
             let input_serialized = request_body
@@ -806,5 +887,239 @@ mod tests {
             let _ = std::fs::remove_dir_all(&home);
         });
         runtime.block_on(handle).expect("test task");
+    }
+
+    #[test]
+    fn subscription_voice_dispatches_open_app_dynamic_tool_call() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_stack_size(16 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let handle = runtime.spawn(async {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let home = std::env::temp_dir().join(format!(
+                "poki-codex-voice-dispatch-test-{}-{unique}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&home).expect("create temp home");
+            let (base_url, captured_rx) = spawn_mock_tool_call_responses_server();
+            std::fs::write(
+                home.join("config.toml"),
+                format!(
+                    concat!(
+                        "model = \"gpt-6-luna\"\n",
+                        "model_provider = \"mock_provider\"\n\n",
+                        "[model_providers.mock_provider]\n",
+                        "name = \"Mock provider\"\n",
+                        "base_url = \"{base_url}\"\n",
+                        "wire_api = \"responses\"\n",
+                        "supports_websockets = false\n",
+                        "request_max_retries = 0\n",
+                        "stream_max_retries = 0\n",
+                    ),
+                    base_url = base_url
+                ),
+            )
+            .expect("write config.toml");
+
+            let (_, mut client) = start_app_server(&home, codex_overrides())
+                .await
+                .expect("start embedded app server");
+            let sender = client.sender();
+            let thread_start: ClientRequest = serde_json::from_value(json!({
+                "id": 1,
+                "method": "thread/start",
+                "params": {
+                    "cwd": home.to_string_lossy(),
+                    "approvalPolicy": "never",
+                    "sandbox": "read-only",
+                    "ephemeral": true,
+                    "developerInstructions": "Open apps with open_app.",
+                    "dynamicTools": [{
+                        "type": "function",
+                        "name": "open_app",
+                        "description": "Open an app on this iPhone.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": { "app": { "type": "string" } },
+                            "required": ["app"],
+                            "additionalProperties": false
+                        }
+                    }]
+                }
+            }))
+            .expect("parse thread/start");
+            let thread_result = sender
+                .request(thread_start)
+                .await
+                .expect("thread/start transport")
+                .expect("thread/start result");
+            let thread_id = thread_result
+                .pointer("/thread/id")
+                .and_then(Value::as_str)
+                .expect("thread id")
+                .to_owned();
+
+            let turn_start: ClientRequest = serde_json::from_value(json!({
+                "id": 2,
+                "method": "turn/start",
+                "params": {
+                    "threadId": thread_id,
+                    "input": [{ "type": "text", "text": "打开微信" }]
+                }
+            }))
+            .expect("parse turn/start");
+            let _ = sender
+                .request(turn_start)
+                .await
+                .expect("turn/start transport")
+                .expect("turn/start result");
+
+            let mut dispatched_tool = None;
+            let mut completed_status = None;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+            while tokio::time::Instant::now() < deadline {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                let Ok(event) = tokio::time::timeout(remaining, client.next_event()).await else {
+                    break;
+                };
+                match event {
+                    Some(InProcessServerEvent::ServerRequest(request)) => {
+                        let value = serde_json::to_value(request).expect("serialize request");
+                        if value.get("method").and_then(Value::as_str) == Some("item/tool/call") {
+                            dispatched_tool = Some((
+                                value
+                                    .pointer("/params/tool")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                                value.pointer("/params/arguments/app").cloned(),
+                            ));
+                            let id: RequestId = serde_json::from_value(
+                                value.get("id").cloned().expect("request id"),
+                            )
+                            .expect("parse request id");
+                            sender
+                                .respond_to_server_request(
+                                    id,
+                                    json!({
+                                        "success": true,
+                                        "contentItems": [{ "type": "inputText", "text": "Opened WeChat" }]
+                                    }),
+                                )
+                                .expect("respond to tool call");
+                        }
+                    }
+                    Some(InProcessServerEvent::ServerNotification(notification)) => {
+                        let value = serde_json::to_value(notification).expect("serialize notif");
+                        if value.get("method").and_then(Value::as_str) == Some("turn/completed") {
+                            completed_status = value
+                                .pointer("/params/turn/status")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            let first_request = captured_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("first /responses request");
+            assert!(
+                collect_direct_function_tool_names(&first_request).contains("open_app"),
+                "open_app must be directly callable"
+            );
+            assert_eq!(
+                dispatched_tool,
+                Some(("open_app".to_owned(), Some(json!("微信")))),
+                "expected item/tool/call for open_app"
+            );
+            assert_eq!(completed_status.as_deref(), Some("completed"));
+
+            let _ = client.shutdown().await;
+            let _ = std::fs::remove_dir_all(&home);
+        });
+        runtime.block_on(handle).expect("test task");
+    }
+
+    #[test]
+    fn backend_diagnostic_notification_exposes_sanitized_transport_and_warning_details() {
+        let tls_error = json!({
+            "params": {
+                "threadId": "thr_1",
+                "willRetry": true,
+                "error": {
+                    "message": "Reconnecting... 2/5",
+                    "codexErrorInfo": {
+                        "responseStreamDisconnected": { "httpStatusCode": 502 }
+                    },
+                    "additionalDetails": "stream disconnected before completion: invalid peer certificate: UnknownIssuer at wss://chatgpt.com/secret?token=Bearer sk-secret123456"
+                }
+            }
+        });
+        let summary = backend_diagnostic_notification("error", &tls_error)
+            .expect("error summary");
+        assert_eq!(summary["method"], "poki/backend/error");
+        assert_eq!(summary["params"]["code"], "responseStreamDisconnected");
+        assert_eq!(summary["params"]["httpStatusCode"], 502);
+        let diagnostic = summary["params"]["diagnostic"]
+            .as_str()
+            .expect("sanitized diagnostic");
+        assert!(
+            diagnostic.contains("UnknownIssuer"),
+            "expected TLS diagnostic, got {diagnostic}"
+        );
+        assert!(
+            !diagnostic.contains("sk-secret123456") && !diagnostic.contains("chatgpt.com"),
+            "diagnostic must not leak URLs or tokens: {diagnostic}"
+        );
+
+        let failed_turn = json!({
+            "params": {
+                "threadId": "thr_1",
+                "turn": {
+                    "status": "failed",
+                    "error": {
+                        "message": "stream disconnected before completion: operation timed out",
+                        "codexErrorInfo": "responseStreamDisconnected",
+                        "additionalDetails": "IO error: operation timed out"
+                    }
+                }
+            }
+        });
+        let completed = backend_diagnostic_notification("turn/completed", &failed_turn)
+            .expect("turn completed summary");
+        assert_eq!(completed["method"], "poki/backend/turnCompleted");
+        assert_eq!(completed["params"]["status"], "failed");
+        assert_eq!(completed["params"]["code"], "responseStreamDisconnected");
+        assert!(
+            completed["params"]["diagnostic"]
+                .as_str()
+                .is_some_and(|d| d.contains("timed out")),
+            "expected failed turn diagnostic, got {completed}"
+        );
+
+        let fallback_warning = json!({
+            "params": {
+                "threadId": "thr_1",
+                "message": "Falling back from WebSockets to HTTPS transport. invalid peer certificate: UnknownIssuer"
+            }
+        });
+        let warning = backend_diagnostic_notification("warning", &fallback_warning)
+            .expect("warning summary");
+        assert_eq!(warning["method"], "poki/backend/warning");
+        assert!(
+            warning["params"]["diagnostic"]
+                .as_str()
+                .is_some_and(|d| d.contains("WebSockets") && d.contains("HTTPS")),
+            "expected transport fallback warning, got {warning}"
+        );
     }
 }
