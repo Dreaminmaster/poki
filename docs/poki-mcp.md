@@ -1,6 +1,6 @@
 # Poki MCP and Poki Agent
 
-Poki MCP is the earlier way to use Poki: an agent on your Mac, such as Claude Code or Codex, drives an iPhone or the iOS Simulator, and Poki Agent, a terminal agent with iMessage and Telegram channels, runs on it. It is no longer updated and stays here as it is for people who already use it or want to build on it. For a maintained way to run Poki, [install the Poki app](../README.md#install-poki-on-your-iphone) on your iPhone.
+Poki MCP is the earlier way to use Poki: an agent on your Mac, such as Claude Code or Codex, drives an iPhone or the iOS Simulator, and Poki Agent, a terminal agent with iMessage and Telegram channels, runs on it. It remains available for existing users and receives only targeted security updates. For the current Poki experience, [install the Poki app](../README.md#install-poki-on-your-iphone) on your iPhone.
 
 **Let your agent install it.** Copy this to your agent:
 
@@ -84,7 +84,7 @@ On physical devices, app container export and direct links to Settings subpages 
 
 | Topic | Read |
 | --- | --- |
-| Poki MCP installation, other MCP clients, and troubleshooting (no longer updated) | [Install guide](install.md) |
+| Poki MCP installation, other MCP clients, and troubleshooting | [Install guide](install.md) |
 | Poki Agent, models, iMessage, and Telegram | [Run Poki Agent](../agent/README.md) |
 | MCP tool reference | [Tool behavior](tools.md) |
 | Environment variables and sessions | [Configuration](configuration.md) |
