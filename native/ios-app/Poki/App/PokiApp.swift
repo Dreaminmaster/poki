@@ -352,8 +352,9 @@ struct RootView: View {
                 model.wentToBackground()
             }
         }
-        // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): the chat,
-        // the setup step, or the Activity Log for a problem; `poki://voice` brings the chat to the front.
+        // A tap on the Live Activity opens the screen its state is about (ActivityFace.link): `poki://activity`
+        // keeps an active task running and returns to its target app; other links open the chat, the setup
+        // step, or the Activity Log for a problem, and `poki://voice` brings the chat to the front.
         .onOpenURL { url in open(link: url) }
         // On the window, not the view: sheets and full-screen covers take it too, and Automatic hands back to iOS.
         .onChange(of: appearance, initial: true) { _, value in

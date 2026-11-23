@@ -879,7 +879,7 @@ final class AppModel {
     /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
-        pendingLiveActivityReturnAt = nil
+        cancelLiveActivityReturn()
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
@@ -1301,6 +1301,7 @@ final class AppModel {
         sessionOn = false
         if awaitingAuthorization { host.update(runner: .failed("Poki was turned off", fix: nil)) }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         stepUnderWay = nil
         runner = .idle
         relayStatus = .off
@@ -1364,6 +1365,7 @@ final class AppModel {
             return
         }
         log.add("session", "\(reason): the talk and the task stop")
+        endLiveActivityTaskGeneration()
         if let chat, chat.running { chat.stop() }
         else { activity.stopRun() }
         for approval in approvals { resolve(approval, approved: false) }
@@ -1470,6 +1472,7 @@ final class AppModel {
     private func standBy(reason: String?, keepingDone: Bool = false) {
         preparingCellularImage = false
         runnerPaused = true
+        endLiveActivityTaskGeneration()
         runner = RunnerStatus(state: "standby", detail: reason.map { "\($0). It starts again when an agent asks." } ?? "It starts when an agent asks.")
         host.update(runner: .starting(automationPath == .inProcess ? "opening the automation session" : "starting the runner"))
         host.setPaused(true)
@@ -1496,6 +1499,8 @@ final class AppModel {
     /// the session, so Poki coming forward because of it does not close the session under it.
     private var endingTasks = 0
     private var pendingLiveActivityReturnAt: Date?
+    private var liveActivityReturnTask: Task<Void, Never>?
+    private var liveActivityTaskGeneration = 0
 
     private var canReturnFromLiveActivity: Bool {
         sessionOn && !runnerPaused
@@ -1505,11 +1510,25 @@ final class AppModel {
             && !drivesDuoCompanion && activitySplitViewSession == nil
     }
 
+    private func cancelLiveActivityReturn() {
+        pendingLiveActivityReturnAt = nil
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = nil
+    }
+
+    private func endLiveActivityTaskGeneration() {
+        liveActivityTaskGeneration &+= 1
+        cancelLiveActivityReturn()
+    }
+
     private func returnToTargetAppFromLiveActivity() {
         guard canReturnFromLiveActivity else { return }
-        Task { [weak self, core, log] in
+        let generation = liveActivityTaskGeneration
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = Task { [weak self, core, log] in
             let line = await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { @MainActor [weak self] in
-                self?.inFront == true && self?.canReturnFromLiveActivity == true
+                guard let self else { return false }
+                return self.liveActivityTaskGeneration == generation && self.inFront && self.canReturnFromLiveActivity
             })
             if let line { log.add("app", line) }
         }
@@ -1534,6 +1553,7 @@ final class AppModel {
     private func tellOwnerAgentsWereHere() {
         let agents = Set(outsideAgentsAtWork.values).sorted()
         outsideAgentsAtWork.removeAll()
+        endLiveActivityTaskGeneration()
         for agent in agents { tellOwner(agentWasHere: agent) }
     }
 
@@ -1943,6 +1963,7 @@ final class AppModel {
             lastAgentActivity = Date(); lastStepAt = Date()
             let shown = PokiActivityAttributes.Handoff.Kind(rawValue: kind) ?? .other
             handoffText = text ?? Self.handoffWording(shown)
+            cancelLiveActivityReturn()
             log.add("handoff", "the agent handed over \(id) (\(kind))\(app.map { " in \($0)" } ?? ""): \(handoffText ?? "")")
             activity.update { state in
                 state.phase = .handoff
@@ -1983,6 +2004,7 @@ final class AppModel {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         lastShot = nil
         let companion = duoCompanionTask
         // The phone goes back to where the task began first: that still needs the session.
@@ -2012,6 +2034,7 @@ final class AppModel {
         }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         lastShot = nil
         if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
@@ -2049,6 +2072,7 @@ final class AppModel {
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
 
     func chatTaskStopped() {
+        endLiveActivityTaskGeneration()
         lastShot = nil
         activity.stopRun()
     }
@@ -2059,6 +2083,7 @@ final class AppModel {
     func chatTaskBegan(splitViewSession: String? = nil) async {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
+        endLiveActivityTaskGeneration()
         if chatTaskActive { lastAgentActivity = Date() }
         if automationPath == .inProcess {
             let native = PKInProcess.shared()
@@ -2228,6 +2253,7 @@ final class AppModel {
     /// The island asks first. The notification is available if nobody answers before iOS folds it.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
+        cancelLiveActivityReturn()
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
