@@ -466,6 +466,21 @@ public final class PokiCore: @unchecked Sendable {
         await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
     }
 
+    public func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
+        if let shouldRun {
+            guard await gate.enter(while: { [computer] in
+                guard !computer.handoffWaiting, computer.approvals.pending == nil else { return false }
+                return await shouldRun()
+            }) else { return nil }
+        } else {
+            guard await gate.enter(waiting: config.busyWait) else { return nil }
+        }
+        defer { gate.leave() }
+        guard !computer.handoffWaiting, computer.approvals.pending == nil else { return nil }
+        if let shouldRun, await !shouldRun() { return nil }
+        return await computer.bringBackTargetApp(why: why, check: shouldRun == nil)
+    }
+
     public func clearTaskScreenshots(localTask: String) {
         taskScreenshots.clear(task: localTask)
     }
@@ -876,6 +891,14 @@ final class Gate: @unchecked Sendable {
             if now() >= until { return false }
             await sleep(seconds: 0.05)
         }
+    }
+    func enter(while stillNeeded: @Sendable () async -> Bool) async -> Bool {
+        while !Task.isCancelled {
+            if await !stillNeeded() { return false }
+            if tryEnter() { return true }
+            await sleep(seconds: 0.05)
+        }
+        return false
     }
     func leave() { lock.lock(); held = false; lock.unlock() }
 }

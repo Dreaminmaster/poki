@@ -67,7 +67,20 @@ final class Computer: @unchecked Sendable {
     /// A swipe or drag went out that no tree read has shown yet: `scroll_to` reads before it swipes
     /// again, so a target cannot pass between two reads (the gym's row 250, scrolled past unread).
     var swipeUnread = false
-    var lastForeground: Foreground?
+    private func workingTarget(_ app: Foreground?) -> Foreground? {
+        guard let app, let bundle = app.bundleID, !bundle.isEmpty,
+              bundle != "com.apple.springboard", !config.isPoki(app) else { return nil }
+        return app
+    }
+
+    var lastForeground: Foreground? {
+        didSet {
+            if let app = workingTarget(lastForeground) {
+                lastWorkingApp = app
+            }
+        }
+    }
+    var lastWorkingApp: Foreground?
     private var selectedPane: (side: String, identity: String, app: String, other: String, session: String?)?
     private let workspaceOwner = LockedBox<String?>(nil)
     var hasLocalWorkspace: Bool { workspaceOwner.value != nil }
@@ -827,7 +840,7 @@ final class Computer: @unchecked Sendable {
         let taskChanged = localTask != activeLocalTask
         guard beginsTask() || taskChanged else { return }
         clearTaskScreenshotCache()
-        if taskChanged { origin = nil }
+        if taskChanged { origin = nil; lastWorkingApp = nil; lastForeground = nil }
         activeLocalTask = localTask
     }
 
@@ -882,6 +895,8 @@ final class Computer: @unchecked Sendable {
         }
         if selectedPane == nil { workspaceOwner.value = nil }
         origin = nil
+        lastWorkingApp = nil
+        lastForeground = nil
         activeLocalTask = nil
         workspaceReads.removeAll()
         workspaceDrop = nil
@@ -1614,6 +1629,8 @@ final class Computer: @unchecked Sendable {
         if let selectedPane {
             let exit = await selectPane("auto", session: selectedPane.session, until: now() + 3)
             origin = nil
+            lastWorkingApp = nil
+            lastForeground = nil
             activeLocalTask = nil
             if exit != nil {
                 approvals.discardWorkspaceDecisions(session: workspaceOwner.value)
@@ -1636,6 +1653,8 @@ final class Computer: @unchecked Sendable {
         }
         approvals.discardAll()
         clearTaskScreenshotCache()
+        lastWorkingApp = nil
+        lastForeground = nil
         activeLocalTask = nil
         guard let task = origin else { return nil }
         origin = nil
@@ -1689,7 +1708,7 @@ final class Computer: @unchecked Sendable {
     /// When Poki itself is in front although the model was working in another app, that app is
     /// activated again, and the line says so. nil when nothing had to be done.
     func bringBack(from before: Foreground?, why: String, check: Bool) async -> String? {
-        guard selectedPane == nil, let app = before?.bundleID, !config.isPoki(before) else { return nil }
+        guard selectedPane == nil, let app = before?.bundleID, !app.isEmpty, !config.isPoki(before) else { return nil }
         if check {
             guard let front = try? await runner.call("GET", "/wda/activeAppInfo", timeout: 1.5), config.isPoki(Foreground(bundleID: front["bundleId"]?.string, name: nil)) else { return nil }
         }
@@ -1699,6 +1718,12 @@ final class Computer: @unchecked Sendable {
         } catch {
             return "note: Poki was in front \(why), and \(before?.describe ?? app) could not be brought back (\(error)). Launch it, or ask the owner."
         }
+    }
+
+    func bringBackTargetApp(why: String, check: Bool = true) async -> String? {
+        guard !handoffWaiting, approvals.pending == nil else { return nil }
+        let target = workingTarget(lastForeground) ?? workingTarget(lastWorkingApp)
+        return await bringBack(from: target, why: why, check: check)
     }
 
     /// The actions, in order, each within its own action time (`actionCap` from when it starts; a

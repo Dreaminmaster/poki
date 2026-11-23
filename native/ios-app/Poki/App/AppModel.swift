@@ -817,6 +817,12 @@ final class AppModel {
         warmInProcess("Poki came to the front")
         openWhileInFront("Poki came to the front")
         closeBecausePokiOpened()
+        if let requestedAt = pendingLiveActivityReturnAt {
+            pendingLiveActivityReturnAt = nil
+            if Date().timeIntervalSince(requestedAt) < 5 {
+                returnToTargetAppFromLiveActivity()
+            }
+        }
         loopback.resume()
         // Swiped away, ended by iOS, or Poki turned on from the background (where iOS starts none):
         // the Live Activity comes back while Poki is on, so the next thing that needs the owner pops up.
@@ -873,6 +879,7 @@ final class AppModel {
     /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
+        cancelLiveActivityReturn()
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
@@ -1294,6 +1301,7 @@ final class AppModel {
         sessionOn = false
         if awaitingAuthorization { host.update(runner: .failed("Poki was turned off", fix: nil)) }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         stepUnderWay = nil
         runner = .idle
         relayStatus = .off
@@ -1357,6 +1365,7 @@ final class AppModel {
             return
         }
         log.add("session", "\(reason): the talk and the task stop")
+        endLiveActivityTaskGeneration()
         if let chat, chat.running { chat.stop() }
         else { activity.stopRun() }
         for approval in approvals { resolve(approval, approved: false) }
@@ -1463,6 +1472,7 @@ final class AppModel {
     private func standBy(reason: String?, keepingDone: Bool = false) {
         preparingCellularImage = false
         runnerPaused = true
+        endLiveActivityTaskGeneration()
         runner = RunnerStatus(state: "standby", detail: reason.map { "\($0). It starts again when an agent asks." } ?? "It starts when an agent asks.")
         host.update(runner: .starting(automationPath == .inProcess ? "opening the automation session" : "starting the runner"))
         host.setPaused(true)
@@ -1488,9 +1498,55 @@ final class AppModel {
     /// Task endings whose return to the app the task began in is still under way: that return needs
     /// the session, so Poki coming forward because of it does not close the session under it.
     private var endingTasks = 0
+    private var pendingLiveActivityReturnAt: Date?
+    private(set) var liveActivityReturnTask: Task<Void, Never>?
+    private var liveActivityReturnID: UUID?
+    private var liveActivityTaskGeneration = 0
+
+    private var canReturnFromLiveActivity: Bool {
+        sessionOn && !runnerPaused
+            && (automationPath != .inProcess || inProcessSession == .open)
+            && (chatTaskActive || !outsideAgentsAtWork.isEmpty)
+            && approvals.isEmpty && handoffText == nil
+            && !drivesDuoCompanion && activitySplitViewSession == nil
+    }
+
+    private func cancelLiveActivityReturn() {
+        pendingLiveActivityReturnAt = nil
+        liveActivityReturnID = nil
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = nil
+    }
+
+    private func endLiveActivityTaskGeneration() {
+        liveActivityTaskGeneration &+= 1
+        cancelLiveActivityReturn()
+    }
+
+    private func returnToTargetAppFromLiveActivity() {
+        guard canReturnFromLiveActivity else { return }
+        let generation = liveActivityTaskGeneration
+        let id = UUID()
+        liveActivityReturnID = id
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = Task { [weak self, core, log] in
+            defer {
+                if let self, self.liveActivityReturnID == id {
+                    self.liveActivityReturnID = nil
+                    self.liveActivityReturnTask = nil
+                }
+            }
+            let line = await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { @MainActor [weak self] in
+                guard let self else { return false }
+                return self.liveActivityTaskGeneration == generation && self.inFront && self.canReturnFromLiveActivity
+            })
+            if let line { log.add("app", line) }
+        }
+    }
 
     private func closeBecausePokiOpened() {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, !inProcessWarming,
+              !chatTaskActive, outsideAgentsAtWork.isEmpty, !voice.isOn,
               stepUnderWay == nil, approvals.isEmpty, !probeDriven, endingTasks == 0 else { return }
         log.add("runner", "Poki is in front: closing the automation session at once; the banner goes with it")
         closeInProcess("Poki in front", keepingSession: idleSessionPolicy == .pauseAutomation)
@@ -1507,6 +1563,7 @@ final class AppModel {
     private func tellOwnerAgentsWereHere() {
         let agents = Set(outsideAgentsAtWork.values).sorted()
         outsideAgentsAtWork.removeAll()
+        endLiveActivityTaskGeneration()
         for agent in agents { tellOwner(agentWasHere: agent) }
     }
 
@@ -1916,6 +1973,7 @@ final class AppModel {
             lastAgentActivity = Date(); lastStepAt = Date()
             let shown = PokiActivityAttributes.Handoff.Kind(rawValue: kind) ?? .other
             handoffText = text ?? Self.handoffWording(shown)
+            cancelLiveActivityReturn()
             log.add("handoff", "the agent handed over \(id) (\(kind))\(app.map { " in \($0)" } ?? ""): \(handoffText ?? "")")
             activity.update { state in
                 state.phase = .handoff
@@ -1956,6 +2014,7 @@ final class AppModel {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         lastShot = nil
         let companion = duoCompanionTask
         // The phone goes back to where the task began first: that still needs the session.
@@ -1985,6 +2044,7 @@ final class AppModel {
         }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         lastShot = nil
         if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
@@ -2022,6 +2082,7 @@ final class AppModel {
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
 
     func chatTaskStopped() {
+        endLiveActivityTaskGeneration()
         lastShot = nil
         activity.stopRun()
     }
@@ -2032,6 +2093,7 @@ final class AppModel {
     func chatTaskBegan(splitViewSession: String? = nil) async {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
+        endLiveActivityTaskGeneration()
         if chatTaskActive { lastAgentActivity = Date() }
         if automationPath == .inProcess {
             let native = PKInProcess.shared()
@@ -2201,6 +2263,7 @@ final class AppModel {
     /// The island asks first. The notification is available if nobody answers before iOS folds it.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
+        cancelLiveActivityReturn()
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
@@ -2489,6 +2552,15 @@ final class AppModel {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
+        case "activity":
+            guard canReturnFromLiveActivity else { return .continueRouting }
+            if inFront {
+                pendingLiveActivityReturnAt = nil
+                returnToTargetAppFromLiveActivity()
+            } else {
+                pendingLiveActivityReturnAt = Date()
+            }
+            return .ignored
         case "pairing":
             guard scanned || canAskAboutLink() else { return .ignored }
             if let text = item("data"), let data = Data(base64URL: text) {
