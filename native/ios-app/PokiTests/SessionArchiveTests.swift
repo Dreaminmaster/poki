@@ -56,6 +56,20 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(Set(relaunched.archivedSessions.map(\.id)), ["old-1", "old-2"], "the archive is kept on disk")
     }
 
+    func testArchiveMigrationRetriesAfterWriteFailure() async throws {
+        for deferred in [false, true] {
+            let id = deferred ? "deferred" : "immediate"
+            _ = try saveEarlier(id, lines: ["Keep this conversation"])
+            defaults.removeObject(forKey: SessionStore.archivedEarlierKey)
+            let failed = SessionStore(folder: folder, defaults: defaults, deferLoad: deferred,
+                                      archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+            await failed.waitUntilLoaded()
+            XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+            XCTAssertEqual(launch().archivedSessions.first { $0.id == id }?.entries.count, 1)
+            XCTAssertTrue(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        }
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in

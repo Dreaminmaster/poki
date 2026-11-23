@@ -222,6 +222,7 @@ final class SessionStore {
     /// leaves it (`RootView`), so it no longer stays open in the chat and its next line does not save it back.
     struct Removal: Equatable { let id: String; let serial: Int }
     private(set) var removed: Removal?
+    private let archiveWrite: @Sendable (Data, URL) throws -> Void
     private let folder: URL
     private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
@@ -262,7 +263,11 @@ final class SessionStore {
     /// The outside agent session whose call is running, if any.
     var activeSessionID: String? { currentSession }
 
-    init(folder: URL, defaults: UserDefaults, samples: Bool = false, deferLoad: Bool = false) {
+    init(folder: URL, defaults: UserDefaults, samples: Bool = false, deferLoad: Bool = false,
+         archiveWrite: @escaping @Sendable (Data, URL) throws -> Void = {
+             try $0.write(to: $1, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+         }) {
+        self.archiveWrite = archiveWrite
         self.folder = folder
         self.defaults = defaults
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -427,21 +432,12 @@ final class SessionStore {
             sessions[i].archived = now
             snapshots.append((file(sessions[i].id), sessions[i]))
         }
-        if !snapshots.isEmpty {
-            let queue = self.writeQueue
-            await withCheckedContinuation { continuation in
-                queue.async {
-                    let encoder = JSONEncoder()
-                    encoder.dateEncodingStrategy = .deferredToDate
-                    for (url, session) in snapshots {
-                        guard let data = try? encoder.encode(session) else { continue }
-                        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    }
-                    continuation.resume()
-                }
-            }
+        let write = archiveWrite
+        let batch = snapshots
+        let persisted = await withCheckedContinuation { continuation in
+            writeQueue.async { continuation.resume(returning: Self.persistArchive(batch, write: write)) }
         }
-        defaults.set(true, forKey: Self.archivedEarlierKey)
+        if persisted { defaults.set(true, forKey: Self.archivedEarlierKey) }
         mergeLoadedBatch(archivedStaged)
     }
 
@@ -468,12 +464,25 @@ final class SessionStore {
     private func archiveEarlier() {
         guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
         let now = Date()
+        var snapshots: [(URL, SavedSession)] = []
         for i in sessions.indices where sessions[i].archived == nil {
             sessions[i].archived = now
-            pendingWrites.insert(sessions[i].id)
+            snapshots.append((file(sessions[i].id), sessions[i]))
         }
-        flush()
-        defaults.set(true, forKey: Self.archivedEarlierKey)
+        let write = archiveWrite
+        if writeQueue.sync(execute: { Self.persistArchive(snapshots, write: write) }) {
+            defaults.set(true, forKey: Self.archivedEarlierKey)
+        }
+    }
+
+    nonisolated private static func persistArchive(_ snapshots: [(URL, SavedSession)], write: (Data, URL) throws -> Void) -> Bool {
+        let encoder = JSONEncoder()
+        var complete = true
+        for (url, session) in snapshots {
+            do { try write(encoder.encode(session), url) }
+            catch { complete = false }
+        }
+        return complete
     }
 
     func session(_ id: String) -> SavedSession? { sessions.first { $0.id == id } }
