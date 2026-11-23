@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // The home avatar, conversation name pill, and voice header open Poki's native status menu.
 // On iOS 26 the menu uses Liquid Glass and opens from the control that was tapped. The model that answers
@@ -48,6 +49,14 @@ extension PowerTile {
     }
 }
 
+/// Where `PokiMenu` opens relative to its control. `.automatic` uses SwiftUI's `Menu` in place
+/// (the chat top bar's Liquid Glass capsule already sits below the bear); `.below` anchors a native
+/// `UIButton` below the control's bottom edge so the menu opens downward clear of the bear's face.
+enum PokiMenuAnchor: Equatable {
+    case automatic
+    case below(spacing: CGFloat = 10)
+}
+
 /// Poki's menu: the status word as its heading, the model that answers (the chat models of every
 /// account that is set up, by account, or Add Model with none) and the approval method with the line on
 /// what always asks you. The method is `AppModel.approvalMode`, the one setting Settings › Approvals
@@ -59,6 +68,9 @@ struct PokiMenu<Face: View>: View {
     /// The tap that opens the menu, for the bear to answer.
     var tapped: () -> Void = {}
     var openCustomization: (() -> Void)? = nil
+    var anchor: PokiMenuAnchor = .automatic
+    var accessibilityLabel: String? = nil
+    var accessibilityIdentifier: String? = nil
     @ViewBuilder var face: () -> Face
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
@@ -70,94 +82,205 @@ struct PokiMenu<Face: View>: View {
     }
 
     var body: some View {
-        Menu {
-            Section {
-                if ModelKeys.hasUsableKey {
-                    Menu {
-                        ForEach(providers) { provider in
-                            let choices = ModelCatalog.available(provider)
-                            if provider == .custom {
-                                ForEach(CustomProviders.all) { custom in
-                                    let models = choices.compactMap { choice -> ChatModelChoice? in
-                                        guard let selection = CustomProviders.parse(choice.id),
-                                              selection.provider == custom.id else { return nil }
-                                        return ChatModelChoice(id: choice.id, name: selection.model)
+        menuTrigger
+            .sensoryFeedback(.selection, trigger: model.approvalMode)
+            .sensoryFeedback(.selection, trigger: modelVersion)
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+            .sheet(isPresented: $showsAutoUnlock) {
+                NavigationStack {
+                    Form {
+                        AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                          showsPasscode: $showsAutoUnlockPasscode)
+                    }
+                    .navigationTitle("Automatic Unlock")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAutoUnlock = false } }
+                    }
+                    .sheet(isPresented: $showsAutoUnlockPasscode) {
+                        AutoUnlockPasscodeForm(setting: model.autoUnlock)
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder private var menuTrigger: some View {
+        switch anchor {
+        case .automatic:
+            Menu {
+                Section {
+                    if ModelKeys.hasUsableKey {
+                        Menu {
+                            ForEach(providers) { provider in
+                                let choices = ModelCatalog.available(provider)
+                                if provider == .custom {
+                                    ForEach(CustomProviders.all) { custom in
+                                        let models = choices.compactMap { choice -> ChatModelChoice? in
+                                            guard let selection = CustomProviders.parse(choice.id),
+                                                  selection.provider == custom.id else { return nil }
+                                            return ChatModelChoice(id: choice.id, name: selection.model)
+                                        }
+                                        if !models.isEmpty {
+                                            modelGroup(custom.displayName, provider: provider, choices: models)
+                                        }
                                     }
-                                    if !models.isEmpty {
-                                        modelGroup(custom.displayName, provider: provider, choices: models)
-                                    }
+                                } else {
+                                    modelGroup(provider.name, provider: provider, choices: choices)
                                 }
-                            } else {
-                                modelGroup(provider.name, provider: provider, choices: choices)
                             }
+                        } label: {
+                            Label("Model", systemImage: "sparkles")
+                            Text(verbatim: ModelKeys.selectedModelName)
+                        }
+                        .accessibilityIdentifier("status.model")
+                    } else {
+                        Button(action: openModel) { Label("Add Model", systemImage: "plus") }
+                            .accessibilityIdentifier("status.addModel")
+                    }
+                    Menu {
+                        Section {
+                            ForEach(ApprovalClassifier.Mode.allCases) { mode in
+                                Toggle(isOn: Binding(
+                                    get: { model.approvalMode == mode },
+                                    set: { on in if on { model.approvalMode = mode } }
+                                )) {
+                                    Text(verbatim: mode.title)
+                                }
+                            }
+                        } header: {
+                            Text("Payments, deletions and actions in Wallet always need your confirmation.")
                         }
                     } label: {
-                        Label("Model", systemImage: "sparkles")
-                        Text(verbatim: ModelKeys.selectedModelName)
+                        Label("Approval", systemImage: "checkmark.shield")
+                        Text(verbatim: model.approvalMode.title)
                     }
-                    .accessibilityIdentifier("status.model")
-                } else {
-                    Button(action: openModel) { Label("Add Model", systemImage: "plus") }
-                        .accessibilityIdentifier("status.addModel")
-                }
-                Menu {
-                    Section {
-                        ForEach(ApprovalClassifier.Mode.allCases) { mode in
-                            Toggle(isOn: Binding(
-                                get: { model.approvalMode == mode },
-                                set: { on in if on { model.approvalMode = mode } }
-                            )) {
-                                Text(verbatim: mode.title)
-                            }
+                    .accessibilityIdentifier("status.approvals")
+                    if let openCustomization {
+                        Button(action: openCustomization) {
+                            Label("Outfits", systemImage: "hanger")
+                            Text(verbatim: outfitName)
                         }
-                    } header: {
-                        Text("Payments, deletions and actions in Wallet always need your confirmation.")
+                        .accessibilityIdentifier("status.customizePoki")
                     }
-                } label: {
-                    Label("Approval", systemImage: "checkmark.shield")
-                    Text(verbatim: model.approvalMode.title)
                 }
-                .accessibilityIdentifier("status.approvals")
-                if let openCustomization {
-                    Button(action: openCustomization) {
-                        Label("Outfits", systemImage: "hanger")
-                        Text(verbatim: outfitName)
+                .id(modelVersion)
+                if model.supportsAutoUnlock {
+                    Button { showsAutoUnlock = true } label: {
+                        Label("Automatic Unlock", systemImage: "lock.open")
                     }
-                    .accessibilityIdentifier("status.customizePoki")
+                    .accessibilityIdentifier("status.autoUnlock")
                 }
+            } label: {
+                face()
             }
-            .id(modelVersion)
-            if model.supportsAutoUnlock {
-                Button { showsAutoUnlock = true } label: {
-                    Label("Automatic Unlock", systemImage: "lock.open")
-                }
-                .accessibilityIdentifier("status.autoUnlock")
-            }
-        } label: {
+            .menuOrder(.fixed)
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded { tapped() })
+        case .below(let spacing):
             face()
+                .accessibilityHidden(true)
+                .overlay {
+                    AnchoredPokiMenuButton(
+                        menu: nativeMenu,
+                        attachmentSpacing: spacing,
+                        accessibilityLabel: accessibilityLabel,
+                        accessibilityIdentifier: accessibilityIdentifier,
+                        onOpen: tapped
+                    )
+                }
         }
-        .menuOrder(.fixed)
-        .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded { tapped() })
-        .sensoryFeedback(.selection, trigger: model.approvalMode)
-        .sensoryFeedback(.selection, trigger: modelVersion)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
-        .sheet(isPresented: $showsAutoUnlock) {
-            NavigationStack {
-                Form {
-                    AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
-                                      showsPasscode: $showsAutoUnlockPasscode)
-                }
-                .navigationTitle("Automatic Unlock")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAutoUnlock = false } }
-                }
-                .sheet(isPresented: $showsAutoUnlockPasscode) {
-                    AutoUnlockPasscodeForm(setting: model.autoUnlock)
+    }
+
+    private var nativeMenu: UIMenu {
+        _ = AppLocalization.language
+        _ = modelVersion
+
+        var primaryItems: [UIMenuElement] = []
+        if ModelKeys.hasUsableKey {
+            var providerMenus: [UIMenu] = []
+            for provider in providers {
+                let choices = ModelCatalog.available(provider)
+                if provider == .custom {
+                    for custom in CustomProviders.all {
+                        let models = choices.compactMap { choice -> ChatModelChoice? in
+                            guard let selection = CustomProviders.parse(choice.id),
+                                  selection.provider == custom.id else { return nil }
+                            return ChatModelChoice(id: choice.id, name: selection.model)
+                        }
+                        if !models.isEmpty {
+                            providerMenus.append(nativeModelGroup(custom.displayName, provider: provider, choices: models))
+                        }
+                    }
+                } else {
+                    providerMenus.append(nativeModelGroup(provider.name, provider: provider, choices: choices))
                 }
             }
+            let modelMenu = UIMenu(
+                title: AppLocalization.text("Model"),
+                subtitle: ModelKeys.selectedModelName,
+                image: UIImage(systemName: "sparkles"),
+                children: providerMenus
+            )
+            modelMenu.accessibilityIdentifier = "status.model"
+            primaryItems.append(modelMenu)
+        } else {
+            let addModel = UIAction(
+                title: AppLocalization.text("Add Model"),
+                image: UIImage(systemName: "plus")
+            ) { _ in openModel() }
+            addModel.accessibilityIdentifier = "status.addModel"
+            primaryItems.append(addModel)
         }
+
+        let approvalActions = ApprovalClassifier.Mode.allCases.map { mode in
+            UIAction(title: mode.title, state: model.approvalMode == mode ? .on : .off) { _ in
+                model.approvalMode = mode
+            }
+        }
+        let approvalSection = UIMenu(
+            title: AppLocalization.text("Payments, deletions and actions in Wallet always need your confirmation."),
+            options: .displayInline,
+            children: approvalActions
+        )
+        let approvalsMenu = UIMenu(
+            title: AppLocalization.text("Approval"),
+            subtitle: model.approvalMode.title,
+            image: UIImage(systemName: "checkmark.shield"),
+            children: [approvalSection]
+        )
+        approvalsMenu.accessibilityIdentifier = "status.approvals"
+        primaryItems.append(approvalsMenu)
+
+        if let openCustomization {
+            let outfits = UIAction(
+                title: AppLocalization.text("Outfits"),
+                subtitle: outfitName,
+                image: UIImage(systemName: "hanger")
+            ) { _ in openCustomization() }
+            outfits.accessibilityIdentifier = "status.customizePoki"
+            primaryItems.append(outfits)
+        }
+
+        var topLevel: [UIMenuElement] = [UIMenu(title: "", options: .displayInline, children: primaryItems)]
+        if model.supportsAutoUnlock {
+            let autoUnlock = UIAction(
+                title: AppLocalization.text("Automatic Unlock"),
+                image: UIImage(systemName: "lock.open")
+            ) { _ in showsAutoUnlock = true }
+            autoUnlock.accessibilityIdentifier = "status.autoUnlock"
+            topLevel.append(autoUnlock)
+        }
+        return UIMenu(title: "", children: topLevel)
+    }
+
+    private func nativeModelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> UIMenu {
+        let actions = choices.map { choice in
+            let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
+            return UIAction(title: choice.name, state: chosen ? .on : .off) { _ in
+                pick(provider, choice.id)
+            }
+        }
+        return UIMenu(title: title, options: .displayInline, children: actions)
     }
 
     private var outfitName: String {
@@ -188,5 +311,104 @@ struct PokiMenu<Face: View>: View {
         ModelKeys.selectedProvider = provider
         ModelKeys.selectedModel = id
         ModelKeys.saved += 1
+    }
+}
+
+private struct AnchoredPokiMenuButton: UIViewRepresentable {
+    var menu: UIMenu
+    var attachmentSpacing: CGFloat
+    var accessibilityLabel: String?
+    var accessibilityIdentifier: String?
+    var onOpen: () -> Void
+
+    func makeUIView(context: Context) -> BelowAnchoredMenuContainer {
+        let container = BelowAnchoredMenuContainer()
+        update(container)
+        return container
+    }
+
+    func updateUIView(_ container: BelowAnchoredMenuContainer, context: Context) {
+        update(container)
+    }
+
+    private func update(_ container: BelowAnchoredMenuContainer) {
+        container.attachmentSpacing = attachmentSpacing
+        container.menuButton.onOpen = onOpen
+        container.menuButton.menu = menu
+        container.menuButton.accessibilityLabel = accessibilityLabel
+        container.menuButton.accessibilityIdentifier = accessibilityIdentifier
+    }
+}
+
+/// Hosts a native `UIButton` whose own frame sits directly below the bear avatar while routing taps
+/// and accessibility bounds from the avatar's frame. On iOS 26/27 Liquid Glass, `UIButton` aligns
+/// a downward primary-action menu's top edge with the button's own frame top edge (while
+/// `menuAttachmentPoint(for:)` controls downward vs upward direction).
+private final class BelowAnchoredMenuContainer: UIView {
+    let menuButton = BelowAnchoredMenuButton(type: .custom)
+    var attachmentSpacing: CGFloat = 10 {
+        didSet {
+            if oldValue != attachmentSpacing { setNeedsLayout() }
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        clipsToBounds = false
+        isAccessibilityElement = false
+        menuButton.backgroundColor = .clear
+        menuButton.showsMenuAsPrimaryAction = true
+        menuButton.preferredMenuElementOrder = .fixed
+        menuButton.isAccessibilityElement = true
+        addSubview(menuButton)
+        accessibilityElements = [menuButton]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        menuButton.frame = CGRect(x: 0, y: bounds.maxY + attachmentSpacing, width: bounds.width, height: 2)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.contains(point)
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard isUserInteractionEnabled, !isHidden, alpha >= 0.01, bounds.contains(point) else { return nil }
+        return menuButton
+    }
+}
+
+private final class BelowAnchoredMenuButton: UIButton {
+    var onOpen: (() -> Void)?
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard let container = superview else { return super.point(inside: point, with: event) }
+        return container.bounds.contains(convert(point, to: container))
+    }
+
+    override func menuAttachmentPoint(for configuration: UIContextMenuConfiguration) -> CGPoint {
+        CGPoint(x: bounds.midX, y: bounds.maxY)
+    }
+
+    override var accessibilityFrame: CGRect {
+        get {
+            guard let container = superview else { return super.accessibilityFrame }
+            return UIAccessibility.convertToScreenCoordinates(container.bounds, in: container)
+        }
+        set { super.accessibilityFrame = newValue }
+    }
+
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+        onOpen?()
     }
 }
