@@ -107,12 +107,20 @@ final class PokiBrowser: NSObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 await withCheckedContinuation { c in
-                    if self.isLoading || !self.committed { self.loadWaiters.append(c) } else { c.resume() }
+                    // The timeout can win before this child gets a turn on the main actor.
+                    // Do not register after the parent has already drained the waiters.
+                    if !Task.isCancelled, self.isLoading || !self.committed {
+                        self.loadWaiters.append(c)
+                    } else {
+                        c.resume()
+                    }
                 }
             }
             group.addTask { @MainActor in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(300))
+                    do { try await Task.sleep(for: .milliseconds(300)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
                     if self.committed, let state = try? await self.webView.evaluateJavaScript("document.readyState") as? String, state != "loading" { return }
                 }
             }
