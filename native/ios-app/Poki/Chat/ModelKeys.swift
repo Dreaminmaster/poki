@@ -200,8 +200,9 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     /// `CustomProviders.choiceID`) and the model goes to the provider's first address in its API. With
     /// `customURL`, an address not saved yet (the connection test on the editing page), `id` is the bare
     /// model id and `customAPI` and `customReasoning` are the page's choices.
-    func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil) -> Model? {
-        let provider = self == .chatgpt && CodexAccount.accessToken != nil ? "openai-codex" : piProvider
+    func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil,
+                 codexService: String = CodexAccount.defaultService, codexHome: URL = CodexAccount.home) -> Model? {
+        let provider = self == .chatgpt && CodexAccount.readAccessToken(service: codexService, home: codexHome) != nil ? "openai-codex" : piProvider
         guard let piProvider = provider else { return nil }
         if self == .custom {
             if let customURL {
@@ -244,38 +245,40 @@ struct ChatModelChoice: Hashable, Identifiable, Sendable {
 /// account per provider). A key is only ever sent to its own provider. Nothing here prints or logs a key
 /// or a token.
 enum ModelKeys {
+    @TaskLocal static var defaultService = "nz.zheha.poki"
+
     private static func account(_ provider: ModelProvider) -> String { "model-key.\(provider.rawValue)" }
 
     /// For a custom provider, the key of the one the chat uses now (`CustomProviders.current`).
-    static func key(_ provider: ModelProvider) -> String? {
+    static func key(_ provider: ModelProvider, service: String = defaultService) -> String? {
         if provider == .custom { return CustomProviders.current.flatMap { CustomProviders.key($0.id) } }
-        guard let data = try? Keychain.read(account(provider)), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
+        guard let data = try? Keychain.read(account(provider), service: service), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
         return key
     }
 
-    static func hasKey(_ provider: ModelProvider) -> Bool { key(provider) != nil }
+    static func hasKey(_ provider: ModelProvider, service: String = defaultService) -> Bool { key(provider, service: service) != nil }
 
-    static func save(_ key: String, for provider: ModelProvider) throws {
+    static func save(_ key: String, for provider: ModelProvider, service: String = defaultService) throws {
         if provider == .custom {
             let current = CustomProviders.current ?? CustomProviders.upsert(CustomProvider())
             return try CustomProviders.saveKey(key, for: current.id)
         }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        try Keychain.write(Data(trimmed.utf8), account: account(provider))
+        try Keychain.write(Data(trimmed.utf8), account: account(provider), service: service)
         saved += 1
     }
 
-    static func remove(_ provider: ModelProvider) {
+    static func remove(_ provider: ModelProvider, service: String = defaultService) {
         if provider == .custom {
             if let current = CustomProviders.current { CustomProviders.removeKey(current.id) }
             return
         }
-        Keychain.delete(account(provider))
+        try? Keychain.remove(account(provider), service: service)
         saved += 1
     }
 
-    static func removeChatGPTSignIn() throws {
-        try Keychain.remove(account(.chatgpt))
+    static func removeChatGPTSignIn(service: String = defaultService) throws {
+        try Keychain.remove(account(.chatgpt), service: service)
         saved += 1
     }
 
@@ -388,16 +391,19 @@ enum ModelKeys {
 /// a minute before it runs out (pi's rule; `expires` is in milliseconds).
 enum ModelCredential {
     /// `piProvider` is pi's provider name of the model sent: for a custom provider it names which one.
-    static func apiKey(for provider: ModelProvider, piProvider: String? = nil) async -> String? {
+    static func apiKey(for provider: ModelProvider, piProvider: String? = nil,
+                       codexService: String = CodexAccount.defaultService,
+                       codexHome: URL = CodexAccount.home,
+                       modelKeysService: String = ModelKeys.defaultService) async -> String? {
         // A custom endpoint may need no key; the request still carries one.
         if provider == .custom {
             let custom = piProvider.flatMap { CustomProviders.provider(piProvider: $0) } ?? CustomProviders.current
             return custom.flatMap { CustomProviders.key($0.id) } ?? "none"
         }
         if provider.signsIn {
-            if piProvider == "openai-codex" { return await ChatGPTAccount.codexAccessToken() }
-            return await ChatGPTAccount.accessToken()
+            if piProvider == "openai-codex" { return await ChatGPTAccount.codexAccessToken(service: codexService, home: codexHome) }
+            return await ChatGPTAccount.accessToken(service: modelKeysService)
         }
-        return ModelKeys.key(provider)
+        return ModelKeys.key(provider, service: modelKeysService)
     }
 }

@@ -136,8 +136,59 @@ enum Keychain {
         return result as? Data
     }
 
-    static func write(_ data: Data, account: String) throws {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    static func readWithAttributes(
+        _ account: String,
+        service name: String = service
+    ) throws -> (data: Data, modified: Date?, accessible: String?)? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        guard let item = result as? [String: Any],
+              let data = item[kSecValueData as String] as? Data else { return nil }
+        return (
+            data: data,
+            modified: item[kSecAttrModificationDate as String] as? Date,
+            accessible: item[kSecAttrAccessible as String] as? String
+        )
+    }
+
+    static func readAll(
+        service name: String
+    ) throws -> [(account: String, data: Data, modified: Date?, accessible: String?)] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        guard let items = result as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  let data = item[kSecValueData as String] as? Data else { return nil }
+            return (
+                account: account,
+                data: data,
+                modified: item[kSecAttrModificationDate as String] as? Date,
+                accessible: item[kSecAttrAccessible as String] as? String
+            )
+        }
+    }
+
+    static func write(_ data: Data, account: String, service name: String = service) throws {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
@@ -149,12 +200,31 @@ enum Keychain {
         guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
     }
 
+    static func updateAccessibility(
+        _ account: String,
+        service name: String = service,
+        accessible: CFString
+    ) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecAttrAccount as String: account,
+        ]
+        let attributes: [String: Any] = [
+            kSecAttrAccessible as String: accessible,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        guard status == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+    }
+
     static func delete(_ account: String) {
         try? remove(account)
     }
 
-    static func remove(_ account: String) throws {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    static func remove(_ account: String, service name: String = service) throws {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let status = SecItemDelete(base as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))

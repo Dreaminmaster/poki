@@ -185,11 +185,26 @@ async fn start_app_server(
 
 async fn serve(
     home: PathBuf,
-    mut incoming: mpsc::Receiver<Value>,
+    incoming: mpsc::Receiver<Value>,
     emit: Event,
 ) -> anyhow::Result<()> {
-    let (_, mut client) = start_app_server(&home, codex_overrides()).await?;
-    let sender = client.sender();
+    serve_with_overrides(
+        home,
+        codex_overrides(),
+        incoming,
+        Arc::new(move |value| publish(emit, value)),
+    )
+    .await
+}
+
+async fn serve_with_overrides(
+    home: PathBuf,
+    overrides: Vec<(String, toml::Value)>,
+    mut incoming: mpsc::Receiver<Value>,
+    publish_event: Arc<dyn Fn(Value) + Send + Sync>,
+) -> anyhow::Result<()> {
+    let (_, mut client) = start_app_server(&home, overrides.clone()).await?;
+    let mut sender = client.sender();
 
     loop {
         tokio::select! {
@@ -202,20 +217,36 @@ async fn serve(
                     continue;
                 }
                 let method = message.get("method").and_then(Value::as_str).unwrap_or_default();
+                if method == "poki/account/reload" {
+                    let _ = client.shutdown().await;
+                    match start_app_server(&home, overrides.clone()).await {
+                        Ok((_, next_client)) => {
+                            client = next_client;
+                            sender = client.sender();
+                            publish_event(json!({"id": id, "result": {}}));
+                        }
+                        Err(error) => {
+                            publish_event(json!({"id": id, "error": {"code": -32000}}));
+                            return Err(error);
+                        }
+                    }
+                    continue;
+                }
                 if !matches!(method, "account/read" | "account/login/start" | "account/login/cancel" | "account/logout" | "thread/start" | "thread/realtime/start" | "thread/realtime/stop")
                     || method == "account/login/start" && !matches!(
                         message.pointer("/params/type").and_then(Value::as_str),
                         Some("chatgpt" | "chatgptDeviceCode")
                     )
                 {
-                    publish(emit, json!({"id": id, "error": {"code": -32601}}));
+                    publish_event(json!({"id": id, "error": {"code": -32601}}));
                     continue;
                 }
                 let Ok(request) = serde_json::from_value::<ClientRequest>(message) else {
-                    publish(emit, json!({"id": id, "error": {"code": -32602}}));
+                    publish_event(json!({"id": id, "error": {"code": -32602}}));
                     continue;
                 };
                 let sender = sender.clone();
+                let publish_event = Arc::clone(&publish_event);
                 tokio::spawn(async move {
                     let response = match sender.request(request).await {
                         Ok(Ok(result)) => json!({"id": id, "result": result}),
@@ -225,7 +256,7 @@ async fn serve(
                         }}),
                         Err(_) => json!({"id": id, "error": {"code": -32000}}),
                     };
-                    publish(emit, response);
+                    publish_event(response);
                 });
             }
             event = client.next_event() => match event {
@@ -264,9 +295,9 @@ async fn serve(
                                 params.insert("item".into(), json!({"type": item_type}));
                             }
                         }
-                        publish(emit, value);
+                        publish_event(value);
                     } else if let Some(summary) = backend_diagnostic_notification(&method, &value) {
-                        publish(emit, summary);
+                        publish_event(summary);
                     }
                 }
                 Some(InProcessServerEvent::ServerRequest(event)) => {
@@ -276,7 +307,7 @@ async fn serve(
                         .and_then(Value::as_str)
                         .unwrap_or_default();
                     if method == "item/tool/call" {
-                        publish(emit, value);
+                        publish_event(value);
                     } else {
                         if let Some(id) = value
                             .get("id")
@@ -294,17 +325,14 @@ async fn serve(
                         if let Some(thread_id) =
                             value.pointer("/params/threadId").and_then(Value::as_str)
                         {
-                            publish(
-                                emit,
-                                json!({
-                                    "method": "poki/tool/rejected",
-                                    "params": {
-                                        "threadId": thread_id,
-                                        "requestMethod": method,
-                                        "reason": "unsupportedServerRequest",
-                                    }
-                                }),
-                            );
+                            publish_event(json!({
+                                "method": "poki/tool/rejected",
+                                "params": {
+                                    "threadId": thread_id,
+                                    "requestMethod": method,
+                                    "reason": "unsupportedServerRequest",
+                                }
+                            }));
                         }
                     }
                 }
@@ -1265,5 +1293,148 @@ mod tests {
                 .is_some_and(|d| d.contains("WebSockets") && d.contains("HTTPS")),
             "expected transport fallback warning, got {warning}"
         );
+    }
+
+    #[test]
+    fn account_reload_recovers_chatgpt_account_after_empty_startup() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_stack_size(16 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let handle = runtime.spawn(async {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let home = std::env::temp_dir().join(format!(
+                "poki-codex-voice-reload-test-{}-{unique}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&home).expect("create temp home");
+
+            let mut overrides = codex_overrides();
+            for (key, value) in &mut overrides {
+                if key == "cli_auth_credentials_store" {
+                    *value = toml::Value::String("file".into());
+                }
+            }
+
+            let (req_tx, req_rx) = mpsc::channel(16);
+            let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+            let server_home = home.clone();
+            let server_task = tokio::spawn(async move {
+                serve_with_overrides(
+                    server_home,
+                    overrides,
+                    req_rx,
+                    Arc::new(move |value| {
+                        let _ = out_tx.send(value);
+                    }),
+                )
+                .await
+            });
+
+            async fn wait_for_id(
+                out_rx: &mut mpsc::UnboundedReceiver<Value>,
+                target: i64,
+            ) -> Value {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+                loop {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    let msg = tokio::time::timeout(remaining, out_rx.recv())
+                        .await
+                        .expect("timed out waiting for rpc response")
+                        .expect("output channel closed");
+                    if msg.get("id").and_then(Value::as_i64) == Some(target) {
+                        return msg;
+                    }
+                }
+            }
+
+            fn assert_rpc_ok(reply: &Value, context: &str) {
+                assert!(
+                    reply.get("result").is_some(),
+                    "expected {context} response to include result, got {reply}"
+                );
+                assert!(
+                    reply.get("error").is_none(),
+                    "expected {context} response to have no error, got {reply}"
+                );
+            }
+
+            req_tx
+                .send(json!({"id": 1, "method": "account/read", "params": {"refreshToken": false}}))
+                .await
+                .expect("send initial account/read");
+            let initial = wait_for_id(&mut out_rx, 1).await;
+            assert_rpc_ok(&initial, "initial account/read");
+            assert!(
+                initial.pointer("/result/account").is_none_or(Value::is_null),
+                "expected empty initial account, got {initial}"
+            );
+
+            // Simulate Swift migrating a valid ChatGPT AuthDotJson after the runtime already started empty.
+            // Omit chatgpt_account_id so account/read stays completely offline without contacting chatgpt.com.
+            let id_token = concat!(
+                "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.",
+                "eyJzdWIiOiJ1c2VyLTEiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20ifQ.",
+                "sig"
+            );
+            let auth_json = json!({
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "id_token": id_token,
+                    "access_token": id_token,
+                    "refresh_token": "refresh-fixture"
+                },
+                "last_refresh": "2026-11-23T10:00:00Z"
+            });
+            std::fs::write(home.join("auth.json"), auth_json.to_string()).expect("write auth.json");
+
+            // Confirm refreshToken: true alone does not transition cached None -> Some(chatgpt).
+            req_tx
+                .send(json!({"id": 2, "method": "account/read", "params": {"refreshToken": true}}))
+                .await
+                .expect("send refresh account/read");
+            let after_refresh_only = wait_for_id(&mut out_rx, 2).await;
+            assert_rpc_ok(&after_refresh_only, "refreshToken:true account/read");
+            assert!(
+                after_refresh_only
+                    .pointer("/result/account")
+                    .is_none_or(Value::is_null),
+                "expected refreshToken:true alone to keep None cache, got {after_refresh_only}"
+            );
+
+            req_tx
+                .send(json!({"id": 3, "method": "poki/account/reload", "params": {}}))
+                .await
+                .expect("send poki/account/reload");
+            let reload_reply = wait_for_id(&mut out_rx, 3).await;
+            assert_rpc_ok(&reload_reply, "poki/account/reload");
+
+            req_tx
+                .send(json!({"id": 4, "method": "account/read", "params": {"refreshToken": false}}))
+                .await
+                .expect("send reloaded account/read");
+            let reloaded = wait_for_id(&mut out_rx, 4).await;
+            assert_rpc_ok(&reloaded, "reloaded account/read");
+            assert_eq!(
+                reloaded.pointer("/result/account/type").and_then(Value::as_str),
+                Some("chatgpt"),
+                "expected chatgpt account after poki/account/reload, got {reloaded}"
+            );
+            assert_eq!(
+                reloaded.pointer("/result/account/email").and_then(Value::as_str),
+                Some("test@example.com"),
+                "expected email from reloaded id_token, got {reloaded}"
+            );
+
+            drop(req_tx);
+            let _ = tokio::time::timeout(Duration::from_secs(10), server_task).await;
+            let _ = std::fs::remove_dir_all(&home);
+        });
+        runtime.block_on(handle).expect("test task");
     }
 }
