@@ -70,7 +70,19 @@ final class ChatGPTSignInTests: XCTestCase {
             .map { String(format: "%02x", $0) }.joined()
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: "Codex Auth", kSecAttrAccount as String: "cli|\(fingerprint)"]
-        let stored = try JSONSerialization.data(withJSONObject: ["auth_mode": "chatgpt", "tokens": ["access_token": access]])
+        let idClaims = Data(#"{"sub":"fixture-user","https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account"}}"#.utf8)
+        let idPayload = idClaims.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let stored = try JSONSerialization.data(withJSONObject: [
+            "auth_mode": "chatgpt",
+            "tokens": [
+                "access_token": access,
+                "refresh_token": "fixture-shared-refresh",
+                "id_token": "e30.\(idPayload).fixture"
+            ]
+        ])
         let status = SecItemAdd(query.merging([kSecValueData as String: stored]) { old, _ in old } as CFDictionary, nil)
         XCTAssertEqual(status, errSecSuccess)
         guard status == errSecSuccess else { return }

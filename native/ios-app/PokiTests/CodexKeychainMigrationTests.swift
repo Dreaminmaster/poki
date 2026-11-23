@@ -61,7 +61,8 @@ final class CodexKeychainMigrationTests: XCTestCase {
             accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         )
 
-        let logCountBefore = AppLog.shared.lines.count
+        let logMarker = UUID().uuidString
+        AppLog.shared.add("test", logMarker)
         CodexAccount.prepareStorage(service: service, home: newHome)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: newHome.path(percentEncoded: false)))
@@ -76,7 +77,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertEqual(try Keychain.read("other|keep", service: service), unrelatedData)
         XCTAssertEqual(CodexAccount.readAccessToken(service: service, home: newHome), secretAccess)
 
-        let addedLogs = AppLog.shared.lines.dropFirst(logCountBefore)
+        let addedLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(logMarker) }).dropFirst())
         XCTAssertFalse(addedLogs.isEmpty, "Migration must record a voice log entry")
         for line in addedLogs {
             XCTAssertFalse(line.contains(secretAccess), "AppLog must never include access_token")
@@ -472,6 +473,274 @@ final class CodexKeychainMigrationTests: XCTestCase {
         try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
         XCTAssertTrue(reloaded, "CodexVoice must reload the runtime account cache when Keychain has a valid credential")
         XCTAssertTrue(sentMethods.contains("poki/account/reload"), "Expected poki/account/reload, got \(sentMethods)")
+    }
+
+    func testKeychainUpdateAccessibilityPreservesValueData() throws {
+        let service = makeTestService()
+        defer { assertServiceCleanedUp(service) }
+        let account = "cli|acc-upgrade-only"
+        let original = try makeCredentialData(accessToken: "tok-original-bytes", lastRefresh: "2026-11-23T09:00:00Z")
+
+        try addRawKeychainItem(
+            service: service,
+            account: account,
+            data: original,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let before = try XCTUnwrap(Keychain.readWithAttributes(account, service: service))
+        XCTAssertEqual(before.accessible, kSecAttrAccessibleWhenUnlocked as String)
+
+        try Keychain.updateAccessibility(
+            account,
+            service: service,
+            accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        )
+
+        let after = try XCTUnwrap(Keychain.readWithAttributes(account, service: service))
+        XCTAssertEqual(after.accessible, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
+        XCTAssertEqual(after.data, original, "updateAccessibility must preserve kSecValueData verbatim")
+
+        XCTAssertThrowsError(
+            try Keychain.updateAccessibility(
+                "cli|missing-item",
+                service: service,
+                accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            )
+        ) { error in
+            XCTAssertEqual((error as NSError).code, Int(errSecItemNotFound))
+        }
+    }
+
+    func testVoiceStartRuntimeBlocksOnLockedStorageAndRetriesAfterUnlock() async throws {
+        var storageState: CodexAccount.StorageState = .locked
+        var startCount = 0
+        var emit: (@MainActor (String) -> Void)?
+        func push(_ payload: [String: Any]) {
+            guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+            let text = String(decoding: bytes, as: UTF8.self)
+            Task { @MainActor in emit?(text) }
+        }
+
+        let voice = CodexVoice(
+            startBridge: { _, next in
+                startCount += 1
+                emit = next
+                return true
+            },
+            sendBridge: { text in
+                guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                      let method = object["method"] as? String,
+                      let id = object["id"] else { return false }
+                switch method {
+                case "account/read":
+                    push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                case "thread/start":
+                    push(["id": id, "result": ["thread": ["id": "unlocked-thread"]]])
+                default:
+                    push(["id": id, "result": [:]])
+                }
+                return true
+            },
+            prepareStorage: { storageState }
+        )
+        defer { voice.stop() }
+
+        do {
+            try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+            XCTFail("Locked Keychain storage must reject runtime startup with Failure.unavailable")
+        } catch let error as CodexVoice.Failure {
+            XCTAssertEqual(error, .unavailable)
+        }
+        XCTAssertEqual(startCount, 0, "poki_codex_start must never be called while storage is .locked")
+
+        storageState = .migrated
+        try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+        XCTAssertEqual(startCount, 1, "Unlocking storage must allow a subsequent startup attempt")
+    }
+
+    func testVoiceReloadsAccountCacheWhenMigratedWhileAlreadyRunning() async throws {
+        var storageState: CodexAccount.StorageState = .empty
+        var emit: (@MainActor (String) -> Void)?
+        var sentMethods: [String] = []
+        var reloaded = false
+        func push(_ payload: [String: Any]) {
+            guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+            let text = String(decoding: bytes, as: UTF8.self)
+            Task { @MainActor in emit?(text) }
+        }
+
+        let voice = CodexVoice(
+            startBridge: { _, next in
+                emit = next
+                return true
+            },
+            sendBridge: { text in
+                guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                      let method = object["method"] as? String,
+                      let id = object["id"] else { return false }
+                sentMethods.append(method)
+                switch method {
+                case "account/read":
+                    if reloaded {
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    } else {
+                        push(["id": id, "result": [:]])
+                    }
+                case "poki/account/reload":
+                    reloaded = true
+                    push(["id": id, "result": [:]])
+                case "thread/start":
+                    push(["id": id, "result": ["thread": ["id": "migrated-while-running-thread"]]])
+                default:
+                    push(["id": id, "result": [:]])
+                }
+                return true
+            },
+            prepareStorage: {
+                let current = storageState
+                if current == .migrated {
+                    storageState = .ready
+                }
+                return current
+            }
+        )
+        defer { voice.stop() }
+
+        // First call starts runtime while Keychain has no credentials yet.
+        do {
+            try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+            XCTFail("Empty storage with no account must fail with Failure.signIn")
+        } catch let error as CodexVoice.Failure {
+            XCTAssertEqual(error, .signIn)
+        }
+        voice.stop()
+
+        // Runtime is now running; next prepare observes .migrated and must reload before reading account.
+        storageState = .migrated
+        try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+        XCTAssertTrue(reloaded)
+        let reloadIndex = try XCTUnwrap(sentMethods.firstIndex(of: "poki/account/reload"))
+        let lastReadIndex = try XCTUnwrap(sentMethods.lastIndex(of: "account/read"))
+        XCTAssertLessThan(reloadIndex, lastReadIndex)
+    }
+
+    func testSignOutGateSuppressesMigrationAndReadAccessToken() throws {
+        let service = makeTestService()
+        defer { assertServiceCleanedUp(service) }
+        let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let current = try expectedAccountKey(for: home)
+
+        let legacyData = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_100_000_000, subject: "gated-legacy"),
+            lastRefresh: "2026-11-23T08:00:00Z"
+        )
+        try addRawKeychainItem(
+            service: service,
+            account: "cli|4000000000000001",
+            data: legacyData,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+
+        var activeGates = 0
+        defer {
+            while activeGates > 0 {
+                CodexAccount.endSignOut()
+                activeGates -= 1
+            }
+        }
+        CodexAccount.beginSignOut(); activeGates += 1
+        CodexAccount.beginSignOut(); activeGates += 1
+
+        XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .empty)
+        XCTAssertNil(CodexAccount.readAccessToken(service: service, home: home))
+        XCTAssertNil(try Keychain.read(current, service: service), "Migration write must be suppressed during sign-out")
+        XCTAssertEqual(try Keychain.read("cli|4000000000000001", service: service), legacyData)
+
+        // Nested sign-out must stay gated until the final endSignOut().
+        CodexAccount.endSignOut(); activeGates -= 1
+        XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .empty)
+        XCTAssertNil(try Keychain.read(current, service: service))
+
+        // After the outermost sign-out finishes, migration works normally again.
+        CodexAccount.endSignOut(); activeGates -= 1
+        XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .migrated)
+        XCTAssertEqual(try Keychain.read(current, service: service), legacyData)
+        XCTAssertNil(try Keychain.read("cli|4000000000000001", service: service))
+    }
+
+    func testSignOutIncludingVoiceClearsKeychainBeforeRuntimeLogoutAndLeavesEmptyState() async throws {
+        let savedChatGPTKey = ModelKeys.key(.chatgpt)
+        defer {
+            if let savedChatGPTKey { try? ModelKeys.save(savedChatGPTKey, for: .chatgpt) }
+            else { ModelKeys.remove(.chatgpt) }
+        }
+        let service = makeTestService()
+        defer { assertServiceCleanedUp(service) }
+        let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let current = try expectedAccountKey(for: home)
+
+        let currentData = try makeCredentialData(accessToken: "tok-active-signout", lastRefresh: "2026-11-23T11:00:00Z")
+        let legacyData = try makeCredentialData(accessToken: "tok-legacy-signout", lastRefresh: "2026-11-20T11:00:00Z")
+        try addRawKeychainItem(service: service, account: current, data: currentData, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+        try addRawKeychainItem(service: service, account: "cli|5000000000000001", data: legacyData, accessible: kSecAttrAccessibleWhenUnlocked)
+
+        var emit: (@MainActor (String) -> Void)?
+        var runtimeHasAccount = true
+        var logoutObservedEmptyKeychain = false
+        var logoutObservedGateBlockingMigration = false
+        var logoutCallCount = 0
+        func push(_ payload: [String: Any]) {
+            guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+            let text = String(decoding: bytes, as: UTF8.self)
+            Task { @MainActor in emit?(text) }
+        }
+
+        let voice = CodexVoice(
+            startBridge: { _, next in
+                emit = next
+                return true
+            },
+            sendBridge: { text in
+                guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                      let method = object["method"] as? String,
+                      let id = object["id"] else { return false }
+                switch method {
+                case "account/read":
+                    push(["id": id, "result": runtimeHasAccount ? ["account": ["type": "chatgpt"]] : [:]])
+                case "thread/start":
+                    push(["id": id, "result": ["thread": ["id": "signout-thread"]]])
+                case "account/logout":
+                    logoutCallCount += 1
+                    let remainingCLI = ((try? Keychain.readAll(service: service)) ?? [])
+                        .filter { $0.account.hasPrefix("cli|") }
+                    logoutObservedEmptyKeychain = remainingCLI.isEmpty
+                    // Concurrent prepareStorage during logout must stay gated and never revive credentials.
+                    logoutObservedGateBlockingMigration = (CodexAccount.prepareStorage(service: service, home: home) == .empty)
+                    runtimeHasAccount = false
+                    push(["id": id, "result": [:]])
+                default:
+                    push(["id": id, "result": [:]])
+                }
+                return true
+            },
+            prepareStorage: { CodexAccount.prepareStorage(service: service, home: home) }
+        )
+        defer { voice.stop() }
+
+        // Put runtime into running == true before signing out.
+        try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+        try await ChatGPTAccount.signOutIncludingVoice(voice: voice, service: service)
+
+        XCTAssertEqual(logoutCallCount, 1, "account/logout must run when the voice runtime is active")
+        XCTAssertTrue(logoutObservedEmptyKeychain, "Keychain must be cleared before Rust account/logout runs")
+        XCTAssertTrue(logoutObservedGateBlockingMigration, "Sign-out gate must stay active during account/logout")
+        XCTAssertFalse(runtimeHasAccount, "Runtime account cache must be cleared after sign-out")
+        let remainingAfterSignOut = try Keychain.readAll(service: service).filter { $0.account.hasPrefix("cli|") }
+        XCTAssertTrue(remainingAfterSignOut.isEmpty)
+        XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .empty)
+        XCTAssertNil(CodexAccount.readAccessToken(service: service, home: home))
     }
 
     // MARK: - Helpers

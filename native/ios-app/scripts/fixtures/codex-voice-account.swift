@@ -11,8 +11,12 @@ enum VoiceDirect {
     ]
 }
 enum CodexAccount {
+    enum StorageState: Equatable {
+        case ready, migrated, empty, locked, failed(Int32)
+    }
     static let home = URL.temporaryDirectory.appending(path: "fixture-voice-account")
-    static func prepareStorage() {}
+    @discardableResult
+    static func prepareStorage() -> StorageState { state == .missing ? .empty : .ready }
     static func ensureAfterFirstUnlock() {}
 }
 enum AppLocalization { static func text(_ value: String) -> String { value } }

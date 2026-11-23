@@ -4,10 +4,19 @@ import Foundation
 import Security
 
 enum CodexAccount {
-    private static let defaultService = "Codex Auth"
+    enum StorageState: Equatable {
+        case ready
+        case migrated
+        case empty
+        case locked
+        case failed(OSStatus)
+    }
+
+    static let defaultService = "Codex Auth"
     private static let cliAccountPrefix = "cli|"
     private static let targetAccessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
     private static let storageLock = NSLock()
+    private static var signOutDepth = 0
 
     static var home: URL {
         URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
@@ -19,11 +28,29 @@ enum CodexAccount {
         readAccessToken()
     }
 
+    static func beginSignOut() {
+        storageLock.lock()
+        signOutDepth += 1
+        storageLock.unlock()
+    }
+
+    static func endSignOut() {
+        storageLock.lock()
+        signOutDepth = max(0, signOutDepth - 1)
+        storageLock.unlock()
+    }
+
     static func readAccessToken(service: String = defaultService, home: URL = CodexAccount.home) -> String? {
         storageLock.lock()
-        let prepared = prepareStorageLocked(service: service, home: home)
-        storageLock.unlock()
-        guard prepared else { return nil }
+        defer { storageLock.unlock() }
+
+        guard signOutDepth == 0 else { return nil }
+        switch prepareStorageLocked(service: service, home: home) {
+        case .ready, .migrated:
+            break
+        case .empty, .locked, .failed:
+            return nil
+        }
 
         let account = currentAccount(for: home)
         do {
@@ -36,29 +63,25 @@ enum CodexAccount {
         }
     }
 
-    static func prepareStorage(service: String = defaultService, home: URL = CodexAccount.home) {
+    @discardableResult
+    static func prepareStorage(service: String = defaultService, home: URL = CodexAccount.home) -> StorageState {
         storageLock.lock()
         defer { storageLock.unlock() }
-        _ = prepareStorageLocked(service: service, home: home)
+        guard signOutDepth == 0 else { return .empty }
+        return prepareStorageLocked(service: service, home: home)
     }
 
     static func ensureAfterFirstUnlock(service: String = defaultService, home: URL = CodexAccount.home) {
         storageLock.lock()
         defer { storageLock.unlock() }
+        guard signOutDepth == 0 else { return }
 
         let account = currentAccount(for: home)
-        let current: (data: Data, modified: Date?, accessible: String?)?
         do {
-            current = try Keychain.readWithAttributes(account, service: service)
+            guard let current = try Keychain.readWithAttributes(account, service: service) else { return }
+            upgradeAccessibilityIfNeeded(account: account, service: service, currentAccessible: current.accessible)
         } catch {
             logVoice("Codex Keychain read failed: OSStatus \((error as NSError).code)")
-            return
-        }
-        guard let current, current.accessible != targetAccessibility else { return }
-        do {
-            try Keychain.write(current.data, account: account, service: service)
-        } catch {
-            logVoice("Codex Keychain accessibility upgrade failed: OSStatus \((error as NSError).code)")
         }
     }
 
@@ -81,15 +104,16 @@ enum CodexAccount {
         from items: [(account: String, data: Data, modified: Date?, accessible: String?)],
         excluding currentAccount: String
     ) -> (account: String, data: Data, modified: Date?, accessible: String?)? {
-        var best: (item: (account: String, data: Data, modified: Date?, accessible: String?), rank: (Date, TimeInterval, Date))?
+        var best: (item: (account: String, data: Data, modified: Date?, accessible: String?), rank: CredentialRank)?
         for item in items {
             guard item.account.hasPrefix(cliAccountPrefix),
                   item.account != currentAccount,
                   let signIn = decodeValidSignIn(item.data) else { continue }
-            let rank = (
-                parseISO8601(signIn.lastRefresh) ?? .distantPast,
-                jwtExpiry(signIn.tokens.accessToken) ?? 0,
-                item.modified ?? .distantPast
+            let rank = CredentialRank(
+                notExpiringSoon: !expiresSoon(signIn.tokens.accessToken),
+                lastRefresh: parseISO8601(signIn.lastRefresh) ?? .distantPast,
+                jwtExpiry: jwtExpiry(signIn.tokens.accessToken) ?? 0,
+                modified: item.modified ?? .distantPast
             )
             if best == nil || best!.rank < rank {
                 best = (item, rank)
@@ -98,25 +122,19 @@ enum CodexAccount {
         return best?.item
     }
 
-    private static func prepareStorageLocked(service: String, home: URL) -> Bool {
+    private static func prepareStorageLocked(service: String, home: URL) -> StorageState {
         let account = currentAccount(for: home)
         let current: (data: Data, modified: Date?, accessible: String?)?
         do {
             current = try Keychain.readWithAttributes(account, service: service)
         } catch {
             logVoice("Codex Keychain read failed: OSStatus \((error as NSError).code)")
-            return false
+            return storageState(for: error)
         }
 
         if let current, decodeValidSignIn(current.data) != nil {
-            if current.accessible != targetAccessibility {
-                do {
-                    try Keychain.write(current.data, account: account, service: service)
-                } catch {
-                    logVoice("Codex Keychain accessibility upgrade failed: OSStatus \((error as NSError).code)")
-                }
-            }
-            return true
+            upgradeAccessibilityIfNeeded(account: account, service: service, currentAccessible: current.accessible)
+            return .ready
         }
 
         let allItems: [(account: String, data: Data, modified: Date?, accessible: String?)]
@@ -124,22 +142,16 @@ enum CodexAccount {
             allItems = try Keychain.readAll(service: service)
         } catch {
             logVoice("Codex Keychain scan failed: OSStatus \((error as NSError).code)")
-            return false
+            return storageState(for: error)
         }
 
-        guard let selected = selectNewestCredential(from: allItems, excluding: account) else { return true }
-        let legacyAccounts = allItems.compactMap { item -> String? in
-            guard item.account.hasPrefix(cliAccountPrefix),
-                  item.account != account,
-                  decodeValidSignIn(item.data) != nil else { return nil }
-            return item.account
-        }
+        guard let selected = selectNewestCredential(from: allItems, excluding: account) else { return .empty }
 
         do {
             try Keychain.write(selected.data, account: account, service: service)
         } catch {
             logVoice("Codex Keychain migration write failed: OSStatus \((error as NSError).code)")
-            return true
+            return storageState(for: error)
         }
 
         let verified: Data?
@@ -147,25 +159,43 @@ enum CodexAccount {
             verified = try Keychain.read(account, service: service)
         } catch {
             logVoice("Codex Keychain migration verify failed: OSStatus \((error as NSError).code)")
-            return true
+            return storageState(for: error)
         }
 
         guard verified == selected.data else {
-            logVoice("Codex Keychain migration verification mismatch; kept legacy items")
-            return true
+            logVoice("Codex Keychain migration verification mismatch; kept legacy item")
+            return .failed(errSecDecode)
         }
 
-        var removedCount = 0
-        for legacy in legacyAccounts {
-            do {
-                try Keychain.remove(legacy, service: service)
-                removedCount += 1
-            } catch {
-                logVoice("Codex Keychain legacy cleanup failed: OSStatus \((error as NSError).code)")
-            }
+        do {
+            try Keychain.remove(selected.account, service: service)
+            logVoice("Codex Keychain migrated credential to current container (removed 1 legacy item)")
+        } catch {
+            logVoice("Codex Keychain legacy cleanup failed: OSStatus \((error as NSError).code)")
         }
-        logVoice("Codex Keychain migrated credential to current container (removed \(removedCount) legacy item(s))")
-        return true
+        return .migrated
+    }
+
+    private static func upgradeAccessibilityIfNeeded(
+        account: String,
+        service: String,
+        currentAccessible: String?
+    ) {
+        guard currentAccessible != targetAccessibility else { return }
+        do {
+            try Keychain.updateAccessibility(
+                account,
+                service: service,
+                accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            )
+        } catch {
+            logVoice("Codex Keychain accessibility upgrade failed: OSStatus \((error as NSError).code)")
+        }
+    }
+
+    private static func storageState(for error: Error) -> StorageState {
+        let status = OSStatus((error as NSError).code)
+        return status == errSecInteractionNotAllowed ? .locked : .failed(status)
     }
 
     private static func currentAccount(for home: URL) -> String {
@@ -183,8 +213,27 @@ enum CodexAccount {
     private static func decodeValidSignIn(_ data: Data) -> SignIn? {
         guard let signIn = try? JSONDecoder().decode(SignIn.self, from: data),
               signIn.authMode == "chatgpt",
-              !signIn.tokens.accessToken.isEmpty else { return nil }
+              !signIn.tokens.accessToken.isEmpty,
+              !signIn.tokens.refreshToken.isEmpty,
+              isValidJWT(signIn.tokens.idToken) else { return nil }
         return signIn
+    }
+
+    private static func isValidJWT(_ token: String) -> Bool {
+        decodeJWTPayload(token) != nil
+    }
+
+    private static func decodeJWTPayload(_ token: String) -> [String: Any]? {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              !parts[0].isEmpty, !parts[1].isEmpty, !parts[2].isEmpty else { return nil }
+        let payloadPart = String(parts[1])
+        guard !payloadPart.contains("+"),
+              !payloadPart.contains("/"),
+              !payloadPart.contains("="),
+              let payload = Data(base64URL: payloadPart),
+              let body = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
+        return body
     }
 
     private static func parseISO8601(_ value: String?) -> Date? {
@@ -198,10 +247,7 @@ enum CodexAccount {
     }
 
     private static func jwtExpiry(_ token: String) -> TimeInterval? {
-        let parts = token.split(separator: ".")
-        guard parts.count == 3,
-              let payload = Data(base64URL: String(parts[1])),
-              let body = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
+        guard let body = decodeJWTPayload(token) else { return nil }
         if let expiry = body["exp"] as? TimeInterval { return expiry }
         if let expiry = body["exp"] as? NSNumber { return expiry.doubleValue }
         return nil
@@ -212,6 +258,26 @@ enum CodexAccount {
             MainActor.assumeIsolated { AppLog.shared.add("voice", message) }
         } else {
             Task { @MainActor in AppLog.shared.add("voice", message) }
+        }
+    }
+
+    private struct CredentialRank: Comparable {
+        let notExpiringSoon: Bool
+        let lastRefresh: Date
+        let jwtExpiry: TimeInterval
+        let modified: Date
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            if lhs.notExpiringSoon != rhs.notExpiringSoon {
+                return !lhs.notExpiringSoon && rhs.notExpiringSoon
+            }
+            if lhs.lastRefresh != rhs.lastRefresh {
+                return lhs.lastRefresh < rhs.lastRefresh
+            }
+            if lhs.jwtExpiry != rhs.jwtExpiry {
+                return lhs.jwtExpiry < rhs.jwtExpiry
+            }
+            return lhs.modified < rhs.modified
         }
     }
 
@@ -229,7 +295,13 @@ enum CodexAccount {
 
     private struct Tokens: Decodable {
         let accessToken: String
+        let refreshToken: String
+        let idToken: String
 
-        enum CodingKeys: String, CodingKey { case accessToken = "access_token" }
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case refreshToken = "refresh_token"
+            case idToken = "id_token"
+        }
     }
 }
