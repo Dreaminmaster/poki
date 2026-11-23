@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "A proxy app answers instead of this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有代理 App 替这台 iPhone 应答"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有代理 App 替這台 iPhone 應答"
+          }
+        }
+      }
+    },
+    "Something answers at 10.7.0.1, but it is not this iPhone. A proxy app is taking the address for itself. In Karing, go to Settings, then TUN, and set Loopback Address to 10.7.0.1. In other proxy apps, turn on the loopback or reflect setting for 10.7.0.1." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10.7.0.1 上有回应，但不是这台 iPhone。有代理 App 占用了这个地址。在 Karing 里，进入“设置”，再进入 TUN，把 Loopback Address 设为 10.7.0.1。在其他代理 App 中，为 10.7.0.1 打开回环或反射设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10.7.0.1 上有回應，但不是這台 iPhone。有代理 App 佔用了這個位址。在 Karing 裡，進入「設定」，再進入 TUN，把 Loopback Address 設為 10.7.0.1。在其他代理 App 中，為 10.7.0.1 開啟回環或反射設定。"
+          }
+        }
+      }
+    },
     "Use This Relay?" : {
       "extractionState" : "manual",
       "localizations" : {

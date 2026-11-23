@@ -84,6 +84,9 @@ struct Issue: Identifiable {
                 out.append(Issue(id: "network", title: AppLocalization.text(LocalizedStringResource("Waiting for the internet")), text: local(fix), fix: .none))
             } else if let trouble = model.localSessionTrouble {
                 out.append(Issue(id: "local", title: AppLocalization.text(LocalizedStringResource("Automation did not start")), text: trouble.text, fix: trouble.opensSetup ? .setup : .none))
+            } else if model.loopback.proxyAnswers, !model.hasOpenInProcessSession, !model.canStartTasks, !model.mountedImageStandsIn {
+                // The proxy's setting is the fix, on cellular too: not Wi-Fi and not the generic advice.
+                out.append(Issue(id: "proxy", title: LoopbackMonitor.proxyTitle, text: LoopbackMonitor.proxyHint, fix: .setup))
             } else if model.loopback.cellularRefused {
                 // On the mounted image a new task starts without the loopback; only the mount needs Wi-Fi.
                 if model.cellularNeedsWiFi, !runner.isRunning {

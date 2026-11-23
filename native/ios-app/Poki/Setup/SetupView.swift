@@ -375,6 +375,9 @@ private struct LoopbackPage: View {
                     Text("It works. You are done with this step.")
                 } else if localReady {
                     Text("The network loopback is unavailable.")
+                } else if monitor.proxyAnswers {
+                    // A proxy took 10.7.0.1 for itself: its setting is the fix, whichever app was picked.
+                    Text(LoopbackMonitor.proxyHint)
                 } else if let chosen {
                     Text("Not yet. Finish step 2 in \(chosen.name), then come back. This turns green by itself.")
                 } else {
