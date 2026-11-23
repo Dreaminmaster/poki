@@ -235,6 +235,31 @@ final class SessionStore {
     private var initialLoadWaiters: [() -> Void] = []
     private var fullLoadWaiters: [() -> Void] = []
     private let writeQueue = DispatchQueue(label: "nz.zheha.poki.session-writes", qos: .utility)
+    // Accessed only on writeQueue so flush sees failures from earlier queued writes.
+    private let writeFailures = WriteFailures()
+
+    private final class WriteFailures: @unchecked Sendable {
+        private var ids: Set<String> = []
+
+        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = []) {
+            let pending = Set(snapshots.map { $0.1.id })
+            let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
+            if !current.isEmpty {
+                ids.formIntersection(Set(current.map { $0.1.id }))
+            }
+            let encoder = JSONEncoder()
+            for (url, session) in snapshots + retries {
+                do {
+                    try encoder.encode(session).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                    ids.remove(session.id)
+                } catch {
+                    ids.insert(session.id)
+                }
+            }
+        }
+
+        func forget(_ ids: Set<String>) { self.ids.subtract(ids) }
+    }
     /// The outside agent sessions seen since launch: id → client name.
     /// Each MCP session's client name (its clientInfo at initialize), kept across launches: an agent
     /// keeps its session while Poki restarts or the session is closed for being idle, and its next
@@ -694,7 +719,11 @@ final class SessionStore {
         pendingWrites.remove(id)
         sessions.removeAll { $0.id == id }
         let url = file(id)
-        writeQueue.async { try? FileManager.default.removeItem(at: url) }
+        let failures = writeFailures
+        writeQueue.async {
+            failures.forget([id])
+            try? FileManager.default.removeItem(at: url)
+        }
         removed = Removal(id: id, serial: (removed?.serial ?? 0) + 1)
     }
 
@@ -870,30 +899,18 @@ final class SessionStore {
         let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
         pendingWrites = []
         guard !snapshots.isEmpty else { return }
-        writeQueue.async {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .deferredToDate
-            for (url, session) in snapshots {
-                guard let data = try? encoder.encode(session) else { continue }
-                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-        }
+        let failures = writeFailures
+        writeQueue.async { failures.write(snapshots) }
     }
 
-    /// Writes the changed sessions now, rather than after the half-second gathering.
+    /// Writes changed sessions now, including previously failed writes still in memory.
     func flush() {
         writeTask?.cancel()
         writeTask = nil
         let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
         pendingWrites = []
-        writeQueue.sync {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .deferredToDate
-            for (url, session) in snapshots {
-                guard let data = try? encoder.encode(session) else { continue }
-                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-        }
+        let current = sessions.map { (file($0.id), $0) }
+        writeQueue.sync { writeFailures.write(snapshots, retryingFrom: current) }
     }
 
     /// Past the limit, the oldest conversations in the list go, one just brought back from the archive
@@ -905,7 +922,9 @@ final class SessionStore {
         let gone = Set(listed.sorted { $0.keptSince > $1.keptSince }[Self.limit...].map(\.id))
         let urls = gone.map { file($0) }
         sessions.removeAll { gone.contains($0.id) }
+        let failures = writeFailures
         writeQueue.async {
+            failures.forget(gone)
             for url in urls { try? FileManager.default.removeItem(at: url) }
         }
     }
