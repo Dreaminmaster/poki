@@ -86,6 +86,17 @@ enum CodexAccount {
         }
     }
 
+    static func clearLegacyCredentials(service: String = defaultService, home: URL = CodexAccount.home) throws {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+
+        let current = currentAccount(for: home)
+        let items = try Keychain.readAll(service: service)
+        for item in items where item.account.hasPrefix(cliAccountPrefix) && item.account != current {
+            try Keychain.remove(item.account, service: service)
+        }
+    }
+
     static func clearStoredCredentials(service: String = defaultService) throws {
         storageLock.lock()
         defer { storageLock.unlock() }

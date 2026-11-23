@@ -74,11 +74,13 @@ enum ChatGPTAccount {
     static func signOutIncludingVoice(
         voice: CodexVoice = .shared,
         codexService: String = CodexAccount.defaultService,
+        codexHome: URL = CodexAccount.home,
         modelKeysService: String = ModelKeys.defaultService
     ) async throws {
         CodexAccount.beginSignOut()
         defer { CodexAccount.endSignOut() }
 
+        try CodexAccount.clearLegacyCredentials(service: codexService, home: codexHome)
         try await voice.signOut()
         try CodexAccount.clearStoredCredentials(service: codexService)
         try signOut(service: modelKeysService)

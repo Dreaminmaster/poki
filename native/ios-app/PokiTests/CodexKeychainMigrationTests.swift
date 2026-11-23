@@ -857,6 +857,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let current = try expectedAccountKey(for: home)
         let legacyAccount = "cli|5000000000000001"
+        let concurrentLegacyAccount = "cli|5000000000000002"
 
         let currentData = try makeCredentialData(accessToken: "tok-active-signout", lastRefresh: "2026-11-23T11:00:00Z")
         let legacyData = try makeCredentialData(accessToken: "tok-legacy-signout", lastRefresh: "2026-11-20T11:00:00Z")
@@ -922,10 +923,16 @@ final class CodexKeychainMigrationTests: XCTestCase {
                         logoutObservedCurrentBeforeDelete = try Keychain.read(current, service: codexService)
                         logoutObservedLegacyBeforeDelete = try Keychain.read(legacyAccount, service: codexService)
                         try Keychain.remove(current, service: codexService)
+                        try self.addRawKeychainItem(
+                            service: codexService,
+                            account: concurrentLegacyAccount,
+                            data: legacyData,
+                            accessible: kSecAttrAccessibleWhenUnlocked
+                        )
                         gatePrepareState = CodexAccount.prepareStorage(service: codexService, home: home)
                         gateReadToken = CodexAccount.readAccessToken(service: codexService, home: home)
                         currentAfterGatedProbe = try Keychain.read(current, service: codexService)
-                        legacyAfterGatedProbe = try Keychain.read(legacyAccount, service: codexService)
+                        legacyAfterGatedProbe = try Keychain.read(concurrentLegacyAccount, service: codexService)
                     } catch {
                         logoutHookError = error
                     }
@@ -944,6 +951,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
         try await ChatGPTAccount.signOutIncludingVoice(
             voice: voice,
             codexService: codexService,
+            codexHome: home,
             modelKeysService: modelKeysService
         )
 
@@ -954,7 +962,10 @@ final class CodexKeychainMigrationTests: XCTestCase {
             currentData,
             "Current cli|<current> credential must remain intact when account/logout starts so Rust can revoke tokens remotely"
         )
-        XCTAssertEqual(logoutObservedLegacyBeforeDelete, legacyData)
+        XCTAssertNil(
+            logoutObservedLegacyBeforeDelete,
+            "Legacy cli|<old> credentials must be cleared before voice.signOut() runs"
+        )
         XCTAssertEqual(gatePrepareState, .empty, "Sign-out gate must suppress migration during account/logout")
         XCTAssertNil(gateReadToken, "Sign-out gate must block readAccessToken during account/logout")
         XCTAssertNil(currentAfterGatedProbe, "Sign-out gate must prevent migrating cli|<old> back into cli|<current>")
@@ -962,6 +973,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
 
         XCTAssertNil(try Keychain.read(current, service: codexService))
         XCTAssertNil(try Keychain.read(legacyAccount, service: codexService))
+        XCTAssertNil(try Keychain.read(concurrentLegacyAccount, service: codexService))
         let remainingAfterSignOut = try Keychain.readAll(service: codexService).filter { $0.account.hasPrefix("cli|") }
         XCTAssertTrue(remainingAfterSignOut.isEmpty)
         XCTAssertNil(try Keychain.read("model-key.chatgpt", service: modelKeysService))
@@ -1067,6 +1079,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
                     try await ChatGPTAccount.signOutIncludingVoice(
                         voice: voice,
                         codexService: codexService,
+                        codexHome: home,
                         modelKeysService: modelKeysService
                     )
                     XCTFail("signOutIncludingVoice must propagate voice.signOut() RPC failure")
