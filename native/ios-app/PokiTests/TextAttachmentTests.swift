@@ -5,6 +5,20 @@ import XCTest
 
 @MainActor
 final class TextAttachmentTests: XCTestCase {
+    func testDelayedPhotoImportDoesNotEnterNewDraft() async {
+        var generation = UUID()
+        let old = generation
+        var received: [Data] = []
+        var loads = 0
+        await ComposerPhotoImport.read([1, 2], stillCurrent: { generation == old }, load: { _ in
+            loads += 1
+            generation = UUID()
+            return Data([1])
+        }, receive: { if let data = $0 { received.append(data) } })
+        XCTAssertEqual(loads, 1)
+        XCTAssertTrue(received.isEmpty)
+    }
+
     func testPickerAndReaderSupportTextExtensions() throws {
         for ext in ["json", "md", "markdown", "txt"] {
             let type = try XCTUnwrap(UTType(filenameExtension: ext))

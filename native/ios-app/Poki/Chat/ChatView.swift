@@ -1262,6 +1262,19 @@ struct ModeLabels: View {
 // row on one sheet of glass: the plus menu, the
 // message, the microphone when Settings › Voice shows it, and one button that talks, sends or stops;
 // the photos and PDFs picked for the message stand over it.
+@MainActor
+enum ComposerPhotoImport {
+    static func read<Item>(_ items: [Item], stillCurrent: () -> Bool,
+                           load: (Item) async -> Data?, receive: (Data?) -> Void) async {
+        for item in items {
+            guard stillCurrent(), !Task.isCancelled else { return }
+            let data = await load(item)
+            guard stillCurrent(), !Task.isCancelled else { return }
+            receive(data)
+        }
+    }
+}
+
 struct ComposerInputView: View {
     @Environment(AppModel.self) private var model
     /// The message being written; the greeting's suggestions fill it.
@@ -1277,6 +1290,7 @@ struct ComposerInputView: View {
     /// pictures) is cleared and the keyboard goes down, as the page first was; an empty field takes
     /// the keyboard.
     var restarts = 0
+    @State private var attachmentGeneration = UUID()
     var send: (String, [ChatAttachment]) -> Void
     var stop: () -> Void
     /// Starts the live voice conversation.
@@ -1438,7 +1452,8 @@ struct ComposerInputView: View {
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
-            Task { await addPhotos(items) }
+            let generation = attachmentGeneration
+            Task { await addPhotos(items, generation: generation) }
         }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
@@ -1452,6 +1467,7 @@ struct ComposerInputView: View {
             .ignoresSafeArea()
         }
         .onChange(of: restarts) {
+            attachmentGeneration = UUID()
             adding = false
             if !input.isEmpty || !attachments.isEmpty {
                 input = ""
@@ -1606,14 +1622,16 @@ struct ComposerInputView: View {
         .accessibilityIdentifier(id)
     }
 
-    private func addPhotos(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
+    private func addPhotos(_ items: [PhotosPickerItem], generation: UUID) async {
+        await ComposerPhotoImport.read(items, stillCurrent: { generation == attachmentGeneration }, load: {
+            try? await $0.loadTransferable(type: Data.self)
+        }, receive: { data in
+            guard let data else {
                 problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
-                continue
+                return
             }
             add { try AttachmentReader.photo(data) }
-        }
+        })
     }
 
     /// One more photo or PDF, up to the limit; a file Poki can't read says so.
@@ -1680,6 +1698,7 @@ struct ComposerInputView: View {
     private func submit() {
         guard !running, canSend else { return }
         dictation.cancel(model)
+        attachmentGeneration = UUID()
         let text = input
         send(text, attachments)
         adding = false
