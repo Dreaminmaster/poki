@@ -1322,9 +1322,14 @@ struct ComposerInputView: View {
     /// A file Poki can't read, said for a moment over the message field.
     @State private var problem: String?
     @State private var fieldScroll = CapsuleScroll()
+    @State private var editorBridge = CapsuleEditorBridge()
     @State private var mentionReady = false
+    @State private var mentionCaretX: CGFloat?
+    @State private var composerWidth: CGFloat = 340
     @State private var showingAllApps = false
-    @State private var appSearch = ""
+    @State private var allAppsInitialSearch = ""
+    @State private var pendingMentionReplaceLength = 0
+    @State private var recentAppsVersion = 0
     /// A swipe down that started on a message scrolled away from its first line: it scrolls the message.
     @State private var swipeScrolls: Bool?
     @Environment(\.colorScheme) private var scheme
@@ -1334,7 +1339,6 @@ struct ComposerInputView: View {
     @ScaledMetric(relativeTo: .body) private var scaledControlInset = 6.0
     @ScaledMetric(relativeTo: .body) private var scaledControlSpacing = 8.0
     @ScaledMetric(relativeTo: .body) private var fieldHeight = 112.0
-    @ScaledMetric(relativeTo: .body) private var wayIconWidth = 28.0
 
     private var buttonDiameter: CGFloat { min(56, max(36, scaledButtonDiameter)) }
     private var buttonHitSide: CGFloat { max(44, buttonDiameter) }
@@ -1363,9 +1367,23 @@ struct ComposerInputView: View {
                     withAnimation(.snappy) { attachments.removeAll { $0.id == item.id } }
                 }
             }
-            if adding, voice.talkState == nil, !needsKey { ways }
-            if focused, mentionReady, !adding, let mention, !mention.apps.isEmpty {
-                MentionPicker(apps: mention.apps) { pickApp($0, replacing: mention.length) }
+            if adding, voice.talkState == nil, !needsKey {
+                ways
+                    .padding(.bottom, 2)
+            }
+            if focused, let mentionState = currentMention {
+                MentionPicker(
+                    state: mentionState,
+                    composerWidth: composerWidth,
+                    caretX: mentionCaretX.map { $0 + buttonHitSide + controlSpacing + controlInset },
+                    pick: { pickApp($0, replacing: mentionState.triggerLength, keepFocus: true) },
+                    browseAll: {
+                        pendingMentionReplaceLength = mentionState.triggerLength
+                        allAppsInitialSearch = ""
+                        adding = false
+                        showingAllApps = true
+                    }
+                )
             }
             // One row on one glass sheet (ESP-376): plus, the message, and the one button that talks,
             // sends or stops. The buttons inside are plain fills: no glass on glass.
@@ -1396,8 +1414,11 @@ struct ComposerInputView: View {
                         plus
                         // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                         CapsuleField(text: $input, focused: $focused, maxLines: 6, maxHeight: min(200, fieldHeight), scroll: fieldScroll,
+                                     editorBridge: editorBridge,
                                      onSwipe: { up in if up { focused = true } else if focused { focused = false } },
-                                     onMentionReady: { mentionReady = $0 }, onSubmit: submit)
+                                     onMentionReady: { mentionReady = $0 },
+                                     onMentionCaretX: { mentionCaretX = $0 },
+                                     onSubmit: submit)
                             .overlay(alignment: .topLeading) {
                                 if input.isEmpty {
                                     Text(dictation.on ? "Listening…" : attachments.isEmpty ? "Message Poki" : "Add a message")
@@ -1421,10 +1442,12 @@ struct ComposerInputView: View {
             .contentShape(.rect)
             .onTapGesture { if voice.talkState == nil, !needsKey { focused = true } }
             .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), fallback: .bar)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { composerWidth = $0 }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
         }
         .animation(.snappy, value: dictation.on)
-        .animation(.snappy, value: adding)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.26), value: adding)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: currentMention)
         .animation(TalkMotion.enter, value: voice.talkState != nil)
         .animation(TalkMotion.enter, value: needsKey)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
@@ -1438,8 +1461,11 @@ struct ComposerInputView: View {
         }
         // The talk's bar stands where the field was: the keyboard goes down with the field.
         .onChange(of: voice.talkState != nil) { _, talking in if talking { focused = false; needsKey = false } }
-        // A suggestion picked or a task starting puts the key's message away.
-        .onChange(of: input) { _, text in if !text.isEmpty, !dictation.on { needsKey = false } }
+        // A suggestion picked or a task starting puts the key's message away; typing dismisses the `+` menu.
+        .onChange(of: input) { old, text in
+            if !text.isEmpty, !dictation.on { needsKey = false }
+            if adding, text != old { adding = false }
+        }
         // The keyboard asked for (a suggestion, New Conversation) while the talk's bar stands in the
         // field's place has no field to go to; over the key's message it brings the field back.
         .onChange(of: focused) { _, now in
@@ -1463,18 +1489,22 @@ struct ComposerInputView: View {
             try? await Task.sleep(for: .seconds(3))
             if !Task.isCancelled { problem = nil }
         }
-        .sheet(isPresented: $showingAllApps, onDismiss: { appSearch = "" }) {
-            NavigationStack {
-                List(searchedApps, id: \.id) { app in
-                    Button(app.name(in: AppLanguage.current)) {
-                        showingAllApps = false
-                        pickApp(app)
-                    }
-                }
-                .searchable(text: $appSearch)
-                .navigationTitle(AppLocalization.text("Apps"))
-                .toolbar { Button("Close") { showingAllApps = false } }
-            }
+        .sheet(isPresented: $showingAllApps, onDismiss: {
+            pendingMentionReplaceLength = 0
+            allAppsInitialSearch = ""
+        }) {
+            AllAppsBrowserSheet(
+                recentIDs: recentAppIDs,
+                mentionedIDs: AppPickerCatalog.mentionedBundleIDs(in: input),
+                initialSearch: allAppsInitialSearch,
+                onPick: { app in
+                    let replaceLength = pendingMentionReplaceLength
+                    pendingMentionReplaceLength = 0
+                    showingAllApps = false
+                    pickApp(app, replacing: replaceLength, keepFocus: true)
+                },
+                onClose: { showingAllApps = false }
+            )
         }
         .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: Self.most - attachments.count, matching: .images)
         .onChange(of: picked) { _, items in
@@ -1526,6 +1556,40 @@ struct ComposerInputView: View {
                 openVoice()
                 try? await Task.sleep(for: .seconds(9))
                 voice.stop()
+            default: break
+            }
+        }
+        .task {
+            guard let scene = UserDefaults.standard.string(forKey: "pokiAppPicker") else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            switch scene {
+            case "plus":
+                focused = false
+                adding = true
+            case "more":
+                adding = false
+                allAppsInitialSearch = ""
+                showingAllApps = true
+            case "more-empty":
+                adding = false
+                allAppsInitialSearch = "xyznotfound"
+                try? await Task.sleep(for: .milliseconds(50))
+                showingAllApps = true
+            case "mention":
+                adding = false
+                input = "帮我用 @m"
+                focused = true
+                mentionReady = true
+            case "mention-empty":
+                adding = false
+                input = "帮我用 @xyz"
+                focused = true
+                mentionReady = true
+            case "filled":
+                adding = false
+                input = "打开 小红书 搜盐田海边\n咖啡并记进 备忘录 "
+                focused = true
+                mentionReady = false
             default: break
             }
         }
@@ -1588,13 +1652,15 @@ struct ComposerInputView: View {
     /// At most this many photos and PDFs go with one message.
     private static let most = 6
 
-    /// Plus: what you add to the message you are writing (board 定稿 04), photos from the library, a
-    /// photo from the camera, or a picture or PDF from Files. Everything else is on Poki's card at the
-    /// top and in Settings.
+    /// Plus: what you add to the message you are writing (Scheme A1), quick apps, photos from the library, a
+    /// photo from the camera, or a picture or PDF from Files. Rotates 45° when expanded.
     private var plus: some View {
-        Button { adding.toggle() } label: {
+        Button {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.26)) { adding.toggle() }
+        } label: {
             Image(systemName: "plus")
                 .font(.title3.weight(.medium)).dynamicTypeSize(...DynamicTypeSize.xxxLarge).foregroundStyle(Color(.label))
+                .rotationEffect(.degrees(adding ? 45 : 0))
                 .frame(width: buttonDiameter, height: buttonDiameter)
                 .background(Color(.label).opacity(scheme == .dark ? 0.16 : 0.12), in: .circle)
                 .frame(width: buttonHitSide, height: buttonHitSide)
@@ -1609,106 +1675,58 @@ struct ComposerInputView: View {
         }
     }
 
-    /// Plus's three ways, on their own glass right over the message field, which stays where it is.
-    /// A system menu can't do this here: it opens out of the glass around it, and that is the
-    /// whole composer.
+    private var recentAppIDs: [String] {
+        _ = recentAppsVersion
+        return RecentAppsStore.shared.recentIDs
+    }
+
+    /// Plus's A1 smoked Liquid Glass menu, anchored `bottomLeading` 10pt above the `+` button.
     private var ways: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            appChoices
-            way("Photos", "photo", "composer.photos", enabled: attachments.count < Self.most) { choosingPhotos = true }
-            way("Take Photo", "camera", "composer.camera", enabled: attachments.count < Self.most && UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
-            way("Files", "folder", "composer.files", enabled: attachments.count < Self.most) { choosingFiles = true }
-        }
-        .padding(.vertical, 6)
-        .fixedSize()
-        // A card over the conversation like the approval's, without its tint.
-        .glassSurface(in: RoundedRectangle(cornerRadius: 26, style: .continuous), fallback: .card)
-        .glassAppearing()
-        // Beside the card is the composer's bar, over the conversation's tap that closes it.
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(.rect)
-        .onTapGesture { adding = false }
-        .accessibilityElement(children: .contain)
-        .accessibilityAction(.escape) { adding = false }
-    }
-
-    private var appChoices: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(KnownApps.all.prefix(3)), id: \.id) { app in
-                Button { pickApp(app) } label: { appChoice(app) }
-                    .buttonStyle(.plain)
-            }
-            Button("More", systemImage: "ellipsis") {
+        ComposerPlusMenu(
+            quickApps: AppPickerCatalog.quickApps(limit: 3, recentIDs: recentAppIDs, language: AppLanguage.current),
+            maxAttachments: Self.most,
+            canAddAttachments: attachments.count < Self.most,
+            canTakePhoto: UIImagePickerController.isSourceTypeAvailable(.camera),
+            onPickApp: { pickApp($0, keepFocus: true) },
+            onMoreApps: {
                 adding = false
+                pendingMentionReplaceLength = 0
+                allAppsInitialSearch = ""
                 showingAllApps = true
-            }
-            .labelStyle(.iconOnly)
-            .frame(width: 44, height: 44)
-            .buttonStyle(.plain)
-            .accessibilityLabel("More Apps")
-        }
-        .padding(.horizontal, 8)
+            },
+            onPhotos: { adding = false; choosingPhotos = true },
+            onCamera: { adding = false; takingPhoto = true },
+            onFiles: { adding = false; choosingFiles = true },
+            onDismiss: { adding = false }
+        )
     }
 
-    private func appChoice(_ app: KnownApp) -> some View {
-        VStack(spacing: 4) {
-            if let icon = AppIconStore.shared.icon(app.id, dark: false) {
-                Image(uiImage: icon).resizable().scaledToFit().frame(width: 29, height: 29)
-                    .clipShape(.rect(cornerRadius: 6))
-            } else {
-                DefaultAppIcon(size: 29)
-            }
-            Text(verbatim: app.name(in: AppLanguage.current)).lineLimit(1)
-        }
-        .font(.caption2)
-        .frame(width: 60)
-        .frame(minHeight: 50)
+    private var currentMention: AppMentionState? {
+        guard voice.talkState == nil, !needsKey else { return nil }
+        return AppPickerCatalog.mentionState(
+            input: input,
+            mentionReady: mentionReady,
+            adding: adding,
+            recentIDs: recentAppIDs,
+            language: AppLanguage.current
+        )
     }
 
-    private func way(_ title: LocalizedStringKey, _ symbol: String, _ id: String, enabled: Bool = true,
-                     _ pick: @escaping () -> Void) -> some View {
-        Button { adding = false; pick() } label: {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).frame(width: wayIconWidth)
-                Text(title)
-            }
-            .font(.body).foregroundStyle(enabled ? Color(.label) : Color(.tertiaryLabel))
-            .padding(.horizontal, 20).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityIdentifier(id)
-    }
-
-    private var searchedApps: [KnownApp] {
-        KnownApps.all.filter { app in
-            appSearch.isEmpty || app.names.contains { $0.localizedCaseInsensitiveContains(appSearch) }
-        }
-        .sorted { $0.name(in: AppLanguage.current).localizedCompare($1.name(in: AppLanguage.current)) == .orderedAscending }
-    }
-
-    private var mention: (length: Int, apps: [KnownApp])? {
-        let word = input.reversed().prefix { !$0.isWhitespace }.reversed()
-        guard !word.isEmpty else { return nil }
-        let explicit = word.first == "@"
-        let query = explicit ? String(word.dropFirst()) : String(word)
-        guard explicit || query.count >= 3 else { return nil }
-        let lower = query.lowercased()
-        let matches = KnownApps.all.filter { app in
-            lower.isEmpty || app.names.contains {
-                let name = $0.lowercased()
-                return name.hasPrefix(lower) && (explicit || name != lower)
-            }
-        }
-        return (word.count, Array(matches.prefix(6)))
-    }
-
-    private func pickApp(_ app: KnownApp, replacing length: Int = 0) {
-        let prefix = String(input.dropLast(length))
-        let separator = prefix.last.map { !$0.isWhitespace } == true ? " " : ""
-        input = prefix + separator + app.name(in: AppLanguage.current) + " "
+    private func pickApp(_ app: AppPickerEntry, replacing length: Int = 0, keepFocus: Bool = false) {
+        let result = AppPickerCatalog.insertApp(
+            app,
+            into: input,
+            cursorUTF16: editorBridge.plainCursorUTF16,
+            replacing: length
+        )
+        editorBridge.scheduleCursor(result.cursorUTF16)
+        input = result.text
+        RecentAppsStore.shared.record(app.id)
+        recentAppsVersion += 1
         adding = false
+        if keepFocus {
+            DispatchQueue.main.async { focused = true }
+        }
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {

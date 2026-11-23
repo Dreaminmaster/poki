@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 final class LoopbackShortcut: ObservableObject {
     static let shared = LoopbackShortcut()
-    private static let shortcut = URL(string: "https://www.icloud.com/shortcuts/cef403d76ef04d0586d03dd69476b96e")!
+    private static let shortcut = URL(string: "https://www.icloud.com/shortcuts/f8ff9cd906194fbf8a58ed51137f6c0a")!
     static let run = URL(string: "shortcuts://run-shortcut?name=Poki%20Loopback")!
 
     @Published private(set) var lastAt = UserDefaults.standard.object(forKey: "history.reconnect.at") as? Date

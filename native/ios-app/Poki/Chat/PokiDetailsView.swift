@@ -413,8 +413,9 @@ struct SetupSettingsPage: View {
                     // page). Poki's own sentences are localized; PokiCore's stay as they came.
                     if let failure = model.developerToolsFailure {
                         Text(failure).foregroundStyle(.red)
-                    } else if !on, !model.sessionStarting, let problem = model.problem {
-                        Text(verbatim: AppLocalization.bundle.localizedString(forKey: problem, value: problem, table: nil))
+                    } else if !on, !model.sessionStarting, let problem = model.problem,
+                              !model.suppressesLoopbackProblem(problem) {
+                        Text(verbatim: Issue.localizedProblem(problem))
                             .foregroundStyle(.red)
                     } else if !on, !model.sessionStarting, model.isDone(.pairing), case .downloaded = model.diskImage.state {
                         Text(DiskImageStore.unavailableMessage).foregroundStyle(.orange)
@@ -855,12 +856,7 @@ struct AgentsAndRelayView: View {
     @Environment(AppModel.self) private var model
     @Binding var path: NavigationPath
 
-    private var relayLine: String {
-        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
-        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
-        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
-        return Health.relay(model).word
-    }
+    private var relayLine: String { Health.relaySummary(model) }
 
     var body: some View {
         @Bindable var model = model

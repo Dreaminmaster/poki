@@ -525,6 +525,7 @@ final class VoiceModel {
     /// true while a conversation with the microphone is on: Poki's silent keep-alive audio steps aside
     /// (its .playback session cannot record), and the voice-chat session keeps Poki running instead.
     private let holdMicrophone: @MainActor (Bool) -> Void
+    private let readyCue: @MainActor () -> Void
 
     /// Opens the connection for one session: events, then why it closed.
     private let connection: @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection
@@ -537,6 +538,7 @@ final class VoiceModel {
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
          phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
          holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
+         readyCue: @escaping @MainActor () -> Void = { VoiceReadyCue.play() },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock(),
          openingSpeech: OpeningSpeech = .system,
@@ -545,6 +547,7 @@ final class VoiceModel {
         self.clearTap = clearTap
         self.phoneTool = phoneTool
         self.holdMicrophone = holdMicrophone
+        self.readyCue = readyCue
         self.connection = connection
         self.time = time
         self.openingSpeech = openingSpeech
@@ -865,6 +868,7 @@ final class VoiceModel {
                 openingTiming = timing
             }
             trace("connection open")
+            let wasConnecting = !ready
             if subscription {
                 ready = true
                 phase = .listening
@@ -875,6 +879,7 @@ final class VoiceModel {
             }
             lastActivity = time.now()
             if subscription {
+                if wasConnecting && holdingMicrophone && openingCapture == nil { readyCue() }
                 endIfDone()
             }
             watchForStall(session: number)
@@ -883,6 +888,7 @@ final class VoiceModel {
         } catch {
             // Ended while connecting: stop() already put everything back.
             guard number == session, liveCloseTimeout == nil else { return }
+            log.add("voice", "could not connect: \(error.localizedDescription)")
             if startOpeningDictation() {
                 // Return control to Shortcuts so the owner can run Poki Anytime again.
                 if !waitsForOpeningDictation { await openingDictation?.value }
@@ -899,7 +905,6 @@ final class VoiceModel {
             }
             phase = .lost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error))
             needsChatGPTSignIn = error as? CodexVoice.Failure == .signIn
-            log.add("voice", "could not connect: \(error.localizedDescription)")
         }
     }
 
@@ -1610,9 +1615,11 @@ final class VoiceModel {
                 manualRealtimeTurns = detection?["create_response"] as? Bool == false
             }
             trace("model session ready")
+            let wasConnecting = !ready
             ready = true
             watchForStall(session: number)
             phase = .listening
+            if wasConnecting && holdingMicrophone && openingCapture == nil { readyCue() }
             if let appAudio {
                 let notes = appAudio.modelNotes(byteLimit: usesLive ? Self.liveNoteByteLimit : nil)
                 guard notes.allSatisfy({ link.send(note($0)) }) else {
