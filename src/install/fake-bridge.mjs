@@ -140,7 +140,7 @@ const commands = {
   },
   update_inspect: () => {
     const rejection = {
-      'update-not-newer': 'The target build is not newer than the installed build; keep Poki installed and wait for a newer build on the same channel.',
+      'update-not-newer': 'The target release is not newer than the installed release. Keep Poki installed and wait for a newer Beta release.',
       'update-missing': 'The recorded Poki is not installed on this iPhone; check the selected phone and use first-install only if it has no existing Poki data.',
       'update-team': 'The installed app and this computer have different signing teams; keep Poki installed and use the original signing computer.',
       'update-channel': 'The phone and computer use different update channels; keep both settings unchanged and ask for help choosing the matching update.',

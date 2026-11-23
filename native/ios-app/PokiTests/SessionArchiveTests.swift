@@ -56,6 +56,25 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(Set(relaunched.archivedSessions.map(\.id)), ["old-1", "old-2"], "the archive is kept on disk")
     }
 
+    func testFlushRetriesFailedSaveWithoutResurrectingDeletedConversation() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        for id in ["keep", "delete"] { _ = try saveEarlier(id, lines: ["Conversation"]) }
+        let store = launch()
+        for id in ["keep", "delete"] {
+            let file = folder.appendingPathComponent(id + ".json")
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            store.archive(id)
+        }
+        store.flush()
+        for id in ["keep", "delete"] {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(id + ".json"))
+        }
+        store.delete("delete")
+        store.flush()
+        XCTAssertEqual(launch().archivedSessions.map(\.id), ["keep"])
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in

@@ -6,7 +6,7 @@ license: AGPL-3.0-only
 
 # Install or update Poki on an iPhone
 
-This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in the repository's `AGENTS.md`. Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
+This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in [docs/install-with-an-agent.md](../../docs/install-with-an-agent.md). Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
 
 For a first install, start the installer, relay its person stops, and verify its result. For an update, complete the preservation checks below before any installation command.
 
@@ -138,7 +138,7 @@ Tell the user these after the result:
 - **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > Signing & Updates > Apple Account (Signing Options > Apple Account in older builds), Poki prepares a renewal 3 days before signing ends and asks the user to tap Install Renewal or Install Update.
 - **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and renewals.
 
-With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command refuses equal builds; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
+With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command requires a higher app version or a higher build within the same version; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
 
 ## Connect this agent to Poki
 
@@ -169,12 +169,12 @@ Use this branch when an existing Poki cannot download its update on the iPhone. 
    node bin/install-iphone.mjs --update-only --json
    ```
 
-3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects equal or lower builds, non-Beta targets or identity mismatches, changed app groups, and missing extensions. Historical phone and computer channel preferences converge to Beta. It performs no pairing, model-key transfer, signing-identity import or relay deployment.
+3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects older app versions, equal or lower builds within the same version, non-Beta targets, identity mismatches, changed app groups, and missing extensions. Historical phone and computer channel preferences converge to Beta. It performs no pairing, model-key transfer, signing-identity import or relay deployment.
 4. On exit **2**, quote the single `reason` sentence and stop. Say that installation did not start; the only phone-side preflight write is a non-secret freshness request. Do not fall back to `run --reinstall`, unguarded `renew`, uninstalling the app, replacing certificates or clearing its data. An unavailable public snapshot is a compatibility limitation, not permission to infer identity from the Mac's record.
 5. On exit **3**, report installation as failed or unconfirmed and keep Poki installed. On exit **4**, report that installation finished but the target version was not verified. Resolve the named failure before another update-only attempt. Never describe either result as success.
 6. Exit **0** means the live installed version and build matched the inspected target after guarded renewal. A result with `simulated: true` proves only the simulated path. For a real update, ask the user to open Poki and confirm conversations, model accounts, settings, signing options, release channel, connections and required extensions. Do not display secret values. Done only when the version matches and those retained items are confirmed.
 
-In current builds the update page is Settings > Signing & Updates; earlier builds may use Settings > Connection > Signing & Updates or Settings > General > Updates. This path only installs a higher numeric build. An equal-build signature refresh is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
+In current builds the update page is Settings > Signing & Updates; earlier builds may use Settings > Connection > Signing & Updates or Settings > General > Updates. A signature refresh of the same version and build is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
 
 ## When Poki's own update stalls
 

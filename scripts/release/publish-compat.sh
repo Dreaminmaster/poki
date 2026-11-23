@@ -37,6 +37,7 @@ REPO="${GH_REPO:-JosssphZhou/poki}"
 # The external entitlements of builds 752, 1130 and 1174, as old clients read them from the zip.
 KNOWN_ENTITLEMENTS="c38bcbe3e3e0915c27edc11f8ab59a4fcf7b995b0b78f6ed0195d439a0b5de93"
 ALPHA_TAG="app-$VERSION-alpha.$BUILD"
+PREALPHA_TAG="app-$VERSION-prealpha.$BUILD"
 case "$KIND" in
   alpha) TAG="$ALPHA_TAG"; TITLE="Poki v$VERSION ($BUILD) Alpha"; WHAT="Alpha build $BUILD" ;;
   beta) TAG="ios-beta-$VERSION-$BUILD"; TITLE="Poki v$VERSION Beta (build $BUILD)"; WHAT="the Beta of Poki $VERSION, build $BUILD" ;;
@@ -48,21 +49,32 @@ commit_of() { gh api "repos/$REPO/commits/$1" --jq .sha 2>/dev/null; }
 
 # ---- The four files, rebuilt from the Pre-alpha run every time, whatever the mode. ----
 
-ROLLING=app-alpha-latest
+REFERENCE=app-alpha-latest
 if ! SHA="$(commit_of "$ALPHA_TAG")"; then
   [ "$MODE" = check ] || { echo "No $ALPHA_TAG yet: promote the build to Alpha first"; exit 1; }
-  ROLLING=app-prealpha-latest
-  SHA="$(commit_of "app-$VERSION-prealpha.$BUILD")" || { echo "Neither $ALPHA_TAG nor app-$VERSION-prealpha.$BUILD exists: is $BUILD the build?"; exit 1; }
+  REFERENCE=app-prealpha-latest
+  SHA="$(commit_of "$PREALPHA_TAG")" || { echo "Neither $ALPHA_TAG nor $PREALPHA_TAG exists: is $BUILD the build?"; exit 1; }
   echo "Not promoted to Alpha yet: this checks the Pre-alpha build, so a changed Poki-signing.zip shows before Alpha users get it."
 fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-RUN="$(gh run list -R "$REPO" --workflow prealpha.yml --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
-[ -n "$RUN" ] || { echo "No successful Pre-alpha run built $SHA"; exit 1; }
-gh run download "$RUN" -R "$REPO" --name Poki-unsigned --dir "$WORK/src"
 mkdir "$WORK/dist"
-cp "$WORK/src/Poki-external-unsigned.ipa" "$WORK/dist/$IPA"
-cp "$WORK/src/Poki-signing.zip" "$WORK/dist/"
+if [ "$(gh release view "$PREALPHA_TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" = false ]; then
+  [ "$(commit_of "$PREALPHA_TAG")" = "$SHA" ] || { echo "$PREALPHA_TAG does not point to $SHA"; exit 1; }
+  if [ "$REFERENCE" = app-prealpha-latest ]; then REFERENCE="$PREALPHA_TAG"; fi
+  gh release download "$PREALPHA_TAG" -R "$REPO" --dir "$WORK/dist" --pattern "$IPA" --pattern Poki-signing.zip
+  for asset in "$IPA" Poki-signing.zip; do
+    published="$(gh api "repos/$REPO/releases/tags/$PREALPHA_TAG" --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+    actual="$(shasum -a 256 "$WORK/dist/$asset" | cut -d' ' -f1)"
+    [ "$published" = "sha256:$actual" ] || { echo "$PREALPHA_TAG has a different $asset"; exit 1; }
+  done
+else
+  RUN="$(gh run list -R "$REPO" --workflow prealpha.yml --branch main --event push --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
+  [ -n "$RUN" ] || { echo "No successful main Pre-alpha run built $SHA"; exit 1; }
+  gh run download "$RUN" -R "$REPO" --name Poki-unsigned --dir "$WORK/src"
+  cp "$WORK/src/Poki-external-unsigned.ipa" "$WORK/dist/$IPA"
+  cp "$WORK/src/Poki-signing.zip" "$WORK/dist/"
+fi
 git show "$SHA:deploy/cf-relay/worker.js" > "$WORK/dist/poki-relay-worker.js"
 (cd "$WORK/dist" && shasum -a 256 "$IPA" poki-relay-worker.js > SHA256SUMS)
 
@@ -72,8 +84,8 @@ inside="$(unzip -p "$WORK/dist/$IPA" 'Payload/*.app/Info.plist' | python3 -c 'im
 
 # The same bytes the channel already carries, so this is a second name, not a second build.
 sum="$(shasum -a 256 "$WORK/dist/$IPA" | cut -d' ' -f1)"
-rolling="$(gh api "repos/$REPO/releases/tags/$ROLLING" --jq ".assets[] | select(.name == \"$IPA\") | .digest")"
-[ "$rolling" = "sha256:$sum" ] || { echo "$ROLLING does not carry $IPA with sha256 $sum (it has: ${rolling:-another build})"; exit 1; }
+published="$(gh api "repos/$REPO/releases/tags/$REFERENCE" --jq ".assets[] | select(.name == \"$IPA\") | .digest")"
+[ "$published" = "sha256:$sum" ] || { echo "$REFERENCE does not carry $IPA with sha256 $sum (it has: ${published:-another build})"; exit 1; }
 
 zip="$WORK/dist/Poki-signing.zip"
 entitlements="$(unzip -Z1 "$zip" | grep -E '(^|/)external/[^/]+\.entitlements$' | LC_ALL=C sort | while read -r f; do printf '%s ' "$(basename "$f")"; unzip -p "$zip" "$f" | shasum -a 256 | cut -d' ' -f1; done | shasum -a 256 | cut -d' ' -f1)"
@@ -90,7 +102,7 @@ EOF
 
 echo "Release: $TAG ($TITLE), prerelease, at $SHA"
 echo "Files:"; (cd "$WORK/dist" && ls -l | sed 1d | awk '{print "  " $NF " (" $5 " bytes)"}')
-echo "IPA: Poki $inside, sha256 $sum, the same as on $ROLLING"
+echo "IPA: Poki $inside, sha256 $sum, the same as on $REFERENCE"
 echo "Entitlements digest: $entitlements$([ "$entitlements" = "$KNOWN_ENTITLEMENTS" ] && echo ' (unchanged since builds 752, 1130 and 1174)' || echo ' (CHANGED: pass it to first-hop-check.mjs --entitlements, and tell the owner before Alpha moves)')"
 [ "$MODE" != check ] || { echo "Notes:"; sed 's/^/  /' "$WORK/notes.md"; echo "Checked only; nothing was uploaded."; exit 0; }
 

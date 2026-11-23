@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const script = process.env.PUBLISH_COMPAT_SCRIPT ?? join(root, 'scripts/release/publish-compat.sh');
 const TAG = 'ios-beta-0.4.0-1175';
+const PREALPHA = 'app-0.4.0-prealpha.1175';
 const IPA = 'Poki-external-0.4.0-1175.ipa';
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const digest = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
@@ -29,9 +30,16 @@ if (args[0] === 'api' && args[1].includes('/commits/')) {
   const at = file('commit-' + args[1].split('/').pop());
   if (!existsSync(at)) process.exit(1);
   out(readFileSync(at, 'utf8').trim());
+} else if (args[0] === 'api' && args[1].endsWith('/releases/tags/${PREALPHA}')) {
+  const release = JSON.parse(readFileSync(file('release-${PREALPHA}.json'), 'utf8'));
+  const filter = String(args[args.indexOf('--jq') + 1]);
+  const asset = release.assets.find(item => filter.includes('"' + item.name + '"'));
+  if (!asset) process.exit(1);
+  out(asset.digest);
 } else if (args[0] === 'api') out(readFileSync(file('rolling-digest'), 'utf8').trim());
 else if (args[0] === 'run' && args[1] === 'list') out('1');
 else if (args[0] === 'run' && args[1] === 'download') cpSync(file('artifact'), args[args.indexOf('--dir') + 1], { recursive: true });
+else if (args[0] === 'release' && args[1] === 'download' && args[2] === '${PREALPHA}') cpSync(file('versioned'), args[args.indexOf('--dir') + 1], { recursive: true });
 else if (args[0] === 'release' && args[1] === 'view') {
   const at = file('release-' + args[2] + '.json');
   if (!existsSync(at)) process.exit(1);
@@ -67,13 +75,29 @@ with zipfile.ZipFile(sys.argv[1] + "/Poki-signing.zip", "w") as z:
     assets: [asset(IPA, ipa), asset('Poki-signing.zip', readFileSync(join(dir, 'artifact/Poki-signing.zip'))), asset('poki-relay-worker.js', worker), asset('SHA256SUMS', sums)],
   };
   const save = () => writeFileSync(join(dir, `release-${TAG}.json`), JSON.stringify(release));
+  function execute(...args) {
+    const done = spawnSync('bash', [script, ...args], {
+      cwd: root, encoding: 'utf8',
+      env: { ...process.env, GH_STUB: dir, GH_REPO: 'example/poki', PATH: `${join(dir, 'bin')}:${process.env.PATH}` },
+    });
+    const calls = existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').split('\n') : [];
+    return { status: done.status, output: done.stdout + done.stderr, published: calls.filter(call => call.startsWith('release edit')) };
+  }
   save();
   return {
     release, save,
     run(...extra) {
-      const done = spawnSync('bash', [script, 'beta', '0.4.0', '1175', 'public', ...extra], { cwd: root, encoding: 'utf8', env: { ...process.env, GH_STUB: dir, GH_REPO: 'example/poki', PATH: `${join(dir, 'bin')}:${process.env.PATH}` } });
-      const calls = existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').split('\n') : [];
-      return { status: done.status, output: done.stdout + done.stderr, published: calls.filter(call => call.startsWith('release edit')) };
+      return execute('beta', '0.4.0', '1175', 'public', ...extra);
+    },
+    checkHotfix() {
+      unlinkSync(join(dir, 'commit-app-0.4.0-alpha.1175'));
+      writeFileSync(join(dir, 'commit-' + PREALPHA), sha);
+      writeFileSync(join(dir, 'release-' + PREALPHA + '.json'), JSON.stringify({ ...release, isDraft: false }));
+      writeFileSync(join(dir, 'rolling-digest'), digest('a different rolling pre-alpha'));
+      mkdirSync(join(dir, 'versioned'));
+      writeFileSync(join(dir, 'versioned', IPA), ipa);
+      writeFileSync(join(dir, 'versioned/Poki-signing.zip'), readFileSync(join(dir, 'artifact/Poki-signing.zip')));
+      return execute('alpha', '0.4.0', '1175', 'check');
     },
   };
 }
@@ -84,6 +108,13 @@ test('public publishes a draft that holds the four checked files, once confirmed
   assert.equal(done.status, 0, done.output);
   assert.equal(done.published.length, 1, done.output);
   assert.match(done.published[0], new RegExp(`^release edit ${TAG} .*--draft=false`));
+});
+
+test('check uses the hotfix versioned pre-alpha when latest belongs to another build', t => {
+  const done = setUp(t).checkHotfix();
+  assert.equal(done.status, 0, done.output);
+  assert.ok(done.output.includes('the same as on ' + PREALPHA), done.output);
+  assert.deepEqual(done.published, [], done.output);
 });
 
 test('public leaves a draft with a file missing as a draft', t => {

@@ -1,0 +1,92 @@
+name: BackgroundAXProbe
+options:
+  bundleIdPrefix: local.pokimcp.axprobe
+  deploymentTarget:
+    iOS: '17.0'
+targets:
+  Fixture:
+    type: application
+    platform: iOS
+    sources: [FixtureSources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.pokimcp.axprobe.fixture
+        PRODUCT_NAME: AXProbeFixture
+        SWIFT_VERSION: '5.0'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1'
+        CODE_SIGNING_ALLOWED: NO
+  ProbeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [ProbeUITests]
+    dependencies:
+      - target: Fixture
+    settings:
+      base:
+        TEST_TARGET_NAME: Fixture
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+        CODE_SIGNING_ALLOWED: NO
+  DeviceProbeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [DeviceProbeUITests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+        PRODUCT_BUNDLE_IDENTIFIER: local.pokimcp.axprobe.uitests
+        SWIFT_OBJC_BRIDGING_HEADER: DeviceProbeUITests/Bridging.h
+        CODE_SIGN_STYLE: Automatic
+  AXFixture:
+    type: application
+    platform: iOS
+    sources: [AXFixture]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.pokimcp.axfixture
+        PRODUCT_NAME: AXFixture
+        SWIFT_VERSION: '5.0'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1'
+        IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+        CODE_SIGNING_ALLOWED: NO
+  SimProbeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [SimProbeUITests]
+    dependencies:
+      - target: AXFixture
+    settings:
+      base:
+        TEST_TARGET_NAME: AXFixture
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+        SWIFT_OBJC_BRIDGING_HEADER: SimProbeUITests/Bridging.h
+        CODE_SIGNING_ALLOWED: NO
+schemes:
+  SimProbe:
+    build:
+      targets:
+        AXFixture: all
+        SimProbeUITests: [test]
+    test:
+      targets: [SimProbeUITests]
+  DeviceProbe:
+    build:
+      targets:
+        DeviceProbeUITests: [test]
+    test:
+      targets: [DeviceProbeUITests]
+  Probe:
+    build:
+      targets:
+        Fixture: all
+        ProbeUITests: [test]
+    test:
+      targets: [ProbeUITests]

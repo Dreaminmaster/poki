@@ -15,30 +15,32 @@ The table shows each package's declared license. For the MCP SDK, see the retain
 | `@emnapi/runtime` | 1.11.3 | MIT | [github.com/toyobayashi/emnapi](https://github.com/toyobayashi/emnapi) | optional |
 | `@hono/node-server` | 2.1.6 | MIT | [github.com/honojs/node-server](https://github.com/honojs/node-server) | regular dependency |
 | `@img/colour` | 1.1.0 | MIT | [github.com/lovell/colour](https://github.com/lovell/colour) | regular dependency |
-| `@img/sharp-darwin-arm64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: darwin; cpu: arm64 |
-| `@img/sharp-darwin-x64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: darwin; cpu: x64 |
-| `@img/sharp-libvips-darwin-arm64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: darwin; cpu: arm64 |
-| `@img/sharp-libvips-darwin-x64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: darwin; cpu: x64 |
-| `@img/sharp-libvips-linux-arm` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm; libc: glibc |
-| `@img/sharp-libvips-linux-arm64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm64; libc: glibc |
-| `@img/sharp-libvips-linux-ppc64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: ppc64; libc: glibc |
-| `@img/sharp-libvips-linux-riscv64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: riscv64; libc: glibc |
-| `@img/sharp-libvips-linux-s390x` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: s390x; libc: glibc |
-| `@img/sharp-libvips-linux-x64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: x64; libc: glibc |
-| `@img/sharp-libvips-linuxmusl-arm64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm64; libc: musl |
-| `@img/sharp-libvips-linuxmusl-x64` | 1.2.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: x64; libc: musl |
-| `@img/sharp-linux-arm` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm; libc: glibc |
-| `@img/sharp-linux-arm64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm64; libc: glibc |
-| `@img/sharp-linux-ppc64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: ppc64; libc: glibc |
-| `@img/sharp-linux-riscv64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: riscv64; libc: glibc |
-| `@img/sharp-linux-s390x` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: s390x; libc: glibc |
-| `@img/sharp-linux-x64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: x64; libc: glibc |
-| `@img/sharp-linuxmusl-arm64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm64; libc: musl |
-| `@img/sharp-linuxmusl-x64` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: x64; libc: musl |
-| `@img/sharp-wasm32` | 0.34.5 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; cpu: wasm32 |
-| `@img/sharp-win32-arm64` | 0.34.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: arm64 |
-| `@img/sharp-win32-ia32` | 0.34.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: ia32 |
-| `@img/sharp-win32-x64` | 0.34.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: x64 |
+| `@img/sharp-darwin-arm64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: darwin; cpu: arm64 |
+| `@img/sharp-darwin-x64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: darwin; cpu: x64 |
+| `@img/sharp-freebsd-wasm32` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: freebsd |
+| `@img/sharp-libvips-darwin-arm64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: darwin; cpu: arm64 |
+| `@img/sharp-libvips-darwin-x64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: darwin; cpu: x64 |
+| `@img/sharp-libvips-linux-arm` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm; libc: glibc |
+| `@img/sharp-libvips-linux-arm64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm64; libc: glibc |
+| `@img/sharp-libvips-linux-ppc64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: ppc64; libc: glibc |
+| `@img/sharp-libvips-linux-riscv64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: riscv64; libc: glibc |
+| `@img/sharp-libvips-linux-s390x` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: s390x; libc: glibc |
+| `@img/sharp-libvips-linux-x64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: x64; libc: glibc |
+| `@img/sharp-libvips-linuxmusl-arm64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: arm64; libc: musl |
+| `@img/sharp-libvips-linuxmusl-x64` | 1.3.4 | LGPL-3.0-or-later | [github.com/lovell/sharp-libvips](https://github.com/lovell/sharp-libvips) | optional; os: linux; cpu: x64; libc: musl |
+| `@img/sharp-linux-arm` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm; libc: glibc |
+| `@img/sharp-linux-arm64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm64; libc: glibc |
+| `@img/sharp-linux-ppc64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: ppc64; libc: glibc |
+| `@img/sharp-linux-riscv64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: riscv64; libc: glibc |
+| `@img/sharp-linux-s390x` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: s390x; libc: glibc |
+| `@img/sharp-linux-x64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: x64; libc: glibc |
+| `@img/sharp-linuxmusl-arm64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: arm64; libc: musl |
+| `@img/sharp-linuxmusl-x64` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: linux; cpu: x64; libc: musl |
+| `@img/sharp-wasm32` | 0.35.5 | Apache-2.0 AND LGPL-3.0-or-later AND MIT | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional |
+| `@img/sharp-webcontainers-wasm32` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; cpu: wasm32 |
+| `@img/sharp-win32-arm64` | 0.35.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: arm64 |
+| `@img/sharp-win32-ia32` | 0.35.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: ia32 |
+| `@img/sharp-win32-x64` | 0.35.5 | Apache-2.0 AND LGPL-3.0-or-later | [github.com/lovell/sharp](https://github.com/lovell/sharp) | optional; os: win32; cpu: x64 |
 | `@modelcontextprotocol/client` | 2.4.0 | Apache-2.0 | [github.com/modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | regular dependency |
 | `@modelcontextprotocol/core` | 2.4.0 | Apache-2.0 | [github.com/modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | regular dependency |
 | `@modelcontextprotocol/node` | 2.1.2 | Apache-2.0 | [github.com/modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | regular dependency |
@@ -54,11 +56,11 @@ The table shows each package's declared license. For the MCP SDK, see the retain
 | `path-key` | 3.1.1 | MIT | [github.com/sindresorhus/path-key](https://github.com/sindresorhus/path-key) | regular dependency |
 | `pkce-challenge` | 5.0.1 | MIT | [github.com/crouchcd/pkce-challenge](https://github.com/crouchcd/pkce-challenge) | regular dependency |
 | `semver` | 7.8.6 | ISC | [github.com/npm/node-semver](https://github.com/npm/node-semver) | regular dependency |
-| `sharp` | 0.34.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | regular dependency |
 | `shebang-command` | 2.0.0 | MIT | [github.com/kevva/shebang-command](https://github.com/kevva/shebang-command) | regular dependency |
 | `shebang-regex` | 3.0.0 | MIT | [github.com/sindresorhus/shebang-regex](https://github.com/sindresorhus/shebang-regex) | regular dependency |
 | `tslib` | 2.9.1 | 0BSD | [github.com/Microsoft/tslib](https://github.com/Microsoft/tslib) | optional |
 | `which` | 2.0.2 | ISC | [github.com/isaacs/node-which](https://github.com/isaacs/node-which) | regular dependency |
+| `sharp` | 0.35.5 | Apache-2.0 | [github.com/lovell/sharp](https://github.com/lovell/sharp) | regular dependency |
 | `zod` | 4.6.7 | MIT | [github.com/colinhacks/zod](https://github.com/colinhacks/zod) | regular dependency |
 
 ## Rust packages
@@ -306,40 +308,38 @@ The `aws-lc-sys` 0.46.0 and 0.47.0 packages include [AWS-LC](https://github.com/
 
 ## Image libraries in the macOS arm64 libvips package
 
-Versions below are the contents of `@img/sharp-libvips-darwin-arm64` 1.2.4 `versions.json`. Component terms are taken from that package’s README and the retained [sharp-libvips notices](../third_party/NOTICE.sharp-libvips.md). Source repositories are identified in the pinned [sharp-libvips build](https://github.com/lovell/sharp-libvips/blob/20b5e899954907a3039d6e3d4c200aaa0ec52c4c/build/posix.sh); patch sources from that build are listed after the table.
+Versions below are the contents of `@img/sharp-libvips-darwin-arm64` 1.3.4 `versions.json`. Component terms are taken from that package’s README and the retained [sharp-libvips notices](../third_party/NOTICE.sharp-libvips.md). Source repositories are identified in the pinned [sharp-libvips build](https://github.com/lovell/sharp-libvips/blob/ebb95f8add54eee8bed840e3fb587e4cbec857d7/build/posix.sh).
 
 | Library | Reported version | Upstream terms in the bundle notices | Source repository |
 | --- | --- | --- | --- |
-| aom | 3.13.1 | BSD-2-Clause and AOM Patent License 1.0 | [aomedia.googlesource.com/aom/](https://aomedia.googlesource.com/aom/) |
-| libarchive | 3.8.2 | BSD-2-Clause | [github.com/libarchive/libarchive](https://github.com/libarchive/libarchive) |
-| cairo | 1.18.4 | MPL-2.0 | [gitlab.freedesktop.org/cairo/cairo](https://gitlab.freedesktop.org/cairo/cairo) |
-| cgif | 0.5.0 | MIT | [github.com/dloebl/cgif](https://github.com/dloebl/cgif) |
-| libexif | 0.6.25 | LGPLv3 via the later-version clause | [github.com/libexif/libexif](https://github.com/libexif/libexif) |
-| expat | 2.7.3 | MIT | [github.com/libexpat/libexpat](https://github.com/libexpat/libexpat) |
-| libffi | 3.5.2 | MIT | [github.com/libffi/libffi](https://github.com/libffi/libffi) |
-| fontconfig | 2.17.1 | fontconfig license (BSD-like) | [gitlab.freedesktop.org/fontconfig/fontconfig](https://gitlab.freedesktop.org/fontconfig/fontconfig) |
-| freetype | 2.14.1 | FreeType License (BSD-like) | [github.com/freetype/freetype](https://github.com/freetype/freetype) |
-| fribidi | 1.0.16 | LGPLv3 via the later-version clause | [github.com/fribidi/fribidi](https://github.com/fribidi/fribidi) |
-| glib | 2.86.1 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/glib](https://gitlab.gnome.org/GNOME/glib) |
-| harfbuzz | 12.1.0 | MIT | [github.com/harfbuzz/harfbuzz](https://github.com/harfbuzz/harfbuzz) |
-| libheif | 1.20.2 | LGPLv3 via the later-version clause | [github.com/strukturag/libheif](https://github.com/strukturag/libheif) |
-| highway | 1.3.0 | Apache-2.0 and BSD-3-Clause | [github.com/google/highway](https://github.com/google/highway) |
+| aom | 3.15.1 | BSD-2-Clause and AOM Patent License 1.0 | [aomedia.googlesource.com/aom/](https://aomedia.googlesource.com/aom/) |
+| libarchive | 3.8.9 | BSD-2-Clause | [github.com/libarchive/libarchive](https://github.com/libarchive/libarchive) |
+| cairo | 1.18.6 | MPL-1.1 (as stated in the bundle notices) | [gitlab.freedesktop.org/cairo/cairo](https://gitlab.freedesktop.org/cairo/cairo) |
+| cgif | 0.5.4 | MIT | [github.com/dloebl/cgif](https://github.com/dloebl/cgif) |
+| libexif | 0.6.26 | LGPLv3 via the later-version clause | [github.com/libexif/libexif](https://github.com/libexif/libexif) |
+| expat | 2.8.5 | MIT | [github.com/libexpat/libexpat](https://github.com/libexpat/libexpat) |
+| libffi | 3.8.0 | MIT | [github.com/libffi/libffi](https://github.com/libffi/libffi) |
+| fontconfig | 2.18.3 | fontconfig license (BSD-like) | [gitlab.freedesktop.org/fontconfig/fontconfig](https://gitlab.freedesktop.org/fontconfig/fontconfig) |
+| freetype | 2.14.3 | FreeType License (BSD-like) | [github.com/freetype/freetype](https://github.com/freetype/freetype) |
+| fribidi | 1.0.17 | LGPLv3 via the later-version clause | [github.com/fribidi/fribidi](https://github.com/fribidi/fribidi) |
+| glib | 2.90.0 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/glib](https://gitlab.gnome.org/GNOME/glib) |
+| harfbuzz | 14.5.0 | MIT | [github.com/harfbuzz/harfbuzz](https://github.com/harfbuzz/harfbuzz) |
+| libheif | 1.23.5 | LGPLv3 via the later-version clause | [github.com/strukturag/libheif](https://github.com/strukturag/libheif) |
+| highway | 1.4.0 | BSD-3-Clause (as stated in the bundle notices) | [github.com/google/highway](https://github.com/google/highway) |
 | libimagequant | 2.4.1 | BSD-2-Clause (the lovell fork in the bundle) | [github.com/lovell/libimagequant](https://github.com/lovell/libimagequant) |
-| lcms | 2.17 | MIT | [github.com/mm2/Little-CMS](https://github.com/mm2/Little-CMS) |
+| lcms | 2.19.1 | MIT | [github.com/mm2/Little-CMS](https://github.com/mm2/Little-CMS) |
 | mozjpeg | 0826579 | zlib, IJG and BSD-3-Clause | [github.com/mozilla/mozjpeg](https://github.com/mozilla/mozjpeg) |
-| pango | 1.57.0 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/pango](https://gitlab.gnome.org/GNOME/pango) |
+| pango | 1.58.2 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/pango](https://gitlab.gnome.org/GNOME/pango) |
 | pixman | 0.46.4 | MIT | [gitlab.freedesktop.org/pixman/pixman](https://gitlab.freedesktop.org/pixman/pixman) |
-| libpng | 1.6.50 | libpng license | [github.com/pnggroup/libpng](https://github.com/pnggroup/libpng) |
+| libpng | 1.6.58 | libpng license | [github.com/pnggroup/libpng](https://github.com/pnggroup/libpng) |
 | proxy-libintl | 0.5 | LGPLv3 via the later-version clause | [github.com/frida/proxy-libintl](https://github.com/frida/proxy-libintl) |
-| librsvg | 2.61.2 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/librsvg](https://gitlab.gnome.org/GNOME/librsvg) |
-| libspng | 0.7.4 | BSD-2-Clause and libpng license | [github.com/randy408/libspng](https://github.com/randy408/libspng) |
-| libtiff | 4.7.1 | libtiff license (BSD-like) | [gitlab.com/libtiff/libtiff](https://gitlab.com/libtiff/libtiff) |
-| libvips | 8.17.3 | LGPLv3 via the later-version clause | [github.com/libvips/libvips](https://github.com/libvips/libvips) |
+| librsvg | 2.63.2 | LGPLv3 via the later-version clause | [gitlab.gnome.org/GNOME/librsvg](https://gitlab.gnome.org/GNOME/librsvg) |
+| libtiff | 4.7.2 | libtiff license (BSD-like) | [gitlab.com/libtiff/libtiff](https://gitlab.com/libtiff/libtiff) |
+| libultrahdr | 2.0.2 | MIT | [github.com/google/libultrahdr](https://github.com/google/libultrahdr) |
+| libvips | 8.18.7 | LGPLv3 via the later-version clause | [github.com/libvips/libvips](https://github.com/libvips/libvips) |
 | libwebp | 1.6.0 | BSD-3-Clause | [chromium.googlesource.com/webm/libwebp](https://chromium.googlesource.com/webm/libwebp) |
-| libxml2 | 2.15.1 | MIT | [gitlab.gnome.org/GNOME/libxml2](https://gitlab.gnome.org/GNOME/libxml2) |
-| zlib-ng | 2.2.5 | zlib license | [github.com/zlib-ng/zlib-ng](https://github.com/zlib-ng/zlib-ng) |
-
-The same pinned build references patches from [kleisauke’s GLib patch](https://gist.github.com/kleisauke/284d685efa00908da99ea6afbaaf39ae), [m-ab-s/aom](https://github.com/m-ab-s/aom/commit/6d2b7f71b98bfa28e372b1f2d85f137280bdb3de), [google/highway](https://github.com/google/highway/commit/ad48f2bf298bac247288c8399a5c0e9a40ed8246), [lovell’s libvips patch](https://gist.github.com/lovell/313a6901e9db1bf285f2a1f1180499e4), and [libvips/build-win64-mxe](https://github.com/libvips/build-win64-mxe/blob/v8.17.3/build/patches/vips-8-heifsave-disable-hbr-support.patch). These are source references for the upstream bundle build; Poki does not apply them or rebuild that bundle.
+| libxml2 | 2.15.4 | MIT | [gitlab.gnome.org/GNOME/libxml2](https://gitlab.gnome.org/GNOME/libxml2) |
+| zlib-ng | 2.3.3 | zlib license | [github.com/zlib-ng/zlib-ng](https://github.com/zlib-ng/zlib-ng) |
 
 The upstream notices also name libnsgif (MIT), but this macOS arm64 package does not report a libnsgif version. Its notice is retained without claiming it is present in the checked bundle.
 
