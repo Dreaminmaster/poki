@@ -260,10 +260,57 @@ final class WhatsNewDecisionTests: XCTestCase {
     func testSmarterLiveVoiceCopyMatchesStopCancellationBehavior() throws {
         let item = try XCTUnwrap(WhatsNewCatalog.current.items.first { $0.id == "smarter-live-voice" })
         XCTAssertFalse(item.summary.en.contains("mutes voice, not tasks"), item.summary.en)
-        XCTAssertTrue(item.summary.en.contains("cancels the current task"), item.summary.en)
+        XCTAssertTrue(item.summary.en.contains("to cancel tasks"), item.summary.en)
+        XCTAssertTrue(item.summary.en.contains("to pause voice"), item.summary.en)
         XCTAssertFalse(item.summary.zhHans.contains("只静音不误停任务"), item.summary.zhHans)
-        XCTAssertTrue(item.summary.zhHans.contains("取消当前任务"), item.summary.zhHans)
+        XCTAssertTrue(item.summary.zhHans.contains("取消任务"), item.summary.zhHans)
+        XCTAssertTrue(item.summary.zhHans.contains("仅暂停播报"), item.summary.zhHans)
         XCTAssertFalse(item.summary.zhHant.contains("只靜音不誤停任務"), item.summary.zhHant)
-        XCTAssertTrue(item.summary.zhHant.contains("取消目前任務"), item.summary.zhHant)
+        XCTAssertTrue(item.summary.zhHant.contains("取消任務"), item.summary.zhHant)
+        XCTAssertTrue(item.summary.zhHant.contains("僅暫停播報"), item.summary.zhHant)
+    }
+
+    func testCurrentCatalogOrderAndTightenedOutcomeCopy() throws {
+        let catalog = WhatsNewCatalog.current
+        XCTAssertEqual(catalog.version, "0.5.0")
+        XCTAssertEqual(
+            catalog.items.map(\.id),
+            [
+                "chatgpt-sign-in",
+                "faster-phone-actions",
+                "watch-and-ask",
+                "smarter-live-voice",
+                "rich-result-cards",
+                "memory-and-skills",
+                "quick-app-picker",
+                "refreshed-setup-menu",
+                "ipad-and-duo-fixes",
+                "mic-and-home-stability",
+            ]
+        )
+
+        let forbiddenPunctuation = ["——", "—", " -- ", " · ", " • ", " ・ "]
+        for item in catalog.items {
+            let texts = [
+                item.title.en, item.title.zhHans, item.title.zhHant,
+                item.summary.en, item.summary.zhHans, item.summary.zhHant,
+            ]
+            for text in texts {
+                XCTAssertFalse(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, item.id)
+                for forbidden in forbiddenPunctuation {
+                    XCTAssertFalse(text.contains(forbidden), "\(item.id) contains forbidden separator \(forbidden): \(text)")
+                }
+            }
+        }
+
+        let richCards = try XCTUnwrap(catalog.items.first { $0.id == "rich-result-cards" })
+        XCTAssertFalse(richCards.summary.en.contains("fixing fare"), richCards.summary.en)
+        XCTAssertFalse(richCards.summary.zhHans.contains("修复 12306"), richCards.summary.zhHans)
+        XCTAssertFalse(richCards.summary.zhHant.contains("修復 12306"), richCards.summary.zhHant)
+
+        let ipadFixes = try XCTUnwrap(catalog.items.first { $0.id == "ipad-and-duo-fixes" })
+        XCTAssertFalse(ipadFixes.summary.en.contains("Fixed iPadOS"), ipadFixes.summary.en)
+        XCTAssertFalse(ipadFixes.summary.zhHans.contains("修复 iPadOS"), ipadFixes.summary.zhHans)
+        XCTAssertFalse(ipadFixes.summary.zhHant.contains("修復 iPadOS"), ipadFixes.summary.zhHant)
     }
 }
