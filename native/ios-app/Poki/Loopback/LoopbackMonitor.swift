@@ -278,7 +278,7 @@ final class LoopbackMonitor {
         state = next
         if next != .checking { checkedAt = Date() }
         if case .working = old, !isWorking { droppedAt = Date() }
-        if isWorking { droppedAt = nil }
+        if isWorking { droppedAt = nil; proxyAnswers = false }
         if log { AppLog.shared.add("loopback", "developer service: \(next)") }
         onChange?(old, next)
     }

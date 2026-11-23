@@ -24,6 +24,7 @@ final class AppModel {
         relayEnabled = on
         UserDefaults.standard.set(on, forKey: "relayEnabled")
         log.add("relay", on ? "turned on" : "turned off")
+        if !on { relayStatus = .off }
         guard sessionOn else { return }
         if on, let relayAddress { core.start(relay: relayAddress) } else { core.stop() }
     }
@@ -301,7 +302,12 @@ final class AppModel {
     /// look, do or status run here as a relay call would be (the Debug probe's end-to-end check).
     /// The probe opened the in-process session itself (on the simulator there is no launcher), so
     /// PokiCore may act now.
-    func inProcessReadyForProbe() { inProcessSession = .open; host.update(runner: .running); probeDriven = true }
+    func inProcessReadyForProbe() {
+        inProcessSession = .open
+        clearLoopbackProblemIfNeeded()
+        host.update(runner: .running)
+        probeDriven = true
+    }
 
     func phoneTool(_ name: String, arguments: String) async -> (text: String, isError: Bool) {
         if let message = signer.installMessage { return (message, true) }
@@ -342,11 +348,19 @@ final class AppModel {
         return ChatModel.delegatedBusy
     }
 
+    private let localVPNAvailableOverride: Bool?
+    private var isLocalVPNAvailable: Bool { localVPNAvailableOverride ?? tunnel.available }
+    private var builtInShouldYieldToExternal: Bool {
+        setup.loopback == .builtIn && (!isLocalVPNAvailable || (loopback.isWorking && !tunnel.connected && !tunnel.busy))
+    }
+
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
          systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
-         requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) {
+         requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted },
+         localVPNAvailable: Bool? = nil) {
         ActivityController.endAll()
+        self.localVPNAvailableOverride = localVPNAvailable
         self.imageMounted = imageMounted
         self.activity = ActivityController()
         self.automation = automation
@@ -462,8 +476,14 @@ final class AppModel {
         // When Poki detects the owner's own VPN it stops: the tunnel says so here, and the problem clears when it is back.
         tunnel.onAttention = { [weak self] text in
             guard let self else { return }
-            if let text { problem = text; tunnelAttention = text }
-            else if problem == tunnelAttention { problem = nil; tunnelAttention = nil }
+            if let text {
+                guard !self.loopback.isWorking, !self.hasOpenInProcessSession, !self.canStartTasks else { return }
+                self.problem = text
+                self.tunnelAttention = text
+            } else if self.problem == self.tunnelAttention {
+                self.problem = nil
+                self.tunnelAttention = nil
+            }
         }
         Task { [weak self] in
             guard let self else { return }
@@ -491,7 +511,7 @@ final class AppModel {
         // Installed over the local-VPN build (both use one bundle ID): this build has only external
         // connections, so a saved built-in choice becomes the external one. Otherwise Setup showed the
         // step done while Turn on said this build has no local VPN.
-        if setup.loopback == .builtIn, !tunnel.available {
+        if setup.loopback == .builtIn, !isLocalVPNAvailable {
             setup.loopback = .proxy
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
@@ -727,6 +747,7 @@ final class AppModel {
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
                 if ok {
+                    self.clearLoopbackProblemIfNeeded()
                     self.automationRevision += 1
                     self.log.add("session-timing", String(format: "session_ready uptime=%.6f", ProcessInfo.processInfo.systemUptime))
                     self.automationStarted()
@@ -953,6 +974,7 @@ final class AppModel {
         if method == .proxy { tunnel.disconnect() }
         setup.loopback = method
         setup.proxyApp = nil
+        clearLoopbackProblemIfNeeded()
         loopback.check()
     }
 
@@ -1077,10 +1099,17 @@ final class AppModel {
             return
         }
         if setup.loopback == .none {
-            problem = "Choose and enable a local connection first (Setup)."
-            return
+            if loopback.isWorking {
+                setup.loopback = .proxy
+            } else {
+                problem = "Choose and enable a local connection first (Setup)."
+                return
+            }
         }
-        if setup.loopback == .builtIn, !tunnel.connected {
+        if builtInShouldYieldToExternal {
+            setup.loopback = .proxy
+        }
+        if setup.loopback == .builtIn, !tunnel.connected, !loopback.isWorking {
             guard reconnectLocal else {
                 problem = "The local connection is off. Turn Poki on to reconnect, or choose an external connection in Setup."
                 return
@@ -1689,6 +1718,28 @@ final class AppModel {
         if starts { launcher.restart() }
     }
 
+    static func isLoopbackProblem(_ text: String) -> Bool {
+        text.contains("local connection") || text.contains("local VPN")
+    }
+
+    func suppressesLoopbackProblem(_ text: String) -> Bool {
+        let isLoopbackOrTunnel = text == tunnelAttention || Self.isLoopbackProblem(text)
+        guard isLoopbackOrTunnel else { return false }
+        return loopback.isWorking || hasOpenInProcessSession || canStartTasks || mountedImageStandsIn
+    }
+
+    private func clearLoopbackProblemIfNeeded() {
+        if let tunnelAttention, problem == tunnelAttention {
+            problem = nil
+            self.tunnelAttention = nil
+            return
+        }
+        tunnelAttention = nil
+        if let problem, Self.isLoopbackProblem(problem) {
+            self.problem = nil
+        }
+    }
+
     private var hasStaleLoopbackFailure: Bool {
         if runner.state == "waiting_network" {
             return runner.code != "network" && runner.code != "ddi_timeout"
@@ -1705,9 +1756,12 @@ final class AppModel {
         // up before, or by Poki Setup) provides it. The external connection is the recorded choice, so
         // Setup's loopback step is done and Turn on does not ask to choose one (0.2.8 build 91: the step
         // never let the owner continue although the loopback was on).
-        if loopback.isWorking, setup.loopback == .none {
-            setup.loopback = .proxy
-            log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
+        if loopback.isWorking {
+            if setup.loopback == .none || builtInShouldYieldToExternal {
+                setup.loopback = .proxy
+                log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
+            }
+            clearLoopbackProblemIfNeeded()
         }
         if !loopback.isWorking, new != .checking {
             loopbackDropped = true
@@ -1788,6 +1842,7 @@ final class AppModel {
         switch status.state {
         case "running" where status.code == "local_ddi":
             servicesSilent = false
+            clearLoopbackProblemIfNeeded()
             // Only the mounted image was found: nothing reached the phone, so the pairing and the
             // setup steps stay as they were until the session opens (warmInProcess).
             log.add("runner", "the loopback did not answer; using the mounted developer disk image")
@@ -1796,6 +1851,7 @@ final class AppModel {
             if pairingTrouble != nil { log.add("pairing", "accepted again") }
             pairingTrouble = nil
             servicesSilent = false
+            clearLoopbackProblemIfNeeded()
             pairingVerifiedAt = Date()
             // The disk image mounted and the runner is starting, so Developer Mode is on; a running
             // runner means UI Automation is on too. Setup's confirm steps tick themselves (a pairing
@@ -1883,8 +1939,9 @@ final class AppModel {
                 }
             }
         case .relay(let status):
-            if status != relayStatus { log.add("relay", "\(status)") }
-            relayStatus = status
+            let effective: RelayStatus = relayEnabled ? status : .off
+            if effective != relayStatus { log.add("relay", "\(effective)") }
+            relayStatus = effective
         case .toolStarted(_, let summary, let session):
             // A step of an outside agent's own session (not the chat's): the owner is told when it is through.
             if let session, let client = SessionStore.shared.outsideClient(ofMCPSession: session) { outsideAgentsAtWork[session] = client }
