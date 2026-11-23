@@ -256,4 +256,14 @@ final class WhatsNewDecisionTests: XCTestCase {
         XCTAssertEqual(text.resolved(for: "zh-Hant"), "繁體中文")
         XCTAssertEqual(text.resolved(for: "zh-HK"), "繁體中文")
     }
+
+    func testSmarterLiveVoiceCopyMatchesStopCancellationBehavior() throws {
+        let item = try XCTUnwrap(WhatsNewCatalog.current.items.first { $0.id == "smarter-live-voice" })
+        XCTAssertFalse(item.summary.en.contains("mutes voice, not tasks"), item.summary.en)
+        XCTAssertTrue(item.summary.en.contains("cancels the current task"), item.summary.en)
+        XCTAssertFalse(item.summary.zhHans.contains("只静音不误停任务"), item.summary.zhHans)
+        XCTAssertTrue(item.summary.zhHans.contains("取消当前任务"), item.summary.zhHans)
+        XCTAssertFalse(item.summary.zhHant.contains("只靜音不誤停任務"), item.summary.zhHant)
+        XCTAssertTrue(item.summary.zhHant.contains("取消目前任務"), item.summary.zhHant)
+    }
 }

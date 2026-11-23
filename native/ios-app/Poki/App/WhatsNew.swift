@@ -74,9 +74,9 @@ enum WhatsNewCatalog {
                     zhHant: "即時語音全面升級"
                 ),
                 summary: WhatsNewText(
-                    en: "Hold to talk records instantly, updating naturally without extra completion cards. Chat replies directly, actions check latest screens, and \"stop\" mutes voice, not tasks.",
-                    zhHans: "按住即录不漏首句，播报更自然且不弹多余完成卡片。闲聊直接回，操作前核对最新画面，说「停」只静音不误停任务。",
-                    zhHant: "按住即錄不漏首句，播報更自然且不彈多餘完成卡片。閒聊直接回，操作前核對最新畫面，說「停」只靜音不誤停任務。"
+                    en: "Hold to talk records instantly, updating naturally without extra completion cards. Chat replies directly, actions check latest screens, saying \"stop\" cancels the current task, and asking to be quiet only pauses voice.",
+                    zhHans: "按住即录不漏首句，播报更自然且不弹多余完成卡片。闲聊直接回，操作前核对最新画面，说「停」可取消当前任务，说安静或静音则仅暂停播报。",
+                    zhHant: "按住即錄不漏首句，播報更自然且不彈多餘完成卡片。閒聊直接回，操作前核對最新畫面，說「停」可取消目前任務，說安靜或靜音則僅暫停播報。"
                 )
             ),
             WhatsNewItem(

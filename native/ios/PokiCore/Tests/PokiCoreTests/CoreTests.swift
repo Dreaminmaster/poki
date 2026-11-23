@@ -314,7 +314,7 @@ final class ToolTests: XCTestCase {
         host.state.value = .starting("mounting the developer disk image")
         let started = Date()
         let result = await core.call("do", ["actions": [["tap": [10, 10]]]])
-        XCTAssertTrue(result.text.contains("still starting"), result.text)
+        XCTAssertTrue(result.text.contains("when automation is ready"), result.text)
         XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
         XCTAssertTrue(wda.sent.isEmpty)
     }
