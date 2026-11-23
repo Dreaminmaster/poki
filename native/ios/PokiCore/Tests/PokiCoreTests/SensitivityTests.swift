@@ -172,14 +172,47 @@ final class SensitivityTests: XCTestCase {
         XCTAssertFalse(result.text.contains("approval_required"), result.text)
         XCTAssertNil(core.pendingApproval)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
+    }
 
-        // Even inside an Alert container, the oversized long CJK label must not trigger approval.
-        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil,
-                            frame: Rect(x: 0, y: 0, width: 402, height: 874), depth: 1, node: 2, end: 3)
-        let container = Element(type: "Other", label: ctripLabel, value: nil, identifier: nil,
-                                frame: Rect(x: 0, y: 0, width: 402, height: 874), depth: 2, node: 3, end: 3)
+    func testCJKShortLabelAndOversizedContainerGuardsActIndependently() {
+        let rules = SensitivityRules()
         let ctrip = Foreground(bundleID: "ctrip.wireless", name: "携程旅行")
-        XCTAssertNil(SensitivityRules().reason(touching: container, typing: false, app: ctrip, secureOnScreen: false, in: [alert, container]))
+
+        // Compact Other inside Alert passes isCompactDeleteTarget (44pt height, 18 chars <= 48, 1 token <= 6)
+        // and is not oversized, so only allowsCJKMatch (> 14 chars for lightActionTypes) suppresses approval.
+        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil,
+                            frame: Rect(x: 40, y: 300, width: 310, height: 180), depth: 1, node: 2, end: 3)
+        let overLimitCompactOther = Element(
+            type: "Other", label: "请在确认本次操作之前仔细核对清空内容", value: nil, identifier: nil,
+            frame: Rect(x: 56, y: 360, width: 278, height: 44), depth: 2, node: 3, end: 3
+        )
+        XCTAssertNil(rules.reason(touching: overLimitCompactOther, typing: false, app: ctrip, secureOnScreen: false, in: [alert, overLimitCompactOther]))
+
+        let shortCompactOther = Element(
+            type: "Other", label: "确认清空当前记录", value: nil, identifier: nil,
+            frame: Rect(x: 56, y: 360, width: 278, height: 44), depth: 2, node: 3, end: 3
+        )
+        XCTAssertEqual(
+            rules.reason(touching: shortCompactOther, typing: false, app: ctrip, secureOnScreen: false, in: [alert, shortCompactOther]),
+            "deleting (\"清空\")"
+        )
+
+        // Short <= 14-char CJK payment label passes allowsCJKMatch and bypasses isCompactDeleteTarget,
+        // so only !isOversizedContainer suppresses approval on the 402x300 container.
+        let oversizedShortPay = Element(
+            type: "Other", label: "微信支付优惠", value: nil, identifier: nil,
+            frame: Rect(x: 0, y: 0, width: 402, height: 300), depth: 1, node: 2, end: 2
+        )
+        XCTAssertNil(rules.reason(touching: oversizedShortPay, typing: false, app: ctrip, secureOnScreen: false, in: [oversizedShortPay]))
+
+        let compactShortPay = Element(
+            type: "Other", label: "微信支付优惠", value: nil, identifier: nil,
+            frame: Rect(x: 16, y: 200, width: 160, height: 44), depth: 1, node: 2, end: 2
+        )
+        XCTAssertEqual(
+            rules.reason(touching: compactShortPay, typing: false, app: ctrip, secureOnScreen: false, in: [compactShortPay]),
+            "a payment (\"支付\")"
+        )
     }
 
     func testVoiceClearTapProtectsCompactDeletesAndAllowsLongChineseContainers() async {
@@ -270,6 +303,41 @@ final class SensitivityTests: XCTestCase {
         XCTAssertFalse(inlineTap.text.contains("approval_required"), inlineTap.text)
         XCTAssertNil(inlineCore.pendingApproval)
         XCTAssertEqual(inlineWDA.bodies("POST /wda/tap").count, 1)
+
+        // A Group container on an ordinary page with loose prompt text, Cancel, and inline Delete is not a confirmation dialog.
+        let groupWDA = FakeWDA()
+        groupWDA.tree([
+            Node("NavigationBar", "编辑草稿", [0, 44, 402, 44]),
+            Node("Group", nil, [16, 200, 370, 140], [
+                Node("StaticText", "确定后可继续编辑草稿", [24, 208, 280, 28]),
+                Node("Button", "取消", [24, 256, 150, 44]),
+                Node("Button", "删除", [212, 256, 150, 44]),
+            ]),
+        ], app: "Notes")
+        let (groupCore, _, _) = makeCore(groupWDA) { $0.approvalWait = 0; $0.approvalMode = { .off } }
+        let groupLook = await groupCore.call("look", [:])
+        XCTAssertTrue(groupLook.text.contains("4 Button \"删除\""), groupLook.text)
+        let groupTap = await groupCore.call("do", ["actions": [["tap": 4]]])
+        XCTAssertFalse(groupTap.text.contains("approval_required"), groupTap.text)
+        XCTAssertNil(groupCore.pendingApproval)
+        XCTAssertEqual(groupWDA.bodies("POST /wda/tap").count, 1)
+
+        // A top-level Window itself must not act as a custom confirmation dialog container.
+        let compactWindowWDA = FakeWDA()
+        compactWindowWDA.tree([
+            Node("Window", nil, [0, 0, 390, 400], [
+                Node("StaticText", "确定后可继续编辑草稿", [24, 120, 280, 28]),
+                Node("Button", "取消", [24, 180, 150, 44]),
+                Node("Button", "删除", [212, 180, 150, 44]),
+            ]),
+        ], app: "Notes")
+        let (windowCore, _, _) = makeCore(compactWindowWDA) { $0.approvalWait = 0; $0.approvalMode = { .off } }
+        let windowLook = await windowCore.call("look", [:])
+        XCTAssertTrue(windowLook.text.contains("3 Button \"删除\""), windowLook.text)
+        let windowTap = await windowCore.call("do", ["actions": [["tap": 3]]])
+        XCTAssertFalse(windowTap.text.contains("approval_required"), windowTap.text)
+        XCTAssertNil(windowCore.pendingApproval)
+        XCTAssertEqual(compactWindowWDA.bodies("POST /wda/tap").count, 1)
     }
 
     func testDeleteInsideConfirmationDialogsRequiresApproval() async {
@@ -305,6 +373,30 @@ final class SensitivityTests: XCTestCase {
                     Node("StaticText", "删除这条记录？", [56, 320, 278, 44]),
                     Node("Button", "取消", [56, 420, 130, 44]),
                     Node("Button", "删除", [204, 420, 130, 44]),
+                ])],
+                3
+            ),
+            (
+                "Custom confirm box inside visible Window",
+                [Node("Window", nil, [0, 0, 390, 844], [
+                    Node("Other", nil, [40, 300, 310, 180], [
+                        Node("StaticText", "删除这条记录？", [56, 320, 278, 44]),
+                        Node("Button", "取消", [56, 420, 130, 44]),
+                        Node("Button", "删除", [204, 420, 130, 44]),
+                    ]),
+                ])],
+                3
+            ),
+            (
+                "Native Alert inside Window and Group",
+                [Node("Window", nil, [0, 0, 390, 844], [
+                    Node("Group", nil, [0, 0, 390, 844], [
+                        Node("Alert", nil, [40, 300, 310, 180], [
+                            Node("StaticText", "确定要删除吗？", [56, 320, 278, 44]),
+                            Node("Button", "取消", [56, 420, 130, 44]),
+                            Node("Button", "删除", [204, 420, 130, 44]),
+                        ]),
+                    ]),
                 ])],
                 3
             ),
