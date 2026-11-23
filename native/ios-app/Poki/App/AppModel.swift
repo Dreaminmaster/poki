@@ -817,6 +817,12 @@ final class AppModel {
         warmInProcess("Poki came to the front")
         openWhileInFront("Poki came to the front")
         closeBecausePokiOpened()
+        if let requestedAt = pendingLiveActivityReturnAt {
+            pendingLiveActivityReturnAt = nil
+            if Date().timeIntervalSince(requestedAt) < 5 {
+                returnToTargetAppFromLiveActivity()
+            }
+        }
         loopback.resume()
         // Swiped away, ended by iOS, or Poki turned on from the background (where iOS starts none):
         // the Live Activity comes back while Poki is on, so the next thing that needs the owner pops up.
@@ -873,6 +879,7 @@ final class AppModel {
     /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
+        pendingLiveActivityReturnAt = nil
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
@@ -1488,9 +1495,28 @@ final class AppModel {
     /// Task endings whose return to the app the task began in is still under way: that return needs
     /// the session, so Poki coming forward because of it does not close the session under it.
     private var endingTasks = 0
+    private var pendingLiveActivityReturnAt: Date?
+
+    private var canReturnFromLiveActivity: Bool {
+        sessionOn && !runnerPaused
+            && (automationPath != .inProcess || inProcessSession == .open)
+            && (chatTaskActive || !outsideAgentsAtWork.isEmpty)
+            && approvals.isEmpty && handoffText == nil
+            && !drivesDuoCompanion && activitySplitViewSession == nil
+    }
+
+    private func returnToTargetAppFromLiveActivity() {
+        guard canReturnFromLiveActivity else { return }
+        Task { [core, log] in
+            if let line = await core.bringBackTargetApp(why: "from the Live Activity") {
+                log.add("app", line)
+            }
+        }
+    }
 
     private func closeBecausePokiOpened() {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, !inProcessWarming,
+              !chatTaskActive, outsideAgentsAtWork.isEmpty, !voice.isOn,
               stepUnderWay == nil, approvals.isEmpty, !probeDriven, endingTasks == 0 else { return }
         log.add("runner", "Poki is in front: closing the automation session at once; the banner goes with it")
         closeInProcess("Poki in front", keepingSession: idleSessionPolicy == .pauseAutomation)
@@ -2489,6 +2515,15 @@ final class AppModel {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
+        case "activity":
+            guard canReturnFromLiveActivity else { return .continueRouting }
+            if inFront {
+                pendingLiveActivityReturnAt = nil
+                returnToTargetAppFromLiveActivity()
+            } else {
+                pendingLiveActivityReturnAt = Date()
+            }
+            return .ignored
         case "pairing":
             guard scanned || canAskAboutLink() else { return .ignored }
             if let text = item("data"), let data = Data(base64URL: text) {

@@ -166,6 +166,8 @@ struct ActivityFace: Hashable {
 enum ActivityLink {
     /// The chat that runs the agent (also approvals and handoffs, which the chat shows).
     static let chat = URL(string: "poki://chat")!
+    /// A tap on the Live Activity while a run, approval, hand-off or talk is active.
+    static let activity = URL(string: "poki://activity")!
     /// The Activity Log, where a problem's details are.
     static let log = URL(string: "poki://log")!
     static func setup(_ step: String? = nil) -> URL {
@@ -255,6 +257,7 @@ extension PokiState {
         face.endsTalk = voice != nil && (phase == .idle || phase == .working) && !stale
         face.talkGlow = voice != nil && !stale
         face.shieldsTaps = !stale && ([.working, .approval, .deciding, .handoff].contains(phase) || voice != nil)
+        if face.shieldsTaps, face.link == ActivityLink.chat { face.link = ActivityLink.activity }
         // A fresh event ("Started", "Denied") shows beside the app's name for a few seconds. An app
         // switch is the app's name itself, already there; so is a word the face already says (Done
         // over a finished run, Paired over Paired), which said twice read as a fault (ESP-954).

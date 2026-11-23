@@ -29,6 +29,7 @@ struct PokiLiveActivity: Widget {
                 // colour that goes with the card's gradient, and light or dark handed down to the card.
                 .modifier(CardTint())
                 .activitySystemActionForegroundColor(.white)
+                .modifier(TapShield(on: face.shieldsTaps))
                 .widgetURL(face.link)
         } dynamicIsland: { context in
             let face = context.face

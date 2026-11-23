@@ -67,7 +67,15 @@ final class Computer: @unchecked Sendable {
     /// A swipe or drag went out that no tree read has shown yet: `scroll_to` reads before it swipes
     /// again, so a target cannot pass between two reads (the gym's row 250, scrolled past unread).
     var swipeUnread = false
-    var lastForeground: Foreground?
+    var lastForeground: Foreground? {
+        didSet {
+            if let app = lastForeground, let bundle = app.bundleID, !bundle.isEmpty,
+               bundle != "com.apple.springboard", !config.isPoki(app) {
+                lastWorkingApp = app
+            }
+        }
+    }
+    var lastWorkingApp: Foreground?
     private var selectedPane: (side: String, identity: String, app: String, other: String, session: String?)?
     private let workspaceOwner = LockedBox<String?>(nil)
     var hasLocalWorkspace: Bool { workspaceOwner.value != nil }
@@ -827,7 +835,7 @@ final class Computer: @unchecked Sendable {
         let taskChanged = localTask != activeLocalTask
         guard beginsTask() || taskChanged else { return }
         clearTaskScreenshotCache()
-        if taskChanged { origin = nil }
+        if taskChanged { origin = nil; lastWorkingApp = nil }
         activeLocalTask = localTask
     }
 
@@ -882,6 +890,7 @@ final class Computer: @unchecked Sendable {
         }
         if selectedPane == nil { workspaceOwner.value = nil }
         origin = nil
+        lastWorkingApp = nil
         activeLocalTask = nil
         workspaceReads.removeAll()
         workspaceDrop = nil
@@ -1699,6 +1708,11 @@ final class Computer: @unchecked Sendable {
         } catch {
             return "note: Poki was in front \(why), and \(before?.describe ?? app) could not be brought back (\(error)). Launch it, or ask the owner."
         }
+    }
+
+    func bringBackTargetApp(why: String) async -> String? {
+        let target = lastForeground.flatMap { config.isPoki($0) ? nil : $0 } ?? lastWorkingApp
+        return await bringBack(from: target, why: why, check: true)
     }
 
     /// The actions, in order, each within its own action time (`actionCap` from when it starts; a
