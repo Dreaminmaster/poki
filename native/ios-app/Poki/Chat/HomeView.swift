@@ -172,11 +172,12 @@ struct PokiFlight: View {
                 .accessibilityHidden(true)
                 .overlay {
                     if home {
-                        PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization) {
+                        PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization,
+                                 anchor: .below(),
+                                 accessibilityLabel: "Poki, " + PokiStatusCopy.word(status),
+                                 accessibilityIdentifier: "home.poki") {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
-                        .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-                        .accessibilityIdentifier("home.poki")
                     } else if let openCustomization {
                         Button {
                             tap()

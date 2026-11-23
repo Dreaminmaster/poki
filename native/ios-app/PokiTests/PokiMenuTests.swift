@@ -62,15 +62,36 @@ final class PokiMenuTests: XCTestCase {
         XCTAssertNotNil(button.menu)
 
         let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil, actionProvider: nil)
+        let container = try XCTUnwrap(button.superview)
+        let bearFrameInWindow = container.convert(container.bounds, to: window)
+        let buttonFrameInWindow = button.convert(button.bounds, to: window)
         let attachmentInButton = button.menuAttachmentPoint(for: configuration)
         let attachmentInWindow = button.convert(attachmentInButton, to: window)
-        let bearFrameInWindow = button.convert(button.bounds, to: window)
 
+        XCTAssertEqual(buttonFrameInWindow.midX, bearFrameInWindow.midX, accuracy: 1.0)
+        XCTAssertGreaterThanOrEqual(
+            buttonFrameInWindow.minY,
+            bearFrameInWindow.maxY,
+            "Native menu trigger frame must sit at or below the bottom of the bear avatar so Liquid Glass menus never cover the bear's face."
+        )
         XCTAssertEqual(attachmentInWindow.x, bearFrameInWindow.midX, accuracy: 1.0)
+        XCTAssertGreaterThanOrEqual(
+            attachmentInButton.y,
+            button.bounds.maxY,
+            "Menu attachment point must stay at the button's bottom edge so iOS 27 opens the menu downward instead of flipping upward over the bear."
+        )
         XCTAssertGreaterThanOrEqual(
             attachmentInWindow.y,
             bearFrameInWindow.maxY,
             "Native menu attachment point must sit at or below the bottom of the bear avatar so the menu never covers the bear's face."
+        )
+        XCTAssertTrue(
+            container.hitTest(CGPoint(x: container.bounds.midX, y: container.bounds.midY), with: nil) === button,
+            "Tapping the bear avatar must route directly to the native menu button."
+        )
+        XCTAssertNil(
+            container.hitTest(CGPoint(x: container.bounds.midX, y: container.bounds.maxY + 12), with: nil),
+            "Taps below the bear avatar must pass through to the greeting and buttons underneath."
         )
     }
 
@@ -179,9 +200,13 @@ final class PokiMenuTests: XCTestCase {
             "Voice header must host a native UIButton menu trigger anchored below the avatar header."
         )
         let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil, actionProvider: nil)
+        let container = try XCTUnwrap(button.superview)
+        let headerFrameInWindow = container.convert(container.bounds, to: window)
+        let buttonFrameInWindow = button.convert(button.bounds, to: window)
         let attachmentInWindow = button.convert(button.menuAttachmentPoint(for: configuration), to: window)
-        let headerFrameInWindow = button.convert(button.bounds, to: window)
 
+        XCTAssertEqual(buttonFrameInWindow.midX, headerFrameInWindow.midX, accuracy: 1.0)
+        XCTAssertGreaterThanOrEqual(buttonFrameInWindow.minY, headerFrameInWindow.maxY)
         XCTAssertEqual(attachmentInWindow.x, headerFrameInWindow.midX, accuracy: 1.0)
         XCTAssertGreaterThanOrEqual(attachmentInWindow.y, headerFrameInWindow.maxY)
     }
