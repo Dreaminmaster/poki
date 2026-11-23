@@ -303,6 +303,16 @@ final class WhatsNewDecisionTests: XCTestCase {
             }
         }
 
+        let speed = try XCTUnwrap(catalog.items.first { $0.id == "faster-phone-actions" })
+        XCTAssertEqual(speed.title.en, "Faster Phone Actions")
+        XCTAssertEqual(speed.title.zhHans, "操作全面提速")
+        XCTAssertEqual(speed.title.zhHant, "操作全面提速")
+        XCTAssertFalse(speed.title.en.contains("50%"), speed.title.en)
+        XCTAssertFalse(speed.title.zhHans.contains("50%"), speed.title.zhHans)
+        XCTAssertFalse(speed.title.zhHant.contains("50%"), speed.title.zhHant)
+        XCTAssertFalse(speed.summary.en.contains("50%"), speed.summary.en)
+        XCTAssertTrue(speed.summary.en.contains("respond noticeably faster"), speed.summary.en)
+
         let richCards = try XCTUnwrap(catalog.items.first { $0.id == "rich-result-cards" })
         XCTAssertFalse(richCards.summary.en.contains("fixing fare"), richCards.summary.en)
         XCTAssertFalse(richCards.summary.zhHans.contains("修复 12306"), richCards.summary.zhHans)
