@@ -70,6 +70,44 @@ final class SessionArchiveTests: XCTestCase {
         }
     }
 
+    func testRetryDoesNotArchiveConversationsCreatedAfterFailedMigration() async throws {
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let failed = SessionStore(folder: folder, defaults: defaults,
+                                  archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        await failed.waitUntilLoaded()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        _ = try saveEarlier("new", lines: ["Created after upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" }, "A later conversation is not part of the upgrade migration")
+    }
+
+    func testExplicitUnarchiveAfterFailedMigrationSurvivesRetry() async throws {
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let failed = SessionStore(folder: folder, defaults: defaults,
+                                  archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        await failed.waitUntilLoaded()
+        failed.unarchive("old")
+        failed.flush()
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "old" })
+        XCTAssertFalse(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
+    func testUnreadableOldFileDoesNotAddLaterConversationToMigration() throws {
+        let oldFile = folder.appendingPathComponent("old.json")
+        try FileManager.default.createDirectory(at: oldFile, withIntermediateDirectories: false)
+        let first = launch()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        XCTAssertTrue(first.listed.isEmpty)
+        _ = try saveEarlier("new", lines: ["After upgrade"])
+        try FileManager.default.removeItem(at: oldFile)
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in
