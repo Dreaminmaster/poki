@@ -366,10 +366,12 @@ final class SessionStore {
                     loaded.reserveCapacity(slice.count)
                     for url in slice {
                         guard let data = try? Data(contentsOf: url) else { batchComplete = false; continue }
-                        if var session = try? decoder.decode(SavedSession.self, from: data) {
-                            if session.live { session.live = false; session.outcome = .stopped }
-                            loaded.append(session)
+                        guard var session = try? decoder.decode(SavedSession.self, from: data) else {
+                            batchComplete = false
+                            continue
                         }
+                        if session.live { session.live = false; session.outcome = .stopped }
+                        loaded.append(session)
                     }
                     return (loaded, batchComplete)
                 }.value
@@ -488,7 +490,8 @@ final class SessionStore {
         var loaded: [SavedSession] = []
         for url in files ?? [] {
             guard let data = try? Data(contentsOf: url) else { complete = false; continue }
-            if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
+            guard let session = try? decoder.decode(SavedSession.self, from: data) else { complete = false; continue }
+            loaded.append(session)
         }
         // Nothing is live after a relaunch.
         for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = .stopped }

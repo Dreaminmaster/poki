@@ -125,6 +125,17 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
     }
 
+    func testMalformedOldFileDoesNotCompleteMigrationOrArchiveLaterSession() throws {
+        try Data("{".utf8).write(to: folder.appendingPathComponent("old.json"))
+        _ = launch()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        _ = try saveEarlier("new", lines: ["After upgrade"])
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in
