@@ -126,11 +126,19 @@ def _curl_bytes(url: str) -> bytes:
     return proc.stdout
 
 
+def _nested_get(obj: Any, *keys: str) -> Any:
+    cur = obj
+    for key in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
 def fetch_icloud_record(shortcut_id: str) -> tuple[dict[str, Any], bytes]:
     api_url = f"https://www.icloud.com/shortcuts/api/records/{shortcut_id}"
     record = json.loads(_curl_bytes(api_url).decode("utf-8"))
-    fields = record.get("fields", {})
-    download_url = fields.get("shortcut", {}).get("value", {}).get("downloadURL")
+    download_url = _nested_get(record, "fields", "shortcut", "value", "downloadURL")
     if not download_url:
         raise RuntimeError(
             f"iCloud record {shortcut_id} is missing fields.shortcut.value.downloadURL"
@@ -143,6 +151,10 @@ def decode_shortcut_bytes(raw: bytes) -> tuple[dict[str, Any], str]:
         if len(raw) < 12:
             raise ValueError("Truncated AEA1 shortcut header")
         auth_len = struct.unpack("<I", raw[8:12])[0]
+        if 12 + auth_len > len(raw):
+            raise ValueError(
+                f"Truncated AEA1 auth header: need {12 + auth_len} bytes, got {len(raw)}"
+            )
         auth_data = raw[12 : 12 + auth_len]
         auth_pl = plistlib.loads(auth_data)
         chain = auth_pl.get("SigningCertificateChain") or []
@@ -219,15 +231,13 @@ def load_target(target: str) -> tuple[dict[str, Any], dict[str, Any]]:
     if shortcut_id and not Path(target).exists():
         record, raw = fetch_icloud_record(shortcut_id)
         workflow, fmt = decode_shortcut_bytes(raw)
-        name = record.get("fields", {}).get("name", {}).get("value")
+        name = _nested_get(record, "fields", "name", "value")
         return workflow, {
             "source": f"icloud:{shortcut_id}",
             "shortcut_id": shortcut_id,
             "name": name,
             "format": fmt,
-            "signing_status": record.get("fields", {})
-            .get("signingStatus", {})
-            .get("value"),
+            "signing_status": _nested_get(record, "fields", "signingStatus", "value"),
         }
 
     path = Path(target)
@@ -246,6 +256,8 @@ def validate_workflow(
     name: str | None = None,
     require_signed_format: str | None = None,
     actual_format: str | None = None,
+    require_signing_status: str | None = None,
+    actual_signing_status: str | None = None,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -257,6 +269,11 @@ def validate_workflow(
     if require_signed_format and actual_format != require_signed_format:
         errors.append(
             f"shortcut format is {actual_format!r}, expected {require_signed_format!r}"
+        )
+
+    if require_signing_status and actual_signing_status != require_signing_status:
+        errors.append(
+            f"iCloud signingStatus is {actual_signing_status!r}, expected {require_signing_status!r}"
         )
 
     actions = workflow.get("WFWorkflowActions")
@@ -468,11 +485,14 @@ def update_loopback_swift(swift_path: Path, shortcut_id: str) -> str:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     workflow, meta = load_target(args.target)
+    is_icloud = str(meta.get("source") or "").startswith("icloud:")
     errors = validate_workflow(
         workflow,
         name=meta.get("name"),
         require_signed_format="signed-aea1" if args.require_signed else None,
         actual_format=meta.get("format"),
+        require_signing_status="APPROVED" if is_icloud else None,
+        actual_signing_status=meta.get("signing_status"),
     )
     payload = {
         "ok": not errors,
@@ -507,7 +527,18 @@ def cmd_build(args: argparse.Namespace) -> int:
         actual_format=meta.get("format"),
     )
     if errors:
-        raise RuntimeError(f"Built artifact failed verification: {errors}")
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "summary": summarize(verified_workflow, meta),
+                    "errors": errors,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return 1
 
     print(
         json.dumps(
@@ -522,12 +553,22 @@ def cmd_build(args: argparse.Namespace) -> int:
 def cmd_update_app(args: argparse.Namespace) -> int:
     shortcut_id = extract_shortcut_id(args.target)
     if not shortcut_id:
-        raise SystemExit(f"Invalid iCloud shortcut ID or URL: {args.target!r}")
+        print(f"error: Invalid iCloud shortcut ID or URL: {args.target!r}", file=sys.stderr)
+        return 1
     if shortcut_id == LEGACY_SHORTCUT_ID:
-        raise SystemExit(f"Refusing to reuse legacy shortcut ID {LEGACY_SHORTCUT_ID}")
+        print(
+            f"error: Refusing to reuse legacy shortcut ID {LEGACY_SHORTCUT_ID}",
+            file=sys.stderr,
+        )
+        return 1
 
     workflow, meta = load_target(shortcut_id)
-    errors = validate_workflow(workflow, name=meta.get("name"))
+    errors = validate_workflow(
+        workflow,
+        name=meta.get("name"),
+        require_signing_status="APPROVED",
+        actual_signing_status=meta.get("signing_status"),
+    )
     if errors:
         print(
             json.dumps(
@@ -586,7 +627,11 @@ def main(argv: list[str] | None = None) -> int:
     p_update.set_defaults(func=cmd_update_app)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

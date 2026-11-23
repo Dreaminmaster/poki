@@ -1,14 +1,34 @@
 #!/usr/bin/env python3
 import copy
 import importlib.util
+import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT_PATH = Path(__file__).with_name("loopback-shortcut.py")
 SPEC = importlib.util.spec_from_file_location("loopback_shortcut", SCRIPT_PATH)
 MOD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MOD)
+
+LEGACY_ID = "cef403d76ef04d0586d03dd69476b96e"
+EXPECTED_LIVE_URL = (
+    "https://www.icloud.com/shortcuts/f8ff9cd906194fbf8a58ed51137f6c0a"
+)
+EXPECTED_NEUTRAL_WFVPN = {
+    "serverAddress": "",
+    "title": "VPN",
+    "appDescriptor": {
+        "BundleIdentifier": "",
+        "Name": "",
+        "TeamIdentifier": "",
+    },
+    "identifier": "00000000-0000-0000-0000-000000000000",
+    "connected": False,
+    "onDemandEnabled": False,
+}
 
 
 def make_legacy_workflow() -> dict:
@@ -126,6 +146,12 @@ def make_legacy_workflow() -> dict:
     }
 
 
+def wfvpn_question(workflow: dict) -> dict:
+    return [
+        q for q in workflow["WFWorkflowImportQuestions"] if q["ParameterKey"] == "WFVPN"
+    ][0]
+
+
 class LoopbackShortcutTests(unittest.TestCase):
     def test_legacy_workflow_fails_with_index_and_surge_errors(self):
         errors = MOD.validate_workflow(make_legacy_workflow(), name="Poki Loopback")
@@ -137,8 +163,7 @@ class LoopbackShortcutTests(unittest.TestCase):
 
     def test_missing_default_value_fails_to_prevent_ios27_share_crash(self):
         fixed = MOD.fix_workflow(make_legacy_workflow())
-        vpn_q = [q for q in fixed["WFWorkflowImportQuestions"] if q["ParameterKey"] == "WFVPN"][0]
-        vpn_q.pop("DefaultValue")
+        wfvpn_question(fixed).pop("DefaultValue")
         errors = MOD.validate_workflow(fixed, name="Poki Loopback")
         self.assertTrue(
             any("missing neutral DefaultValue placeholder" in e for e in errors),
@@ -149,32 +174,72 @@ class LoopbackShortcutTests(unittest.TestCase):
         fixed = MOD.fix_workflow(make_legacy_workflow())
         errors = MOD.validate_workflow(fixed, name="Poki Loopback")
         self.assertEqual(errors, [])
-        self.assertNotIn("WFVPN", fixed["WFWorkflowActions"][0]["WFWorkflowActionParameters"])
-        vpn_q = [q for q in fixed["WFWorkflowImportQuestions"] if q["ParameterKey"] == "WFVPN"][0]
+        self.assertNotIn(
+            "WFVPN", fixed["WFWorkflowActions"][0]["WFWorkflowActionParameters"]
+        )
+        vpn_q = wfvpn_question(fixed)
         self.assertEqual(vpn_q["ActionIndex"], 0)
-        self.assertEqual(vpn_q["DefaultValue"], MOD.NEUTRAL_WFVPN_PLACEHOLDER)
+        self.assertEqual(vpn_q["DefaultValue"], EXPECTED_NEUTRAL_WFVPN)
 
     def test_icloud_exported_neutral_placeholder_in_action0_is_accepted(self):
         exported = MOD.fix_workflow(make_legacy_workflow())
-        neutral_action0 = copy.deepcopy(MOD.NEUTRAL_WFVPN_PLACEHOLDER)
+        neutral_action0 = copy.deepcopy(EXPECTED_NEUTRAL_WFVPN)
         neutral_action0.pop("serverAddress")
-        exported["WFWorkflowActions"][0]["WFWorkflowActionParameters"]["WFVPN"] = neutral_action0
+        exported["WFWorkflowActions"][0]["WFWorkflowActionParameters"][
+            "WFVPN"
+        ] = neutral_action0
         self.assertEqual(MOD.validate_workflow(exported, name="Poki Loopback"), [])
 
         bad = copy.deepcopy(exported)
-        bad["WFWorkflowActions"][0]["WFWorkflowActionParameters"]["WFVPN"]["title"] = "Karing"
+        bad["WFWorkflowActions"][0]["WFWorkflowActionParameters"]["WFVPN"][
+            "title"
+        ] = "Karing"
         errors = MOD.validate_workflow(bad, name="Poki Loopback")
         self.assertTrue(any("hardcodes WFVPN" in e for e in errors), errors)
+
+    def test_icloud_signing_status_must_be_approved(self):
+        fixed = MOD.fix_workflow(make_legacy_workflow())
+        self.assertEqual(
+            MOD.validate_workflow(
+                fixed,
+                name="Poki Loopback",
+                require_signing_status="APPROVED",
+                actual_signing_status="APPROVED",
+            ),
+            [],
+        )
+        errors = MOD.validate_workflow(
+            fixed,
+            name="Poki Loopback",
+            require_signing_status="APPROVED",
+            actual_signing_status="PENDING",
+        )
+        self.assertTrue(
+            any("signingStatus is 'PENDING', expected 'APPROVED'" in e for e in errors),
+            errors,
+        )
+
+    def test_decode_rejects_truncated_aea1_auth_len_and_null_icloud_fields(self):
+        truncated = b"AEA1\x00\x00\x00\x00" + struct.pack("<I", 9999) + b"short"
+        with self.assertRaisesRegex(ValueError, "Truncated AEA1 auth header"):
+            MOD.decode_shortcut_bytes(truncated)
+
+        null_record = json.dumps({"fields": {"shortcut": None}}).encode("utf-8")
+        with mock.patch.object(MOD, "_curl_bytes", return_value=null_record):
+            with self.assertRaisesRegex(
+                RuntimeError, "missing fields.shortcut.value.downloadURL"
+            ):
+                MOD.fetch_icloud_record("0123456789abcdef0123456789abcdef")
 
     def test_update_loopback_swift_rejects_legacy_id_and_replaces_valid_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             swift = Path(tmp) / "LoopbackShortcut.swift"
             swift.write_text(
-                'private static let shortcut = URL(string: "https://www.icloud.com/shortcuts/cef403d76ef04d0586d03dd69476b96e")!\n',
+                f'private static let shortcut = URL(string: "https://www.icloud.com/shortcuts/{LEGACY_ID}")!\n',
                 encoding="utf-8",
             )
-            with self.assertRaises(ValueError):
-                MOD.update_loopback_swift(swift, MOD.LEGACY_SHORTCUT_ID)
+            with self.assertRaisesRegex(ValueError, "legacy"):
+                MOD.update_loopback_swift(swift, LEGACY_ID)
 
             new_id = "0123456789abcdef0123456789abcdef"
             updated_url = MOD.update_loopback_swift(
@@ -182,7 +247,7 @@ class LoopbackShortcutTests(unittest.TestCase):
             )
             self.assertEqual(updated_url, f"https://www.icloud.com/shortcuts/{new_id}")
             self.assertIn(updated_url, swift.read_text(encoding="utf-8"))
-            self.assertNotIn(MOD.LEGACY_SHORTCUT_ID, swift.read_text(encoding="utf-8"))
+            self.assertNotIn(LEGACY_ID, swift.read_text(encoding="utf-8"))
 
     def test_committed_signed_shortcut_and_app_url_pass_verification(self):
         self.assertTrue(
@@ -199,11 +264,8 @@ class LoopbackShortcutTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
         swift_text = MOD.DEFAULT_SWIFT.read_text(encoding="utf-8")
-        self.assertNotIn(MOD.LEGACY_SHORTCUT_ID, swift_text)
-        self.assertIn(
-            "https://www.icloud.com/shortcuts/f8ff9cd906194fbf8a58ed51137f6c0a",
-            swift_text,
-        )
+        self.assertNotIn(LEGACY_ID, swift_text)
+        self.assertIn(EXPECTED_LIVE_URL, swift_text)
 
 
 if __name__ == "__main__":
