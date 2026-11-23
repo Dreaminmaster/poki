@@ -29,7 +29,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **Reporting**
 - In a tester group, message an admin who is not part of the dispute.
-- On GitHub, open an issue whose title starts with "Conduct", and leave out personal details. For something that should stay private, ask a maintainer in an issue for a private channel first.
+- On GitHub, open an issue whose title starts with "Conduct", and leave out personal details. For something that should stay private, email [conduct@poki.bot](mailto:conduct@poki.bot).
 - Security vulnerabilities go to [GitHub private vulnerability reporting](https://github.com/JosssphZhou/poki/security/advisories/new). Conduct reports do not.
 
 <details>
@@ -60,7 +60,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **举报**
 - 在测试群里，私信一位不涉及争议的管理员。
-- 在 GitHub 上，开一个标题以 “Conduct” 开头的 issue，不要写个人信息。需要保密的情况，请先在 issue 里请维护者提供私下沟通的渠道。
+- 在 GitHub 上，开一个标题以 “Conduct” 开头的 issue，不要写个人信息。需要保密的情况，请发邮件到 [conduct@poki.bot](mailto:conduct@poki.bot)。
 - 安全漏洞请通过 [GitHub 私密漏洞报告](https://github.com/JosssphZhou/poki/security/advisories/new) 提交。行为举报不走这个渠道。
 
 </details>
@@ -93,7 +93,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **檢舉**
 - 在測試群組裡，私訊一位不涉及爭議的管理員。
-- 在 GitHub 上，開一個標題以 “Conduct” 開頭的 issue，不要寫個人資料。需要保密的情況，請先在 issue 裡請維護者提供私下溝通的管道。
+- 在 GitHub 上，開一個標題以 “Conduct” 開頭的 issue，不要寫個人資料。需要保密的情況，請寄信到 [conduct@poki.bot](mailto:conduct@poki.bot)。
 - 安全漏洞請透過 [GitHub 私密漏洞回報](https://github.com/JosssphZhou/poki/security/advisories/new) 提交。行為檢舉不走這個管道。
 
 </details>
@@ -126,7 +126,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **報告の方法**
 - テスターグループでは、争いに関わっていない管理者に個別に連絡してください。
-- GitHub では、タイトルが “Conduct” で始まる issue を作り、個人情報は書かないでください。非公開にすべき内容は、まず issue でメンテナーに非公開の連絡手段を尋ねてください。
+- GitHub では、タイトルが “Conduct” で始まる issue を作り、個人情報は書かないでください。非公開にすべき内容は [conduct@poki.bot](mailto:conduct@poki.bot) へメールしてください。
 - セキュリティの脆弱性は [GitHub のプライベート脆弱性報告](https://github.com/JosssphZhou/poki/security/advisories/new) へ。行動に関する報告はそちらではありません。
 
 </details>
@@ -159,7 +159,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **신고 방법**
 - 테스터 그룹에서는 분쟁에 관여하지 않은 관리자에게 개인 메시지를 보내 주세요.
-- GitHub에서는 제목이 “Conduct”로 시작하는 이슈를 열고 개인정보는 적지 마세요. 비공개로 다뤄야 할 내용이라면 먼저 이슈에서 메인테이너에게 비공개 연락 방법을 요청해 주세요.
+- GitHub에서는 제목이 “Conduct”로 시작하는 이슈를 열고 개인정보는 적지 마세요. 비공개로 다뤄야 할 내용이라면 [conduct@poki.bot](mailto:conduct@poki.bot)로 이메일을 보내 주세요.
 - 보안 취약점은 [GitHub 비공개 취약점 보고](https://github.com/JosssphZhou/poki/security/advisories/new)로 보내 주세요. 행동 신고는 그곳으로 보내지 않습니다.
 
 </details>
@@ -192,7 +192,7 @@ This code applies to the Poki repository and to the Poki tester groups (WeChat, 
 
 **Cómo informar**
 - En un grupo de pruebas, escribe en privado a un administrador que no forme parte de la disputa.
-- En GitHub, abre un issue cuyo título empiece por “Conduct”, sin datos personales. Si debe tratarse en privado, pide primero en un issue a un mantenedor un canal privado.
+- En GitHub, abre un issue cuyo título empiece por “Conduct”, sin datos personales. Si debe tratarse en privado, escribe a [conduct@poki.bot](mailto:conduct@poki.bot).
 - Las vulnerabilidades de seguridad van al [informe privado de vulnerabilidades de GitHub](https://github.com/JosssphZhou/poki/security/advisories/new). Los informes de conducta no.
 
 </details>
@@ -245,7 +245,7 @@ We agree to restrict the following behaviors in our community. Instances, threat
 
 Tensions can occur between community members even when they are trying their best to collaborate. Not every conflict represents a code of conduct violation, and this Code of Conduct reinforces encouraged behaviors and norms that can help avoid conflicts and minimize harm.
 
-When an incident does occur, it is important to report it promptly. To report a possible violation, see Reporting in the [Poki community rules](#poki-community-rules) above. Maintainers will keep the reporter's identity confidential.
+When an incident does occur, it is important to report it promptly. To report a possible violation, see Reporting in the [Poki community rules](#poki-community-rules) above, or email [conduct@poki.bot](mailto:conduct@poki.bot). Maintainers will keep the reporter's identity confidential.
 
 Community Moderators take reports of violations seriously and will make every effort to respond in a timely manner. They will investigate all reports of code of conduct violations, reviewing messages, logs, and recordings, or interviewing witnesses and other participants. Community Moderators will keep investigation and enforcement actions as transparent as possible while prioritizing safety and confidentiality. In order to honor these values, enforcement actions are carried out in private with the involved parties, but communicating to the whole community may be part of a mutually agreed upon resolution.
 
