@@ -10,16 +10,30 @@ final class CodexKeychainMigrationTests: XCTestCase {
     private var createdServices: [String] = []
     private var createdDirectories: [URL] = []
 
-    override func tearDown() {
+    override func tearDownWithError() throws {
+        var firstError: Error?
         for service in createdServices {
-            deleteAllItems(in: service)
+            do {
+                try deleteAllItems(in: service)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
         }
         createdServices.removeAll()
         for dir in createdDirectories {
-            try? FileManager.default.removeItem(at: dir)
+            do {
+                if FileManager.default.fileExists(atPath: dir.path(percentEncoded: false)) {
+                    try FileManager.default.removeItem(at: dir)
+                }
+            } catch {
+                if firstError == nil { firstError = error }
+            }
         }
         createdDirectories.removeAll()
-        super.tearDown()
+        try super.tearDownWithError()
+        if let firstError {
+            throw firstError
+        }
     }
 
     func testPrepareStorageMigratesLegacyContainerCredentialAndRemovesOldKey() throws {
@@ -280,6 +294,159 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertEqual(try Keychain.read("cli|1000000000000002", service: service), missingRefreshNewer)
         XCTAssertEqual(try Keychain.read("cli|1000000000000003", service: service), invalidIDTokenNewer)
         XCTAssertEqual(try Keychain.read("cli|1000000000000004", service: service), nonObjectIDTokenPayload)
+    }
+
+    func testPrepareStorageRejectsMalformedLastRefreshAndInvalidIdClaimsAndRecoversValidLegacy() throws {
+        // 1) Legacy entries with malformed last_refresh or invalid Rust IdClaims field types
+        // must be rejected without deletion, while a valid older legacy record is recovered.
+        let serviceA = makeTestService()
+        defer { assertServiceCleanedUp(serviceA) }
+        let homeA = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: homeA, withIntermediateDirectories: true)
+        let currentA = try expectedAccountKey(for: homeA)
+
+        let validOlder = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_000_000_000, subject: "valid-older-m1"),
+            refreshToken: "ref-valid-older-m1",
+            idToken: makeCustomJWT(payload: [
+                "sub": "user-valid",
+                "email": "valid@example.com",
+                "https://api.openai.com/profile": ["email": "profile@example.com"],
+                "https://api.openai.com/auth": [
+                    "chatgpt_plan_type": "plus",
+                    "chatgpt_user_id": "user-1",
+                    "chatgpt_account_id": "acct-1",
+                    "chatgpt_account_is_fedramp": false
+                ]
+            ]),
+            lastRefresh: "2026-11-20T08:00:00Z"
+        )
+        let malformedLastRefresh = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-date"),
+            lastRefresh: "not-a-valid-rfc3339-date"
+        )
+        let trailingGarbageLastRefresh = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "trailing-date"),
+            lastRefresh: "2026-11-24T10:00:00Z trailing"
+        )
+        let badEmailClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-email"),
+            idToken: makeCustomJWT(payload: ["email": 123]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let badProfileClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-profile"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/profile": ["email": 456]]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let nonObjectAuthClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-auth-obj"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/auth": "not-an-object"]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let badPlanTypeClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-plan-type"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/auth": ["chatgpt_plan_type": 99]]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let badAccountIdClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-account-id"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/auth": ["chatgpt_account_id": 42]]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let badFedrampTypeClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "bad-fedramp-type"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/auth": ["chatgpt_account_is_fedramp": "yes"]]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+        let nullFedrampClaim = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_900_000_000, subject: "null-fedramp"),
+            idToken: makeCustomJWT(payload: ["https://api.openai.com/auth": ["chatgpt_account_is_fedramp": NSNull()]]),
+            lastRefresh: "2026-11-24T10:00:00Z"
+        )
+
+        let invalidLegacy: [(String, Data)] = [
+            ("cli|6000000000000002", malformedLastRefresh),
+            ("cli|6000000000000003", trailingGarbageLastRefresh),
+            ("cli|6000000000000004", badEmailClaim),
+            ("cli|6000000000000005", badProfileClaim),
+            ("cli|6000000000000006", nonObjectAuthClaim),
+            ("cli|6000000000000007", badPlanTypeClaim),
+            ("cli|6000000000000008", badAccountIdClaim),
+            ("cli|6000000000000009", badFedrampTypeClaim),
+            ("cli|600000000000000a", nullFedrampClaim),
+        ]
+        try addRawKeychainItem(service: serviceA, account: "cli|6000000000000001", data: validOlder, accessible: kSecAttrAccessibleWhenUnlocked)
+        for (account, data) in invalidLegacy {
+            try addRawKeychainItem(service: serviceA, account: account, data: data, accessible: kSecAttrAccessibleWhenUnlocked)
+        }
+
+        XCTAssertEqual(CodexAccount.prepareStorage(service: serviceA, home: homeA), .migrated)
+        XCTAssertEqual(try Keychain.read(currentA, service: serviceA), validOlder)
+        XCTAssertNil(try Keychain.read("cli|6000000000000001", service: serviceA))
+        for (account, expectedData) in invalidLegacy {
+            XCTAssertEqual(
+                try Keychain.read(account, service: serviceA),
+                expectedData,
+                "Invalid legacy entry \(account) must not be selected or deleted"
+            )
+        }
+
+        // 2) Current key failing strict last_refresh or IdClaims validation must NOT be treated as .ready
+        // and must fall back to recovering a valid legacy record.
+        for (label, badCurrent) in [
+            ("malformed last_refresh", malformedLastRefresh),
+            ("invalid IdClaims email", badEmailClaim),
+            ("null chatgpt_account_is_fedramp", nullFedrampClaim),
+        ] {
+            let serviceB = makeTestService()
+            defer { assertServiceCleanedUp(serviceB) }
+            let homeB = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+            try FileManager.default.createDirectory(at: homeB, withIntermediateDirectories: true)
+            let currentB = try expectedAccountKey(for: homeB)
+
+            try addRawKeychainItem(service: serviceB, account: currentB, data: badCurrent, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+            try addRawKeychainItem(service: serviceB, account: "cli|7000000000000001", data: validOlder, accessible: kSecAttrAccessibleWhenUnlocked)
+
+            XCTAssertEqual(
+                CodexAccount.prepareStorage(service: serviceB, home: homeB),
+                .migrated,
+                "Current key with \(label) must not be accepted as .ready"
+            )
+            XCTAssertEqual(try Keychain.read(currentB, service: serviceB), validOlder, "Expected legacy recovery for \(label)")
+            XCTAssertNil(try Keychain.read("cli|7000000000000001", service: serviceB))
+        }
+
+        // 3) Explicit null last_refresh, fractional nanosecond RFC 3339, and unknown PlanType strings remain valid.
+        let serviceC = makeTestService()
+        defer { assertServiceCleanedUp(serviceC) }
+        let homeC = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: homeC, withIntermediateDirectories: true)
+        let currentC = try expectedAccountKey(for: homeC)
+
+        let nullLastRefreshData = try JSONSerialization.data(withJSONObject: [
+            "auth_mode": "chatgpt",
+            "last_refresh": NSNull(),
+            "tokens": [
+                "access_token": makeJWT(exp: 4_100_000_000, subject: "null-refresh"),
+                "refresh_token": "ref-null-refresh",
+                "id_token": makeCustomJWT(payload: [
+                    "https://api.openai.com/auth": [
+                        "chatgpt_plan_type": "future_custom_plan",
+                        "user_id": "legacy-user-id"
+                    ]
+                ])
+            ]
+        ])
+        try addRawKeychainItem(service: serviceC, account: currentC, data: nullLastRefreshData, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+        XCTAssertEqual(CodexAccount.prepareStorage(service: serviceC, home: homeC), .ready)
+
+        let nanoLastRefreshData = try makeCredentialData(
+            accessToken: makeJWT(exp: 4_100_000_000, subject: "nano-refresh"),
+            lastRefresh: "2026-11-23T10:00:00.123456789Z"
+        )
+        try Keychain.write(nanoLastRefreshData, account: currentC, service: serviceC)
+        XCTAssertEqual(CodexAccount.prepareStorage(service: serviceC, home: homeC), .ready)
     }
 
     func testPrepareStorageScansLegacyWhenCurrentKeyIsIncomplete() throws {
@@ -669,28 +836,28 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertNil(try Keychain.read("cli|4000000000000001", service: service))
     }
 
-    func testSignOutIncludingVoiceClearsKeychainBeforeRuntimeLogoutAndLeavesEmptyState() async throws {
-        let savedChatGPTKey = ModelKeys.key(.chatgpt)
-        defer {
-            if let savedChatGPTKey { try? ModelKeys.save(savedChatGPTKey, for: .chatgpt) }
-            else { ModelKeys.remove(.chatgpt) }
-        }
+    func testSignOutIncludingVoicePreservesCurrentKeyForRemoteRevokeGatesMigrationAndClearsAllCredentials() async throws {
         let service = makeTestService()
         defer { assertServiceCleanedUp(service) }
         let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let current = try expectedAccountKey(for: home)
+        let legacyAccount = "cli|5000000000000001"
 
         let currentData = try makeCredentialData(accessToken: "tok-active-signout", lastRefresh: "2026-11-23T11:00:00Z")
         let legacyData = try makeCredentialData(accessToken: "tok-legacy-signout", lastRefresh: "2026-11-20T11:00:00Z")
         try addRawKeychainItem(service: service, account: current, data: currentData, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
-        try addRawKeychainItem(service: service, account: "cli|5000000000000001", data: legacyData, accessible: kSecAttrAccessibleWhenUnlocked)
+        try addRawKeychainItem(service: service, account: legacyAccount, data: legacyData, accessible: kSecAttrAccessibleWhenUnlocked)
 
         var emit: (@MainActor (String) -> Void)?
-        var runtimeHasAccount = true
-        var logoutObservedEmptyKeychain = false
-        var logoutObservedGateBlockingMigration = false
-        var logoutCallCount = 0
+        var sentMethods: [String] = []
+        var logoutObservedCurrentBeforeDelete: Data?
+        var logoutObservedLegacyBeforeDelete: Data?
+        var gatePrepareState: CodexAccount.StorageState?
+        var gateReadToken: String?
+        var currentAfterGatedProbe: Data?
+        var legacyAfterGatedProbe: Data?
+        var logoutHookError: Error?
         func push(_ payload: [String: Any]) {
             guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
             let text = String(decoding: bytes, as: UTF8.self)
@@ -706,19 +873,24 @@ final class CodexKeychainMigrationTests: XCTestCase {
                 guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
                       let method = object["method"] as? String,
                       let id = object["id"] else { return false }
+                sentMethods.append(method)
                 switch method {
                 case "account/read":
-                    push(["id": id, "result": runtimeHasAccount ? ["account": ["type": "chatgpt"]] : [:]])
+                    push(["id": id, "result": ["account": ["type": "chatgpt"]]])
                 case "thread/start":
                     push(["id": id, "result": ["thread": ["id": "signout-thread"]]])
                 case "account/logout":
-                    logoutCallCount += 1
-                    let remainingCLI = ((try? Keychain.readAll(service: service)) ?? [])
-                        .filter { $0.account.hasPrefix("cli|") }
-                    logoutObservedEmptyKeychain = remainingCLI.isEmpty
-                    // Concurrent prepareStorage during logout must stay gated and never revive credentials.
-                    logoutObservedGateBlockingMigration = (CodexAccount.prepareStorage(service: service, home: home) == .empty)
-                    runtimeHasAccount = false
+                    do {
+                        logoutObservedCurrentBeforeDelete = try Keychain.read(current, service: service)
+                        logoutObservedLegacyBeforeDelete = try Keychain.read(legacyAccount, service: service)
+                        try Keychain.remove(current, service: service)
+                        gatePrepareState = CodexAccount.prepareStorage(service: service, home: home)
+                        gateReadToken = CodexAccount.readAccessToken(service: service, home: home)
+                        currentAfterGatedProbe = try Keychain.read(current, service: service)
+                        legacyAfterGatedProbe = try Keychain.read(legacyAccount, service: service)
+                    } catch {
+                        logoutHookError = error
+                    }
                     push(["id": id, "result": [:]])
                 default:
                     push(["id": id, "result": [:]])
@@ -729,14 +901,24 @@ final class CodexKeychainMigrationTests: XCTestCase {
         )
         defer { voice.stop() }
 
-        // Put runtime into running == true before signing out.
         try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
         try await ChatGPTAccount.signOutIncludingVoice(voice: voice, service: service)
 
-        XCTAssertEqual(logoutCallCount, 1, "account/logout must run when the voice runtime is active")
-        XCTAssertTrue(logoutObservedEmptyKeychain, "Keychain must be cleared before Rust account/logout runs")
-        XCTAssertTrue(logoutObservedGateBlockingMigration, "Sign-out gate must stay active during account/logout")
-        XCTAssertFalse(runtimeHasAccount, "Runtime account cache must be cleared after sign-out")
+        XCTAssertNil(logoutHookError, "Unexpected Keychain error inside account/logout hook: \(String(describing: logoutHookError))")
+        XCTAssertEqual(sentMethods, ["account/read", "thread/start", "thread/realtime/stop", "account/logout"])
+        XCTAssertEqual(
+            logoutObservedCurrentBeforeDelete,
+            currentData,
+            "Current cli|<current> credential must remain intact when account/logout starts so Rust can revoke tokens remotely"
+        )
+        XCTAssertEqual(logoutObservedLegacyBeforeDelete, legacyData)
+        XCTAssertEqual(gatePrepareState, .empty, "Sign-out gate must suppress migration during account/logout")
+        XCTAssertNil(gateReadToken, "Sign-out gate must block readAccessToken during account/logout")
+        XCTAssertNil(currentAfterGatedProbe, "Sign-out gate must prevent migrating cli|<old> back into cli|<current>")
+        XCTAssertEqual(legacyAfterGatedProbe, legacyData, "Gated probe must not modify or remove cli|<old>")
+
+        XCTAssertNil(try Keychain.read(current, service: service))
+        XCTAssertNil(try Keychain.read(legacyAccount, service: service))
         let remainingAfterSignOut = try Keychain.readAll(service: service).filter { $0.account.hasPrefix("cli|") }
         XCTAssertTrue(remainingAfterSignOut.isEmpty)
         XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .empty)
@@ -752,9 +934,13 @@ final class CodexKeychainMigrationTests: XCTestCase {
     }
 
     private func assertServiceCleanedUp(_ service: String, file: StaticString = #filePath, line: UInt = #line) {
-        deleteAllItems(in: service)
-        let remaining = (try? Keychain.readAll(service: service)) ?? []
-        XCTAssertTrue(remaining.isEmpty, "Expected Keychain service \(service) to be clean", file: file, line: line)
+        do {
+            try deleteAllItems(in: service)
+            let remaining = try Keychain.readAll(service: service)
+            XCTAssertTrue(remaining.isEmpty, "Expected Keychain service \(service) to be clean", file: file, line: line)
+        } catch {
+            XCTFail("Failed to clean up Keychain service \(service): \(error)", file: file, line: line)
+        }
     }
 
     private func makeTempDirectory() throws -> URL {
@@ -794,9 +980,14 @@ final class CodexKeychainMigrationTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: json)
     }
 
-    private func makeJWT(exp: Int, subject: String) throws -> String {
+    private func makeCustomJWT(payload: [String: Any]) throws -> String {
         let header = Data(#"{"alg":"RS256","typ":"JWT"}"#.utf8)
-        let payload = try JSONSerialization.data(withJSONObject: [
+        let payloadData = try JSONSerialization.data(withJSONObject: payload)
+        return "\(base64URL(header)).\(base64URL(payloadData)).sig"
+    }
+
+    private func makeJWT(exp: Int, subject: String) throws -> String {
+        try makeCustomJWT(payload: [
             "exp": exp,
             "sub": subject,
             "https://api.openai.com/auth": [
@@ -804,7 +995,6 @@ final class CodexKeychainMigrationTests: XCTestCase {
                 "chatgpt_user_id": "user-fixture"
             ]
         ])
-        return "\(base64URL(header)).\(base64URL(payload)).sig"
     }
 
     private func base64URL(_ data: Data) -> String {
@@ -831,11 +1021,18 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertEqual(status, errSecSuccess, "SecItemAdd failed with OSStatus \(status)")
     }
 
-    private func deleteAllItems(in service: String) {
+    private func deleteAllItems(in service: String) throws {
+        let items = try Keychain.readAll(service: service)
+        for item in items {
+            try Keychain.remove(item.account, service: service)
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
     }
 }

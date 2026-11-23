@@ -1353,11 +1353,23 @@ mod tests {
                 }
             }
 
+            fn assert_rpc_ok(reply: &Value, context: &str) {
+                assert!(
+                    reply.get("result").is_some(),
+                    "expected {context} response to include result, got {reply}"
+                );
+                assert!(
+                    reply.get("error").is_none(),
+                    "expected {context} response to have no error, got {reply}"
+                );
+            }
+
             req_tx
                 .send(json!({"id": 1, "method": "account/read", "params": {"refreshToken": false}}))
                 .await
                 .expect("send initial account/read");
             let initial = wait_for_id(&mut out_rx, 1).await;
+            assert_rpc_ok(&initial, "initial account/read");
             assert!(
                 initial.pointer("/result/account").is_none_or(Value::is_null),
                 "expected empty initial account, got {initial}"
@@ -1387,6 +1399,7 @@ mod tests {
                 .await
                 .expect("send refresh account/read");
             let after_refresh_only = wait_for_id(&mut out_rx, 2).await;
+            assert_rpc_ok(&after_refresh_only, "refreshToken:true account/read");
             assert!(
                 after_refresh_only
                     .pointer("/result/account")
@@ -1399,16 +1412,14 @@ mod tests {
                 .await
                 .expect("send poki/account/reload");
             let reload_reply = wait_for_id(&mut out_rx, 3).await;
-            assert!(
-                reload_reply.get("result").is_some(),
-                "expected poki/account/reload ok, got {reload_reply}"
-            );
+            assert_rpc_ok(&reload_reply, "poki/account/reload");
 
             req_tx
                 .send(json!({"id": 4, "method": "account/read", "params": {"refreshToken": false}}))
                 .await
                 .expect("send reloaded account/read");
             let reloaded = wait_for_id(&mut out_rx, 4).await;
+            assert_rpc_ok(&reloaded, "reloaded account/read");
             assert_eq!(
                 reloaded.pointer("/result/account/type").and_then(Value::as_str),
                 Some("chatgpt"),
