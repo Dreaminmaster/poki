@@ -152,6 +152,7 @@ enum VoiceError: LocalizedError {
     case bridge(Int, String?)
     case realtime(Int, String)
     case noBridge
+    case appAudioNeedsKeyOrBridge
     case timeout(String)
     /// The connection was set up but no network path to OpenAI opened (the ICE state at the end).
     case noPath(String)
@@ -165,6 +166,7 @@ enum VoiceError: LocalizedError {
         case .bridge(let code, let reason): "The voice bridge answered \(code): \(reason ?? "no reason given")"
         case .realtime(let code, let reason): "OpenAI answered \(code): \(reason)"
         case .noBridge: "Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac."
+        case .appAudioNeedsKeyOrBridge: "Ask about App Audio isn't available with ChatGPT sign-in alone. Add an API key or voice bridge, or stop listening to app audio to keep using ChatGPT voice."
         case .timeout(let what): "\(what) took too long."
         case .noPath: "The voice connection could not reach OpenAI over this network. Check Wi-Fi or cellular, or a VPN or proxy app that blocks calls, then try again."
         case .noWebRTC: "WebRTC could not start"
@@ -180,6 +182,7 @@ enum VoiceError: LocalizedError {
             AppLocalization.text(LocalizedStringResource("The voice bridge answered \(code): \(reason ?? AppLocalization.text(LocalizedStringResource("no reason given")))"))
         case .realtime(let code, let reason): AppLocalization.text(LocalizedStringResource("OpenAI answered \(code): \(reason)"))
         case .noBridge: AppLocalization.text(LocalizedStringResource("Set up Poki's model first (an OpenAI key talks fastest), or enter a voice bridge address from your Mac."))
+        case .appAudioNeedsKeyOrBridge: AppLocalization.text(LocalizedStringResource("Ask about App Audio isn't available with ChatGPT sign-in alone. Add an API key or voice bridge, or stop listening to app audio to keep using ChatGPT voice."))
         case .timeout(let what): AppLocalization.text(LocalizedStringResource("\(what) took too long."))
         case .noPath: AppLocalization.text(LocalizedStringResource("The voice connection could not reach OpenAI over this network. Check Wi-Fi or cellular, or a VPN or proxy app that blocks calls, then try again."))
         case .noWebRTC: AppLocalization.text(LocalizedStringResource("WebRTC could not start"))
@@ -706,11 +709,15 @@ final class VoiceModel {
         appAudio = context
         let account = VoiceDirect.account
         let key = VoiceDirect.apiKey(for: account)
-        let subscription = usesChatGPTSubscription && microphone && !rehearsing
+        let wantsSubscription = usesChatGPTSubscription && microphone && !rehearsing
+        let subscription = wantsSubscription && appAudio == nil
         if !subscription, key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone, appAudio == nil {
                 await startDictation()
-            } else { phase = .lost(VoiceError.noBridge.words) }
+            } else {
+                appAudio = nil
+                phase = .lost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words)
+            }
             return
         }
         let bridge = self.bridge
@@ -724,10 +731,14 @@ final class VoiceModel {
                     guard let self, number == session, VoiceDirect.localTools.contains(name) else {
                         return ("This voice session has ended or cannot run that tool.", true, nil)
                     }
+                    guard appAudio == nil else {
+                        log.add("voice", "tool refused during media questions")
+                        return (Self.mediaToolRefusal, true, nil)
+                    }
                     guard Self.phoneTools.contains(name) else {
                         return (Self.localTool(name), false, nil)
                     }
-                    return await phoneTool(name, arguments, nil)
+                    return await runPhoneTool(name, arguments: arguments, cancellation: nil)
                 })
                 return VoiceBridge.Token(value: nil, model: CodexVoice.model, local_tools: [], live: true)
             }
@@ -1906,7 +1917,7 @@ final class VoiceModel {
             var output: String
             var screen: Data?
             if local, Self.phoneTools.contains(call.name) {
-                let answer = await phoneTool(call.name, call.arguments, operation)
+                let answer = await runPhoneTool(call.name, arguments: call.arguments, cancellation: operation)
                 output = answer.text.count > 6000 ? String(answer.text.prefix(6000)) + "…" : answer.text
                 screen = answer.screen
                 if answer.failed { state = .failed }
@@ -2020,10 +2031,20 @@ final class VoiceModel {
         }
     }
 
+    private static let mediaToolRefusal = "This is a media question. Phone tools are unavailable. Answer the user's question from the media excerpt."
+
+    private func runPhoneTool(_ name: String, arguments: String, cancellation: PhoneOperationCancellation?) async -> PhoneAnswer {
+        guard appAudio == nil else {
+            log.add("voice", "tool refused during media questions")
+            return (Self.mediaToolRefusal, true, nil)
+        }
+        return await phoneTool(name, arguments, cancellation)
+    }
+
     private func refuseMediaTool(_ call: VoiceCall) {
         log.add("voice", "tool refused during media questions")
         let item: [String: Any] = ["type": "function_call_output", "call_id": call.id,
-                                  "output": "This is a media question. Phone tools are unavailable. Answer the user's question from the media excerpt."]
+                                  "output": Self.mediaToolRefusal]
         let event = usesLive ? "response.item.create" : "conversation.item.create"
         if link?.send(["type": event, "item": item]) == true, !usesLive {
             wantsResponse = true

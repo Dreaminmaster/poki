@@ -14127,6 +14127,22 @@
         }
       }
     },
+    "Ask about App Audio isn't available with ChatGPT sign-in alone. Add an API key or voice bridge, or stop listening to app audio to keep using ChatGPT voice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅使用 ChatGPT 登录时暂不支持「边看边问」。请添加 API 密钥或语音桥接，或停止听取 App 声音以继续使用 ChatGPT 语音。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅使用 ChatGPT 登入時暫不支援「邊看邊問」。請新增 API 金鑰或語音橋接，或停止聽取 App 聲音以繼續使用 ChatGPT 語音。"
+          }
+        }
+      }
+    },
     "Sign in to ChatGPT again to start a voice conversation." : {
       "localizations" : {
         "zh-Hans" : {

@@ -1815,8 +1815,18 @@ final class Computer: @unchecked Sendable {
                 }
                 did.append("\(action.serialized()) (\(delivery.rawValue), \(Int(((now() - began) * 1000).rounded())) ms)")
                 // Nothing after a failed action is sent.
-                let head = "action \(index + 1) \(delivery == .unknown ? "may have been delivered" : "was not sent"): \(why)"
-                let tail = i + 1 < actions.count ? "; the actions after it were not sent" : ""
+                let refusedLaunch = action["launch"] != nil && delivery == .notSent
+                let outcome: String
+                switch delivery {
+                case .unknown: outcome = "may have been delivered"
+                case .sent: outcome = "stopped after sending input"
+                case .notSent: outcome = refusedLaunch ? "was refused" : "was not sent"
+                }
+                let head = "action \(index + 1) \(outcome): \(why)"
+                var tail = i + 1 < actions.count ? "; the actions after it were not sent" : ""
+                if (refusedLaunch && index > 0) || delivery == .sent {
+                    tail += ". Do not repeat the actions marked sent"
+                }
                 error = head + recoveryNote + tail
                 logError = head + recoveryLog + tail
                 break
