@@ -1890,6 +1890,174 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    func testSubscriptionVoiceSurfacesBackendFailureAndSanitizedDiagnostics() async throws {
+        try await withChatGPTSelected {
+            var emit: (@MainActor (String) -> Void)?
+            func push(_ payload: [String: Any]) {
+                guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            }
+            let codex = CodexVoice(
+                startBridge: { _, next in
+                    emit = next
+                    return true
+                },
+                sendBridge: { text in
+                    guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                          let method = object["method"] as? String, let id = object["id"] else { return true }
+                    switch method {
+                    case "account/read":
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    case "thread/start":
+                        push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
+                    case "thread/realtime/start":
+                        push(["id": id, "result": [:]])
+                        push(["method": "thread/realtime/sdp", "params": ["threadId": "fixture-thread", "sdp": "fixture-sdp-answer"]])
+                    default:
+                        push(["id": id, "result": [:]])
+                    }
+                    return true
+                }
+            )
+            let marker = UUID().uuidString
+            AppLog.shared.add("test", marker)
+            @MainActor func newLogs() -> String {
+                AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
+            }
+            let h = Harness(codex: codex)
+            var delivered: [[VoiceLine]] = []
+            h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
+            defer { h.voice.stop() }
+            await h.connect()
+
+            push(["method": "poki/backend/warning", "params": [
+                "threadId": "fixture-thread",
+                "diagnostic": "falling back from WebSockets to HTTPS transport",
+            ]])
+            push(["method": "poki/backend/error", "params": [
+                "threadId": "fixture-thread",
+                "code": "responseStreamDisconnected",
+                "willRetry": true,
+                "httpStatusCode": 502,
+                "diagnostic": "tls invalid peer certificate: UnknownIssuer",
+            ]])
+            await h.time.settle()
+
+            XCTAssertTrue(h.voice.isOn, "retrying backend error must not prematurely end the session")
+            let retryLogs = newLogs()
+            XCTAssertTrue(retryLogs.contains("Codex backend warning: falling back from WebSockets to HTTPS transport"), retryLogs)
+            XCTAssertTrue(retryLogs.contains("Codex backend error: responseStreamDisconnected, retry: true (http 502, tls invalid peer certificate: UnknownIssuer)"), retryLogs)
+
+            push(["method": "poki/backend/error", "params": [
+                "threadId": "fixture-thread",
+                "code": "responseStreamDisconnected",
+                "willRetry": false,
+                "diagnostic": "stream disconnected before completion",
+            ]])
+            push(["method": "poki/backend/turnCompleted", "params": [
+                "threadId": "fixture-thread",
+                "status": "failed",
+                "code": "responseStreamDisconnected",
+                "diagnostic": "stream disconnected before completion",
+            ]])
+            await h.time.settle()
+
+            XCTAssertFalse(h.voice.isOn, "terminal backend error must end the silent stall and surface failure")
+            XCTAssertEqual(h.voice.phase, .lost(CodexVoice.Failure.backendFailed.localizedDescription))
+            XCTAssertEqual(h.voice.talkState?.isFailed, true)
+            XCTAssertEqual(delivered.count, 1)
+            XCTAssertEqual(delivered.first?.filter { $0.role == .note && $0.text == CodexVoice.Failure.backendFailed.localizedDescription }.count, 1)
+            XCTAssertTrue(h.voice.lines.isEmpty)
+            let terminalLogs = newLogs()
+            XCTAssertTrue(terminalLogs.contains("Codex backend error: responseStreamDisconnected, retry: false (stream disconnected before completion)"), terminalLogs)
+        }
+    }
+
+    func testSubscriptionVoiceSurfacesFailedBackendTurnAndSignInFailure() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            await h.connect()
+            codex.notify("poki/backend/turnCompleted", [
+                "status": "failed",
+                "code": "internalServerError",
+                "diagnostic": "unexpected status 502",
+            ])
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertEqual(h.voice.phase, .lost(CodexVoice.Failure.backendFailed.localizedDescription))
+            XCTAssertEqual(h.voice.talkState?.isFailed, true)
+            XCTAssertFalse(h.voice.needsChatGPTSignIn)
+        }
+
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            await h.connect()
+            codex.notify("poki/backend/error", [
+                "willRetry": false,
+                "code": "unauthorized",
+                "kind": "signInRequired",
+            ])
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertTrue(h.voice.needsChatGPTSignIn)
+            XCTAssertEqual(h.voice.phase, .lost(CodexVoice.Failure.signIn.localizedDescription))
+        }
+    }
+
+    func testSubscriptionVoiceBackendFailureDeliversSpecificNoteToChatHistoryAndClearsLiveLines() async throws {
+        let savedLanguage = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = savedLanguage }
+        AppLocalization.shared.preference = "en"
+
+        let genericLostNote = "Connection lost. Nothing is sent again. Talk again to hear how running steps ended."
+        let cases: [(name: String, method: String, params: CodexVoice.JSON, expectedNote: String, expectsSignIn: Bool)] = [
+            (
+                "non-retrying backend error",
+                "poki/backend/error",
+                ["willRetry": false, "code": "responseStreamDisconnected", "diagnostic": "stream disconnected before completion"],
+                "ChatGPT couldn’t finish that phone action. Try again.",
+                false
+            ),
+            (
+                "failed backend turn",
+                "poki/backend/turnCompleted",
+                ["status": "failed", "code": "internalServerError", "diagnostic": "unexpected status 502"],
+                "ChatGPT couldn’t finish that phone action. Try again.",
+                false
+            ),
+            (
+                "sign-in required backend error",
+                "poki/backend/error",
+                ["willRetry": false, "code": "unauthorized", "kind": "signInRequired"],
+                "Sign in to ChatGPT again to start a voice conversation.",
+                true
+            ),
+        ]
+
+        try await withChatGPTSelected {
+            for item in cases {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                var delivered: [[VoiceLine]] = []
+                h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
+                await h.connect()
+
+                codex.notify(item.method, item.params)
+
+                XCTAssertFalse(h.voice.isOn, item.name)
+                XCTAssertEqual(h.voice.phase, .lost(item.expectedNote), item.name)
+                XCTAssertEqual(h.voice.talkState?.isFailed, true, item.name)
+                XCTAssertEqual(h.voice.needsChatGPTSignIn, item.expectsSignIn, item.name)
+                XCTAssertEqual(delivered.count, 1, item.name)
+                XCTAssertEqual(delivered.first?.last?.role, .note, item.name)
+                XCTAssertEqual(delivered.first?.last?.text, item.expectedNote, item.name)
+                XCTAssertFalse(delivered.first?.contains(where: { $0.text == genericLostNote }) ?? true, item.name)
+                XCTAssertTrue(h.voice.lines.isEmpty, "\(item.name) must not leave a stale failure line after onConversationEnded")
+            }
+        }
+    }
+
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
         let selected = UserDefaults.standard.object(forKey: "chat.provider")
         let saved = ModelKeys.key(.chatgpt)
@@ -2274,7 +2442,7 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(link.closed)
             NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
-            // Part 2: Final non-retrying poki/backend/error ends busy state; willRetry: true keeps busy state.
+            // Part 2: Retrying backend error keeps busy state; final non-retrying poki/backend/error clears busy state and surfaces failure.
             let fakeCodex = FakeSubscriptionVoice()
             let h2 = Harness(codex: fakeCodex)
             defer { h2.voice.stop() }
@@ -2291,13 +2459,12 @@ final class VoiceModelTests: XCTestCase {
 
             fakeCodex.notify("poki/backend/error", ["code": "streamFailed", "willRetry": false])
             await h2.time.settle()
-            XCTAssertEqual(h2.voice.phase, .listening)
-            XCTAssertFalse(h2.voice.midTurn)
-            await h2.time.advance(59)
-            XCTAssertTrue(h2.voice.isOn)
-            await h2.time.advance(1)
             XCTAssertFalse(h2.voice.isOn)
+            XCTAssertFalse(h2.voice.midTurn)
+            XCTAssertEqual(h2.voice.phase, .lost(CodexVoice.Failure.backendFailed.localizedDescription))
+            XCTAssertEqual(h2.voice.talkState?.isFailed, true)
             XCTAssertTrue(link2.closed)
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         }
     }
 

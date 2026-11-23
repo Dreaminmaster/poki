@@ -5918,6 +5918,22 @@
         }
       }
     },
+    "ChatGPT couldn’t finish that phone action. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT 未能完成这项手机操作，请再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT 未能完成這項手機操作，請再試一次。"
+          }
+        }
+      }
+    },
     "Connection lost. Nothing is sent again. Talk again to hear how running steps ended." : {
       "localizations" : {
         "zh-Hans" : {

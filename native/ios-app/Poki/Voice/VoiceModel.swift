@@ -1483,7 +1483,7 @@ final class VoiceModel {
     }
     #endif
 
-    private func closed(_ reason: String, session number: Int, confirmed: Bool = false) {
+    private func closed(_ reason: String, session number: Int, confirmed: Bool = false, lostMessage: String? = nil, note: String? = nil) {
         guard number == session, link != nil else { return }
         if liveCloseTimeout != nil {
             finishLiveClose(reason, confirmed: confirmed)
@@ -1493,8 +1493,8 @@ final class VoiceModel {
         if usesLive && ready { logLiveClose(reason, confirmed: confirmed) }
         endSession()
         session += 1
-        phase = .lost(TalkState.connectionLost)
-        lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
+        phase = .lost(lostMessage ?? TalkState.connectionLost)
+        lines.append(VoiceLine(role: .note, text: note ?? AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
     }
@@ -1526,6 +1526,13 @@ final class VoiceModel {
             codexBackendBusy = false
             awaitingAnswer = false
             lastActivity = time.now()
+            if params["status"] as? String == "failed" {
+                let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
+                let reason = failure.localizedDescription
+                if failure == .signIn { needsChatGPTSignIn = true }
+                closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
+                return
+            }
             if phase == .thinking, !answerDue { phase = .listening }
             endIfDone()
         case "poki/backend/error":
@@ -1537,8 +1544,10 @@ final class VoiceModel {
             } else {
                 codexBackendBusy = false
                 awaitingAnswer = false
-                if phase == .thinking, !answerDue { phase = .listening }
-                endIfDone()
+                let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
+                let reason = failure.localizedDescription
+                if failure == .signIn { needsChatGPTSignIn = true }
+                closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
             }
         case "thread/realtime/transcript/delta":
             guard params["role"] as? String == "user" else { return }
