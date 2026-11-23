@@ -331,6 +331,10 @@ final class VoiceModel {
     private(set) var waitsForOpeningDictation = false
     private var openingDictation: Task<Void, Never>?
     var isCapturingOpening: Bool { openingCapture != nil }
+
+    func ensureBackgroundAudioActive() -> Bool {
+        openingCapture?.audio.ensureRunning() ?? true
+    }
     private var usesLive = false
     private var appAudio: AppAudioContext?
     private var usesCodexLive = false
@@ -749,6 +753,7 @@ final class VoiceModel {
                     guard Self.phoneTools.contains(name) else {
                         return (Self.localTool(name), false, nil)
                     }
+                    openingCapture?.audio.markPhoneActionStarted(session: number)
                     activeCodexTools += 1
                     lastActivity = time.now()
                     keepOpen()
@@ -860,14 +865,16 @@ final class VoiceModel {
                 openingTiming = timing
             }
             trace("connection open")
+            if subscription {
+                ready = true
+                phase = .listening
+            }
             if !sendOpeningAudioIfReady() {
                 if !waitsForOpeningDictation { await openingDictation?.value }
                 return
             }
             lastActivity = time.now()
             if subscription {
-                ready = true
-                phase = .listening
                 endIfDone()
             }
             watchForStall(session: number)
@@ -1574,6 +1581,7 @@ final class VoiceModel {
                 phase = .thinking
                 watchForStall(session: number)
             } else if role == "assistant", !text.isEmpty {
+                openingCapture?.audio.markRemoteReplied(session: number)
                 lines.append(VoiceLine(role: .poki, text: text))
             }
         default:

@@ -37,18 +37,37 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private static let sampleRate = 48_000.0
     private static let framesPerMillisecond = Int(sampleRate / 1_000)
     private static let deliveryChunkFrames = 480
+    private static let maxFramesPerSlice: UInt32 = 4_096
     // Covers two connection attempts plus fallback dictation without unbounded memory growth.
     static let maxOpeningFrames = Int(sampleRate) * 180
     private static let channelFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true
     )!
+    private static let pcm16StreamDescription = AudioStreamBasicDescription(
+        mSampleRate: sampleRate,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 2,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: 2,
+        mChannelsPerFrame: 1,
+        mBitsPerChannel: 16,
+        mReserved: 0
+    )
 
-    private let engine = AVAudioEngine()
-    @MainActor private var engineRunning = false
+    @MainActor private var audioUnit: AudioComponentInstance?
+    @MainActor private var audioUnitRunning = false
+    @MainActor private var holdsAudioSession = false
+    @MainActor private var interruptionObserver: NSObjectProtocol?
+    @MainActor private var resetObserver: NSObjectProtocol?
     private let lock = NSLock()
+    private let converterLock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
     private let session: Int
+    private var callbackAudioUnit: AudioComponentInstance?
+    private var renderScratch: UnsafeMutablePointer<Int16>
+    private var renderScratchCapacity: Int
 
     private enum State {
         case buffering
@@ -91,6 +110,13 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var phoneActionStarted = false
     private var remoteReplied = false
     private var openingConfirmed = false
+    private var tapCallbacks = 0
+    private var nonZeroTapCallbacks = 0
+    private var rawNonZeroTapCallbacks = 0
+    private var rawMaxPeak: Float = 0
+    private var conversionErrors = 0
+    private var renderErrors = 0
+    private var deliveryErrors = 0
 
     let deviceInputSampleRate = OpeningVoiceAudio.sampleRate
     let deviceOutputSampleRate = OpeningVoiceAudio.sampleRate
@@ -118,55 +144,205 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     init(session: Int, playReadyChime: Bool = true) {
         self.session = session
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
+        renderScratchCapacity = Int(Self.maxFramesPerSlice)
+        renderScratch = .allocate(capacity: renderScratchCapacity)
         super.init()
     }
 
+    deinit {
+        if let unit = lock.withLock({ () -> AudioComponentInstance? in
+            let current = callbackAudioUnit
+            callbackAudioUnit = nil
+            return current
+        }) {
+            AudioOutputUnitStop(unit)
+            AudioUnitUninitialize(unit)
+            AudioComponentInstanceDispose(unit)
+        }
+        renderScratch.deallocate()
+    }
+
     @MainActor func startCapture() throws {
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try audioSession.setActive(true)
-        var tapInstalled = false
+        try VoiceLink.activateAudioSession(configure: true)
+        holdsAudioSession = true
         do {
-            let microphone = engine.inputNode
-            try microphone.setVoiceProcessingEnabled(true)
-            microphone.isVoiceProcessingBypassed = false
-            let inputFormat = microphone.outputFormat(forBus: 0)
-            guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0,
-                  let converter = AVAudioConverter(from: inputFormat, to: Self.channelFormat) else {
-                throw VoiceError.noWebRTC
-            }
-            let playbackFormat = AVAudioFormat(standardFormatWithSampleRate: Self.sampleRate, channels: 1)!
-            let player = makePlayer(format: playbackFormat)
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
-            installTap(on: microphone, format: inputFormat, converter: converter)
-            tapInstalled = true
-            engine.prepare()
-            try engine.start()
-            engineRunning = true
+            try configureAndStartAudioUnit()
+            observeAudioLifecycle()
         } catch {
-            engine.stop()
-            if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
-            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            removeAudioLifecycleObservers()
+            stopAudioUnit()
+            if holdsAudioSession {
+                holdsAudioSession = false
+                VoiceLink.deactivateAudioSession()
+            }
             throw error
         }
     }
 
+    @MainActor func ensureRunning() -> Bool {
+        guard audioUnit != nil || audioUnitRunning else { return false }
+        if !audioUnitRunning {
+            restartAudioUnit(reason: "ensureRunning")
+        }
+        return audioUnitRunning && RTCAudioSession.sharedInstance().isActive
+    }
+
+    @MainActor private func configureAndStartAudioUnit() throws {
+        stopAudioUnit()
+        var desc = AudioComponentDescription(
+            componentType: kAudioUnitType_Output,
+            componentSubType: kAudioUnitSubType_VoiceProcessingIO,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        guard let component = AudioComponentFindNext(nil, &desc) else {
+            Self.logVoice("opening audio unit failed: VoiceProcessingIO component not found")
+            throw VoiceError.noWebRTC
+        }
+        var created: AudioComponentInstance?
+        let newStatus = AudioComponentInstanceNew(component, &created)
+        guard newStatus == noErr, let unit = created else {
+            Self.logVoice("opening audio unit failed: AudioComponentInstanceNew (\(newStatus))")
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(newStatus))
+        }
+        do {
+            try setupAudioUnit(unit)
+            lock.withLock { callbackAudioUnit = unit }
+            let startStatus = AudioOutputUnitStart(unit)
+            guard startStatus == noErr else {
+                lock.withLock { callbackAudioUnit = nil }
+                throw NSError(domain: NSOSStatusErrorDomain, code: Int(startStatus), userInfo: [
+                    NSLocalizedDescriptionKey: "AudioOutputUnitStart failed (\(startStatus))",
+                ])
+            }
+            audioUnit = unit
+            audioUnitRunning = true
+            let session = AVAudioSession.sharedInstance()
+            Self.logVoice("opening audio unit started: 48000 Hz 1 ch Int16 VPIO, sessionRate=\(Int(session.sampleRate)), inputCh=\(session.inputNumberOfChannels), muted=\(AVAudioApplication.shared.isInputMuted)")
+        } catch {
+            lock.withLock { callbackAudioUnit = nil }
+            AudioUnitUninitialize(unit)
+            AudioComponentInstanceDispose(unit)
+            Self.logVoice("opening audio unit start failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    @MainActor private func setupAudioUnit(_ unit: AudioComponentInstance) throws {
+        func check(_ status: OSStatus, _ step: String) throws {
+            guard status == noErr else {
+                throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [
+                    NSLocalizedDescriptionKey: "VPIO \(step) failed (\(status))",
+                ])
+            }
+        }
+        var enableIO: UInt32 = 1
+        try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableIO, UInt32(MemoryLayout<UInt32>.size)), "enableInput")
+        try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &enableIO, UInt32(MemoryLayout<UInt32>.size)), "enableOutput")
+
+        var zero: UInt32 = 0
+        _ = AudioUnitSetProperty(unit, kAudioUnitProperty_ShouldAllocateBuffer, kAudioUnitScope_Output, 1, &zero, UInt32(MemoryLayout<UInt32>.size))
+        _ = AudioUnitSetProperty(unit, kAUVoiceIOProperty_BypassVoiceProcessing, kAudioUnitScope_Global, 0, &zero, UInt32(MemoryLayout<UInt32>.size))
+        _ = AudioUnitSetProperty(unit, kAUVoiceIOProperty_MuteOutput, kAudioUnitScope_Global, 0, &zero, UInt32(MemoryLayout<UInt32>.size))
+
+        var format = Self.pcm16StreamDescription
+        let formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &format, formatSize), "inputStreamFormat")
+        try check(AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, formatSize), "outputStreamFormat")
+
+        var maxFrames = Self.maxFramesPerSlice
+        _ = AudioUnitSetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, UInt32(MemoryLayout<UInt32>.size))
+
+        let refCon = Unmanaged.passUnretained(self).toOpaque()
+        var inputCallback = AURenderCallbackStruct(inputProc: openingAudioInputCallback, inputProcRefCon: refCon)
+        try check(AudioUnitSetProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &inputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), "setInputCallback")
+
+        var playoutCallback = AURenderCallbackStruct(inputProc: openingAudioPlayoutCallback, inputProcRefCon: refCon)
+        try check(AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &playoutCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), "setRenderCallback")
+
+        try check(AudioUnitInitialize(unit), "initialize")
+    }
+
+    @MainActor private func stopAudioUnit() {
+        let unit = audioUnit
+        audioUnit = nil
+        audioUnitRunning = false
+        guard let unit else { return }
+        AudioOutputUnitStop(unit)
+        lock.withLock { callbackAudioUnit = nil }
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+    }
+
+    @MainActor private func observeAudioLifecycle() {
+        removeAudioLifecycleObservers()
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+            Task { @MainActor in self?.restartAudioUnit(reason: "interruption ended") }
+        }
+        resetObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.restartAudioUnit(reason: "media services reset") }
+        }
+    }
+
+    @MainActor private func removeAudioLifecycleObservers() {
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let resetObserver { NotificationCenter.default.removeObserver(resetObserver) }
+        interruptionObserver = nil
+        resetObserver = nil
+    }
+
+    @MainActor private func restartAudioUnit(reason: String) {
+        let stopped: Bool = lock.withLock {
+            if case .stopped = state { return true }
+            return false
+        }
+        guard !stopped else { return }
+        stopAudioUnit()
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            try configureAndStartAudioUnit()
+            Self.logVoice("opening audio unit restarted after \(reason)")
+            let currentDelegate = lock.withLock { delegate }
+            currentDelegate?.dispatchAsync {
+                currentDelegate?.notifyAudioInputInterrupted()
+                currentDelegate?.notifyAudioOutputInterrupted()
+            }
+        } catch {
+            Self.logVoice("opening audio unit restart failed after \(reason): \(error.localizedDescription)")
+        }
+    }
+
     func allowSending(session: Int) -> Bool {
-        lock.withLock {
-            guard session == self.session, !overflow else { return false }
+        let result: (allowed: Bool, summary: String?) = lock.withLock {
+            guard session == self.session, !overflow else { return (false, nil) }
             switch state {
             case .buffering:
                 recovery = queued
                 openingEndFrame = queued.count
                 state = .sending
-                return true
+                let seconds = String(format: "%.2f", Double(queued.count) / Self.sampleRate)
+                let peak = String(format: "%.5f", rawMaxPeak)
+                let summary = "opening audio handoff: queued \(queued.count) frames (\(seconds) s), taps \(tapCallbacks), nonZeroTaps \(nonZeroTapCallbacks), rawNonZero \(rawNonZeroTapCallbacks), rawPeak \(peak), renderErrors \(renderErrors), convErrors \(conversionErrors)"
+                return (true, summary)
             case .sending:
-                return true
+                return (true, nil)
             case .waitingForOwner, .readyForDictation, .stopped:
-                return false
+                return (false, nil)
             }
         }
+        if let summary = result.summary { Self.logVoice(summary) }
+        return result.allowed
     }
 
     func confirmRemoteAudio(session: Int, endMilliseconds: Int) {
@@ -268,11 +444,11 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             }
         }
         guard stopped.wasRunning else { return nil }
-        if engineRunning {
-            engineRunning = false
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        removeAudioLifecycleObservers()
+        stopAudioUnit()
+        if holdsAudioSession {
+            holdsAudioSession = false
+            VoiceLink.deactivateAudioSession()
         }
         guard let samples = stopped.completeRecording, !samples.isEmpty,
               let audio = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: AVAudioFrameCount(samples.count)),
@@ -282,42 +458,317 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         return audio
     }
 
-    private func installTap(on microphone: AVAudioInputNode, format: AVAudioFormat, converter: AVAudioConverter) {
-        tapConverter = converter
-        microphone.installTap(onBus: 0, bufferSize: 480, format: format) { [weak self] buffer, time in
-            self?.ingestCapturedBuffer(buffer, at: time)
+    fileprivate func handleAudioUnitInput(
+        ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        inTimeStamp: UnsafePointer<AudioTimeStamp>,
+        inBusNumber: UInt32,
+        inNumberFrames: UInt32
+    ) -> OSStatus {
+        guard let unit = lock.withLock({ callbackAudioUnit }) else { return noErr }
+        let count = Int(inNumberFrames)
+        guard count > 0 else { return noErr }
+        if count > renderScratchCapacity {
+            renderScratch.deallocate()
+            renderScratch = .allocate(capacity: count)
+            renderScratchCapacity = count
         }
+        var bufferList = AudioBufferList(
+            mNumberBuffers: 1,
+            mBuffers: AudioBuffer(
+                mNumberChannels: 1,
+                mDataByteSize: UInt32(count * MemoryLayout<Int16>.stride),
+                mData: renderScratch
+            )
+        )
+        let status = AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
+        guard status == noErr else {
+            let errCount = lock.withLock { () -> Int in
+                renderErrors += 1
+                return renderErrors
+            }
+            if errCount <= 3 || errCount % 100 == 0 {
+                Self.logVoice("opening audio unit render error (#\(errCount)): OSStatus \(status)")
+            }
+            return status
+        }
+        let samples = UnsafeBufferPointer(start: renderScratch, count: count)
+        var maxSample: Int32 = 0
+        for sample in samples {
+            let magnitude = abs(Int32(sample))
+            if magnitude > maxSample { maxSample = magnitude }
+        }
+        let peak = Float(maxSample) / 32_768.0
+        lock.withLock {
+            tapCallbacks += 1
+            if maxSample > 0 {
+                nonZeroTapCallbacks += 1
+                rawNonZeroTapCallbacks += 1
+            }
+            if peak > rawMaxPeak { rawMaxPeak = peak }
+        }
+        inputSamples(samples, timestamp: inTimeStamp.pointee)
+        return noErr
+    }
+
+    fileprivate func handleAudioUnitPlayout(
+        ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        inTimeStamp: UnsafePointer<AudioTimeStamp>,
+        inNumberFrames: UInt32,
+        ioData: UnsafeMutablePointer<AudioBufferList>?
+    ) -> OSStatus {
+        guard let ioData, let destination = ioData.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) else {
+            return kAudio_ParamError
+        }
+        let count = Int(inNumberFrames)
+        switch selectPlayoutSource(count: count) {
+        case .chime(let range):
+            let chime = VoiceOpeningFeedback.readyChime
+            var write = 0
+            for index in range {
+                let scaled = max(-1.0 as Float, min(1.0 as Float, chime[index])) * 32_767.0
+                destination[write] = Int16(scaled)
+                write += 1
+            }
+            if write < count {
+                destination.advanced(by: write).update(repeating: 0, count: count - write)
+            }
+            return noErr
+        case .silence:
+            ioActionFlags.pointee.insert(.unitRenderAction_OutputIsSilence)
+            destination.update(repeating: 0, count: count)
+            return noErr
+        case .webrtc(let delegate):
+            var flags: AudioUnitRenderActionFlags = []
+            var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                mNumberChannels: 1,
+                mDataByteSize: inNumberFrames * UInt32(MemoryLayout<Int16>.stride),
+                mData: destination
+            ))
+            let status = delegate.getPlayoutData(&flags, inTimeStamp, 0, inNumberFrames, &audio)
+            guard status == noErr else {
+                ioActionFlags.pointee.insert(.unitRenderAction_OutputIsSilence)
+                destination.update(repeating: 0, count: count)
+                return status
+            }
+            if flags.contains(.unitRenderAction_OutputIsSilence) {
+                ioActionFlags.pointee.insert(.unitRenderAction_OutputIsSilence)
+                destination.update(repeating: 0, count: count)
+            }
+            return noErr
+        }
+    }
+
+    private static func logVoice(_ message: String) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { AppLog.shared.add("voice", message) }
+        } else {
+            Task { @MainActor in AppLog.shared.add("voice", message) }
+        }
+    }
+
+    private func recordConversionError(_ reason: String) {
+        let count = lock.withLock { () -> Int in
+            conversionErrors += 1
+            return conversionErrors
+        }
+        if count <= 3 || count % 100 == 0 {
+            Self.logVoice("opening audio conversion error (#\(count)): \(reason)")
+        }
+    }
+
+    private static func makeValidatedConverter(for format: AVAudioFormat) -> AVAudioConverter? {
+        guard format.sampleRate > 0, format.channelCount > 0, format.commonFormat != .otherFormat else { return nil }
+        let sourceFormat: AVAudioFormat
+        if format.channelCount > 1 {
+            guard format.commonFormat == .pcmFormatFloat32
+                || format.commonFormat == .pcmFormatInt16
+                || format.commonFormat == .pcmFormatInt32,
+                  let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else {
+                return nil
+            }
+            sourceFormat = mono
+        } else {
+            sourceFormat = format
+        }
+        guard let converter = AVAudioConverter(from: sourceFormat, to: Self.channelFormat) else { return nil }
+        converter.downmix = false
+        converter.channelMap = [0]
+        return converter
+    }
+
+    private static func downmixToMonoFloat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        let format = buffer.format
+        let channels = Int(format.channelCount)
+        let frames = Int(buffer.frameLength)
+        guard channels > 1, frames > 0, format.sampleRate > 0,
+              let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false),
+              let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength),
+              let destination = mono.floatChannelData?[0] else { return nil }
+        mono.frameLength = buffer.frameLength
+        let scale = 1.0 / Float(channels)
+        switch format.commonFormat {
+        case .pcmFormatFloat32:
+            if format.isInterleaved {
+                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    let base = frame * channels
+                    for ch in 0..<channels { sum += raw[base + ch] }
+                    destination[frame] = max(-1, min(1, sum * scale))
+                }
+            } else {
+                guard let data = buffer.floatChannelData else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    for ch in 0..<channels { sum += data[ch][frame] }
+                    destination[frame] = max(-1, min(1, sum * scale))
+                }
+            }
+        case .pcmFormatInt16:
+            let norm = scale / 32_768.0
+            if format.isInterleaved {
+                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    let base = frame * channels
+                    for ch in 0..<channels { sum += Float(raw[base + ch]) }
+                    destination[frame] = max(-1, min(1, sum * norm))
+                }
+            } else {
+                guard let data = buffer.int16ChannelData else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    for ch in 0..<channels { sum += Float(data[ch][frame]) }
+                    destination[frame] = max(-1, min(1, sum * norm))
+                }
+            }
+        case .pcmFormatInt32:
+            let norm = scale / 2_147_483_648.0
+            if format.isInterleaved {
+                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int32.self) else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    let base = frame * channels
+                    for ch in 0..<channels { sum += Float(raw[base + ch]) }
+                    destination[frame] = max(-1, min(1, sum * norm))
+                }
+            } else {
+                guard let data = buffer.int32ChannelData else { return nil }
+                for frame in 0..<frames {
+                    var sum: Float = 0
+                    for ch in 0..<channels { sum += Float(data[ch][frame]) }
+                    destination[frame] = max(-1, min(1, sum * norm))
+                }
+            }
+        default:
+            return nil
+        }
+        return mono
+    }
+
+    private static func peakAmplitude(in buffer: AVAudioPCMBuffer) -> Float {
+        let format = buffer.format
+        let channels = Int(format.channelCount)
+        let frames = Int(buffer.frameLength)
+        guard channels > 0, frames > 0 else { return 0 }
+        var peak: Float = 0
+        switch format.commonFormat {
+        case .pcmFormatFloat32:
+            if format.isInterleaved, let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) {
+                for i in 0..<(frames * channels) { peak = max(peak, abs(raw[i])) }
+            } else if let data = buffer.floatChannelData {
+                for ch in 0..<channels {
+                    let ptr = data[ch]
+                    for frame in 0..<frames { peak = max(peak, abs(ptr[frame])) }
+                }
+            }
+        case .pcmFormatInt16:
+            if format.isInterleaved, let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                for i in 0..<(frames * channels) { peak = max(peak, abs(Float(raw[i])) / 32_768.0) }
+            } else if let data = buffer.int16ChannelData {
+                for ch in 0..<channels {
+                    let ptr = data[ch]
+                    for frame in 0..<frames { peak = max(peak, abs(Float(ptr[frame])) / 32_768.0) }
+                }
+            }
+        default:
+            break
+        }
+        return peak
     }
 
     @discardableResult
     func ingestCapturedBuffer(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) -> Bool {
         let format = buffer.format
-        let converter: AVAudioConverter
-        if let existing = tapConverter, existing.inputFormat == format {
-            converter = existing
+        guard buffer.frameLength > 0, format.sampleRate > 0, format.channelCount > 0, format.commonFormat != .otherFormat else {
+            recordConversionError("invalid input buffer (frames \(buffer.frameLength), rate \(format.sampleRate), ch \(format.channelCount), common \(format.commonFormat.rawValue))")
+            return false
+        }
+        let rawPeak = Self.peakAmplitude(in: buffer)
+        let sourceBuffer: AVAudioPCMBuffer
+        if format.channelCount > 1 {
+            guard let mono = Self.downmixToMonoFloat(buffer) else {
+                recordConversionError("failed to downmix \(format.channelCount)-channel format \(format.commonFormat.rawValue)")
+                return false
+            }
+            sourceBuffer = mono
         } else {
-            guard format.sampleRate > 0, format.channelCount > 0,
-                  let created = AVAudioConverter(from: format, to: Self.channelFormat) else { return false }
-            tapConverter = created
-            converter = created
+            sourceBuffer = buffer
         }
-        let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * Self.sampleRate / format.sampleRate)) + 64
-        guard let pcm = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: capacity) else { return false }
-        var supplied = false
-        let status = converter.convert(to: pcm, error: nil) { _, inputStatus in
-            inputStatus.pointee = supplied ? .noDataNow : .haveData
-            defer { supplied = true }
-            return supplied ? nil : buffer
+        let capacity = AVAudioFrameCount(ceil(Double(sourceBuffer.frameLength) * Self.sampleRate / sourceBuffer.format.sampleRate)) + 64
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: capacity) else {
+            recordConversionError("failed to allocate output PCM buffer (\(capacity) frames)")
+            return false
         }
-        guard status != .error, pcm.frameLength > 0 else { return false }
+        var conversionError: NSError?
+        let status: AVAudioConverterOutputStatus? = converterLock.withLock {
+            let converter: AVAudioConverter
+            if let existing = tapConverter, existing.inputFormat == sourceBuffer.format {
+                converter = existing
+            } else {
+                guard let created = Self.makeValidatedConverter(for: sourceBuffer.format) else { return nil }
+                tapConverter = created
+                converter = created
+            }
+            var supplied = false
+            return converter.convert(to: pcm, error: &conversionError) { _, inputStatus in
+                inputStatus.pointee = supplied ? .noDataNow : .haveData
+                defer { supplied = true }
+                return supplied ? nil : sourceBuffer
+            }
+        }
+        guard let status else {
+            recordConversionError("failed to create converter for \(sourceBuffer.format.sampleRate) Hz \(sourceBuffer.format.channelCount) ch")
+            return false
+        }
+        guard status != .error, conversionError == nil, pcm.frameLength > 0 else {
+            let detail = conversionError?.localizedDescription ?? "status \(status.rawValue), frames \(pcm.frameLength)"
+            recordConversionError("AVAudioConverter failed: \(detail)")
+            return false
+        }
+        if let samples = pcm.int16ChannelData?[0] {
+            let frames = UnsafeBufferPointer(start: samples, count: Int(pcm.frameLength))
+            let hasNonZero = lastNonZeroOffset(in: frames) != nil
+            lock.withLock {
+                tapCallbacks += 1
+                if hasNonZero { nonZeroTapCallbacks += 1 }
+                if rawPeak > 0 { rawNonZeroTapCallbacks += 1 }
+                if rawPeak > rawMaxPeak { rawMaxPeak = rawPeak }
+            }
+        }
         input(pcm, at: time)
         return true
     }
 
     func input(_ pcm: AVAudioPCMBuffer, at time: AVAudioTime) {
         guard let source = pcm.int16ChannelData?[0] else { return }
-        let count = Int(pcm.frameLength)
-        let sourceFrames = UnsafeBufferPointer(start: source, count: count)
+        let sourceFrames = UnsafeBufferPointer(start: source, count: Int(pcm.frameLength))
+        inputSamples(sourceFrames, timestamp: time.audioTimeStamp)
+    }
+
+    private func inputSamples(_ sourceFrames: UnsafeBufferPointer<Int16>, timestamp: AudioTimeStamp) {
+        let count = sourceFrames.count
+        guard count > 0 else { return }
         sendLock.withLock {
             let delivery: Delivery = lock.withLock {
                 switch state {
@@ -368,9 +819,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             case .none:
                 return
             case .live(let delegate):
-                deliverChunked(sourceFrames, to: delegate, at: time)
+                deliverChunked(sourceFrames, to: delegate, timestamp: timestamp)
             case .queued(let delegate, let pending):
-                pending.withUnsafeBufferPointer { deliverChunked($0, to: delegate, at: time) }
+                pending.withUnsafeBufferPointer { deliverChunked($0, to: delegate, timestamp: timestamp) }
             }
         }
     }
@@ -412,32 +863,37 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         queued.append(contentsOf: frames)
     }
 
-    private func deliverChunked(_ samples: UnsafeBufferPointer<Int16>, to delegate: RTCAudioDeviceDelegate, at time: AVAudioTime) {
+    private func deliverChunked(_ samples: UnsafeBufferPointer<Int16>, to delegate: RTCAudioDeviceDelegate, timestamp initialTimestamp: AudioTimeStamp) {
         guard let base = samples.baseAddress, !samples.isEmpty else { return }
-        var timestamp = time.audioTimeStamp
+        var timestamp = initialTimestamp
         var offset = 0
         while offset < samples.count {
             let chunkCount = min(Self.deliveryChunkFrames, samples.count - offset)
             timestamp.mSampleTime = deliveredSampleTime
+            timestamp.mFlags.insert(.sampleTimeValid)
             var flags: AudioUnitRenderActionFlags = []
             var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
                 mNumberChannels: 1,
                 mDataByteSize: UInt32(chunkCount * MemoryLayout<Int16>.stride),
                 mData: UnsafeMutableRawPointer(mutating: base.advanced(by: offset))
             ))
-            _ = delegate.deliverRecordedData(&flags, &timestamp, 0, UInt32(chunkCount), &audio, nil, nil)
+            let status = delegate.deliverRecordedData(&flags, &timestamp, 0, UInt32(chunkCount), &audio, nil, nil)
+            if status != noErr {
+                let count = lock.withLock { () -> Int in
+                    deliveryErrors += 1
+                    return deliveryErrors
+                }
+                if count <= 3 || count % 100 == 0 {
+                    Self.logVoice("opening audio deliverRecordedData error (#\(count)): OSStatus \(status)")
+                }
+            }
             deliveredSampleTime += Double(chunkCount)
             offset += chunkCount
         }
     }
 
-    func renderPlayout(silent: UnsafeMutablePointer<ObjCBool>, timestamp: UnsafePointer<AudioTimeStamp>,
-                       frameCount: AVAudioFrameCount, output: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
-        guard let destination = output.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) else {
-            return kAudio_ParamError
-        }
-        let count = Int(frameCount)
-        let source: PlayoutSource = lock.withLock {
+    private func selectPlayoutSource(count: Int) -> PlayoutSource {
+        lock.withLock {
             if case .stopped = state { return .silence }
             if chimeOffset < VoiceOpeningFeedback.readyChime.count {
                 let start = chimeOffset
@@ -450,7 +906,15 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             }
             return .silence
         }
-        switch source {
+    }
+
+    func renderPlayout(silent: UnsafeMutablePointer<ObjCBool>, timestamp: UnsafePointer<AudioTimeStamp>,
+                       frameCount: AVAudioFrameCount, output: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
+        guard let destination = output.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) else {
+            return kAudio_ParamError
+        }
+        let count = Int(frameCount)
+        switch selectPlayoutSource(count: count) {
         case .chime(let range):
             let chime = VoiceOpeningFeedback.readyChime
             var write = 0
@@ -485,16 +949,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         }
     }
 
-    private func makePlayer(format: AVAudioFormat) -> AVAudioSourceNode {
-        AVAudioSourceNode(format: format) { [weak self] silent, timestamp, count, output in
-            guard let self else {
-                silent.pointee = true
-                return noErr
-            }
-            return self.renderPlayout(silent: silent, timestamp: timestamp, frameCount: count, output: output)
-        }
-    }
-
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
         lock.withLock { self.delegate = delegate }
         return true
@@ -515,4 +969,38 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     func stopRecording() -> Bool { lock.withLock { recording = false }; return true }
     func startPlayout() -> Bool { lock.withLock { playing = true }; return true }
     func stopPlayout() -> Bool { lock.withLock { playing = false }; return true }
+}
+
+private func openingAudioInputCallback(
+    inRefCon: UnsafeMutableRawPointer,
+    ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+    inTimeStamp: UnsafePointer<AudioTimeStamp>,
+    inBusNumber: UInt32,
+    inNumberFrames: UInt32,
+    ioData: UnsafeMutablePointer<AudioBufferList>?
+) -> OSStatus {
+    let audio = Unmanaged<OpeningVoiceAudio>.fromOpaque(inRefCon).takeUnretainedValue()
+    return audio.handleAudioUnitInput(
+        ioActionFlags: ioActionFlags,
+        inTimeStamp: inTimeStamp,
+        inBusNumber: inBusNumber,
+        inNumberFrames: inNumberFrames
+    )
+}
+
+private func openingAudioPlayoutCallback(
+    inRefCon: UnsafeMutableRawPointer,
+    ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+    inTimeStamp: UnsafePointer<AudioTimeStamp>,
+    inBusNumber: UInt32,
+    inNumberFrames: UInt32,
+    ioData: UnsafeMutablePointer<AudioBufferList>?
+) -> OSStatus {
+    let audio = Unmanaged<OpeningVoiceAudio>.fromOpaque(inRefCon).takeUnretainedValue()
+    return audio.handleAudioUnitPlayout(
+        ioActionFlags: ioActionFlags,
+        inTimeStamp: inTimeStamp,
+        inNumberFrames: inNumberFrames,
+        ioData: ioData
+    )
 }

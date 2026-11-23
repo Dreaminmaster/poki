@@ -42,6 +42,9 @@ struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundConti
             return try await openPoki(LocalizedStringResource("Poki couldn’t show the talk on the Lock Screen, so it opens to talk.", table: "Entry"))
         }
         if case .lost(let why) = app.voice.phase { throw TalkHereError(why: why) }
+        if app.voice.isOn, !app.voice.ensureBackgroundAudioActive() {
+            AppLog.shared.add("voice", "Talk Here: background audio session was not active when intent finished")
+        }
         return .result()
     }
 

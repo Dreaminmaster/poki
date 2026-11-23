@@ -76,6 +76,28 @@ final class VoiceLinkAudioTests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningCaptureConnectionSurvivesRejectedWebRTCConfiguration() async {
+        let audioSession = AVAudioSession.sharedInstance()
+        let rtcSession = RTCAudioSession.sharedInstance()
+        let configuration = RTCAudioSessionConfiguration.webRTC()
+        let savedCategory = configuration.category
+        let invalidCategory = AVAudioSession.Category(rawValue: "InvalidOpeningCategory")
+        XCTAssertThrowsError(try audioSession.setCategory(invalidCategory))
+        configuration.category = invalidCategory.rawValue
+        defer { configuration.category = savedCategory }
+
+        let capture = OpeningVoiceCapture(audio: OpeningVoiceAudio(session: 1, playReadyChime: false))
+        let link = VoiceLink(onEvent: { _ in }, onClosed: { _ in })
+        link.useOpeningCapture(capture)
+        defer { link.close() }
+
+        await connectToUnavailableEndpoint(link)
+        XCTAssertTrue(rtcSession.isActive, "Fallback audio configuration must still activate RTCAudioSession with openingCapture")
+        link.close()
+        XCTAssertFalse(rtcSession.isActive, "Closing VoiceLink must deactivate RTCAudioSession after fallback")
+    }
+
+    @MainActor
     private func connectToUnavailableEndpoint(_ link: VoiceLink) async {
         do {
             try await link.connect(secret: "test", base: URL(string: "poki-test://realtime")!)

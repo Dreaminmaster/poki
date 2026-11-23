@@ -3791,4 +3791,51 @@ extension VoiceModelTests {
             h.voice.stop()
         }
     }
+
+    func testSubscriptionOpeningCaptureTransitionsToSendingOnceConnected() async throws {
+        try await withChatGPTSelected {
+            var emit: (@MainActor (String) -> Void)?
+            func push(_ payload: [String: Any]) {
+                guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            }
+            let codex = CodexVoice(
+                startBridge: { _, next in
+                    emit = next
+                    return true
+                },
+                sendBridge: { text in
+                    guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                          let method = object["method"] as? String,
+                          let id = object["id"] else { return true }
+                    switch method {
+                    case "account/read":
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    case "thread/start":
+                        push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
+                    case "thread/realtime/start":
+                        push(["id": id, "result": [:]])
+                        push(["method": "thread/realtime/sdp", "params": ["threadId": "fixture-thread", "sdp": "fixture-sdp-answer"]])
+                    default:
+                        push(["id": id, "result": [:]])
+                    }
+                    return true
+                }
+            )
+            let audio = OpeningAudioProbe()
+            audio.speechAuthorization = .notDetermined
+            let h = Harness(openingAudio: audio, codex: codex)
+            defer { h.voice.stop() }
+            await h.voice.start(captureOpening: true, presentSpeechPermission: { request in
+                audio.feed(4_800, sample: 1_200)
+                return await request()
+            })
+            XCTAssertEqual(h.voice.phase, .listening)
+            audio.feed(4_800, sample: 2_400)
+            let expected = [Int16](repeating: 1_200, count: 4_800) + [Int16](repeating: 2_400, count: 4_800)
+            XCTAssertTrue(audio.sent.elementsEqual(expected),
+                          "ChatGPT subscription (Codex Live) Talk Here must transition OpeningVoiceAudio to sending right when connected instead of staying stuck in buffering")
+        }
+    }
 }
