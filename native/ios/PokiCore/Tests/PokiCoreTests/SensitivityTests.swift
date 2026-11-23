@@ -388,6 +388,19 @@ final class SensitivityTests: XCTestCase {
                 3
             ),
             (
+                "Custom confirm box inside Window and Group",
+                [Node("Window", nil, [0, 0, 390, 844], [
+                    Node("Group", nil, [0, 0, 390, 844], [
+                        Node("Other", nil, [40, 300, 310, 180], [
+                            Node("StaticText", "删除这条记录？", [56, 320, 278, 44]),
+                            Node("Button", "取消", [56, 420, 130, 44]),
+                            Node("Button", "删除", [204, 420, 130, 44]),
+                        ]),
+                    ]),
+                ])],
+                3
+            ),
+            (
                 "Native Alert inside Window and Group",
                 [Node("Window", nil, [0, 0, 390, 844], [
                     Node("Group", nil, [0, 0, 390, 844], [
