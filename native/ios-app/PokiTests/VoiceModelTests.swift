@@ -1992,6 +1992,59 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    func testSubscriptionVoiceBackendFailureDeliversSpecificNoteToChatHistoryAndClearsLiveLines() async throws {
+        let savedLanguage = AppLocalization.shared.preference
+        defer { AppLocalization.shared.preference = savedLanguage }
+        AppLocalization.shared.preference = "en"
+
+        let genericLostNote = "Connection lost. Nothing is sent again. Talk again to hear how running steps ended."
+        let cases: [(name: String, method: String, params: CodexVoice.JSON, expectedNote: String, expectsSignIn: Bool)] = [
+            (
+                "non-retrying backend error",
+                "poki/backend/error",
+                ["willRetry": false, "code": "responseStreamDisconnected", "diagnostic": "stream disconnected before completion"],
+                "ChatGPT couldn’t finish that phone action. Try again.",
+                false
+            ),
+            (
+                "failed backend turn",
+                "poki/backend/turnCompleted",
+                ["status": "failed", "code": "internalServerError", "diagnostic": "unexpected status 502"],
+                "ChatGPT couldn’t finish that phone action. Try again.",
+                false
+            ),
+            (
+                "sign-in required backend error",
+                "poki/backend/error",
+                ["willRetry": false, "code": "unauthorized", "kind": "signInRequired"],
+                "Sign in to ChatGPT again to start a voice conversation.",
+                true
+            ),
+        ]
+
+        try await withChatGPTSelected {
+            for item in cases {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                var delivered: [[VoiceLine]] = []
+                h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
+                await h.connect()
+
+                codex.notify(item.method, item.params)
+
+                XCTAssertFalse(h.voice.isOn, item.name)
+                XCTAssertEqual(h.voice.phase, .lost(item.expectedNote), item.name)
+                XCTAssertEqual(h.voice.talkState?.isFailed, true, item.name)
+                XCTAssertEqual(h.voice.needsChatGPTSignIn, item.expectsSignIn, item.name)
+                XCTAssertEqual(delivered.count, 1, item.name)
+                XCTAssertEqual(delivered.first?.last?.role, .note, item.name)
+                XCTAssertEqual(delivered.first?.last?.text, item.expectedNote, item.name)
+                XCTAssertFalse(delivered.first?.contains(where: { $0.text == genericLostNote }) ?? true, item.name)
+                XCTAssertTrue(h.voice.lines.isEmpty, "\(item.name) must not leave a stale failure line after onConversationEnded")
+            }
+        }
+    }
+
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
         let selected = UserDefaults.standard.object(forKey: "chat.provider")
         let saved = ModelKeys.key(.chatgpt)
