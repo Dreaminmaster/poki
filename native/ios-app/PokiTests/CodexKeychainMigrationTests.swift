@@ -970,6 +970,129 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertNil(CodexAccount.readAccessToken(service: codexService, home: home))
     }
 
+    func testSignOutFailureAfterCurrentKeyDeletionDoesNotReviveLegacyCredential() async throws {
+        let codexService = makeTestService()
+        defer { assertServiceCleanedUp(codexService) }
+        let modelKeysService = makeTestModelKeysService()
+        defer { assertServiceCleanedUp(modelKeysService) }
+        let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let current = try expectedAccountKey(for: home)
+        let legacyAccount = "cli|6000000000000001"
+
+        let currentData = try makeCredentialData(accessToken: "tok-current-before-failed-logout", lastRefresh: "2026-11-23T12:00:00Z")
+        let legacyData = try makeCredentialData(accessToken: "tok-legacy-must-not-revive", lastRefresh: "2026-11-20T12:00:00Z")
+        try addRawKeychainItem(
+            service: codexService,
+            account: current,
+            data: currentData,
+            accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        )
+        try addRawKeychainItem(
+            service: codexService,
+            account: legacyAccount,
+            data: legacyData,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        try ChatGPTAccount.save(
+            OAuthCredentials(
+                refresh: "legacy-oauth-refresh-fail",
+                access: "legacy-oauth-access-fail",
+                expires: Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000,
+                clientId: "fixture-client-fail"
+            ),
+            service: modelKeysService
+        )
+
+        var emit: (@MainActor (String) -> Void)?
+        var logoutObservedCurrentBeforeDelete: Data?
+        var logoutHookError: Error?
+        func push(_ payload: [String: Any]) {
+            do {
+                let bytes = try JSONSerialization.data(withJSONObject: payload)
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            } catch {
+                XCTFail("Failed to encode mock RPC payload: \(error)")
+            }
+        }
+
+        let voice = CodexVoice(
+            startBridge: { _, next in
+                emit = next
+                return true
+            },
+            sendBridge: { text in
+                let object: [String: Any]
+                do {
+                    guard let decoded = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                        XCTFail("Expected JSON object in sendBridge payload")
+                        return false
+                    }
+                    object = decoded
+                } catch {
+                    XCTFail("Failed to decode sendBridge payload: \(error)")
+                    return false
+                }
+                guard let method = object["method"] as? String,
+                      let id = object["id"] else { return false }
+                switch method {
+                case "account/read":
+                    push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                case "thread/start":
+                    push(["id": id, "result": ["thread": ["id": "signout-fail-thread"]]])
+                case "account/logout":
+                    do {
+                        logoutObservedCurrentBeforeDelete = try Keychain.read(current, service: codexService)
+                        try Keychain.remove(current, service: codexService)
+                    } catch {
+                        logoutHookError = error
+                    }
+                    push(["id": id, "error": ["code": -32000, "message": "logout rpc failed"]])
+                default:
+                    push(["id": id, "result": [:]])
+                }
+                return true
+            },
+            codexService: codexService,
+            home: home
+        )
+        defer { voice.stop() }
+
+        try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
+
+        try await CodexAccount.$defaultService.withValue(codexService) {
+            try await CodexAccount.$defaultHome.withValue(home) {
+                do {
+                    try await ChatGPTAccount.signOutIncludingVoice(
+                        voice: voice,
+                        codexService: codexService,
+                        modelKeysService: modelKeysService
+                    )
+                    XCTFail("signOutIncludingVoice must propagate voice.signOut() RPC failure")
+                } catch let error as CodexVoice.Failure {
+                    XCTAssertEqual(error, .unavailable)
+                }
+
+                XCTAssertNil(logoutHookError, "Unexpected Keychain error inside account/logout hook: \(String(describing: logoutHookError))")
+                XCTAssertEqual(
+                    logoutObservedCurrentBeforeDelete,
+                    currentData,
+                    "Current cli|<current> credential must remain intact when account/logout starts"
+                )
+                XCTAssertEqual(
+                    CodexAccount.prepareStorage(service: codexService, home: home),
+                    .empty,
+                    "Legacy cli|<old> credential must not revive after voice.signOut() fails post-current-key deletion"
+                )
+                XCTAssertNil(CodexAccount.accessToken, "CodexAccount.accessToken must stay nil after failed sign-out")
+                XCTAssertNil(CodexAccount.readAccessToken(service: codexService, home: home))
+                let remaining = try Keychain.readAll(service: codexService).filter { $0.account.hasPrefix("cli|") }
+                XCTAssertTrue(remaining.isEmpty, "No cli|* credentials may remain in isolated service after sign-out fails")
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func makeTestService() -> String {
