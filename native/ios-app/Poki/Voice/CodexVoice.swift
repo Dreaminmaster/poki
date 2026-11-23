@@ -54,6 +54,7 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var pending: [String: Pending] = [:]
     @ObservationIgnored private var completed: [String: Result<JSON, any Error>] = [:]
     @ObservationIgnored private var running = false
+    @ObservationIgnored private var needsAccountReload = false
     @ObservationIgnored private var active: UUID?
     @ObservationIgnored private var loginAttempt: UUID?
     @ObservationIgnored private var loginID: String?
@@ -64,14 +65,23 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var onTool: ((String, String) async -> PhoneAnswer)?
     @ObservationIgnored private let startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)?
     @ObservationIgnored private let sendBridge: ((String) -> Bool)?
+    @ObservationIgnored private let prepareStorageBridge: (() -> CodexAccount.StorageState)?
+    @ObservationIgnored private let codexService: String
+    @ObservationIgnored private let codexHome: URL
 
     init(startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)? = nil,
-         sendBridge: ((String) -> Bool)? = nil) {
+         sendBridge: ((String) -> Bool)? = nil,
+         prepareStorage: (() -> CodexAccount.StorageState)? = nil,
+         codexService: String = CodexAccount.defaultService,
+         home: URL = CodexAccount.home) {
         self.startBridge = startBridge
         self.sendBridge = sendBridge
+        self.prepareStorageBridge = prepareStorage
+        self.codexService = codexService
+        self.codexHome = home
     }
 
-    private var homePath: String { CodexAccount.home.path(percentEncoded: false) }
+    private var homePath: String { codexHome.path(percentEncoded: false) }
 
     func prepare(onEvent: @escaping (String, JSON) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
         let generation = UUID()
@@ -129,18 +139,61 @@ final class CodexVoice: SubscriptionVoice {
         guard running || FileManager.default.fileExists(atPath: homePath) else { return }
         onEvent?("thread/realtime/closed", [:])
         stop()
+        needsAccountReload = false
         try await request("account/logout", [:])
     }
 
     private func requireAccount(_ generation: UUID) async throws {
-        let state = try await request("account/read", ["refreshToken": false])
+        try startRuntime()
+        if needsAccountReload {
+            try await reloadAccountCache()
+            try check(generation)
+        }
+        let state = try await request("account/read", ["refreshToken": false], checkStorage: false)
         try check(generation)
-        guard (state["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        if (state["account"] as? JSON)?["type"] as? String == "chatgpt" { return }
+
+        switch runPrepareStorage() {
+        case .locked, .failed:
+            throw Failure.unavailable
+        case .migrated, .ready:
+            try await reloadAccountCache()
+            try check(generation)
+            let reloaded = try await request("account/read", ["refreshToken": false], checkStorage: false)
+            try check(generation)
+            guard (reloaded["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        case .empty:
+            throw Failure.signIn
+        }
     }
 
     func refreshAccount() async throws {
-        let account = try await request("account/read", ["refreshToken": true])
-        guard (account["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        try startRuntime()
+        if needsAccountReload {
+            try await reloadAccountCache()
+        }
+        let account = try await request("account/read", ["refreshToken": true], checkStorage: false)
+        if (account["account"] as? JSON)?["type"] as? String == "chatgpt" { return }
+
+        switch runPrepareStorage() {
+        case .locked, .failed:
+            throw Failure.unavailable
+        case .migrated, .ready:
+            try await reloadAccountCache()
+            let reloaded = try await request("account/read", ["refreshToken": true], checkStorage: false)
+            guard (reloaded["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        case .empty:
+            throw Failure.signIn
+        }
+    }
+
+    private func reloadAccountCache() async throws {
+        _ = try await request("poki/account/reload", [:], checkStorage: false)
+        needsAccountReload = false
+    }
+
+    private func runPrepareStorage() -> CodexAccount.StorageState {
+        prepareStorageBridge?() ?? CodexAccount.prepareStorage(service: codexService, home: codexHome)
     }
 
     func cancelLogin() {
@@ -192,6 +245,7 @@ final class CodexVoice: SubscriptionVoice {
         let authorized = try await request("account/read", ["refreshToken": false])
         guard loginAttempt == attempt else { throw CancellationError() }
         guard (authorized["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        CodexAccount.ensureAfterFirstUnlock(service: codexService, home: codexHome)
     }
 
     private func check(_ generation: UUID) throws {
@@ -199,8 +253,10 @@ final class CodexVoice: SubscriptionVoice {
     }
 
     @discardableResult
-    private func request(_ method: String, _ params: JSON) async throws -> JSON {
-        try startRuntime()
+    private func request(_ method: String, _ params: JSON, checkStorage: Bool = true) async throws -> JSON {
+        if checkStorage || !running {
+            try startRuntime()
+        }
         nextRequest += 1
         let id = nextRequest
         do {
@@ -240,7 +296,19 @@ final class CodexVoice: SubscriptionVoice {
     }
 
     private func startRuntime() throws {
-        if running { return }
+        let storage = runPrepareStorage()
+        if running {
+            if storage == .migrated {
+                needsAccountReload = true
+            }
+            return
+        }
+        switch storage {
+        case .locked, .failed:
+            throw Failure.unavailable
+        case .ready, .migrated, .empty:
+            break
+        }
         if let startBridge {
             running = startBridge(homePath) { [weak self] text in self?.receive(text) }
         } else {
@@ -253,6 +321,7 @@ final class CodexVoice: SubscriptionVoice {
             }
         }
         if !running { throw Failure.unavailable }
+        needsAccountReload = false
     }
 
     private func send(_ message: JSON) -> Bool {
@@ -280,6 +349,7 @@ final class CodexVoice: SubscriptionVoice {
         let params = message["params"] as? JSON ?? [:]
         if method == "poki/runtime/closed" {
             running = false
+            needsAccountReload = false
             if let stage = params["stage"] as? String {
                 AppLog.shared.add("voice", "Codex runtime stopped at \(stage)")
             }

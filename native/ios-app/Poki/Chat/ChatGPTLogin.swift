@@ -6,7 +6,7 @@ import SwiftUI
 /// New sign-ins share the Codex Keychain account for text and voice. Existing text-only sign-ins
 /// continue to work for text until their owner authorizes the shared account.
 enum ChatGPTAccount {
-    @MainActor private static var renewal: (stored: String, task: Task<String?, Never>)?
+    @MainActor private static var renewal: (service: String, stored: String, task: Task<String?, Never>)?
 
     struct SignInRequired: LocalizedError {
         var errorDescription: String? { ChatGPTAccount.signInAgain }
@@ -35,37 +35,60 @@ enum ChatGPTAccount {
         try? JSONDecoder().decode(OAuthCredentials.self, from: Data(stored.utf8))
     }
 
-    static func save(_ credentials: OAuthCredentials) throws {
+    static func save(_ credentials: OAuthCredentials, service: String = ModelKeys.defaultService) throws {
         let data = try JSONEncoder().encode(credentials)
-        try ModelKeys.save(String(decoding: data, as: UTF8.self), for: .chatgpt)
+        try ModelKeys.save(String(decoding: data, as: UTF8.self), for: .chatgpt, service: service)
     }
 
     static var signedIn: Bool {
-        CodexAccount.accessToken != nil || ModelKeys.key(.chatgpt).flatMap(decode)?.clientId?.isEmpty == false
+        isSignedIn()
+    }
+
+    static func isSignedIn(
+        codexService: String = CodexAccount.defaultService,
+        codexHome: URL = CodexAccount.home,
+        modelKeysService: String = ModelKeys.defaultService
+    ) -> Bool {
+        CodexAccount.readAccessToken(service: codexService, home: codexHome) != nil
+            || ModelKeys.key(.chatgpt, service: modelKeysService).flatMap(decode)?.clientId?.isEmpty == false
     }
 
     @MainActor
-    static func codexAccessToken() async -> String? {
-        guard let token = CodexAccount.accessToken else { return nil }
+    static func codexAccessToken(
+        voice: CodexVoice = .shared,
+        service: String = CodexAccount.defaultService,
+        home: URL = CodexAccount.home
+    ) async -> String? {
+        guard let token = CodexAccount.readAccessToken(service: service, home: home) else { return nil }
         guard CodexAccount.expiresSoon(token) else { return token }
-        do { try await CodexVoice.shared.refreshAccount() } catch { return nil }
-        guard let fresh = CodexAccount.accessToken, !CodexAccount.expiresSoon(fresh) else { return nil }
+        do { try await voice.refreshAccount() } catch { return nil }
+        guard let fresh = CodexAccount.readAccessToken(service: service, home: home), !CodexAccount.expiresSoon(fresh) else { return nil }
         return fresh
     }
 
-    static func signOut() throws {
-        try ModelKeys.removeChatGPTSignIn()
+    static func signOut(service: String = ModelKeys.defaultService) throws {
+        try ModelKeys.removeChatGPTSignIn(service: service)
     }
 
     @MainActor
-    static func signOutIncludingVoice() async throws {
-        try await CodexVoice.shared.signOut()
-        try signOut()
+    static func signOutIncludingVoice(
+        voice: CodexVoice = .shared,
+        codexService: String = CodexAccount.defaultService,
+        codexHome: URL = CodexAccount.home,
+        modelKeysService: String = ModelKeys.defaultService
+    ) async throws {
+        CodexAccount.beginSignOut()
+        defer { CodexAccount.endSignOut() }
+
+        try CodexAccount.clearLegacyCredentials(service: codexService, home: codexHome)
+        try await voice.signOut()
+        try CodexAccount.clearStoredCredentials(service: codexService)
+        try signOut(service: modelKeysService)
     }
 
     @MainActor
-    static func accessToken() async -> String? {
-        guard let stored = ModelKeys.key(.chatgpt), let credential = decode(stored),
+    static func accessToken(service: String = ModelKeys.defaultService) async -> String? {
+        guard let stored = ModelKeys.key(.chatgpt, service: service), let credential = decode(stored),
               credential.clientId?.isEmpty == false else { return nil }
         let now = Date().timeIntervalSince1970 * 1000
         if credential.expires > now + 60_000 || credential.refresh.isEmpty && credential.expires > now {
@@ -75,19 +98,19 @@ enum ChatGPTAccount {
 
         // A new chat asks for a title and a reply at the same time. Both need the same rotated token.
         let task: Task<String?, Never>
-        if let renewal, renewal.stored == stored {
+        if let renewal, renewal.service == service, renewal.stored == stored {
             task = renewal.task
         } else {
             task = Task {
-                defer { if renewal?.stored == stored { renewal = nil } }
+                defer { if renewal?.service == service && renewal?.stored == stored { renewal = nil } }
                 guard let fresh = try? await refreshOpenAIChatGPTToken(credential),
-                      ModelKeys.key(.chatgpt) == stored else { return nil }
-                do { try save(fresh); return fresh.access }
+                      ModelKeys.key(.chatgpt, service: service) == stored else { return nil }
+                do { try save(fresh, service: service); return fresh.access }
                 catch { return nil }
             }
-            renewal = (stored, task)
+            renewal = (service, stored, task)
         }
-        guard let access = await task.value, ModelKeys.key(.chatgpt).flatMap(decode)?.access == access else { return nil }
+        guard let access = await task.value, ModelKeys.key(.chatgpt, service: service).flatMap(decode)?.access == access else { return nil }
         return access
     }
 
