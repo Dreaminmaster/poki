@@ -231,6 +231,8 @@ final class LoopbackMonitor {
     }
 
     #if DEBUG
+    func simulateNetworkChange() { networkChanged(physical: true) }
+
     /// Tests: set the state as a probe result would, running the change hook.
     func simulate(_ next: State) {
         publish(next, log: false)
