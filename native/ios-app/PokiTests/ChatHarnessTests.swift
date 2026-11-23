@@ -4099,6 +4099,7 @@ private actor PasteReceiptTransport: HTTPTransport {
 final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
+    private let beforePathRequest: (@Sendable (String) async -> Void)?
     private let screenLabel: @Sendable () -> String
     private let beforeActivation: (@Sendable (String) async -> Void)?
     private let activeApp: @Sendable () -> (bundleID: String, name: String)
@@ -4111,6 +4112,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
+         beforePathRequest: (@Sendable (String) async -> Void)? = nil,
          beforeActivation: (@Sendable (String) async -> Void)? = nil,
          activeApp: @escaping @Sendable () -> (bundleID: String, name: String) = { ("com.apple.Preferences", "Settings") },
          unavailableApp: String? = nil,
@@ -4119,6 +4121,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
+        self.beforePathRequest = beforePathRequest
         self.beforeActivation = beforeActivation
         self.activeApp = activeApp
         self.unavailableApp = unavailableApp
@@ -4126,9 +4129,10 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        await beforeRequest?()
-        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        await beforeRequest?()
+        await beforePathRequest?(path)
+        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let value: JSON
         switch path {
         case "/wda/apps/activate":

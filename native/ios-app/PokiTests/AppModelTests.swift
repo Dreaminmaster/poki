@@ -1281,8 +1281,23 @@ final class InProcessPasscodeTests: XCTestCase {
         let stateLock = NSLock()
         var front = (bundleID: "com.apple.Preferences", name: "Settings")
         var activated: [String] = []
+        var holdNextRequest = false
+        var enteredHold = false
+        var releaseHold: CheckedContinuation<Void, Never>?
         let transport = SessionScreenTransport(
             session: session,
+            beforeRequest: {
+                let shouldHold = stateLock.withLock { () -> Bool in
+                    guard holdNextRequest else { return false }
+                    holdNextRequest = false
+                    enteredHold = true
+                    return true
+                }
+                guard shouldHold else { return }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    stateLock.withLock { releaseHold = continuation }
+                }
+            },
             beforeActivation: { bundle in
                 stateLock.withLock {
                     activated.append(bundle)
@@ -1313,17 +1328,253 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(session.isOpen)
         XCTAssertEqual(session.closes, 0)
 
-        // Leaving Poki before becoming active clears the pending return instead of firing later.
+        // Leaving Poki while an in-flight read holds the gate cancels the pending return.
         stateLock.withLock {
             activated.removeAll()
-            front = ("com.apple.springboard", "SpringBoard")
+            front = ("com.apple.Preferences", "Settings")
+            holdNextRequest = true
+            enteredHold = false
         }
+        model.wentToBackground()
+        let heldRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("in-flight read is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        model.wentToBackground()
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let heldResult = await heldRead.value
+        XCTAssertFalse(heldResult.isError, heldResult.text)
+        // A serialized follow-up look enters the gate after any queued return would have run.
+        let drain1 = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(drain1.isError, drain1.text)
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+
+        // Leaving Poki before becameActive clears pendingLiveActivityReturnAt without activating later.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.Preferences", "Settings")
+        }
+        let prepRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(prepRead.isError, prepRead.text)
         model.wentToBackground()
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.wentToBackground()
         model.becameActive()
-        try await Task.sleep(for: .milliseconds(150))
+        let drain2 = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(drain2.isError, drain2.text)
         XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+    }
+
+    func testLiveActivityReturnIgnoresSpringBoardEmptyBundleAndPreviousTaskForeground() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        let transport = SessionScreenTransport(
+            session: session,
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let initialRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(initialRead.isError, initialRead.text)
+
+        // A mid-transition read that records SpringBoard as lastForeground must still return to Settings.
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        let springBoardRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(springBoardRead.isError, springBoardRead.text)
+        await waitFor("SpringBoard read finished") { self.model.activityText == "Idle" }
+
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        await waitFor("target app reactivated instead of SpringBoard") {
+            stateLock.withLock { !activated.isEmpty }
+        }
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+
+        // A read with an empty bundle ID and non-empty name must also fall back to Settings.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("", "Transition")
+        }
+        model.wentToBackground()
+        let emptyBundleRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(emptyBundleRead.isError, emptyBundleRead.text)
+        await waitFor("empty-bundle read finished") { self.model.activityText == "Idle" }
+
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        await waitFor("target app reactivated when latest foreground has empty bundle ID") {
+            stateLock.withLock { activated.contains("com.apple.Preferences") }
+        }
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+
+        // Ending the task clears previous-task target state so a new task before its first read does not reactivate Settings.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.Preferences", "Settings")
+        }
+        let closingRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(closingRead.isError, closingRead.text)
+        model.chatTaskEnded(reply: nil, session: "task-1", acted: true)
+        await waitFor("task 1 finished and closed automation") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.springboard", "SpringBoard")
+        }
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let drainNewTask = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(drainNewTask.isError, drainNewTask.text)
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
+                      "a new task before any non-SpringBoard read must not reactivate the previous task's app")
+    }
+
+    func testLiveActivityReturnWaitsPastBusyWaitForSlowReadAndCancelsOnStopOrHandoff() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        var holdPath: String?
+        var enteredHold = false
+        var releaseHold: CheckedContinuation<Void, Never>?
+        let transport = SessionScreenTransport(
+            session: session,
+            beforePathRequest: { path in
+                let shouldHold = stateLock.withLock { () -> Bool in
+                    guard holdPath == path else { return false }
+                    holdPath = nil
+                    enteredHold = true
+                    return true
+                }
+                guard shouldHold else { return }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    stateLock.withLock { releaseHold = continuation }
+                }
+            },
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let initialRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(initialRead.isError, initialRead.text)
+
+        // Hold /source (4 s readTimeout) longer than CoreConfig.busyWait (2.0 s) while Poki stays in front.
+        stateLock.withLock {
+            holdPath = "/source"
+            enteredHold = false
+        }
+        let slowRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("slow /source read is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+
+        try await Task.sleep(for: .milliseconds(2300))
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let slowResult = await slowRead.value
+        XCTAssertFalse(slowResult.isError, slowResult.text)
+
+        await waitFor("target app reactivated after slow /source read released gate past 2 s busyWait") {
+            stateLock.withLock { activated.contains("com.apple.Preferences") }
+        }
+        XCTAssertTrue(session.isOpen)
+
+        // Handoff arriving while a pending Live Activity return waits on the gate must cancel it.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.Preferences", "Settings")
+            holdPath = "/wda/keys"
+            enteredHold = false
+        }
+        model.wentToBackground()
+        let handoffStep = Task {
+            await self.model.runTool("do", arguments: #"{"actions":[{"key":"return"},{"handoff":{"kind":"password","text":"Sign in"}}]}"#)
+        }
+        await waitFor("pre-handoff key action is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let handoffResult = await handoffStep.value
+        XCTAssertFalse(handoffResult.isError, handoffResult.text)
+        await waitFor("handoff reached AppModel and closed automation") {
+            self.model.handoffText != nil && !self.session.isOpen
+        }
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
+                      "a Live Activity return must cancel once handoff is active")
+
+        // Explicit Stop while a slow read holds the gate must also cancel a pending Live Activity return.
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        let takeBack = await model.runTool("do", arguments: #"{"actions":[{"handoff":false}]}"#)
+        XCTAssertFalse(takeBack.isError, takeBack.text)
+        await waitFor("handoff cleared") { self.model.handoffText == nil }
+
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.Preferences", "Settings")
+            holdPath = "/source"
+            enteredHold = false
+        }
+        model.wentToBackground()
+        let stoppedRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("read before stop is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        model.stopFromOutside(AppModel.liveActivityStop)
+        await waitFor("Stop closed the session") { !self.session.isOpen && self.model.runnerPaused }
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        _ = await stoppedRead.value
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
+                      "Stop must cancel any pending Live Activity return")
     }
 
     /// Talk Here starts a relaunched Poki in the background. On iOS 27 its first open asks for no
