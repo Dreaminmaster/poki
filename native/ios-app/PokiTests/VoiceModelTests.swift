@@ -664,9 +664,14 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(confirmed.voice.phase, .off)
 
         let unconfirmed = Harness()
+        defer {
+            unconfirmed.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await unconfirmed.liveTalk()
-        await unconfirmed.time.advance(8)
-        XCTAssertFalse(unconfirmed.voice.isOn, "The idle timer must also request a graceful close.")
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await unconfirmed.time.advance(60)
+        XCTAssertFalse(unconfirmed.voice.isOn, "The background idle timer must also request a graceful close.")
         XCTAssertFalse(unconfirmed.link.closed)
         XCTAssertEqual(unconfirmed.microphone, [true])
         await unconfirmed.time.advance(10)
@@ -1706,7 +1711,7 @@ final class VoiceModelTests: XCTestCase {
                     codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
                 }
                 NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-                let deadline: Double = spoke ? 30 : 8
+                let deadline: Double = spoke ? 30 : 60
                 await h.time.advance(deadline - 1)
                 XCTAssertTrue(h.voice.isOn)
                 await h.time.advance(1)
@@ -1739,9 +1744,13 @@ final class VoiceModelTests: XCTestCase {
         try await withChatGPTSelected {
             let codex = FakeSubscriptionVoice()
             let h = Harness(codex: codex)
-            defer { h.voice.stop() }
+            defer {
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
             await h.connect()
             let link = try XCTUnwrap(h.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
             codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
             link.remoteSpeech = true
             await h.time.advance(0.2)
@@ -1750,7 +1759,7 @@ final class VoiceModelTests: XCTestCase {
             link.remoteSpeech = false
             for _ in 0..<3 { await h.time.advance(0.2) }
             XCTAssertEqual(h.voice.phase, .listening)
-            await h.time.advance(7)
+            await h.time.advance(59)
             XCTAssertTrue(h.voice.isOn)
             codex.notify("thread/realtime/transcript/done", ["role": "assistant", "text": "Hi there."])
             XCTAssertTrue(h.voice.lines.contains { $0.role == .poki && $0.text == "Hi there." })
@@ -2062,13 +2071,20 @@ final class VoiceModelTests: XCTestCase {
         try await run()
     }
 
-    /// Said once, answered once: the conversation waits 8 s for the person to go on, then ends and lets
-    /// go of the microphone, so iOS's microphone dot goes off instead of Poki listening on.
-    func testTheConversationEndsWhenNobodySpeaksForEightSecondsAfterTheAnswer() async {
+    /// Said once, answered once: in the foreground the conversation stays open until ended; in the
+    /// background it waits 60 s of complete idle, then ends and lets go of the microphone.
+    func testTheConversationEndsWhenNobodySpeaksForSixtySecondsInTheBackgroundAfterTheAnswer() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
         h.turn("What iOS version is this?", "iOS 26.1.", id: "r1")
-        await h.time.advance(7)
+        await h.time.advance(65)
+        XCTAssertTrue(h.voice.isOn, "foreground silence must not auto-end")
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
@@ -2077,35 +2093,54 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(h.microphone, [true, false])
     }
 
-    /// Talk to Poki and then nothing said: the same 8 s end it.
-    func testTheConversationEndsWhenNobodySpeaksForEightSecondsAfterItOpens() async {
+    /// Talk to Poki and then nothing said: stays open in the foreground, ends after 60 s in the background.
+    func testTheConversationEndsWhenNobodySpeaksForSixtySecondsInTheBackgroundAfterItOpens() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
-        await h.time.advance(7)
+        await h.time.advance(65)
+        XCTAssertTrue(h.voice.isOn)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
         XCTAssertEqual(h.microphone, [true, false])
     }
 
-    /// Speech the server answers only with an error: no answer is coming, so the 8 s still end it.
-    func testSpeechAnsweredOnlyWithAnErrorStillEndsAfterEightSeconds() async {
+    /// Speech the server answers only with an error: no answer is coming, so the 60 s background idle timer ends it.
+    func testSpeechAnsweredOnlyWithAnErrorStillEndsAfterSixtySecondsInTheBackground() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
                     ["type": "error", "error": ["message": "Conversation already has an active response"]])
-        await h.time.advance(8)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
     }
 
-    /// Speaking again within the 8 s goes on in the same conversation: the model keeps what was said.
-    func testSpeakingAgainWithinEightSecondsGoesOnInTheSameConversation() async {
+    /// Speaking again within the 60 s background idle window goes on in the same conversation: the model keeps what was said.
+    func testSpeakingAgainWithinSixtySecondsInTheBackgroundGoesOnInTheSameConversation() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         await h.time.settle()
         h.link.play(["type": "input_audio_buffer.speech_started"])
-        await h.time.advance(8)
+        await h.time.advance(20)
         XCTAssertTrue(h.voice.isOn)
         XCTAssertEqual(h.links.count, 1)
         XCTAssertFalse(h.link.closed)
@@ -2117,7 +2152,7 @@ final class VoiceModelTests: XCTestCase {
         let h = Harness()
         await h.talk()
         h.turn("Open Settings.", "Settings is open.", id: "r1")
-        await h.time.advance(8)
+        h.voice.stop()
         XCTAssertFalse(h.voice.isOn)
 
         await h.time.advance(4 * 60)
@@ -2139,13 +2174,19 @@ final class VoiceModelTests: XCTestCase {
         await h.time.advance(5 * 60 + 1)
         await h.talk()
         XCTAssertFalse(h.link.notes.joined().contains("Wi-Fi"))
+        h.voice.stop()
     }
 
     /// A step that finishes while its request's answer is still out: the conversation stays until the
     /// answer that carries the result has played.
     func testAStepsResultIsSaidBeforeTheConversationEnds() async {
         let h = Harness(phoneTool: { _, _ in ("Settings is open", false, nil) })
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]])
         await h.time.settle()
@@ -2155,13 +2196,15 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertTrue(h.voice.isOn)
         h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
                     ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
-        await h.time.advance(8)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
     }
 
     /// You switch to another app during a talk and it goes on (the owner, 2026-11-13): Poki still listens,
     /// the microphone stays with it and the Live Activity says so, also when it was still connecting. It
-    /// ends there as it does in front: 8 s after an answer if nobody speaks.
+    /// ends in the background after 60 s of complete idle.
     func testATalkGoesOnWhenPokiGoesToTheBackground() async {
         let h = Harness()
         await h.talk()
@@ -2173,7 +2216,7 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(TalkActivity.state(of: h.voice), .listening)
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         XCTAssertTrue(h.voice.isOn, "an answer said in the background does not end the talk")
-        await h.time.advance(7)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
@@ -2190,15 +2233,19 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(connecting.links.count, 1)
         XCTAssertEqual(connecting.microphone, [true])
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        connecting.voice.stop()
     }
 
     /// An error that is not about the request for the step's answer (a stale cancel, say) leaves that
-    /// answer expected: the talk waits for it. The error that is about it means no answer is coming, and
-    /// the talk ends after the 8 s it gives the person to go on.
+    /// answer expected: the talk waits for it (and hits the 30 s background stall cap if it never comes).
+    /// The error that is about it means no answer is coming, so it leaves mid-turn and waits the full
+    /// 60 s background idle window.
     func testOnlyAnErrorForTheAnswerRequestGivesUpOnTheAnswer() async {
+        defer { NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil) }
         for ownError in [false, true] {
             let (step, stepDone) = AsyncStream<Void>.makeStream()
             let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false, nil) })
+            defer { h.voice.stop() }
             await h.talk()
             h.link.play(["type": "response.created", "response": ["id": "r1"]],
                         ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -2210,9 +2257,15 @@ final class VoiceModelTests: XCTestCase {
             let id = request?["event_id"] as? String
             XCTAssertNotNil(id, "the request for the answer carries an id its error can name")
 
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
             h.link.play(["type": "error", "error": ["message": "x", "event_id": ownError ? id ?? "" : "event_other"]])
-            await h.time.advance(8)
-            XCTAssertEqual(h.voice.isOn, !ownError, ownError ? "the answer request failed, nothing is coming" : "an unrelated error ended it before the answer")
+            await h.time.advance(30)
+            XCTAssertEqual(h.voice.isOn, ownError, ownError ? "idle background talk should wait 60 s, not 30 s stall" : "an unanswered turn should stall after 30 s in the background")
+            if ownError {
+                await h.time.advance(30)
+                XCTAssertFalse(h.voice.isOn)
+            }
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         }
     }
 
@@ -2220,14 +2273,20 @@ final class VoiceModelTests: XCTestCase {
     /// opened within 5 minutes of that one still hears it.
     func testASilentConversationInBetweenKeepsTheLastTurnsToCarryOver() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         h.voice.stop()
 
         await h.time.advance(30)
         await h.talk()
-        await h.time.advance(8)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(60)
         XCTAssertFalse(h.voice.isOn)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
         await h.time.advance(30)
         await h.talk()
@@ -2305,6 +2364,305 @@ final class VoiceModelTests: XCTestCase {
                     ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
         XCTAssertTrue(h.voice.isOn, "the result said, the talk waits for the person to go on")
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+
+    func testCodexHandoffTurnAndRetryingBackendErrorStayOpenPastOldEightSecondWindow() async throws {
+        try await withChatGPTSelected {
+            // Part 1: Real CodexVoice bridge forwarding handoff_request, turnStarted, retrying error (ignored), and turnCompleted.
+            var emit: (@MainActor (String) -> Void)?
+            func push(_ payload: [String: Any]) {
+                guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            }
+            let codex = CodexVoice(
+                startBridge: { _, next in
+                    emit = next
+                    return true
+                },
+                sendBridge: { text in
+                    guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+                          let method = object["method"] as? String, let id = object["id"] else { return true }
+                    switch method {
+                    case "account/read":
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    case "thread/start":
+                        push(["id": id, "result": ["thread": ["id": "busy-thread"]]])
+                    case "thread/realtime/start":
+                        push(["id": id, "result": [:]])
+                        push(["method": "thread/realtime/sdp", "params": ["threadId": "busy-thread", "sdp": "fixture-sdp-answer"]])
+                    default:
+                        push(["id": id, "result": [:]])
+                    }
+                    return true
+                }
+            )
+            let h = Harness(codex: codex)
+            defer {
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+            push(["method": "thread/realtime/itemAdded", "params": [
+                "threadId": "busy-thread", "item": ["type": "handoff_request"],
+            ]])
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "busy-thread"]])
+            await h.time.settle()
+
+            // Frontend speaks a short filler ("这就去") and goes quiet while backend retries.
+            link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.voice.phase, .speaking)
+            link.remoteSpeech = false
+            for _ in 0..<3 { await h.time.advance(0.2) }
+            XCTAssertEqual(h.voice.phase, .thinking, "Playback going quiet during a Codex backend turn must stay .thinking")
+            XCTAssertTrue(h.voice.midTurn)
+
+            for _ in 0..<4 {
+                push(["method": "poki/backend/error", "params": [
+                    "threadId": "busy-thread", "code": "responseStreamDisconnected", "willRetry": true,
+                ]])
+                await h.time.advance(18)
+                XCTAssertTrue(h.voice.isOn, "Retrying Codex backend turn must never auto-end past 8s or 60s")
+                XCTAssertFalse(link.closed)
+                XCTAssertEqual(h.voice.phase, .thinking)
+            }
+
+            push(["method": "poki/backend/turnCompleted", "params": ["threadId": "busy-thread", "status": "completed"]])
+            await h.time.settle()
+            XCTAssertEqual(h.voice.phase, .listening)
+            XCTAssertFalse(h.voice.midTurn)
+            await h.time.advance(59)
+            XCTAssertTrue(h.voice.isOn, "Background idle must stay open until 60 seconds have elapsed")
+            await h.time.advance(1)
+            XCTAssertFalse(h.voice.isOn, "Background idle must end once 60 seconds pass after turnCompleted")
+            XCTAssertTrue(link.closed)
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+            // Part 2: Retrying backend error keeps busy state; final non-retrying poki/backend/error clears busy state and surfaces failure.
+            let fakeCodex = FakeSubscriptionVoice()
+            let h2 = Harness(codex: fakeCodex)
+            defer { h2.voice.stop() }
+            await h2.connect()
+            let link2 = try XCTUnwrap(h2.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            fakeCodex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Open WeChat"])
+            fakeCodex.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            fakeCodex.notify("poki/backend/turnStarted", [:])
+            fakeCodex.notify("poki/backend/error", ["code": "responseStreamDisconnected", "willRetry": true])
+            await h2.time.advance(70)
+            XCTAssertTrue(h2.voice.isOn, "Retrying backend error must keep the session open")
+            XCTAssertTrue(h2.voice.midTurn)
+
+            fakeCodex.notify("poki/backend/error", ["code": "streamFailed", "willRetry": false])
+            await h2.time.settle()
+            XCTAssertFalse(h2.voice.isOn)
+            XCTAssertFalse(h2.voice.midTurn)
+            XCTAssertEqual(h2.voice.phase, .lost(CodexVoice.Failure.backendFailed.localizedDescription))
+            XCTAssertEqual(h2.voice.talkState?.isFailed, true)
+            XCTAssertTrue(link2.closed)
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+    }
+
+    func testCodexRunningPhoneToolStaysOpenInForegroundAndBackgroundUntilFinished() async throws {
+        try await withChatGPTSelected {
+            let (gate, releaseGate) = AsyncStream<Void>.makeStream()
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex, phoneTool: { _, _ in
+                for await _ in gate { break }
+                return ("Opened Settings", false, nil)
+            })
+            defer {
+                releaseGate.finish()
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+            let toolTask = Task { await codex.callTool("open_app", #"{"app":"Settings"}"#) }
+            await h.time.settle()
+            XCTAssertEqual(h.voice.phase, .thinking)
+            XCTAssertTrue(h.voice.midTurn)
+
+            await h.time.advance(10)
+            XCTAssertTrue(h.voice.isOn, "Running Codex phone tool must not end after 8 seconds")
+            await h.time.advance(65)
+            XCTAssertTrue(h.voice.isOn, "Running Codex phone tool must not end after 60 seconds in background")
+            XCTAssertFalse(link.closed)
+
+            releaseGate.finish()
+            let answer = await toolTask.value
+            XCTAssertEqual(answer?.failed, false)
+            await h.time.settle()
+            XCTAssertEqual(h.voice.phase, .listening)
+            XCTAssertFalse(h.voice.midTurn)
+
+            await h.time.advance(59)
+            XCTAssertTrue(h.voice.isOn)
+            await h.time.advance(1)
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertTrue(link.closed)
+            XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
+    func testForegroundSilenceNeverAutoEndsConversation() async throws {
+        // Realtime in foreground
+        let realtime = Harness()
+        await realtime.talk()
+        await realtime.time.advance(120)
+        XCTAssertTrue(realtime.voice.isOn, "Foreground Realtime must not auto-end on initial silence")
+        realtime.turn("What iOS version is this?", "iOS 26.1.", id: "r1")
+        await realtime.time.advance(120)
+        XCTAssertTrue(realtime.voice.isOn, "Foreground Realtime must not auto-end after an answer")
+        XCTAssertFalse(realtime.link.closed)
+        realtime.voice.stop()
+        XCTAssertFalse(realtime.voice.isOn)
+
+        // Live in foreground
+        let live = Harness()
+        await live.liveTalk()
+        await live.time.advance(120)
+        XCTAssertTrue(live.voice.isOn, "Foreground Live must not auto-end on silence")
+        XCTAssertFalse(live.link.closed)
+        live.voice.stop()
+
+        // Codex subscription voice in foreground
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let sub = Harness(codex: codex)
+            defer { sub.voice.stop() }
+            await sub.connect()
+            let link = try XCTUnwrap(sub.links.last)
+            await sub.time.advance(120)
+            XCTAssertTrue(sub.voice.isOn, "Foreground Codex voice must not auto-end on silence")
+            XCTAssertFalse(link.closed)
+            sub.voice.stop()
+            XCTAssertFalse(sub.voice.isOn)
+        }
+    }
+
+    func testBackgroundEndsOnlyAfterSixtySecondsOfCompleteIdleAndSyncsOnAppTransitions() async {
+        let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+        await h.talk()
+        await h.time.advance(90)
+        XCTAssertTrue(h.voice.isOn, "Foreground silence must stay open indefinitely")
+
+        // Moving to background starts the 60s idle countdown.
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn, "Background idle must not end before 60 seconds")
+
+        // Returning to foreground cancels the pending background countdown.
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        await h.time.advance(120)
+        XCTAssertTrue(h.voice.isOn, "Returning to foreground must cancel the background idle timer")
+
+        // Re-entering background starts a fresh 60s countdown.
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
+        XCTAssertFalse(h.voice.isOn, "Background complete idle must end at 60 seconds")
+        XCTAssertTrue(h.link.closed)
+        XCTAssertEqual(h.microphone, [true, false])
+    }
+
+    func testCodexLiveHearingAndRemotePlaybackTransitionsAvoidFalseEndOrStuckPhase() async throws {
+        try await withChatGPTSelected {
+            defer { NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil) }
+
+            // 1. Remote playback starts while phase is .hearing (before transcript/done): must enter .speaking, not stall in .hearing.
+            do {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                defer { h.voice.stop() }
+                await h.connect()
+                let link = try XCTUnwrap(h.links.last)
+                NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+                codex.notify("thread/realtime/transcript/delta", ["role": "user", "delta": "打开"])
+                XCTAssertEqual(h.voice.phase, .hearing)
+                link.remoteSpeech = true
+                await h.time.advance(0.2)
+                XCTAssertEqual(h.voice.phase, .speaking, "New remote playback while .hearing must transition to .speaking")
+                for _ in 0..<4 { await h.time.advance(10) }
+                XCTAssertTrue(h.voice.isOn, "Active remote playback after .hearing must not stall-kill the session")
+                link.remoteSpeech = false
+                for _ in 0..<3 { await h.time.advance(0.2) }
+                XCTAssertEqual(h.voice.phase, .listening)
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+
+            // 2. Barge-in during playback: draining old audio keeps .hearing; when playback goes quiet, stays .hearing without triggering endIfDone.
+            do {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                defer { h.voice.stop() }
+                await h.connect()
+                let link = try XCTUnwrap(h.links.last)
+                link.remoteSpeech = true
+                await h.time.advance(0.2)
+                XCTAssertEqual(h.voice.phase, .speaking)
+
+                codex.notify("thread/realtime/transcript/delta", ["role": "user", "delta": "等等"])
+                XCTAssertEqual(h.voice.phase, .hearing)
+                await h.time.advance(0.16)
+                XCTAssertEqual(h.voice.phase, .hearing, "Brief residual playback right after barge-in must not overwrite .hearing")
+
+                link.remoteSpeech = false
+                for _ in 0..<3 { await h.time.advance(0.2) }
+                XCTAssertEqual(h.voice.phase, .hearing, "Old playback going quiet after barge-in must preserve .hearing")
+                XCTAssertTrue(h.voice.isOn)
+            }
+
+            // 3. Echo transcript/delta during continuous remote playback: recovers back to .speaking instead of staying stuck in .hearing.
+            do {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                defer { h.voice.stop() }
+                await h.connect()
+                let link = try XCTUnwrap(h.links.last)
+                NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+                link.remoteSpeech = true
+                await h.time.advance(0.2)
+                XCTAssertEqual(h.voice.phase, .speaking)
+
+                codex.notify("thread/realtime/transcript/delta", ["role": "user", "delta": "嗯"])
+                XCTAssertEqual(h.voice.phase, .hearing)
+                for _ in 0..<4 { await h.time.advance(0.2) }
+                XCTAssertEqual(h.voice.phase, .speaking, "Sustained remote playback after echo delta must return to .speaking")
+                for _ in 0..<4 { await h.time.advance(10) }
+                XCTAssertTrue(h.voice.isOn, "Recovered playback must not stall in background")
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+
+            // 4. Empty user transcript/done exits .hearing cleanly instead of staying stuck until stall timeout.
+            do {
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(codex: codex)
+                defer { h.voice.stop() }
+                await h.connect()
+                NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+                codex.notify("thread/realtime/transcript/delta", ["role": "user", "delta": ""])
+                XCTAssertEqual(h.voice.phase, .hearing)
+                codex.notify("thread/realtime/transcript/done", ["role": "user", "text": ""])
+                XCTAssertEqual(h.voice.phase, .listening)
+                await h.time.advance(35)
+                XCTAssertTrue(h.voice.isOn, "Empty transcript/done must exit .hearing and not trigger 30s background stall")
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+        }
     }
 }
 

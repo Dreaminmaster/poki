@@ -1071,7 +1071,10 @@ struct MessageListHeader: View {
     var openModel: () -> Void = {}
 
     var body: some View {
-        PokiMenu(openModel: openModel) {
+        PokiMenu(openModel: openModel,
+                 anchor: .below(),
+                 accessibilityLabel: AppLocalization.text("\(title), details"),
+                 accessibilityIdentifier: "chat.header.details") {
             VStack(spacing: 4) {
                 PokiAvatar(size: 56)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -1093,9 +1096,6 @@ struct MessageListHeader: View {
             .frame(maxWidth: .infinity)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text("\(title), details"))
-        .accessibilityIdentifier("chat.header.details")
         .overlay(alignment: .topLeading) {
             if let back, UserDefaults.standard.string(forKey: "pokiChat") == nil, UserDefaults.standard.string(forKey: "pokiVoiceSample") == nil {
                 Button(action: back) {

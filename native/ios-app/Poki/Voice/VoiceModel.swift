@@ -334,6 +334,8 @@ final class VoiceModel {
     private var usesLive = false
     private var appAudio: AppAudioContext?
     private var usesCodexLive = false
+    private var codexBackendBusy = false
+    private var activeCodexTools = 0
     private var liveCloseTimeout: Task<Void, Never>?
     private var liveUsageSeconds: Double?
     private var liveSpeechStopped = false
@@ -492,8 +494,8 @@ final class VoiceModel {
     private var lastLines: [VoiceLine] = []
     private var inBackground = UIApplication.shared.applicationState == .background
 
-    /// How long the conversation waits after an answer for the person to go on before it ends.
-    static let followUp: Duration = .seconds(8)
+    /// How long a background conversation waits while completely idle before ending and releasing the microphone.
+    static let backgroundFollowUp: Duration = .seconds(60)
     /// A conversation opened this soon after the last one ended is told the last turns.
     static let carryOver: TimeInterval = 5 * 60
     static let carriedLines = 6
@@ -545,21 +547,30 @@ final class VoiceModel {
         self.recentAppAudio = recentAppAudio
         self.codex = codex ?? CodexVoice.shared
         // Poki in the background goes on with the talk (the owner, 2026-11-13): you speak to it from the
-        // app you went to, and the Live Activity says what it is doing and carries End. It ends there as
-        // it does in front, when nobody speaks for `followUp` after an answer. Only the wait for a server
-        // that says nothing is shorter there.
+        // app you went to, and the Live Activity says what it is doing and carries End. In the foreground
+        // silence stays open until the owner ends it; in the background it ends after `backgroundFollowUp`
+        // of complete idle, and the wait for a server that says nothing is shorter there.
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.inBackground = true
-                guard self.isOn, self.answerDue || self.usesCodexLive && self.link != nil && !self.ready else { return }
+                guard self.isOn else { return }
+                if self.idle {
+                    self.endIfDone()
+                    return
+                }
+                guard self.answerDue || self.usesCodexLive && self.link != nil && !self.ready else { return }
                 // What is still due is waited for, but not for ever: the wait for the server now has 30 s.
                 self.lastActivity = self.time.now()
                 if self.ready || self.usesCodexLive { self.watchForStall(session: self.session) }
             }
         }
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.inBackground = false }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.inBackground = false
+                self.keepOpen()
+            }
         }
     }
     private var holdingMicrophone = false {
@@ -607,7 +618,7 @@ final class VoiceModel {
         case .connecting: return isCapturingOpening ? .listening : .connecting
         case .listening: return interrupted ? .interrupted : .listening
         case .hearing: return interrupted ? .interrupted : .hearing
-        case .thinking: return calls.contains { $0.state == .running } ? .acting : .thinking
+        case .thinking: return (calls.contains { $0.state == .running } || activeCodexTools > 0) ? .acting : .thinking
         case .speaking: return .speaking
         }
     }
@@ -737,6 +748,18 @@ final class VoiceModel {
                     }
                     guard Self.phoneTools.contains(name) else {
                         return (Self.localTool(name), false, nil)
+                    }
+                    activeCodexTools += 1
+                    lastActivity = time.now()
+                    keepOpen()
+                    if phase != .speaking && phase != .hearing { phase = .thinking }
+                    defer {
+                        if number == session {
+                            activeCodexTools = max(0, activeCodexTools - 1)
+                            lastActivity = time.now()
+                            if phase == .thinking, !answerDue { phase = .listening }
+                            endIfDone()
+                        }
                     }
                     return await runPhoneTool(name, arguments: arguments, cancellation: nil)
                 })
@@ -1122,6 +1145,8 @@ final class VoiceModel {
             codex.stop()
             usesCodexLive = false
         }
+        codexBackendBusy = false
+        activeCodexTools = 0
         keepOpen()
         openingTiming = nil
         livePlayback?.cancel()
@@ -1174,9 +1199,11 @@ final class VoiceModel {
     /// false, not by a guess at a pause (ESP-954).
     var midTurn: Bool { isOn && (answerDue || phase == .thinking) }
 
+    private var codexBusy: Bool { codexBackendBusy || activeCodexTools > 0 }
+
     private var answerDue: Bool {
         awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse || pendingRealtimeTurns > 0
-            || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running }
+            || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running } || codexBusy
     }
 
     /// The server owes something: the end of the person's speech, an answer, the end of the audio. A step
@@ -1184,7 +1211,7 @@ final class VoiceModel {
     private var waitingOnServer: Bool {
         !ready || (awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse
             || pendingRealtimeTurns > 0 || phase == .hearing || phase == .speaking)
-            && !calls.contains { $0.state == .running }
+            && !calls.contains { $0.state == .running } && !codexBusy
     }
 
     /// Ends the conversation when the server owes something and has said nothing for `stall` (30 s in the
@@ -1219,17 +1246,18 @@ final class VoiceModel {
     /// The answer has played and nothing it asked for is still running or still to be said.
     private var idle: Bool { link != nil && ready && !answerDue }
 
-    /// Once idle, the conversation waits `followUp` for the person to go on; if nobody speaks it ends and
-    /// lets go of the microphone. The same in front and in the background.
+    /// In the background, once completely idle, the conversation waits `backgroundFollowUp` for the person
+    /// to go on; if nobody speaks it ends and lets go of the microphone. In the foreground, silence stays open.
     private func endIfDone() {
-        guard idle, endWindow == nil else { return }
+        guard inBackground, idle, endWindow == nil else { return }
+        let number = session
         let openingDelay = openingCapture?.audio.bufferedDuration ?? .zero
         endWindow = Task { [weak self, time] in
-            await time.sleep(Self.followUp + openingDelay)
-            guard let self, !Task.isCancelled else { return }
+            await time.sleep(Self.backgroundFollowUp + openingDelay)
+            guard let self, !Task.isCancelled, number == session else { return }
             endWindow = nil
-            guard idle else { return }
-            log.add("voice", "nobody spoke for \(Self.followUp) after the answer: conversation ended")
+            guard inBackground, idle else { return }
+            log.add("voice", "nobody spoke for \(Self.backgroundFollowUp) in the background while idle: conversation ended")
             stop()
         }
     }
@@ -1243,10 +1271,12 @@ final class VoiceModel {
         livePlayback = Task { [weak self] in
             var quiet = 0
             var audible = false
+            var suppressedWhileHearing = 0
             while !Task.isCancelled {
                 let playing = await link.hasRemoteSpeech()
                 guard let self, number == session, !Task.isCancelled else { return }
-                if ready && playing && !liveSpeechStopped && (!usesCodexLive || phase != .hearing) {
+                let suppressHearingDrain = usesCodexLive && phase == .hearing && audible && suppressedWhileHearing < 3
+                if ready && playing && !liveSpeechStopped && !suppressHearingDrain {
                     if !audible {
                         loggedLiveInputDuringPlayback = false
                         trace("reply playback started (remote audio level)")
@@ -1254,6 +1284,7 @@ final class VoiceModel {
                         audible = true
                     }
                     quiet = 0
+                    suppressedWhileHearing = 0
                     keepOpen()
                     lastActivity = time.now()
                     phase = .speaking
@@ -1265,6 +1296,19 @@ final class VoiceModel {
                         liveAwaitingPlayback = false
                         recordSpokenAnswer(at: lastActivity)
                     }
+                } else if suppressHearingDrain {
+                    if playing {
+                        quiet = 0
+                        suppressedWhileHearing += 1
+                    } else {
+                        quiet += 1
+                        if quiet >= 3 {
+                            trace("reply playback went quiet (remote audio level)")
+                            audible = false
+                            quiet = 0
+                            suppressedWhileHearing = 0
+                        }
+                    }
                 } else if phase == .speaking || audible {
                     quiet += 1
                     if quiet >= 3 {
@@ -1272,12 +1316,18 @@ final class VoiceModel {
                             trace("reply playback went quiet (remote audio level)")
                             audible = false
                         }
+                        quiet = 0
+                        suppressedWhileHearing = 0
                         if phase == .speaking {
-                            let working = awaitingAnswer || liveAwaitingPlayback || activeResponse != nil || calls.contains { $0.state == .running }
+                            let working = awaitingAnswer || liveAwaitingPlayback || activeResponse != nil
+                                || calls.contains { $0.state == .running } || codexBusy
                             phase = working ? .thinking : .listening
                             endIfDone()
                         }
                     }
+                } else {
+                    quiet = 0
+                    suppressedWhileHearing = 0
                 }
                 await time.sleep(.milliseconds(160))
             }
@@ -1410,7 +1460,7 @@ final class VoiceModel {
         liveAwaitingPlayback = false
         for index in calls.indices where !calls[index].delivered { calls[index].silentResult = true }
         link.setRemoteVolume(0)
-        phase = calls.contains { $0.state == .running } ? .thinking : .listening
+        phase = (calls.contains { $0.state == .running } || codexBusy) ? .thinking : .listening
         if ready { link.send(note(message)) }
         endIfDone()
     }
@@ -1452,41 +1502,82 @@ final class VoiceModel {
     // MARK: Events
 
     private func handleCodex(_ method: String, params: CodexVoice.JSON, session number: Int) {
-        guard number == session, usesCodexLive, link != nil else { return }
-        if method == "thread/realtime/closed" || method == "thread/realtime/error" {
+        guard number == session, usesCodexLive, let link else { return }
+        switch method {
+        case "thread/realtime/closed", "thread/realtime/error":
             let needsSignIn = CodexVoice.failure(in: params, fallback: .ended) == .signIn
             closed("the ChatGPT voice session ended", session: number, confirmed: method == "thread/realtime/closed")
             if needsSignIn {
                 needsChatGPTSignIn = true
                 phase = .lost(CodexVoice.Failure.signIn.localizedDescription)
             }
-            return
-        }
-        if (method == "poki/backend/error" && params["willRetry"] as? Bool != true)
-            || (method == "poki/backend/turnCompleted" && params["status"] as? String == "failed") {
-            let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
-            let reason = failure.localizedDescription
-            if failure == .signIn { needsChatGPTSignIn = true }
-            closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
-            return
-        }
-        if method == "thread/realtime/transcript/delta", params["role"] as? String == "user" {
+        case "thread/realtime/itemAdded":
+            guard (params["item"] as? CodexVoice.JSON)?["type"] as? String == "handoff_request" else { return }
+            codexBackendBusy = true
+            lastActivity = time.now()
+            keepOpen()
+            if phase != .speaking && phase != .hearing { phase = .thinking }
+        case "poki/backend/turnStarted":
+            codexBackendBusy = true
+            lastActivity = time.now()
+            keepOpen()
+            if phase != .speaking && phase != .hearing { phase = .thinking }
+        case "poki/backend/turnCompleted":
+            codexBackendBusy = false
+            awaitingAnswer = false
+            lastActivity = time.now()
+            if params["status"] as? String == "failed" {
+                let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
+                let reason = failure.localizedDescription
+                if failure == .signIn { needsChatGPTSignIn = true }
+                closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
+                return
+            }
+            if phase == .thinking, !answerDue { phase = .listening }
+            endIfDone()
+        case "poki/backend/error":
+            lastActivity = time.now()
+            if params["willRetry"] as? Bool == true {
+                codexBackendBusy = true
+                keepOpen()
+                if phase != .speaking && phase != .hearing { phase = .thinking }
+            } else {
+                codexBackendBusy = false
+                awaitingAnswer = false
+                let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
+                let reason = failure.localizedDescription
+                if failure == .signIn { needsChatGPTSignIn = true }
+                closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
+            }
+        case "thread/realtime/transcript/delta":
+            guard params["role"] as? String == "user" else { return }
+            resumeLiveAudio(link)
             lastActivity = time.now()
             keepOpen()
             phase = .hearing
-            return
-        }
-        guard method == "thread/realtime/transcript/done", let text = params["text"] as? String,
-              !text.isEmpty, let role = params["role"] as? String else { return }
-        if role == "user" {
-            lastActivity = time.now()
-            keepOpen()
-            lines.append(VoiceLine(role: .you, text: text))
-            awaitingAnswer = true
-            phase = .thinking
-            watchForStall(session: number)
-        } else if role == "assistant" {
-            lines.append(VoiceLine(role: .poki, text: text))
+        case "thread/realtime/transcript/done":
+            guard let role = params["role"] as? String else { return }
+            let text = params["text"] as? String ?? ""
+            if role == "user" {
+                resumeLiveAudio(link)
+                lastActivity = time.now()
+                keepOpen()
+                if text.isEmpty {
+                    if phase == .hearing {
+                        phase = codexBusy ? .thinking : .listening
+                        endIfDone()
+                    }
+                    return
+                }
+                lines.append(VoiceLine(role: .you, text: text))
+                awaitingAnswer = true
+                phase = .thinking
+                watchForStall(session: number)
+            } else if role == "assistant", !text.isEmpty {
+                lines.append(VoiceLine(role: .poki, text: text))
+            }
+        default:
+            break
         }
     }
 
