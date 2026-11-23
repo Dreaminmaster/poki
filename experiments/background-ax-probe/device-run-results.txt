@@ -1,0 +1,15 @@
+PROBE 03:44:14.358 [A] calculator pid=33551; settings=4 calculator=4
+PROBE 03:44:14.361 [A] background assertion granted=Optional(1)
+PROBE 03:44:24.371 [A] t+2s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:44:45.381 [A] t+15s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:45:18.391 [A] t+40s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:46:46.401 [A] t+120s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:49:54.412 [A] t+300s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:49:54.548 [A] end: settings=4 calculator=3
+PROBE 03:49:55.788 [A] verification (foreground, one-off): static texts=[Edit field]
+PROBE 03:49:58.348 [B] calculator pid=33554; settings=4 calculator=4
+PROBE 03:50:08.354 [B] t+2s snapshot timeout after 8 s; settings=4 calculator=4
+PROBE 03:50:21.461 [B] t+15s snapshot error: Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorServerNotFound" UserInfo={NSLocalizedDescription=Error getting main window kAXErrorServerNotFound}; settings=4 calculator=4
+PROBE 03:50:46.572 [B] t+40s snapshot error: Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorServerNotFound" UserInfo={NSLocalizedDescription=Error getting main window kAXErrorServerNotFound}; settings=4 calculator=4
+PROBE 03:50:46.691 [B] end: settings=4 calculator=2
+PROBE 03:50:47.910 [B] verification (foreground, one-off): static texts=[Edit field]
