@@ -31,7 +31,7 @@ final class CodexVoice: SubscriptionVoice {
     }
 
     enum Failure: LocalizedError, Equatable {
-        case unavailable, signIn, ended, timedOut
+        case unavailable, signIn, ended, timedOut, backendFailed
 
         var errorDescription: String? {
             switch self {
@@ -39,6 +39,7 @@ final class CodexVoice: SubscriptionVoice {
             case .signIn: AppLocalization.text("Sign in to ChatGPT again to start a voice conversation.")
             case .ended: AppLocalization.text("The ChatGPT voice conversation ended.")
             case .timedOut: AppLocalization.text("ChatGPT voice took too long to connect. Try again.")
+            case .backendFailed: AppLocalization.text("ChatGPT couldn’t finish that phone action. Try again.")
             }
         }
     }
@@ -339,11 +340,23 @@ final class CodexVoice: SubscriptionVoice {
             AppLog.shared.add("voice", "Codex backend turn started")
         case "poki/backend/turnCompleted":
             let status = params["status"] as? String ?? "unknown"
-            AppLog.shared.add("voice", "Codex backend turn completed: \(status)")
+            let detail = Self.formatBackendDiagnostic(params)
+            AppLog.shared.add("voice", "Codex backend turn completed: \(status)\(detail)")
+            if status == "failed" {
+                onEvent?(method, params)
+            }
         case "poki/backend/error":
             let code = params["code"] as? String ?? "unknown"
             let willRetry = params["willRetry"] as? Bool ?? false
-            AppLog.shared.add("voice", "Codex backend error: \(code), retry: \(willRetry)")
+            let detail = Self.formatBackendDiagnostic(params)
+            AppLog.shared.add("voice", "Codex backend error: \(code), retry: \(willRetry)\(detail)")
+            if !willRetry {
+                onEvent?(method, params)
+            }
+        case "poki/backend/warning":
+            if let diagnostic = params["diagnostic"] as? String, !diagnostic.isEmpty {
+                AppLog.shared.add("voice", "Codex backend warning: \(diagnostic)")
+            }
         case "poki/tool/rejected":
             let requestMethod = params["requestMethod"] as? String ?? "unknown"
             let reason = params["reason"] as? String ?? "rejected"
@@ -363,5 +376,16 @@ final class CodexVoice: SubscriptionVoice {
 
     static func failure(in params: JSON?, fallback: Failure) -> Failure {
         params?["kind"] as? String == "signInRequired" ? .signIn : fallback
+    }
+
+    private static func formatBackendDiagnostic(_ params: JSON) -> String {
+        var parts: [String] = []
+        if let status = params["httpStatusCode"] as? Int {
+            parts.append("http \(status)")
+        }
+        if let diagnostic = params["diagnostic"] as? String, !diagnostic.isEmpty {
+            parts.append(diagnostic)
+        }
+        return parts.isEmpty ? "" : " (\(parts.joined(separator: ", ")))"
     }
 }

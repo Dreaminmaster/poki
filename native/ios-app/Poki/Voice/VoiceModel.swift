@@ -1462,6 +1462,20 @@ final class VoiceModel {
             }
             return
         }
+        if (method == "poki/backend/error" && params["willRetry"] as? Bool != true)
+            || (method == "poki/backend/turnCompleted" && params["status"] as? String == "failed") {
+            let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
+            let reason = failure.localizedDescription
+            closed("the ChatGPT voice backend failed", session: number, confirmed: true)
+            if failure == .signIn { needsChatGPTSignIn = true }
+            phase = .lost(reason)
+            if lines.last?.role == .note {
+                lines[lines.count - 1].text = reason
+            } else {
+                lines.append(VoiceLine(role: .note, text: reason))
+            }
+            return
+        }
         if method == "thread/realtime/transcript/delta", params["role"] as? String == "user" {
             lastActivity = time.now()
             keepOpen()

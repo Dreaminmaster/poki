@@ -115,6 +115,14 @@ fn codex_overrides() -> Vec<(String, toml::Value)> {
             "features.secret_auth_storage".into(),
             toml::Value::Boolean(false),
         ),
+        (
+            "features.code_mode_only_strict_3p_tools".into(),
+            toml::Value::Boolean(false),
+        ),
+        (
+            "features.code_mode.direct_only_tool_namespaces".into(),
+            toml::Value::Array(vec![toml::Value::String("functions".into())]),
+        ),
     ]
 }
 
@@ -308,6 +316,35 @@ async fn serve(
     Ok(())
 }
 
+fn extract_codex_error_fields(error: Option<&Value>) -> (&str, Option<u16>, Option<&'static str>, Option<String>) {
+    let Some(error) = error else {
+        return ("unknown", None, None, None);
+    };
+    let (code, http_status) = match error.get("codexErrorInfo") {
+        Some(Value::String(name)) => (name.as_str(), None),
+        Some(Value::Object(map)) => {
+            if let Some((name, detail)) = map.iter().next() {
+                let status = detail
+                    .get("httpStatusCode")
+                    .and_then(Value::as_u64)
+                    .and_then(|status| u16::try_from(status).ok())
+                    .filter(|status| (400..=599).contains(status));
+                (name.as_str(), status)
+            } else {
+                ("unknown", None)
+            }
+        }
+        _ => ("unknown", None),
+    };
+    let message = error.get("message").and_then(Value::as_str);
+    let details = error.get("additionalDetails").and_then(Value::as_str);
+    let kind = message
+        .and_then(auth_failure_kind)
+        .or_else(|| details.and_then(auth_failure_kind));
+    let diagnostic = backend_error_diagnostic(message, details);
+    (code, http_status, kind, diagnostic)
+}
+
 fn backend_diagnostic_notification(method: &str, value: &Value) -> Option<Value> {
     let thread_id = value.pointer("/params/threadId").and_then(Value::as_str)?;
     match method {
@@ -320,9 +357,26 @@ fn backend_diagnostic_notification(method: &str, value: &Value) -> Option<Value>
                 .pointer("/params/turn/status")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
+            let mut params = json!({ "threadId": thread_id, "status": status });
+            if let (Some(turn_error), Some(obj)) =
+                (value.pointer("/params/turn/error").filter(|v| !v.is_null()), params.as_object_mut())
+            {
+                let (code, http_status, kind, diagnostic) =
+                    extract_codex_error_fields(Some(turn_error));
+                obj.insert("code".into(), json!(code));
+                if let Some(http_status) = http_status {
+                    obj.insert("httpStatusCode".into(), json!(http_status));
+                }
+                if let Some(kind) = kind {
+                    obj.insert("kind".into(), json!(kind));
+                }
+                if let Some(diagnostic) = diagnostic {
+                    obj.insert("diagnostic".into(), json!(diagnostic));
+                }
+            }
             Some(json!({
                 "method": "poki/backend/turnCompleted",
-                "params": { "threadId": thread_id, "status": status }
+                "params": params
             }))
         }
         "error" => {
@@ -330,30 +384,120 @@ fn backend_diagnostic_notification(method: &str, value: &Value) -> Option<Value>
                 .pointer("/params/willRetry")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            let code = match value.pointer("/params/error/codexErrorInfo") {
-                Some(Value::String(name)) => name.as_str(),
-                Some(Value::Object(map)) => map.keys().next().map(String::as_str).unwrap_or("unknown"),
-                _ => "unknown",
-            };
-            let kind = value
-                .pointer("/params/error/message")
-                .and_then(Value::as_str)
-                .and_then(auth_failure_kind);
+            let (code, http_status, kind, diagnostic) =
+                extract_codex_error_fields(value.pointer("/params/error"));
             let mut params = json!({
                 "threadId": thread_id,
                 "willRetry": will_retry,
                 "code": code,
             });
-            if let (Some(kind), Some(obj)) = (kind, params.as_object_mut()) {
-                obj.insert("kind".into(), json!(kind));
+            if let Some(obj) = params.as_object_mut() {
+                if let Some(http_status) = http_status {
+                    obj.insert("httpStatusCode".into(), json!(http_status));
+                }
+                if let Some(kind) = kind {
+                    obj.insert("kind".into(), json!(kind));
+                }
+                if let Some(diagnostic) = diagnostic {
+                    obj.insert("diagnostic".into(), json!(diagnostic));
+                }
             }
             Some(json!({
                 "method": "poki/backend/error",
                 "params": params
             }))
         }
+        "warning" => {
+            let message = value.pointer("/params/message").and_then(Value::as_str)?;
+            let diagnostic = backend_warning_diagnostic(message)?;
+            Some(json!({
+                "method": "poki/backend/warning",
+                "params": {
+                    "threadId": thread_id,
+                    "diagnostic": diagnostic,
+                }
+            }))
+        }
         _ => None,
     }
+}
+
+fn backend_error_diagnostic(message: Option<&str>, details: Option<&str>) -> Option<String> {
+    let combined = match (details, message) {
+        (Some(d), Some(m)) => format!("{d}\n{m}"),
+        (Some(d), None) => d.to_owned(),
+        (None, Some(m)) => m.to_owned(),
+        (None, None) => return None,
+    };
+    let lower = combined.to_ascii_lowercase();
+    if lower.contains("no native root ca certificates found") {
+        return Some("tls no native root CA certificates found".into());
+    }
+    if lower.contains("unknownissuer") || lower.contains("unknown issuer") {
+        return Some("tls invalid peer certificate: UnknownIssuer".into());
+    }
+    if lower.contains("invalid peer certificate") || lower.contains("certificate verify failed") {
+        return Some("tls invalid peer certificate".into());
+    }
+    if lower.contains("failed to configure websocket tls") || lower.contains("tls handshake") {
+        return Some("tls handshake failed".into());
+    }
+    if lower.contains("operation timed out") || lower.contains("timed out") {
+        return Some("operation timed out".into());
+    }
+    if lower.contains("connection reset by peer") {
+        return Some("connection reset by peer".into());
+    }
+    if lower.contains("connection refused") {
+        return Some("connection refused".into());
+    }
+    if lower.contains("dns error") || lower.contains("failed to lookup address") {
+        return Some("dns resolution failed".into());
+    }
+    if lower.contains("websocket closed") {
+        return Some("websocket closed unexpectedly".into());
+    }
+    if let Some(status) = extract_http_status(&lower) {
+        return Some(format!("unexpected status {status}"));
+    }
+    if lower.contains("stream disconnected before completion") {
+        return Some("stream disconnected before completion".into());
+    }
+    None
+}
+
+fn backend_warning_diagnostic(message: &str) -> Option<String> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("falling back from websockets to https") {
+        if let Some(cause) = backend_error_diagnostic(Some(message), None) {
+            return Some(format!(
+                "falling back from WebSockets to HTTPS transport ({cause})"
+            ));
+        }
+        return Some("falling back from WebSockets to HTTPS transport".into());
+    }
+    if lower.contains("code mode is unavailable") {
+        if lower.contains("fail closed") {
+            return Some("code mode unavailable (fail closed)".into());
+        }
+        return Some("code mode unavailable (falling back to direct tools)".into());
+    }
+    None
+}
+
+fn extract_http_status(lower: &str) -> Option<u16> {
+    for prefix in ["unexpected status ", "status code ", "status: ", "http status "] {
+        if let Some((_, rest)) = lower.split_once(prefix)
+            && let Some(status) = rest
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|digits| digits.parse::<u16>().ok())
+                .filter(|status| (400..=599).contains(status))
+        {
+            return Some(status);
+        }
+    }
+    None
 }
 
 fn auth_failure_kind(message: &str) -> Option<&'static str> {

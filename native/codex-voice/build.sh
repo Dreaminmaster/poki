@@ -88,12 +88,13 @@ PY
 fi
 
 workspace="$source_dir/codex-rs"
-# Extend the pinned upstream lockfile in both fresh and previously prepared build trees.
-python3 - "$workspace/Cargo.lock" <<'PY'
+# Extend the pinned upstream lockfile and apply iOS runtime patches in both fresh and previously prepared build trees.
+python3 - "$workspace" <<'PY'
 from pathlib import Path
 import sys
 
-lock = Path(sys.argv[1])
+root = Path(sys.argv[1])
+lock = root / "Cargo.lock"
 contents = lock.read_text()
 header, *packages = contents.split('[[package]]\n')
 
@@ -122,9 +123,45 @@ dependencies = [
 
 ''')
 
+update_dependency('codex-http-client', '"webpki-roots 1.0.10"')
+
 updated = '[[package]]\n'.join([header, *packages])
 if updated != contents:
     lock.write_text(updated)
+
+def ensure_patch(relative_path, marker, old, new):
+    path = root / relative_path
+    text = path.read_text()
+    if marker in text:
+        return
+    if old not in text:
+        raise SystemExit(f"Codex source no longer matches {relative_path}")
+    path.write_text(text.replace(old, new, 1))
+
+# Responses WebSocket uses WebSocketTlsMode::ExplicitCodexTls, which builds a rustls RootCertStore
+# from codex-http-client::native_roots::load(). On iOS, rustls-native-certs probes Unix paths that
+# do not exist in the app sandbox, leaving an empty trust store. Include Mozilla's webpki-roots.
+ensure_patch(
+    "http-client/Cargo.toml",
+    '[target.\'cfg(target_os = "ios")\'.dependencies]',
+    '[target.\'cfg(target_os = "macos")\'.dependencies]',
+    '[target.\'cfg(target_os = "ios")\'.dependencies]\nwebpki-roots = "1.0.10"\n\n[target.\'cfg(target_os = "macos")\'.dependencies]',
+)
+ensure_patch(
+    "http-client/src/native_roots.rs",
+    'webpki_roots::TLS_SERVER_ROOTS',
+    '    let mut roots = RootCertStore::empty();\n    let _ = roots.add_parsable_certificates(certs);',
+    '    let mut roots = RootCertStore::empty();\n    #[cfg(target_os = "ios")]\n    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());\n    let _ = roots.add_parsable_certificates(certs);',
+)
+# Models configured as code_mode_only fail closed when no codex-code-mode-host executable is
+# available (which is always true on iOS and in embedded voice). Fall back to direct tool calls so
+# dynamic phone tools remain directly callable.
+ensure_patch(
+    "core/src/tools/mod.rs",
+    'matches!(requested_tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)',
+    '    if !turn_context.code_mode_available\n        && requested_tool_mode == ToolMode::CodeMode\n        && !turn_context.config.code_mode.disable_in_process_fallback',
+    '    if !turn_context.code_mode_available\n        && matches!(requested_tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)\n        && !turn_context.config.code_mode.disable_in_process_fallback',
+)
 PY
 mkdir -p "$workspace/poki-codex-voice/src"
 for file in Cargo.toml src/lib.rs; do
