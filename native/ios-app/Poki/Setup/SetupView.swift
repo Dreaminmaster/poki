@@ -133,9 +133,7 @@ struct SetupView: View {
     /// the step opened on "Not on yet" with nothing to tap in view: it is dialled again here, and the
     /// check that follows moves the page on.
     private func reconnectBuiltIn() {
-        guard step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available,
-              !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse else { return }
-        Task { try? await model.tunnel.connect(); model.loopback.check() }
+        reconnectBuiltInIfNeeded(model, for: step)
     }
 
     private func advanceSoon() {
@@ -178,6 +176,14 @@ extension SetupStep {
 @MainActor func openSettings(_ model: AppModel, for step: SetupStep?) {
     if let step { model.guide(step) }
     if let url = settingsURL(for: step) { UIApplication.shared.open(url) }
+}
+
+/// Reconnects Poki's built-in tunnel when opening the loopback setup step, unless an external
+/// loopback is already working or the tunnel is already up, busy, or locked by a session.
+@MainActor private func reconnectBuiltInIfNeeded(_ model: AppModel, for step: SetupStep) {
+    guard step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available,
+          !model.loopback.isWorking, !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse else { return }
+    Task { try? await model.tunnel.connect(); model.loopback.check() }
 }
 
 func settingsURL(for step: SetupStep?) -> URL? {
@@ -909,9 +915,7 @@ struct SetupStepPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()
-            if step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available, !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse {
-                Task { try? await model.tunnel.connect(); model.loopback.check() }
-            }
+            reconnectBuiltInIfNeeded(model, for: step)
         }
         .onDisappear { if step == .pairing { model.leftPairing() } }
     }

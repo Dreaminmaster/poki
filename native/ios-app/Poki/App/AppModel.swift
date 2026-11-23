@@ -350,6 +350,9 @@ final class AppModel {
 
     private let localVPNAvailableOverride: Bool?
     private var isLocalVPNAvailable: Bool { localVPNAvailableOverride ?? tunnel.available }
+    private var builtInShouldYieldToExternal: Bool {
+        setup.loopback == .builtIn && (!isLocalVPNAvailable || (loopback.isWorking && !tunnel.connected && !tunnel.busy))
+    }
 
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
@@ -1103,7 +1106,7 @@ final class AppModel {
                 return
             }
         }
-        if setup.loopback == .builtIn, !isLocalVPNAvailable {
+        if builtInShouldYieldToExternal {
             setup.loopback = .proxy
         }
         if setup.loopback == .builtIn, !tunnel.connected, !loopback.isWorking {
@@ -1754,7 +1757,7 @@ final class AppModel {
         // Setup's loopback step is done and Turn on does not ask to choose one (0.2.8 build 91: the step
         // never let the owner continue although the loopback was on).
         if loopback.isWorking {
-            if setup.loopback == .none || (setup.loopback == .builtIn && !isLocalVPNAvailable) {
+            if setup.loopback == .none || builtInShouldYieldToExternal {
                 setup.loopback = .proxy
                 log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
             }

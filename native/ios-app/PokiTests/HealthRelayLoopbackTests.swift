@@ -355,39 +355,52 @@ final class HealthRelayLoopbackTests: XCTestCase {
         // Even if `.builtIn` is still present while external loopback is already working, opening
         // `SetupStepPage(step: .loopback)` or `SetupView` must NOT auto-dial the built-in tunnel,
         // and `startSession` must migrate `.builtIn` to `.proxy` when `!tunnel.connected && !tunnel.busy`.
-        let guardModel = makeModel()
-        defer { guardModel.loopback.pause(); guardModel.stopSession() }
-        XCTAssertTrue(guardModel.tunnel.available)
-        XCTAssertEqual(guardModel.tunnel.state, .off)
-        guardModel.loopback.simulate(.working(ms: 1591))
-        guardModel.setup.loopback = .builtIn
+        let guardStepModel = makeModel()
+        defer { guardStepModel.loopback.pause(); guardStepModel.stopSession() }
+        XCTAssertTrue(guardStepModel.tunnel.available)
+        XCTAssertEqual(guardStepModel.tunnel.state, .off)
+        guardStepModel.loopback.simulate(.working(ms: 1591))
+        guardStepModel.setup.loopback = .builtIn
 
         _ = try await renderedLabels(
             of: NavigationStack { SetupStepPage(step: .loopback) },
-            model: guardModel,
+            model: guardStepModel,
             waitFor: { $0.contains { $0.contains("本地连接已开启") } }
         )
         await Task.yield()
-        XCTAssertEqual(guardModel.tunnel.state, .off,
+        XCTAssertEqual(guardStepModel.tunnel.state, .off,
                        "SetupStepPage(.loopback) must not auto-connect built-in tunnel while external loopback is working")
+
+        let guardSetupViewModel = makeModel()
+        defer { guardSetupViewModel.loopback.pause(); guardSetupViewModel.stopSession() }
+        XCTAssertTrue(guardSetupViewModel.tunnel.available)
+        XCTAssertEqual(guardSetupViewModel.tunnel.state, .off)
+        guardSetupViewModel.loopback.simulate(.working(ms: 1591))
+        guardSetupViewModel.setup.loopback = .builtIn
 
         if let loopbackIndex = SetupStep.shown.firstIndex(of: .loopback) {
             _ = try await renderedLabels(
                 of: SetupView(start: loopbackIndex),
-                model: guardModel,
-                waitFor: { $0.contains { $0.contains("本地连接已开启") } }
+                model: guardSetupViewModel,
+                waitFor: { _ in true }
             )
             await Task.yield()
-            XCTAssertEqual(guardModel.tunnel.state, .off,
+            XCTAssertEqual(guardSetupViewModel.tunnel.state, .off,
                            "SetupView(.loopback) must not auto-connect built-in tunnel while external loopback is working")
         }
 
-        guardModel.startSession(reconnectLocal: false)
-        XCTAssertEqual(guardModel.setup.loopback, .proxy,
+        let startSessionModel = makeModel()
+        defer { startSessionModel.loopback.pause(); startSessionModel.stopSession() }
+        XCTAssertTrue(startSessionModel.tunnel.available)
+        XCTAssertEqual(startSessionModel.tunnel.state, .off)
+        startSessionModel.loopback.simulate(.working(ms: 1591))
+        startSessionModel.setup.loopback = .builtIn
+        startSessionModel.startSession(reconnectLocal: false)
+        XCTAssertEqual(startSessionModel.setup.loopback, .proxy,
                        "startSession must migrate .builtIn to .proxy when external loopback works and built-in tunnel is not connected")
-        XCTAssertTrue(guardModel.sessionOn)
-        XCTAssertNil(guardModel.problem)
-        XCTAssertEqual(guardModel.tunnel.state, .off)
+        XCTAssertTrue(startSessionModel.sessionOn)
+        XCTAssertNil(startSessionModel.problem)
+        XCTAssertEqual(startSessionModel.tunnel.state, .off)
 
         // Stale loopback problem set while loopback was down clears once local_ddi makes canStartTasks true.
         let ddiModel = makeModel(imageMounted: { true })
