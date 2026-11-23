@@ -701,6 +701,7 @@ final class VoiceModel {
         phase = .thinking
         Task {
             let text = await dictation.finish()
+            guard self.dictation === dictation else { return }
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
@@ -708,11 +709,14 @@ final class VoiceModel {
             if chat.running { lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Poki is still on the last task.")))); phase = .listening; return }
             let before = chat.entries.count
             chat.send(text)
-            while chat.running { try? await Task.sleep(for: .milliseconds(200)) }
+            while chat.running, self.dictation === dictation {
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
+            }
+            guard self.dictation === dictation else { return }
             let reply = chat.entries.dropFirst(before).compactMap { entry -> String? in if case .poki(let t) = entry.kind { return t }; return nil }.last
                 ?? AppLocalization.text(LocalizedStringResource("Done."))
             lines.append(VoiceLine(role: .poki, text: reply))
-            guard self.dictation === dictation else { return }
             phase = .speaking
             dictation.speak(reply.replacingOccurrences(of: "**", with: ""))
         }
