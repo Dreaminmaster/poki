@@ -220,7 +220,11 @@ final class LookDoTests: XCTestCase {
         wda.set("POST /poki/pane") { _ in
             (200, ["value": ["identity": "left/workspace", "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
         }
-        wda.source([("Button", "Delete test item")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete test item", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         let read = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "workspace")
         XCTAssertFalse(read.isError, read.text)
         let call = Task {
@@ -277,7 +281,11 @@ final class LookDoTests: XCTestCase {
             side.value = args?["side"]?.string ?? "auto"
             return (200, ["value": ["identity": .string("\(side.value)/workspace"), "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
         }
-        wda.source([("Button", "Delete test item")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete test item", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         func read(_ side: String) async {
             let result = await core.callTool("look", arguments: "{\"pane\":\"\(side)\"}", localSession: "workspace")
             XCTAssertFalse(result.isError, result.text)
@@ -1757,7 +1765,11 @@ final class LookDoTests: XCTestCase {
 
     func testTheActionsGetTheirFullTimeAfterTheOwnerApproves() async {
         let (core, wda, _) = makeCore { $0.approvalWait = 4; $0.toolDeadline = 3; $0.actionCap = 1.5; $0.readTimeout = 1 }
-        wda.source([("Button", "Delete Photo")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete Photo", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         _ = await core.call("look", [:])
         Task {
             try? await Task.sleep(nanoseconds: 2_500_000_000)

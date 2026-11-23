@@ -673,7 +673,12 @@ final class FaultTests: XCTestCase {
     /// the first that needs approval go first, and the answer says which to send again.
     func testTheSafePartOfABatchGoesBeforeApprovalIsAsked() async {
         let (core, wda, _) = makeCore()
-        wda.source([("Button", "Photo"), ("Button", "Delete")], app: "Photos")
+        wda.tree([
+            Node("Button", "Photo", [16, 100, 358, 44]),
+            Node("Alert", nil, [16, 130, 358, 80], [
+                Node("Button", "Delete", [16, 144, 358, 44]),
+            ]),
+        ], app: "Photos")
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2]]])
         XCTAssertTrue(result.isError, "the requested batch stopped before the approval-gated action")
@@ -833,7 +838,10 @@ final class MailTestTests: XCTestCase {
         XCTAssertEqual(reason("Button", "Buy now"), "a payment (\"buy\")")
         XCTAssertEqual(reason("Button", "Pay $12.00"), "a payment (\"pay\")")
         XCTAssertEqual(reason("Button", "Confirm and pay"), "a payment (\"pay\")")
-        XCTAssertEqual(reason("Button", "Delete Message"), "deleting (\"delete\")")
+        XCTAssertNil(reason("Button", "Delete Message"))
+        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil, frame: Rect(x: 40, y: 300, width: 310, height: 180), depth: 1, node: 2, end: 3)
+        let deleteMessage = Element(type: "Button", label: "Delete Message", value: nil, identifier: nil, frame: Rect(x: 56, y: 420, width: 278, height: 44), depth: 2, node: 3, end: 3)
+        XCTAssertEqual(rules.reason(touching: deleteMessage, typing: false, app: mail, secureOnScreen: false, in: [alert, deleteMessage]), "deleting (\"delete\")")
         XCTAssertEqual(reason("Button", "Send"), "sending a message (\"send\")")
         XCTAssertNil(reason("Cell", "Re: Please send the files when you have them, John, Monday"))
     }

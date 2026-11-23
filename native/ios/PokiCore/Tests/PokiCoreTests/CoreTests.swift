@@ -371,7 +371,12 @@ final class ToolTests: XCTestCase {
 final class ApprovalTests: XCTestCase {
     func screenWithDelete() -> FakeWDA {
         let wda = FakeWDA()
-        wda.source([("Button", "Delete Photo"), ("Button", "Share")], app: "Photos")
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete Photo", [16, 100, 358, 44]),
+            ]),
+            Node("Button", "Share", [16, 144, 358, 44]),
+        ], app: "Photos")
         return wda
     }
 
@@ -433,7 +438,14 @@ final class ApprovalTests: XCTestCase {
 
     func testABatchReportsEverySensitiveActionBeforeOwnerApproval() async throws {
         let wda = FakeWDA()
-        wda.source([("Button", "Photo"), ("Button", "Call"), ("Button", "Delete"), ("Button", "Pay")], app: "Photos")
+        wda.tree([
+            Node("Button", "Photo", [16, 100, 358, 44]),
+            Node("Button", "Call", [16, 144, 358, 44]),
+            Node("Alert", nil, [16, 180, 358, 60], [
+                Node("Button", "Delete", [16, 188, 358, 44]),
+            ]),
+            Node("Button", "Pay", [16, 232, 358, 44]),
+        ], app: "Photos")
         let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2], ["tap": 3], ["tap": 4]]])
@@ -501,7 +513,7 @@ final class ApprovalTests: XCTestCase {
         for kind in ActionKind.allCases {
             guard let actions = samples[kind] else { XCTFail("no sample of \(kind.rawValue): aim one at Pay or Delete"); continue }
             for (action, pay) in actions.flatMap({ a in ([[16, 100, 358, 44], [16, 380, 358, 120]] as [[Double]]).map { (a, $0) } }) {
-                let screen = [Node("Button", "Pay", pay), Node("Button", "Delete", delete)]
+                let screen = [Node("Button", "Pay", pay), Node("Menu", nil, delete, [Node("Button", "Delete", delete)])]
                 for entrance in Entrance.allCases {
                     let wda = FakeWDA()
                     let store = RoutineStore(url: nil)
@@ -544,7 +556,10 @@ final class ApprovalTests: XCTestCase {
             for (opened, asks) in [("Delete", true), ("Back", false)] {
                 let wda = FakeWDA()
                 wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
-                let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+                let topLeft = opened == "Delete"
+                    ? Node("Menu", nil, [8, 50, 60, 40], [Node("Button", opened, [8, 50, 60, 40])])
+                    : Node("Button", opened, [8, 50, 60, 40])
+                let page = [topLeft, Node("Cell", "Order 1", [0, 200, 390, 44])]
                 wda.set(opener.endpoint) { [wda] _ in wda.tree(page, app: "Shop"); return (200, ["value": .null]) }
                 let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
                 _ = await core.call("look", [:])
@@ -564,7 +579,10 @@ final class ApprovalTests: XCTestCase {
         for (opened, asks) in [("Delete", true), ("Back", false)] {
             let wda = FakeWDA()
             wda.tree([Node("Button", "Back", [8, 50, 60, 40]), Node("Cell", "Orders", [0, 200, 390, 44])], app: "Shop")
-            let page = [Node("Button", opened, [8, 50, 60, 40]), Node("Cell", "Order 1", [0, 200, 390, 44])]
+            let topLeft = opened == "Delete"
+                ? Node("Menu", nil, [8, 50, 60, 40], [Node("Button", opened, [8, 50, 60, 40])])
+                : Node("Button", opened, [8, 50, 60, 40])
+            let page = [topLeft, Node("Cell", "Order 1", [0, 200, 390, 44])]
             wda.set("POST /wda/tap") { [wda] _ in
                 Task { try? await Task.sleep(nanoseconds: 300_000_000); wda.tree(page, app: "Shop") }
                 return (200, ["value": .null])
@@ -772,12 +790,23 @@ final class ApprovalTests: XCTestCase {
     }
 
     /// A step on a screen, in the app it is in, and what holds it back when asking is on.
-    private struct HeldStep { let app: String; let bundle: String; let screen: [(String, String)]; let action: JSON; let reason: String }
+    private struct HeldStep {
+        let app: String
+        let bundle: String
+        let screen: [(String, String)]
+        var nodes: [Node]? = nil
+        let action: JSON
+        let reason: String
+    }
 
     /// PokiCore started on the step's screen with the way of asking `mode` holds, and the screen read.
     private func started(on step: HeldStep, mode: LockedBox<ApprovalMode>) async -> (PokiCore, FakeWDA) {
         let wda = FakeWDA()
-        wda.source(step.screen, app: step.app)
+        if let nodes = step.nodes {
+            wda.tree(nodes, app: step.app)
+        } else {
+            wda.source(step.screen, app: step.app)
+        }
         wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": .string(step.bundle), "name": .string(step.app)]]) }
         let (core, _, _) = makeCore(wda) { $0.approvalWait = 0; $0.approvalMode = { mode.value } }
         _ = await core.call("look", [:])
@@ -825,7 +854,9 @@ final class ApprovalTests: XCTestCase {
         let steps = [
             (HeldStep(app: "Messages", bundle: "com.apple.MobileSMS", screen: [("Button", "Send")], action: ["tap": 1], reason: "sending a message (\"send\")"), stillAsks: false),
             (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Pay")], action: ["tap": 1], reason: "a payment (\"pay\")"), stillAsks: true),
-            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Delete")], action: ["tap": 1], reason: "deleting (\"delete\")"), stillAsks: true),
+            (HeldStep(app: "Shop", bundle: "com.example.shop", screen: [("Button", "Delete")],
+                      nodes: [Node("Alert", nil, [16, 80, 358, 120], [Node("Button", "Delete", [16, 100, 358, 44])])],
+                      action: ["tap": 1], reason: "deleting (\"delete\")"), stillAsks: true),
             (HeldStep(app: "Wallet", bundle: "com.apple.Passbook", screen: [("Button", "Apple Card")], action: ["tap": 1], reason: "input in Wallet"), stillAsks: true),
         ]
         for (step, stillAsks) in steps {
@@ -1070,7 +1101,12 @@ final class ApprovalTests: XCTestCase {
         phone.source([("Cell", "Mom")], app: "Phone")
         phone.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobilephone", "name": "Phone"]]) }
         let shop = FakeWDA()
-        shop.source([("Button", "Delete Photo"), pay], app: "Shop")
+        shop.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete Photo", [16, 100, 358, 44]),
+            ]),
+            Node("Button", "Pay", [16, 144, 358, 44]),
+        ], app: "Shop")
         let cases: [(label: String, wda: FakeWDA, actions: [JSON], stops: Bool)] = [
             ("a message", messages(rows: [send]), [["tap": 1]], true),
             ("two messages in one batch", messages(rows: [send, send]), [["tap": 1], ["tap": 2]], true),
@@ -1103,7 +1139,15 @@ final class ApprovalTests: XCTestCase {
             let (core, _, _) = makeCore(wda)
             _ = await core.call("look", [:])
             wda.set("POST /wda/tap") { _ in
-                wda.source([("Button", label)])
+                if label == "删除" {
+                    wda.tree([
+                        Node("Alert", nil, [16, 80, 358, 120], [
+                            Node("Button", label, [16, 100, 358, 44]),
+                        ]),
+                    ], app: "Settings")
+                } else {
+                    wda.source([("Button", label)])
+                }
                 return (200, ["value": .null])
             }
             let result = await core.call("do", ["actions": [["tap": 1], ["tap": [100, 120]]]])
@@ -1452,14 +1496,24 @@ final class ApprovalTests: XCTestCase {
     /// the number the read gives it. Returns the answer and the taps sent.
     private func grantThenTap(approved: String, shown: String) async throws -> (text: String, taps: Int) {
         let wda = FakeWDA()
-        wda.source([("Button", approved), ("Button", "Cancel")], app: "Shop")
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", approved, [16, 100, 358, 44]),
+                Node("Button", "Cancel", [16, 144, 358, 44]),
+            ]),
+        ], app: "Shop")
         let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
         _ = await core.call("look", [:])
         _ = await core.call("do", ["actions": [["tap": 1]]])
         let approval = try XCTUnwrap(core.pendingApproval, approved)
         core.resolveApproval(id: approval.id, approved: true)
 
-        wda.source([("Button", shown), ("Button", "Cancel")], app: "Shop")
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", shown, [16, 100, 358, 44]),
+                Node("Button", "Cancel", [16, 144, 358, 44]),
+            ]),
+        ], app: "Shop")
         let read = await core.call("look", [:])
         // The number the read gives the new label (a new number when it is another control).
         let line = try XCTUnwrap(read.text.split(separator: "\n").first { $0.contains("Button \"\(shown)\"") }, read.text)
@@ -1601,7 +1655,12 @@ final class ApprovalTests: XCTestCase {
     /// the same number names there.
     func testAGrantAfterASafeActionDoesNotPressAnotherControl() async throws {
         let wda = FakeWDA()
-        wda.source([("Button", "Next"), ("Button", "Delete Photo")], app: "Shop")
+        wda.tree([
+            Node("Button", "Next", [16, 100, 358, 44]),
+            Node("Alert", nil, [16, 130, 358, 80], [
+                Node("Button", "Delete Photo", [16, 144, 358, 44]),
+            ]),
+        ], app: "Shop")
         let (core, _, _) = makeCore(wda) { $0.approvalWait = 0 }
         _ = await core.call("look", [:])
         wda.source([("Button", "Back"), ("Button", "Pay $500")], app: "Shop")  // the screen Next opens

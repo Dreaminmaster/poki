@@ -3,29 +3,58 @@ import XCTest
 
 final class SensitivityTests: XCTestCase {
     private let punctuatedActions = [
-        "Tap to pay $12.00", "Tap to pay $1,200.00", "Please delete photo-2026-11-14",
-        "Tap to pay 12.00元/次", "Please delete my photo-2026-11-14.jpg", "Please delete 照片-旅遊-備份",
-        "Please delete 照片-旅遊-備份-2026.final.jpg",
+        "Tap to pay $12.00", "Tap to pay $1,200.00",
+        "Tap to pay 12.00元/次",
     ]
 
-    private func reason(_ label: String, type: String = "Button") -> String? {
+    private func reason(_ label: String, type: String = "Button", in elements: [Element] = []) -> String? {
         SensitivityRules().reason(
             touching: Element(type: type, label: label, value: nil, identifier: nil,
                               frame: Rect(x: 0, y: 0, width: 100, height: 44), depth: 1),
             typing: false, app: Foreground(bundleID: "com.apple.mobilemail", name: "Mail"),
-            secureOnScreen: false)
+            secureOnScreen: false, in: elements)
     }
 
     func testLongActionButtonsStillRequireApproval() {
         for label in ["Complete purchase of 3 items", "Tap here to complete the payment",
-                      "Open details and then pay", "Tap here to delete this photo permanently"] {
+                      "Open details and then pay"] {
             XCTAssertNotNil(reason(label), label)
         }
+        // Deleting on an ordinary page is allowed; compact delete inside a dialog still asks.
+        XCTAssertNil(reason("Tap here to delete this photo permanently"))
+        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil,
+                            frame: Rect(x: 40, y: 300, width: 310, height: 180), depth: 1, node: 2, end: 3)
+        let deleteButton = Element(type: "Button", label: "Delete Photo", value: nil, identifier: nil,
+                                   frame: Rect(x: 56, y: 420, width: 278, height: 44), depth: 2, node: 3, end: 3)
+        XCTAssertEqual(
+            SensitivityRules().reason(
+                touching: deleteButton, typing: false,
+                app: Foreground(bundleID: "com.apple.mobilemail", name: "Mail"),
+                secureOnScreen: false, in: [alert, deleteButton]
+            ),
+            "deleting (\"delete\")"
+        )
     }
 
     func testTraditionalChineseActionsRequireApproval() {
-        for label in ["購買", "訂閱", "轉賬", "轉帳", "刪除", "還原", "發送", "回覆", "發布", "撥打"] {
+        for label in ["購買", "訂閱", "轉賬", "轉帳", "發送", "回覆", "發布", "撥打"] {
             XCTAssertNotNil(reason(label), label)
+        }
+        // Traditional Chinese delete labels require approval inside a confirmation dialog or menu.
+        for label in ["刪除", "還原"] {
+            XCTAssertNil(reason(label), label)
+            let menu = Element(type: "Menu", label: nil, value: nil, identifier: nil,
+                               frame: Rect(x: 180, y: 120, width: 190, height: 120), depth: 1, node: 2, end: 3)
+            let button = Element(type: "Button", label: label, value: nil, identifier: nil,
+                                 frame: Rect(x: 180, y: 164, width: 190, height: 44), depth: 2, node: 3, end: 3)
+            XCTAssertNotNil(
+                SensitivityRules().reason(
+                    touching: button, typing: false,
+                    app: Foreground(bundleID: "com.apple.mobilemail", name: "Mail"),
+                    secureOnScreen: false, in: [menu, button]
+                ),
+                label
+            )
         }
     }
 
@@ -302,5 +331,19 @@ final class SensitivityTests: XCTestCase {
             let element = Element(type: type, label: label, value: nil, identifier: nil, frame: Rect(x: 16, y: 400, width: 160, height: 44), depth: 1)
             XCTAssertNotNil(rules.reason(touching: element, typing: false, app: wechat, secureOnScreen: false), "\(type) \(label)")
         }
+
+        // Context menu container identified by UIKit identifier also triggers delete approval via node...end containment.
+        let contextMenu = Element(
+            type: "Other", label: nil, value: nil, identifier: "UIContextMenuView",
+            frame: Rect(x: 160, y: 200, width: 200, height: 140), depth: 1, node: 2, end: 3
+        )
+        let menuDelete = Element(
+            type: "Button", label: "删除", value: nil, identifier: nil,
+            frame: Rect(x: 160, y: 244, width: 200, height: 44), depth: 2, node: 3, end: 3
+        )
+        XCTAssertEqual(
+            rules.reason(touching: menuDelete, typing: false, app: wechat, secureOnScreen: false, in: [contextMenu, menuDelete]),
+            "deleting (\"删除\")"
+        )
     }
 }
