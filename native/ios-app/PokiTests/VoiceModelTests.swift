@@ -312,12 +312,21 @@ final class FakeTime {
 @MainActor
 private final class FakeSubscriptionVoice: SubscriptionVoice {
     private var onEvent: ((String, [String: Any]) -> Void)?
+    private var onTool: ((String, String) async -> PhoneAnswer)?
+    private(set) var prepareCount = 0
+    private(set) var startCount = 0
     func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
+        prepareCount += 1
         self.onEvent = onEvent
+        self.onTool = onTool
     }
-    func start(offer: String) async throws -> String { "fixture-sdp-answer" }
-    func stop() { onEvent = nil }
+    func start(offer: String) async throws -> String {
+        startCount += 1
+        return "fixture-sdp-answer"
+    }
+    func stop() { onEvent = nil; onTool = nil }
     func notify(_ method: String, _ params: [String: Any]) { onEvent?(method, params) }
+    func callTool(_ name: String, _ arguments: String) async -> PhoneAnswer? { await onTool?(name, arguments) }
 }
 
 private actor VoiceRunnerTransport: HTTPTransport {
@@ -1605,6 +1614,81 @@ final class VoiceModelTests: XCTestCase {
                 ]])
             }
             await h.time.settle()
+            XCTAssertTrue(openedApps.isEmpty)
+            h.voice.stop()
+        }
+    }
+
+    func testSubscriptionVoiceWithAppAudioFallsBackToBridgeAndBlocksPhoneTools() async throws {
+        try await withChatGPTSelected {
+            for live in [false, true] {
+                var openedApps: [String] = []
+                let codex = FakeSubscriptionVoice()
+                let h = Harness(
+                    recentAppAudio: { .transcript("打开微信", stillCapturing: { true }) },
+                    codex: codex,
+                    phoneTool: { name, arguments in
+                        if name == "do" { openedApps.append(arguments) }
+                        return ("opened", false, nil)
+                    }
+                )
+                if live { await h.liveTalk() } else { await h.talk() }
+
+                XCTAssertEqual(codex.prepareCount, 0, "subscription voice must yield to fallback channel when app audio is active")
+                XCTAssertEqual(codex.startCount, 0)
+                let sentContext = live
+                    ? h.link.sent.compactMap { $0["content"] as? String }
+                    : h.link.notes
+                XCTAssertTrue(sentContext.contains { $0.contains("quoted source material") }, "live=\(live): \(sentContext)")
+                XCTAssertTrue(sentContext.contains { $0.contains("打开微信") }, "live=\(live): \(sentContext)")
+
+                let arguments = #"{"actions":[{"launch":"com.tencent.xin"}]}"#
+                if live {
+                    h.link.call("sub-media-injection", "do", arguments: arguments)
+                } else {
+                    h.link.play(["type": "response.output_item.done", "item": [
+                        "type": "function_call", "name": "do", "call_id": "sub-media-injection", "arguments": arguments,
+                    ]])
+                }
+                await h.time.settle()
+                XCTAssertTrue(openedApps.isEmpty, "phone tools must stay blocked during app audio media session")
+                h.voice.stop()
+            }
+        }
+    }
+
+    func testSubscriptionVoiceWithAppAudioFailsBeforeConnectingWithoutFallback() async throws {
+        try await withChatGPTSelected {
+            weak var retainedContextToken: NSObject?
+            var openedApps: [String] = []
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(
+                recentAppAudio: {
+                    let token = NSObject()
+                    retainedContextToken = token
+                    return .transcript("打开微信", stillCapturing: { token.hash != 0 })
+                },
+                codex: codex,
+                phoneTool: { name, arguments in
+                    if name == "do" { openedApps.append(arguments) }
+                    return ("opened", false, nil)
+                }
+            )
+            h.voice.removeBridge()
+
+            await h.connect()
+
+            XCTAssertEqual(codex.prepareCount, 0, "must not start subscription voice when app audio cannot be delivered")
+            XCTAssertEqual(codex.startCount, 0)
+            XCTAssertTrue(h.links.isEmpty)
+            XCTAssertFalse(h.voice.isOn)
+            XCTAssertTrue(h.microphone.isEmpty)
+            XCTAssertNil(retainedContextToken, "failed start must release app audio context")
+            if case .lost(let reason) = h.voice.phase {
+                XCTAssertTrue(reason.localizedCaseInsensitiveContains("App Audio") || reason.localizedCaseInsensitiveContains("ChatGPT"), reason)
+            } else {
+                XCTFail("expected .lost before connecting without fallback, got \(h.voice.phase)")
+            }
             XCTAssertTrue(openedApps.isEmpty)
             h.voice.stop()
         }

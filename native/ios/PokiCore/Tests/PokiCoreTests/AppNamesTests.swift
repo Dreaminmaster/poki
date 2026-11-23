@@ -53,6 +53,72 @@ final class AppNamesTests: XCTestCase {
         XCTAssertEqual(launched(wda), ["com.example.shop"])
     }
 
+    func testALaunchFailureReportsWhichBatchActionsWereSent() async {
+        let (core, wda) = core()
+        _ = await core.call("look", [:])
+        wda.set("POST /wda/apps/activate") { _ in
+            (400, ["value": ["error": "unknown error", "message": "app not installed"]])
+        }
+
+        let result = await core.call("do", ["actions": [
+            ["button": "volume_up"], ["launch": ["bundle": "com.example.missing"]], ["button": "volume_down"],
+        ]])
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("button volume_up (sent"), result.text)
+        XCTAssertTrue(result.text.contains("action 2 was refused"), result.text)
+        XCTAssertTrue(result.text.contains("the actions after it were not sent"), result.text)
+        XCTAssertTrue(result.text.contains("Do not repeat the actions marked sent"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressButton").compactMap { $0["name"]?.string }, ["volumeUp"])
+
+        let pathResult = await core.call("do", ["actions": [["path": ["steps": [
+            ["button": "volume_up"], ["launch": ["bundle": "com.example.missing"]], ["button": "volume_down"],
+        ]]]]])
+        XCTAssertTrue(pathResult.isError, pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("action 1 stopped after sending input: path stopped at step 2"), pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("steps 1 to 1 were sent"), pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("Do not repeat the actions marked sent"), pathResult.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressButton").compactMap { $0["name"]?.string }, ["volumeUp", "volumeUp"])
+    }
+
+    func testASkillThatLaunchedItsStartingAppReportsInputSentWhenStepOneFails() async {
+        let store = SkillStore(url: nil)
+        let now = Date()
+        let skill = Skill(
+            name: "check-clock",
+            description: "open clock and tap missing button",
+            app: "com.apple.mobiletimer",
+            steps: [SkillStep(action: ["tap": "Missing"], target: SkillTarget(type: SkillTarget.anyType, label: "Missing"), app: "com.apple.mobiletimer")],
+            params: [:],
+            expect: [],
+            read: [],
+            runs: 0,
+            ok: 0,
+            failuresInARow: 0,
+            lastStop: nil,
+            lastMs: nil,
+            savedBy: "test",
+            created: now,
+            updated: now
+        )
+        store.save(skill)
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+        let (core, _, _) = makeCore(wda) {
+            $0.memory = store
+            $0.actionCap = 0.4
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
+        }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["run": "check-clock"]]])
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertEqual(launched(wda), ["com.apple.mobiletimer"])
+        XCTAssertTrue(result.text.contains("action 1 stopped after sending input: run \"check-clock\" stopped at step 1"), result.text)
+        XCTAssertTrue(result.text.contains("Do not repeat the actions marked sent"), result.text)
+    }
+
     func testWithNamesOffALaunchIsSentAsGiven() async {
         let (core, wda) = core(names: false)
         _ = await core.call("look", [:])
