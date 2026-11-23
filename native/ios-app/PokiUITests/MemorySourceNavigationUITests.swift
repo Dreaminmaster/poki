@@ -79,8 +79,25 @@ final class MemorySourceNavigationUITests: XCTestCase {
         let conversations = app.descendants(matching: .any)["details.searchConversations"]
         XCTAssertTrue(conversations.waitForExistence(timeout: 20), "Settings must show Conversations")
         conversations.tap()
+        // On iPhone the native SwiftUI .searchable control can start collapsed.
+        // Exercise the owner's pull-to-reveal gesture before treating it as absent.
         let search = app.searchFields.firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 10), "Conversations must provide native search")
+        if !search.waitForExistence(timeout: 3) {
+            let list = app.collectionViews.firstMatch
+            if list.exists { list.swipeDown() } else { app.swipeDown() }
+        }
+        // Newer iOS navigation layouts can also expose an explicit Search action.
+        if !search.exists {
+            let reveal = app.buttons.matching(
+                NSPredicate(format: "label ==[c] %@", "Search")
+            ).firstMatch
+            if reveal.exists && reveal.isHittable { reveal.tap() }
+        }
+        screenshot(app, name: "Conversations native search control")
+        guard search.waitForExistence(timeout: 10) else {
+            XCTFail("Conversations must expose native search after the owner's reveal gestures")
+            return app
+        }
         search.tap()
         search.typeText(phrase)
         let result = app.buttons["search.message"].firstMatch
