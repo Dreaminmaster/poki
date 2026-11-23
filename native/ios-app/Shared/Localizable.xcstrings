@@ -1,6 +1,156 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Relay protocol version is incompatible" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务协议版本不兼容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務通訊協定版本不相容"
+          }
+        }
+      }
+    },
+    "The relay is temporarily busy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务暂时繁忙"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務暫時繁忙"
+          }
+        }
+      }
+    },
+    "pairing certificate is no longer trusted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对证书已失效或不受信任"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配對憑證已失效或不受信任"
+          }
+        }
+      }
+    },
+    "pairing record is missing or invalid" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对记录无效或已缺失"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配對記錄無效或已遺失"
+          }
+        }
+      }
+    },
+    "pairing has expired or been reset" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对已过期或被重置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配對已過期或被重設"
+          }
+        }
+      }
+    },
+    "unlock this iPhone and trust the pairing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先解锁此 iPhone 并信任配对"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先解鎖此 iPhone 並信任配對"
+          }
+        }
+      }
+    },
+    "the pairing file from a computer does not work on this iOS version" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电脑生成的配对文件不适用于当前 iOS 版本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "電腦產生的配對檔案不適用於目前 iOS 版本"
+          }
+        }
+      }
+    },
+    "The phone refused the pairing. Pair again in Setup." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pair again in Setup. This iPhone refused the pairing."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“配置”中重新配对。iPhone 拒绝了当前配对。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在「配置」中重新配對。iPhone 拒絕了目前配對。"
+          }
+        }
+      }
+    },
+    "The phone no longer accepts Poki’s pairing. Pair again in Setup; it takes a minute." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 iPhone 已不再接受当前配对，请在“配置”中重新配对（约需 1 分钟）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 iPhone 已不再接受目前配對，請在「配置」中重新配對（約需 1 分鐘）。"
+          }
+        }
+      }
+    },
     "Enter your relay’s address first in Settings › External Connections › Address. Poki has no default relay." : {
       "extractionState" : "manual",
       "localizations" : {

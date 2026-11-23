@@ -856,12 +856,7 @@ struct AgentsAndRelayView: View {
     @Environment(AppModel.self) private var model
     @Binding var path: NavigationPath
 
-    private var relayLine: String {
-        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
-        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
-        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
-        return Health.relayStatusText(model)
-    }
+    private var relayLine: String { Health.relaySummary(model) }
 
     var body: some View {
         @Bindable var model = model

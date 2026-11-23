@@ -404,9 +404,9 @@ private struct LoopbackPage: View {
                     Button("Disconnect Local Connection") { model.tunnel.disconnect() }.disabled(connectionLocked)
                 case .disconnecting:
                     LabeledContent("Built-in Connection") { ProgressView() }
-                case .failed(let message):
-                    Label(AppLocalization.bundle.localizedString(forKey: message, value: message, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                case .off, .unavailable:
+                case .failed(let message) where model.setup.loopback == .builtIn && !monitor.isWorking && !localReady:
+                    Label(Issue.localizedProblem(message), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                case .failed, .off, .unavailable:
                     Button("Enable Local Connection") {
                         model.chooseConnection(.builtIn)
                         Task { try? await model.tunnel.connect(); model.loopback.check() }

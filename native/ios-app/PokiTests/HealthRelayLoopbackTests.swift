@@ -420,6 +420,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
         model.setup.loopback = .proxy
         model.loopback.simulate(.working(ms: 12))
         model.startSession()
+        model.wakeRunner()
         model.runnerChanged(RunnerStatus(state: "failed", detail: "invalid cert from peer", code: "pairing"))
 
         let pairingIssue = try XCTUnwrap(Issue.current(model).first { $0.id == "pairing" })
@@ -435,6 +436,13 @@ final class HealthRelayLoopbackTests: XCTestCase {
         let detailsJoined = detailsLabels.joined(separator: " | ")
         XCTAssertTrue(detailsJoined.contains("配对证书已失效或不受信任"), "PokiDetailsView must localize pairing reason: \(detailsJoined)")
         XCTAssertFalse(detailsJoined.contains("invalid cert"), "PokiDetailsView leaked raw English pairing reason: \(detailsJoined)")
+
+        // Unrecognized English pairing detail must also be summarized cleanly in Chinese without leaking raw text.
+        model.runnerChanged(RunnerStatus(state: "failed", detail: "x509 verify mismatch", code: "pairing"))
+        let unknownPairingIssue = try XCTUnwrap(Issue.current(model).first { $0.id == "pairing" })
+        XCTAssertTrue(unknownPairingIssue.text.contains("重新配对"), unknownPairingIssue.text)
+        XCTAssertFalse(unknownPairingIssue.text.contains("x509") || unknownPairingIssue.text.contains("mismatch"),
+                       "unrecognized English pairing reason leaked: \(unknownPairingIssue.text)")
 
         AppLocalization.shared.preference = "zh-Hant"
         XCTAssertEqual(Health.relayOfflineReason("Error Domain=NSURLErrorDomain Code=-1004 \"Could not connect to the server.\""), "無法連線至遠端連線服務")
