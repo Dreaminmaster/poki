@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import UIKit
 import XCTest
@@ -51,19 +52,8 @@ final class TaskCardSkillTests: XCTestCase {
         defer { library.forget(item.id) }
         let noteRef = TaskMemoryUse.Note(id: item.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))
 
-        // 1. Skill only
+        // 1. Memory only
         AppLocalization.shared.preference = "en"
-        let skillOnlyXML = try await renderTaskCardXML(
-            state: .done,
-            memoryUse: TaskMemoryUse(notes: [], skills: ["Order usual"]),
-            containerID: "taskcard.sep.skillOnly"
-        )
-        let skillOnly = try StaticTextElements(skillOnlyXML)
-        XCTAssertEqual(skillOnly.labels(for: "taskCard.skillUse"), ["Using skill - Order usual"])
-        XCTAssertTrue(skillOnly.labels(for: "taskCard.memoryUse").isEmpty)
-        XCTAssertFalse(skillOnlyXML.contains("Used:"), skillOnlyXML)
-
-        // 2. Memory only
         let memoryOnlyXML = try await renderTaskCardXML(
             state: .done,
             memoryUse: TaskMemoryUse(notes: [noteRef], skills: []),
@@ -74,7 +64,7 @@ final class TaskCardSkillTests: XCTestCase {
         XCTAssertEqual(memoryOnly.labels(for: "taskCard.memoryUse"), ["Used: \(noteText)"])
         XCTAssertFalse(memoryOnlyXML.contains("Using skill -"), memoryOnlyXML)
 
-        // 3. Skill + Memory together (English)
+        // 2. Skill + Memory together (English)
         let bothEnXML = try await renderTaskCardXML(
             state: .done,
             memoryUse: TaskMemoryUse(notes: [noteRef], skills: ["Order usual"]),
@@ -86,7 +76,7 @@ final class TaskCardSkillTests: XCTestCase {
         XCTAssertFalse(bothEnXML.contains("Used: Order usual"), "Skill must not leak into memory row:\n\(bothEnXML)")
         XCTAssertFalse(bothEnXML.contains("Order usual and \(noteText)"), "Skill and memory must not mix:\n\(bothEnXML)")
 
-        // 4. Skill + Memory together (Simplified Chinese, running blue card)
+        // 3. Skill + Memory together (Simplified Chinese, running blue card + expanded details)
         AppLocalization.shared.preference = "zh-Hans"
         let bothZhXML = try await renderTaskCardXML(
             state: .running,
@@ -119,29 +109,14 @@ final class TaskCardSkillTests: XCTestCase {
             .init(hex: 0x8E4EC6, location: 1.00),
         ]
 
-        XCTAssertEqual(TaskCardSkillRainbow.palette(onBlue: false, colorScheme: .dark), .darkSurface)
-        XCTAssertEqual(TaskCardSkillRainbow.palette(onBlue: true, colorScheme: .light), .darkSurface)
-        XCTAssertEqual(TaskCardSkillRainbow.palette(onBlue: true, colorScheme: .dark), .darkSurface)
-        XCTAssertEqual(TaskCardSkillRainbow.palette(onBlue: false, colorScheme: .light), .lightSurface)
-
         XCTAssertEqual(TaskCardSkillRainbow.stops(onBlue: false, colorScheme: .dark), expectedDark)
         XCTAssertEqual(TaskCardSkillRainbow.stops(onBlue: true, colorScheme: .light), expectedDark)
         XCTAssertEqual(TaskCardSkillRainbow.stops(onBlue: true, colorScheme: .dark), expectedDark)
         XCTAssertEqual(TaskCardSkillRainbow.stops(onBlue: false, colorScheme: .light), expectedLight)
-
         XCTAssertEqual(TaskCardSkillRainbow.flowDuration, 2.5, accuracy: 0.001)
-        XCTAssertTrue(TaskCardSkillRainbow.shouldAnimateFlow(reduceMotion: false))
-        XCTAssertFalse(TaskCardSkillRainbow.shouldAnimateFlow(reduceMotion: true))
-
-        let flowing = TaskCardSkillRainbow.flowingStops(from: expectedDark)
-        XCTAssertEqual(flowing.count, 12)
-        XCTAssertEqual(flowing.first?.hex, 0xFF6B6B)
-        XCTAssertEqual(flowing.first?.location ?? -1, 0.0, accuracy: 0.0001)
-        XCTAssertEqual(flowing.last?.hex, 0xB48CFF)
-        XCTAssertEqual(flowing.last?.location ?? -1, 1.0, accuracy: 0.0001)
     }
 
-    func testVisualComparisonCapturesLightDarkAndBlueCards() async throws {
+    func testSkillRowRendersMultiColorRainbowAndReadableBlueCardContrast() async throws {
         let library = MemoryLibrary.shared
         let noteText = "咖啡要冰美式，少冰"
         library.add(noteText, app: nil)
@@ -149,17 +124,16 @@ final class TaskCardSkillTests: XCTestCase {
         defer { library.forget(item.id) }
         let noteRef = TaskMemoryUse.Note(id: item.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))
 
-        let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TaskCardSkillEvidence")
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-
+        let output = try evidenceDirectory()
         AppLocalization.shared.preference = "zh-Hans"
         let end = Date()
 
-        let scenes: [(filename: String, scheme: UIUserInterfaceStyle, cards: [AnyView])] = [
+        let scenes: [(filename: String, scheme: UIUserInterfaceStyle, isBlue: Bool, containerID: String, cards: [AnyView])] = [
             (
                 "light-cards.png",
                 .light,
+                false,
+                "taskcard.visual.light",
                 [
                     AnyView(TaskCard(
                         title: "点一杯冰美式",
@@ -193,6 +167,8 @@ final class TaskCardSkillTests: XCTestCase {
             (
                 "dark-cards.png",
                 .dark,
+                false,
+                "taskcard.visual.dark",
                 [
                     AnyView(TaskCard(
                         title: "点一杯冰美式",
@@ -217,6 +193,8 @@ final class TaskCardSkillTests: XCTestCase {
             (
                 "blue-running-cards.png",
                 .light,
+                true,
+                "taskcard.visual.blue",
                 [
                     AnyView(TaskCard(
                         title: "正在执行技能任务",
@@ -238,19 +216,12 @@ final class TaskCardSkillTests: XCTestCase {
             ),
         ]
 
-        let windowScene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let covered = windowScene.windows.filter { !$0.accessibilityElementsHidden }
-        covered.forEach { $0.accessibilityElementsHidden = true }
-        let window = UIWindow(windowScene: windowScene)
-        window.frame = windowScene.screen.bounds
-        defer {
-            window.isHidden = true
-            covered.forEach { $0.accessibilityElementsHidden = false }
-        }
+        let (window, cleanup) = try makeTestWindow()
+        defer { cleanup() }
 
         for scene in scenes {
             window.overrideUserInterfaceStyle = scene.scheme
-            let host = UIHostingController(rootView:
+            window.rootViewController = UIHostingController(rootView:
                 VStack(spacing: 16) {
                     ForEach(Array(scene.cards.enumerated()), id: \.offset) { _, card in card }
                     Spacer(minLength: 0)
@@ -259,37 +230,205 @@ final class TaskCardSkillTests: XCTestCase {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(Color(.systemGroupedBackground))
                 .environment(\.locale, AppLocalization.locale)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(scene.containerID)
             )
-            window.rootViewController = host
             window.makeKeyAndVisible()
             window.layoutIfNeeded()
             CATransaction.flush()
-            try await Task.sleep(for: .milliseconds(250))
 
-            let png = UIGraphicsImageRenderer(bounds: window.bounds).pngData { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            // Wait until the initial 2.5s sweep settles so the rendered frame reflects the final 6-stop rainbow.
+            let xml = try await waitForXML(containing: scene.containerID)
+            if !UIAccessibility.isReduceMotionEnabled {
+                try await Task.sleep(for: .milliseconds(2700))
+                window.layoutIfNeeded()
+                CATransaction.flush()
             }
-            XCTAssertGreaterThan(png.count, 1000, "Screenshot \(scene.filename) must not be empty")
-            try png.write(to: output.appendingPathComponent(scene.filename))
+
+            let image = captureWindow(window)
+            try XCTUnwrap(image.pngData()).write(to: output.appendingPathComponent(scene.filename))
+
+            let parsed = try StaticTextElements(xml)
+            let skillRect = try XCTUnwrap(parsed.frames(for: "taskCard.skillUse").first,
+                                          "Missing taskCard.skillUse frame in \(scene.filename)")
+            let sample = try SkillRowPixels.analyze(image: image, rect: skillRect)
+            assertMultiColorRainbow(sample, context: scene.filename)
+
+            if scene.isBlue {
+                XCTAssertGreaterThanOrEqual(
+                    sample.rightContrast,
+                    4.5,
+                    "Blue running card trailing rainbow glyphs must have >= 4.5:1 contrast against immediate backing (got \(String(format: "%.2f", sample.rightContrast)):1, fg=\(sample.rightColor), bg=\(sample.backgroundColor))"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    sample.leftContrast,
+                    4.5,
+                    "Blue running card leading rainbow glyphs must have >= 4.5:1 contrast (got \(String(format: "%.2f", sample.leftContrast)):1)"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    sample.midContrast,
+                    4.5,
+                    "Blue running card middle rainbow glyphs must have >= 4.5:1 contrast (got \(String(format: "%.2f", sample.midContrast)):1)"
+                )
+            }
         }
     }
 
+    func testSkillRowFlowsOnAppearAndSkillChange() async throws {
+        try XCTSkipIf(UIAccessibility.isReduceMotionEnabled, "Requires Reduce Motion disabled to verify rainbow sweep")
+
+        let model = LiveSkillCardModel(skills: ["点常点的那家"])
+        let (window, cleanup) = try makeTestWindow()
+        defer { cleanup() }
+
+        AppLocalization.shared.preference = "zh-Hans"
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = UIHostingController(rootView:
+            LiveSkillCardHost(model: model, containerID: "taskcard.flow.live")
+        )
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
+
+        let initialXML = try await waitForXML(containing: "taskcard.flow.live")
+        let initialRect = try XCTUnwrap(try StaticTextElements(initialXML).frames(for: "taskCard.skillUse").first)
+
+        // 1. On initial appearance, pixels inside the skill row shift during the 2.5s sweep.
+        try await Task.sleep(for: .milliseconds(300))
+        let appearFrame1 = captureWindow(window)
+        try await Task.sleep(for: .milliseconds(800))
+        let appearFrame2 = captureWindow(window)
+        let appearDiff = try SkillRowPixels.meanForegroundDifference(appearFrame1, appearFrame2, rect: initialRect)
+        XCTAssertGreaterThan(appearDiff, 0.05,
+                             "Initial skill row appearance must visibly flow across the 2.5s sweep (diff=\(appearDiff))")
+
+        // 2. After the 2.5s sweep completes, consecutive frames stay steady on the static 6-stop rainbow.
+        try await Task.sleep(for: .milliseconds(1750))
+        let settledFrame1 = captureWindow(window)
+        try await Task.sleep(for: .milliseconds(300))
+        let settledFrame2 = captureWindow(window)
+        let settledDiff = try SkillRowPixels.meanForegroundDifference(settledFrame1, settledFrame2, rect: initialRect)
+        XCTAssertLessThan(settledDiff, 0.015,
+                          "Skill row must settle to a static rainbow after 2.5s (diff=\(settledDiff))")
+        assertMultiColorRainbow(try SkillRowPixels.analyze(image: settledFrame2, rect: initialRect),
+                                context: "settled after initial flow")
+
+        // 3. Updating the skill list refreshes the label and replays the 2.5s sweep.
+        model.skills = ["查天气", "发消息"]
+        let updatedXML = try await waitForXML(containing: "使用技能 - 查天气和发消息")
+        let updatedRect = try XCTUnwrap(try StaticTextElements(updatedXML).frames(for: "taskCard.skillUse").first)
+
+        try await Task.sleep(for: .milliseconds(300))
+        let changeFrame1 = captureWindow(window)
+        try await Task.sleep(for: .milliseconds(800))
+        let changeFrame2 = captureWindow(window)
+        let changeDiff = try SkillRowPixels.meanForegroundDifference(changeFrame1, changeFrame2, rect: updatedRect)
+        XCTAssertGreaterThan(changeDiff, 0.05,
+                             "Changing the skill list must replay the rainbow sweep (diff=\(changeDiff))")
+
+        let output = try evidenceDirectory()
+        try XCTUnwrap(appearFrame1.pngData()).write(to: output.appendingPathComponent("flow-appear-t1.png"))
+        try XCTUnwrap(appearFrame2.pngData()).write(to: output.appendingPathComponent("flow-appear-t2.png"))
+        try XCTUnwrap(settledFrame2.pngData()).write(to: output.appendingPathComponent("flow-settled.png"))
+        try XCTUnwrap(changeFrame2.pngData()).write(to: output.appendingPathComponent("flow-changed-t2.png"))
+    }
+
+    func testSkillRowStaysStaticWhenSystemReduceMotionIsEnabled() async throws {
+        try XCTSkipUnless(UIAccessibility.isReduceMotionEnabled,
+                          "Enable Reduce Motion in simulator Accessibility defaults to verify static rainbow fallback")
+
+        let model = LiveSkillCardModel(skills: ["点常点的那家"])
+        let (window, cleanup) = try makeTestWindow()
+        defer { cleanup() }
+
+        AppLocalization.shared.preference = "zh-Hans"
+        window.overrideUserInterfaceStyle = .dark
+        window.rootViewController = UIHostingController(rootView:
+            LiveSkillCardHost(model: model, containerID: "taskcard.reduceMotion.live")
+        )
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
+
+        let xml = try await waitForXML(containing: "taskcard.reduceMotion.live")
+        let rect = try XCTUnwrap(try StaticTextElements(xml).frames(for: "taskCard.skillUse").first)
+
+        try await Task.sleep(for: .milliseconds(150))
+        let frame1 = captureWindow(window)
+        try await Task.sleep(for: .milliseconds(850))
+        let frame2 = captureWindow(window)
+
+        let diff = try SkillRowPixels.meanForegroundDifference(frame1, frame2, rect: rect)
+        XCTAssertLessThan(diff, 0.01,
+                          "Under system Reduce Motion, the skill row must stay static without sweeping (diff=\(diff))")
+        assertMultiColorRainbow(try SkillRowPixels.analyze(image: frame1, rect: rect),
+                                context: "reduceMotion static rainbow")
+
+        let output = try evidenceDirectory()
+        try XCTUnwrap(frame1.pngData()).write(to: output.appendingPathComponent("reduce-motion-static.png"))
+    }
+
     // MARK: - Helpers
+
+    private func assertMultiColorRainbow(_ sample: SkillRowPixels.Sample, context: String) {
+        XCTAssertGreaterThan(sample.leftColor.r - sample.leftColor.b, 0.15,
+                             "[\(context)] leading glyphs should be warm red/orange (got \(sample.leftColor))")
+        XCTAssertGreaterThan(sample.midColor.g - sample.midColor.b, 0.12,
+                             "[\(context)] middle glyphs should be yellow/green (got \(sample.midColor))")
+        XCTAssertGreaterThan(sample.rightColor.b - sample.rightColor.r, 0.15,
+                             "[\(context)] trailing glyphs should be blue/purple (got \(sample.rightColor))")
+    }
+
+    private func evidenceDirectory() throws -> URL {
+        let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TaskCardSkillEvidence")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        return output
+    }
+
+    private func makeTestWindow() throws -> (UIWindow, () -> Void) {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let covered = scene.windows.filter { !$0.accessibilityElementsHidden }
+        covered.forEach { $0.accessibilityElementsHidden = true }
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        return (window, {
+            window.isHidden = true
+            covered.forEach { $0.accessibilityElementsHidden = false }
+        })
+    }
+
+    private func captureWindow(_ window: UIWindow) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window.screen.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+
+    private func waitForXML(containing token: String) async throws -> String {
+        var source = ""
+        let deadline = CACurrentMediaTime() + 15
+        repeat {
+            source = await Task.detached {
+                var code: NSString?
+                return PKInProcess.shared().sourceXML(nil, code: &code) ?? ""
+            }.value
+            if source.contains(token) { break }
+            try await Task.sleep(for: .milliseconds(50))
+        } while CACurrentMediaTime() < deadline
+        XCTAssertTrue(source.contains(token), "Expected \(token) in accessibility tree")
+        return source
+    }
 
     private func renderTaskCardXML(
         state: TaskCardState,
         memoryUse: TaskMemoryUse?,
         containerID: String
     ) async throws -> String {
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let covered = scene.windows.filter { !$0.accessibilityElementsHidden }
-        covered.forEach { $0.accessibilityElementsHidden = true }
-        let window = UIWindow(windowScene: scene)
-        window.frame = scene.screen.bounds
-        defer {
-            window.isHidden = true
-            covered.forEach { $0.accessibilityElementsHidden = false }
-        }
+        let (window, cleanup) = try makeTestWindow()
+        defer { cleanup() }
 
         let end = Date()
         let rootView = VStack(spacing: 16) {
@@ -314,24 +453,213 @@ final class TaskCardSkillTests: XCTestCase {
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
         CATransaction.flush()
+        return try await waitForXML(containing: containerID)
+    }
+}
 
-        var source = ""
-        let deadline = CACurrentMediaTime() + 15
-        repeat {
-            source = await Task.detached {
-                var code: NSString?
-                return PKInProcess.shared().sourceXML(nil, code: &code) ?? ""
-            }.value
-            if source.contains(containerID) { break }
-            try await Task.sleep(for: .milliseconds(50))
-        } while CACurrentMediaTime() < deadline
-        XCTAssertTrue(source.contains(containerID), "TaskCard did not appear in accessibility tree")
-        return source
+@MainActor
+@Observable
+private final class LiveSkillCardModel {
+    var skills: [String]
+    init(skills: [String]) { self.skills = skills }
+}
+
+private struct LiveSkillCardHost: View {
+    var model: LiveSkillCardModel
+    var containerID: String
+    private let end = Date()
+
+    var body: some View {
+        VStack(spacing: 16) {
+            TaskCard(
+                title: "点一杯冰美式",
+                steps: [PlanStep("打开星巴克", state: .done)],
+                state: .done,
+                app: "com.starbucks.mystarbucks",
+                started: end.addingTimeInterval(-14),
+                ended: end,
+                memoryUse: TaskMemoryUse(notes: [], skills: model.skills)
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(.systemGroupedBackground))
+        .environment(\.locale, AppLocalization.locale)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(containerID)
+    }
+}
+
+private enum SkillRowPixels {
+    struct RGB: CustomStringConvertible {
+        var r: Double
+        var g: Double
+        var b: Double
+        var description: String {
+            String(format: "(%.2f, %.2f, %.2f)", r, g, b)
+        }
+
+        func distance(to other: RGB) -> Double {
+            let dr = r - other.r, dg = g - other.g, db = b - other.b
+            return sqrt(dr * dr + dg * dg + db * db)
+        }
+
+        var luminance: Double {
+            func linear(_ c: Double) -> Double {
+                c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        }
+
+        func contrast(with other: RGB) -> Double {
+            let l1 = luminance, l2 = other.luminance
+            return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+        }
+    }
+
+    struct Sample {
+        var backgroundColor: RGB
+        var leftColor: RGB
+        var midColor: RGB
+        var rightColor: RGB
+        var leftContrast: Double
+        var midContrast: Double
+        var rightContrast: Double
+    }
+
+    private struct Buffer {
+        var width: Int
+        var height: Int
+        var bytes: [UInt8]
+
+        func rgb(x: Int, y: Int) -> RGB {
+            let idx = (y * width + x) * 4
+            return RGB(
+                r: Double(bytes[idx]) / 255.0,
+                g: Double(bytes[idx + 1]) / 255.0,
+                b: Double(bytes[idx + 2]) / 255.0
+            )
+        }
+    }
+
+    static func analyze(image: UIImage, rect: CGRect) throws -> Sample {
+        let buf = try cropBuffer(image: image, rect: rect)
+        let bg = borderBackground(buf)
+        let left = try dominantForeground(buf, bg: bg, xRange: 0.06..<0.32)
+        let mid = try dominantForeground(buf, bg: bg, xRange: 0.36..<0.64)
+        let right = try dominantForeground(buf, bg: bg, xRange: 0.68..<0.94)
+        return Sample(
+            backgroundColor: bg,
+            leftColor: left,
+            midColor: mid,
+            rightColor: right,
+            leftContrast: left.contrast(with: bg),
+            midContrast: mid.contrast(with: bg),
+            rightContrast: right.contrast(with: bg)
+        )
+    }
+
+    static func meanForegroundDifference(_ first: UIImage, _ second: UIImage, rect: CGRect) throws -> Double {
+        let a = try cropBuffer(image: first, rect: rect)
+        let b = try cropBuffer(image: second, rect: rect)
+        guard a.width == b.width, a.height == b.height else {
+            throw NSError(domain: "SkillRowPixels", code: 2)
+        }
+        let bg = borderBackground(a)
+        var total = 0.0
+        var count = 0
+        for y in 1..<max(1, a.height - 1) {
+            for x in 1..<max(1, a.width - 1) {
+                let ca = a.rgb(x: x, y: y)
+                let cb = b.rgb(x: x, y: y)
+                if ca.distance(to: bg) >= 0.16 || cb.distance(to: bg) >= 0.16 {
+                    total += (abs(ca.r - cb.r) + abs(ca.g - cb.g) + abs(ca.b - cb.b)) / 3.0
+                    count += 1
+                }
+            }
+        }
+        guard count > 0 else {
+            throw NSError(domain: "SkillRowPixels", code: 3, userInfo: [NSLocalizedDescriptionKey: "No foreground pixels found in skill row rect"])
+        }
+        return total / Double(count)
+    }
+
+    private static func cropBuffer(image: UIImage, rect: CGRect) throws -> Buffer {
+        guard let cgImage = image.cgImage else {
+            throw NSError(domain: "SkillRowPixels", code: 1)
+        }
+        let scale = image.scale
+        let pixelRect = CGRect(
+            x: max(0, floor(rect.minX * scale)),
+            y: max(0, floor(rect.minY * scale)),
+            width: min(CGFloat(cgImage.width) - max(0, floor(rect.minX * scale)), ceil(rect.width * scale)),
+            height: min(CGFloat(cgImage.height) - max(0, floor(rect.minY * scale)), ceil(rect.height * scale))
+        )
+        guard let cropped = cgImage.cropping(to: pixelRect), cropped.width > 4, cropped.height > 4 else {
+            throw NSError(domain: "SkillRowPixels", code: 4)
+        }
+        let w = cropped.width, h = cropped.height
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &bytes,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            throw NSError(domain: "SkillRowPixels", code: 5)
+        }
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return Buffer(width: w, height: h, bytes: bytes)
+    }
+
+    private static func borderBackground(_ buf: Buffer) -> RGB {
+        var samples: [RGB] = []
+        let topY = min(1, buf.height - 1)
+        let bottomY = max(0, buf.height - 2)
+        for x in 1..<max(1, buf.width - 1) {
+            samples.append(buf.rgb(x: x, y: topY))
+            samples.append(buf.rgb(x: x, y: bottomY))
+        }
+        let rs = samples.map(\.r).sorted()
+        let gs = samples.map(\.g).sorted()
+        let bs = samples.map(\.b).sorted()
+        let mid = samples.count / 2
+        return RGB(r: rs[mid], g: gs[mid], b: bs[mid])
+    }
+
+    private static func dominantForeground(_ buf: Buffer, bg: RGB, xRange: Range<Double>) throws -> RGB {
+        let minX = max(1, Int(Double(buf.width) * xRange.lowerBound))
+        let maxX = min(buf.width - 1, Int(Double(buf.width) * xRange.upperBound))
+        var candidates: [(rgb: RGB, dist: Double)] = []
+        for y in 1..<max(1, buf.height - 1) {
+            for x in minX..<max(minX, maxX) {
+                let c = buf.rgb(x: x, y: y)
+                let d = c.distance(to: bg)
+                if d >= 0.14 {
+                    candidates.append((c, d))
+                }
+            }
+        }
+        guard !candidates.isEmpty else {
+            throw NSError(domain: "SkillRowPixels", code: 6, userInfo: [NSLocalizedDescriptionKey: "No visible glyph pixels in segment \(xRange)"])
+        }
+        candidates.sort { $0.dist > $1.dist }
+        let topCount = max(1, candidates.count / 3)
+        let top = candidates.prefix(topCount)
+        let r = top.map(\.rgb.r).reduce(0, +) / Double(topCount)
+        let g = top.map(\.rgb.g).reduce(0, +) / Double(topCount)
+        let b = top.map(\.rgb.b).reduce(0, +) / Double(topCount)
+        return RGB(r: r, g: g, b: b)
     }
 }
 
 private final class StaticTextElements: NSObject, XMLParserDelegate {
-    private var entries: [(name: String, label: String)] = []
+    private var entries: [(name: String, label: String, frame: CGRect)] = []
 
     convenience init(_ xml: String) throws {
         self.init()
@@ -346,6 +674,10 @@ private final class StaticTextElements: NSObject, XMLParserDelegate {
         entries.filter { $0.name == name }.map(\.label)
     }
 
+    func frames(for name: String) -> [CGRect] {
+        entries.filter { $0.name == name }.map(\.frame)
+    }
+
     func parser(
         _ parser: XMLParser,
         didStartElement elementName: String,
@@ -356,7 +688,11 @@ private final class StaticTextElements: NSObject, XMLParserDelegate {
         if elementName == "XCUIElementTypeStaticText",
            let name = attributes["name"],
            let label = attributes["label"] {
-            entries.append((name, label))
+            let x = Double(attributes["x"] ?? "") ?? 0
+            let y = Double(attributes["y"] ?? "") ?? 0
+            let w = Double(attributes["width"] ?? "") ?? 0
+            let h = Double(attributes["height"] ?? "") ?? 0
+            entries.append((name, label, CGRect(x: x, y: y, width: w, height: h)))
         }
     }
 }
