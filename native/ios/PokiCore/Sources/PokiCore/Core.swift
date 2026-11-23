@@ -469,7 +469,8 @@ public final class PokiCore: @unchecked Sendable {
     public func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
         if let shouldRun {
             guard await gate.enter(while: { [computer] in
-                !computer.handoffWaiting && computer.approvals.pending == nil && await shouldRun()
+                guard !computer.handoffWaiting, computer.approvals.pending == nil else { return false }
+                return await shouldRun()
             }) else { return nil }
         } else {
             guard await gate.enter(waiting: config.busyWait) else { return nil }
