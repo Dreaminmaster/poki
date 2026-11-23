@@ -39661,6 +39661,22 @@
         }
       }
     },
+    "Using skill - %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用技能 - %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用技能 - %@"
+          }
+        }
+      }
+    },
     "Skill: %@" : {
       "localizations" : {
         "zh-Hans" : {

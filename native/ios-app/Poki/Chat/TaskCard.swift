@@ -59,6 +59,7 @@ struct TaskCard: View {
     @ScaledMetric(relativeTo: .footnote) private var endingSide = 20.0
     @ScaledMetric(relativeTo: .subheadline) private var cardInset = 12.0
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.locale) private var locale
 
     private var total: Int { steps.count + upcoming.count }
     private var finished: Int { steps.filter { $0.state == .done }.count }
@@ -72,6 +73,7 @@ struct TaskCard: View {
     /// Over: the result card (board 定稿 07), the app's icon, what was done, where and how long, and a
     /// mark for how it ended.
     private var over: Bool { state == .done || state == .failed || state == .stopped || state == .interrupted }
+    private var usedSkills: [String] { memoryUse?.skills ?? [] }
     private var usedNotes: [MemoryItem] {
         (memoryUse?.notes ?? []).compactMap { reference in
             guard let item = MemoryLibrary.shared.item(reference.id),
@@ -134,9 +136,12 @@ struct TaskCard: View {
             VStack(alignment: .leading, spacing: over ? 2 : 1) {
                 Text(verbatim: title).font(.subheadline.weight(.semibold)).foregroundStyle(ink).lineLimit(big ? nil : 1)
                 subline.font(over ? .footnote : .caption).foregroundStyle(soft).lineLimit(big ? nil : 1)
-                let usedNames = (memoryUse?.skills ?? []) + usedNotes.map(\.text)
-                if !usedNames.isEmpty {
-                    Text("Used: \(usedNames.formatted(.list(type: .and)))")
+                if !usedSkills.isEmpty {
+                    TaskCardSkillLine(skills: usedSkills, onBlue: blue, big: big)
+                        .accessibilityIdentifier("taskCard.skillUse")
+                }
+                if !usedNotes.isEmpty {
+                    Text("Used: \(usedNotes.map(\.text).formatted(.list(type: .and).locale(locale)))")
                         .font(.footnote).foregroundStyle(soft).lineLimit(big ? nil : 1)
                         .accessibilityIdentifier("taskCard.memoryUse")
                 }
@@ -282,6 +287,142 @@ struct TaskCard: View {
                 .font(.footnote.weight(.medium)).foregroundStyle(Tint.amberInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// Six-stop rainbow typography for a task card's skill call row, matching the workbench's skill line.
+struct TaskCardSkillRainbow: Equatable {
+    struct Stop: Equatable {
+        var hex: UInt32
+        var location: CGFloat
+    }
+
+    static let flowDuration: Double = 2.5
+    static let flowSpan: CGFloat = 2.2
+    static let flowTravel: CGFloat = 1.2
+
+    static let darkStops: [Stop] = [
+        Stop(hex: 0xFF6B6B, location: 0.00),
+        Stop(hex: 0xFFB347, location: 0.20),
+        Stop(hex: 0xF7E26B, location: 0.38),
+        Stop(hex: 0x6EE7A0, location: 0.56),
+        Stop(hex: 0x5AA9FF, location: 0.76),
+        Stop(hex: 0xB48CFF, location: 1.00),
+    ]
+
+    static let lightStops: [Stop] = [
+        Stop(hex: 0xE5484D, location: 0.00),
+        Stop(hex: 0xF76B15, location: 0.20),
+        Stop(hex: 0xD6A000, location: 0.38),
+        Stop(hex: 0x30A46C, location: 0.56),
+        Stop(hex: 0x0090FF, location: 0.76),
+        Stop(hex: 0x8E4EC6, location: 1.00),
+    ]
+
+    static func stops(onBlue: Bool, colorScheme: ColorScheme) -> [Stop] {
+        (onBlue || colorScheme == .dark) ? darkStops : lightStops
+    }
+
+    static func gradient(stops: [Stop], flowing: Bool, progress: CGFloat) -> LinearGradient {
+        if !flowing {
+            return LinearGradient(
+                stops: stops.map { Gradient.Stop(color: Color(hex: $0.hex), location: $0.location) },
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+        let first = stops.map { Gradient.Stop(color: Color(hex: $0.hex), location: $0.location / flowSpan) }
+        let second = stops.map { Gradient.Stop(color: Color(hex: $0.hex), location: (flowTravel + $0.location) / flowSpan) }
+        let offset = flowTravel * (1 - min(max(progress, 0), 1))
+        return LinearGradient(
+            stops: first + second,
+            startPoint: UnitPoint(x: -offset, y: 0.5),
+            endPoint: UnitPoint(x: flowSpan - offset, y: 0.5)
+        )
+    }
+
+    static func formattedLine(skills: [String], locale: Locale) -> String {
+        let joined = skills.formatted(.list(type: .and).locale(locale))
+        var resource = LocalizedStringResource("Using skill - \(joined)")
+        resource.locale = locale
+        return String(localized: resource)
+    }
+}
+
+/// Compact rainbow skill call row shown under the task card subtitle.
+private struct TaskCardSkillLine: View {
+    var skills: [String]
+    var onBlue: Bool
+    var big: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.locale) private var locale
+    @State private var flowStartedAt: Date?
+    @State private var flowTask: Task<Void, Never>?
+
+    var body: some View {
+        let stops = TaskCardSkillRainbow.stops(onBlue: onBlue, colorScheme: colorScheme)
+        Group {
+            if let started = flowStartedAt, !reduceMotion {
+                TimelineView(.animation) { context in
+                    let elapsed = context.date.timeIntervalSince(started)
+                    let progress = min(max(elapsed / TaskCardSkillRainbow.flowDuration, 0), 1)
+                    skillLabel(stops: stops, flowing: progress < 1, progress: CGFloat(progress))
+                }
+            } else {
+                skillLabel(stops: stops, flowing: false, progress: 1)
+            }
+        }
+        .onAppear { startFlow() }
+        .onChange(of: skills) { _, _ in startFlow() }
+        .onChange(of: reduceMotion) { _, reduced in
+            if reduced { stopFlow() }
+        }
+        .onDisappear {
+            flowTask?.cancel()
+            flowTask = nil
+        }
+    }
+
+    @ViewBuilder
+    private func skillLabel(stops: [TaskCardSkillRainbow.Stop], flowing: Bool, progress: CGFloat) -> some View {
+        let text = Text(verbatim: TaskCardSkillRainbow.formattedLine(skills: skills, locale: locale))
+            .font(.footnote.weight(onBlue ? .semibold : .medium))
+            .lineLimit(big ? nil : 1)
+            .foregroundStyle(TaskCardSkillRainbow.gradient(stops: stops, flowing: flowing, progress: progress))
+        if onBlue {
+            // Deep navy backing keeps all six specified rainbow stops (including #5AA9FF and #B48CFF)
+            // above 4.5:1 contrast on Poki's bright blue running card without altering the palette.
+            text
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(hex: 0x071738).opacity(0.86), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        } else {
+            text
+        }
+    }
+
+    private func startFlow() {
+        flowTask?.cancel()
+        flowTask = nil
+        guard !reduceMotion else {
+            flowStartedAt = nil
+            return
+        }
+        flowStartedAt = Date()
+        flowTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(TaskCardSkillRainbow.flowDuration))
+            guard !Task.isCancelled else { return }
+            flowStartedAt = nil
+            flowTask = nil
+        }
+    }
+
+    private func stopFlow() {
+        flowTask?.cancel()
+        flowTask = nil
+        flowStartedAt = nil
     }
 }
 
