@@ -337,13 +337,18 @@ final class CodexVoice: SubscriptionVoice {
             onEvent?(method, params)
         case "poki/backend/turnStarted":
             AppLog.shared.add("voice", "Codex backend turn started")
+            onEvent?(method, params)
         case "poki/backend/turnCompleted":
             let status = params["status"] as? String ?? "unknown"
             AppLog.shared.add("voice", "Codex backend turn completed: \(status)")
+            onEvent?(method, params)
         case "poki/backend/error":
             let code = params["code"] as? String ?? "unknown"
             let willRetry = params["willRetry"] as? Bool ?? false
             AppLog.shared.add("voice", "Codex backend error: \(code), retry: \(willRetry)")
+            if !willRetry {
+                onEvent?(method, params)
+            }
         case "poki/tool/rejected":
             let requestMethod = params["requestMethod"] as? String ?? "unknown"
             let reason = params["reason"] as? String ?? "rejected"

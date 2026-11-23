@@ -664,9 +664,14 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(confirmed.voice.phase, .off)
 
         let unconfirmed = Harness()
+        defer {
+            unconfirmed.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await unconfirmed.liveTalk()
-        await unconfirmed.time.advance(8)
-        XCTAssertFalse(unconfirmed.voice.isOn, "The idle timer must also request a graceful close.")
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await unconfirmed.time.advance(60)
+        XCTAssertFalse(unconfirmed.voice.isOn, "The background idle timer must also request a graceful close.")
         XCTAssertFalse(unconfirmed.link.closed)
         XCTAssertEqual(unconfirmed.microphone, [true])
         await unconfirmed.time.advance(10)
@@ -1706,7 +1711,7 @@ final class VoiceModelTests: XCTestCase {
                     codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
                 }
                 NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-                let deadline: Double = spoke ? 30 : 8
+                let deadline: Double = spoke ? 30 : 60
                 await h.time.advance(deadline - 1)
                 XCTAssertTrue(h.voice.isOn)
                 await h.time.advance(1)
@@ -1739,9 +1744,13 @@ final class VoiceModelTests: XCTestCase {
         try await withChatGPTSelected {
             let codex = FakeSubscriptionVoice()
             let h = Harness(codex: codex)
-            defer { h.voice.stop() }
+            defer {
+                h.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
             await h.connect()
             let link = try XCTUnwrap(h.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
             codex.notify("thread/realtime/transcript/done", ["role": "user", "text": "Hello"])
             link.remoteSpeech = true
             await h.time.advance(0.2)
@@ -1750,7 +1759,7 @@ final class VoiceModelTests: XCTestCase {
             link.remoteSpeech = false
             for _ in 0..<3 { await h.time.advance(0.2) }
             XCTAssertEqual(h.voice.phase, .listening)
-            await h.time.advance(7)
+            await h.time.advance(59)
             XCTAssertTrue(h.voice.isOn)
             codex.notify("thread/realtime/transcript/done", ["role": "assistant", "text": "Hi there."])
             XCTAssertTrue(h.voice.lines.contains { $0.role == .poki && $0.text == "Hi there." })
@@ -1894,13 +1903,20 @@ final class VoiceModelTests: XCTestCase {
         try await run()
     }
 
-    /// Said once, answered once: the conversation waits 8 s for the person to go on, then ends and lets
-    /// go of the microphone, so iOS's microphone dot goes off instead of Poki listening on.
-    func testTheConversationEndsWhenNobodySpeaksForEightSecondsAfterTheAnswer() async {
+    /// Said once, answered once: in the foreground the conversation stays open until ended; in the
+    /// background it waits 60 s of complete idle, then ends and lets go of the microphone.
+    func testTheConversationEndsWhenNobodySpeaksForSixtySecondsInTheBackgroundAfterTheAnswer() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
         h.turn("What iOS version is this?", "iOS 26.1.", id: "r1")
-        await h.time.advance(7)
+        await h.time.advance(65)
+        XCTAssertTrue(h.voice.isOn, "foreground silence must not auto-end")
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
@@ -1909,35 +1925,54 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(h.microphone, [true, false])
     }
 
-    /// Talk to Poki and then nothing said: the same 8 s end it.
-    func testTheConversationEndsWhenNobodySpeaksForEightSecondsAfterItOpens() async {
+    /// Talk to Poki and then nothing said: stays open in the foreground, ends after 60 s in the background.
+    func testTheConversationEndsWhenNobodySpeaksForSixtySecondsInTheBackgroundAfterItOpens() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
-        await h.time.advance(7)
+        await h.time.advance(65)
+        XCTAssertTrue(h.voice.isOn)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
         XCTAssertEqual(h.microphone, [true, false])
     }
 
-    /// Speech the server answers only with an error: no answer is coming, so the 8 s still end it.
-    func testSpeechAnsweredOnlyWithAnErrorStillEndsAfterEightSeconds() async {
+    /// Speech the server answers only with an error: no answer is coming, so the 60 s background idle timer ends it.
+    func testSpeechAnsweredOnlyWithAnErrorStillEndsAfterSixtySecondsInTheBackground() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.link.play(["type": "input_audio_buffer.speech_started"], ["type": "input_audio_buffer.speech_stopped"],
                     ["type": "error", "error": ["message": "Conversation already has an active response"]])
-        await h.time.advance(8)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
     }
 
-    /// Speaking again within the 8 s goes on in the same conversation: the model keeps what was said.
-    func testSpeakingAgainWithinEightSecondsGoesOnInTheSameConversation() async {
+    /// Speaking again within the 60 s background idle window goes on in the same conversation: the model keeps what was said.
+    func testSpeakingAgainWithinSixtySecondsInTheBackgroundGoesOnInTheSameConversation() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         await h.time.settle()
         h.link.play(["type": "input_audio_buffer.speech_started"])
-        await h.time.advance(8)
+        await h.time.advance(20)
         XCTAssertTrue(h.voice.isOn)
         XCTAssertEqual(h.links.count, 1)
         XCTAssertFalse(h.link.closed)
@@ -1949,7 +1984,7 @@ final class VoiceModelTests: XCTestCase {
         let h = Harness()
         await h.talk()
         h.turn("Open Settings.", "Settings is open.", id: "r1")
-        await h.time.advance(8)
+        h.voice.stop()
         XCTAssertFalse(h.voice.isOn)
 
         await h.time.advance(4 * 60)
@@ -1971,13 +2006,19 @@ final class VoiceModelTests: XCTestCase {
         await h.time.advance(5 * 60 + 1)
         await h.talk()
         XCTAssertFalse(h.link.notes.joined().contains("Wi-Fi"))
+        h.voice.stop()
     }
 
     /// A step that finishes while its request's answer is still out: the conversation stays until the
     /// answer that carries the result has played.
     func testAStepsResultIsSaidBeforeTheConversationEnds() async {
         let h = Harness(phoneTool: { _, _ in ("Settings is open", false, nil) })
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
         h.link.play(["type": "response.created", "response": ["id": "r1"]],
                     ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": #"{"goal":"open Settings"}"#]])
         await h.time.settle()
@@ -1987,13 +2028,15 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertTrue(h.voice.isOn)
         h.link.play(["type": "response.created", "response": ["id": "r2"]], ["type": "output_audio_buffer.started"],
                     ["type": "response.done", "response": ["id": "r2"]], ["type": "output_audio_buffer.stopped"])
-        await h.time.advance(8)
+        await h.time.advance(59)
+        XCTAssertTrue(h.voice.isOn)
+        await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
     }
 
     /// You switch to another app during a talk and it goes on (the owner, 2026-11-13): Poki still listens,
     /// the microphone stays with it and the Live Activity says so, also when it was still connecting. It
-    /// ends there as it does in front: 8 s after an answer if nobody speaks.
+    /// ends in the background after 60 s of complete idle.
     func testATalkGoesOnWhenPokiGoesToTheBackground() async {
         let h = Harness()
         await h.talk()
@@ -2005,7 +2048,7 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(TalkActivity.state(of: h.voice), .listening)
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         XCTAssertTrue(h.voice.isOn, "an answer said in the background does not end the talk")
-        await h.time.advance(7)
+        await h.time.advance(59)
         XCTAssertTrue(h.voice.isOn)
         await h.time.advance(1)
         XCTAssertFalse(h.voice.isOn)
@@ -2022,15 +2065,19 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(connecting.links.count, 1)
         XCTAssertEqual(connecting.microphone, [true])
         NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        connecting.voice.stop()
     }
 
     /// An error that is not about the request for the step's answer (a stale cancel, say) leaves that
-    /// answer expected: the talk waits for it. The error that is about it means no answer is coming, and
-    /// the talk ends after the 8 s it gives the person to go on.
+    /// answer expected: the talk waits for it (and hits the 30 s background stall cap if it never comes).
+    /// The error that is about it means no answer is coming, so it leaves mid-turn and waits the full
+    /// 60 s background idle window.
     func testOnlyAnErrorForTheAnswerRequestGivesUpOnTheAnswer() async {
+        defer { NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil) }
         for ownError in [false, true] {
             let (step, stepDone) = AsyncStream<Void>.makeStream()
             let h = Harness(phoneTool: { _, _ in for await _ in step { break }; return ("done", false, nil) })
+            defer { h.voice.stop() }
             await h.talk()
             h.link.play(["type": "response.created", "response": ["id": "r1"]],
                         ["type": "response.output_item.done", "item": ["type": "function_call", "call_id": "c1", "name": "do", "arguments": "{}"]],
@@ -2042,9 +2089,15 @@ final class VoiceModelTests: XCTestCase {
             let id = request?["event_id"] as? String
             XCTAssertNotNil(id, "the request for the answer carries an id its error can name")
 
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
             h.link.play(["type": "error", "error": ["message": "x", "event_id": ownError ? id ?? "" : "event_other"]])
-            await h.time.advance(8)
-            XCTAssertEqual(h.voice.isOn, !ownError, ownError ? "the answer request failed, nothing is coming" : "an unrelated error ended it before the answer")
+            await h.time.advance(30)
+            XCTAssertEqual(h.voice.isOn, ownError, ownError ? "idle background talk should wait 60 s, not 30 s stall" : "an unanswered turn should stall after 30 s in the background")
+            if ownError {
+                await h.time.advance(30)
+                XCTAssertFalse(h.voice.isOn)
+            }
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         }
     }
 
@@ -2052,14 +2105,20 @@ final class VoiceModelTests: XCTestCase {
     /// opened within 5 minutes of that one still hears it.
     func testASilentConversationInBetweenKeepsTheLastTurnsToCarryOver() async {
         let h = Harness()
+        defer {
+            h.voice.stop()
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
         await h.talk()
         h.turn("Open Settings.", "Settings is open.", id: "r1")
         h.voice.stop()
 
         await h.time.advance(30)
         await h.talk()
-        await h.time.advance(8)
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        await h.time.advance(60)
         XCTAssertFalse(h.voice.isOn)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
         await h.time.advance(30)
         await h.talk()
