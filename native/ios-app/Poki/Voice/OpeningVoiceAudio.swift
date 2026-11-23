@@ -71,6 +71,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     private var delegate: RTCAudioDeviceDelegate?
+    private var tapConverter: AVAudioConverter?
     private var recording = false
     private var playing = false
     private var recordingInitialized = false
@@ -282,18 +283,35 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     private func installTap(on microphone: AVAudioInputNode, format: AVAudioFormat, converter: AVAudioConverter) {
+        tapConverter = converter
         microphone.installTap(onBus: 0, bufferSize: 480, format: format) { [weak self] buffer, time in
-            let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * Self.sampleRate / format.sampleRate)) + 64
-            guard let self, let pcm = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: capacity) else { return }
-            var supplied = false
-            let status = converter.convert(to: pcm, error: nil) { _, inputStatus in
-                inputStatus.pointee = supplied ? .noDataNow : .haveData
-                defer { supplied = true }
-                return supplied ? nil : buffer
-            }
-            guard status != .error, pcm.frameLength > 0 else { return }
-            self.input(pcm, at: time)
+            self?.ingestCapturedBuffer(buffer, at: time)
         }
+    }
+
+    @discardableResult
+    func ingestCapturedBuffer(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) -> Bool {
+        let format = buffer.format
+        let converter: AVAudioConverter
+        if let existing = tapConverter, existing.inputFormat == format {
+            converter = existing
+        } else {
+            guard format.sampleRate > 0, format.channelCount > 0,
+                  let created = AVAudioConverter(from: format, to: Self.channelFormat) else { return false }
+            tapConverter = created
+            converter = created
+        }
+        let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * Self.sampleRate / format.sampleRate)) + 64
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: capacity) else { return false }
+        var supplied = false
+        let status = converter.convert(to: pcm, error: nil) { _, inputStatus in
+            inputStatus.pointee = supplied ? .noDataNow : .haveData
+            defer { supplied = true }
+            return supplied ? nil : buffer
+        }
+        guard status != .error, pcm.frameLength > 0 else { return false }
+        input(pcm, at: time)
+        return true
     }
 
     func input(_ pcm: AVAudioPCMBuffer, at time: AVAudioTime) {
