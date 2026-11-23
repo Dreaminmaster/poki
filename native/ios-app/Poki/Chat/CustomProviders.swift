@@ -155,7 +155,7 @@ enum CustomProviders {
         let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
         let run = await ConnectionCheck.runCustom(url: endpoint.normalized, key: key, modelID: model,
                                                   api: endpoint.api, reasoning: draft.reasoning)
-        guard run.result.passed, endpoint.api == .automatic, let saved = provider(draft.id),
+        guard !Task.isCancelled, run.result.passed, endpoint.api == .automatic, let saved = provider(draft.id),
               saved.model == model, saved.reasoning == draft.reasoning else { return run }
         let keyData = try? (Keychain.read(keyAccount(saved.id)) ?? Data())
         let savedKey = keyData.flatMap { String(data: $0, encoding: .utf8) }
