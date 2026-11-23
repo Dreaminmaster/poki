@@ -93,8 +93,8 @@ final class LiveCore: CoreSession {
     func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
         await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
     }
-    func bringBackTargetApp(why: String) async -> String? {
-        await core.bringBackTargetApp(why: why)
+    func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
+        await core.bringBackTargetApp(why: why, shouldRun: shouldRun)
     }
     func clearTaskScreenshots(localTask: String) {
         core.clearTaskScreenshots(localTask: localTask)

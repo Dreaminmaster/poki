@@ -466,10 +466,11 @@ public final class PokiCore: @unchecked Sendable {
         await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
     }
 
-    public func bringBackTargetApp(why: String) async -> String? {
+    public func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
         guard await gate.enter(waiting: config.busyWait) else { return nil }
         defer { gate.leave() }
-        return await computer.bringBackTargetApp(why: why)
+        if let shouldRun, await !shouldRun() { return nil }
+        return await computer.bringBackTargetApp(why: why, check: shouldRun == nil)
     }
 
     public func clearTaskScreenshots(localTask: String) {

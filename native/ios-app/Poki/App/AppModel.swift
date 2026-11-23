@@ -1507,10 +1507,11 @@ final class AppModel {
 
     private func returnToTargetAppFromLiveActivity() {
         guard canReturnFromLiveActivity else { return }
-        Task { [core, log] in
-            if let line = await core.bringBackTargetApp(why: "from the Live Activity") {
-                log.add("app", line)
-            }
+        Task { [weak self, core, log] in
+            let line = await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { @MainActor [weak self] in
+                self?.inFront == true && self?.canReturnFromLiveActivity == true
+            })
+            if let line { log.add("app", line) }
         }
     }
 

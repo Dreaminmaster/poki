@@ -1710,9 +1710,9 @@ final class Computer: @unchecked Sendable {
         }
     }
 
-    func bringBackTargetApp(why: String) async -> String? {
+    func bringBackTargetApp(why: String, check: Bool = true) async -> String? {
         let target = lastForeground.flatMap { config.isPoki($0) ? nil : $0 } ?? lastWorkingApp
-        return await bringBack(from: target, why: why, check: true)
+        return await bringBack(from: target, why: why, check: check)
     }
 
     /// The actions, in order, each within its own action time (`actionCap` from when it starts; a

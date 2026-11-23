@@ -1277,6 +1277,55 @@ final class InProcessPasscodeTests: XCTestCase {
         }
     }
 
+    func testLiveActivityTapBetweenChatStepsReturnsWhenActiveAppInfoLags() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        let transport = SessionScreenTransport(
+            session: session,
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let read = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        await waitFor("step finished and model is thinking between steps") { self.model.activityText == "Idle" }
+
+        // On real iOS, scenePhase == .active fires while SpringBoard's activeAppInfo still reports
+        // the previous app or SpringBoard during the Dynamic Island zoom animation.
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+
+        await waitFor("target app reactivated even while activeAppInfo still reports SpringBoard") {
+            stateLock.withLock { activated.contains("com.apple.Preferences") }
+        }
+        XCTAssertTrue(session.isOpen)
+        XCTAssertEqual(session.closes, 0)
+
+        // Leaving Poki before becoming active clears the pending return instead of firing later.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.springboard", "SpringBoard")
+        }
+        model.wentToBackground()
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.wentToBackground()
+        model.becameActive()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+    }
+
     /// Talk Here starts a relaunched Poki in the background. On iOS 27 its first open asks for no
     /// passcode while the boot's allowance lasts, so it opens there instead of telling the owner to open
     /// Poki; an allowance from another boot, or older than 8 hours, still waits for Poki in front.
