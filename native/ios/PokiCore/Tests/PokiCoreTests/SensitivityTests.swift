@@ -162,13 +162,6 @@ final class SensitivityTests: XCTestCase {
             + " 以上是符合条件的酒店，修改可重新查询 清空 ¥300-¥350 筛选 完成"
         XCTAssertGreaterThan(ctripLabel.count, 1200)
 
-        let container = Element(
-            type: "Other", label: ctripLabel, value: nil, identifier: nil,
-            frame: Rect(x: 0, y: 0, width: 402, height: 874), depth: 1, node: 2, end: 2
-        )
-        let ctrip = Foreground(bundleID: "ctrip.wireless", name: "携程旅行")
-        XCTAssertNil(SensitivityRules().reason(touching: container, typing: false, app: ctrip, secureOnScreen: false))
-
         let wda = FakeWDA()
         wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "ctrip.wireless", "name": "携程旅行"]]) }
         wda.tree([Node("Other", ctripLabel, [0, 0, 402, 874])], app: "携程旅行")
@@ -178,6 +171,42 @@ final class SensitivityTests: XCTestCase {
         XCTAssertFalse(result.text.contains("approval_required"), result.text)
         XCTAssertNil(core.pendingApproval)
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
+
+        // Even inside an Alert container, the oversized long CJK label must not trigger approval.
+        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil,
+                            frame: Rect(x: 0, y: 0, width: 402, height: 874), depth: 1, node: 2, end: 3)
+        let container = Element(type: "Other", label: ctripLabel, value: nil, identifier: nil,
+                                frame: Rect(x: 0, y: 0, width: 402, height: 874), depth: 2, node: 3, end: 3)
+        let ctrip = Foreground(bundleID: "ctrip.wireless", name: "携程旅行")
+        XCTAssertNil(SensitivityRules().reason(touching: container, typing: false, app: ctrip, secureOnScreen: false, in: [alert, container]))
+    }
+
+    func testVoiceClearTapProtectsCompactDeletesAndAllowsLongChineseContainers() async {
+        let repeatedCard = " 南山区 · 近南头古城 酒店房费优惠 积分再抵¥21 免费停车场 洗衣房 免费健身室 4.7 超棒 617点评 7330收藏 ¥422 起 白银贵宾价 门店首单 3项优惠"
+        let ctripLabel = "最高使用2136积分抵 ¥21 积分抵房费 每100积分=¥1 打开开关看积分抵后价"
+            + String(repeating: repeatedCard, count: 16)
+            + " 以上是符合条件的酒店，修改可重新查询 清空 ¥300-¥350 筛选 完成"
+
+        let (core, _, _) = makeCore { $0.approvalMode = { .off } }
+        for compactDelete in ["Delete", "删除"] {
+            let clearance = await core.clearTap(on: compactDelete, inApp: "com.apple.MobileSMS", named: "Messages", waiting: 0.05)
+            guard case .unanswered(let reason) = clearance else {
+                XCTFail("Expected bridged voice tap on \(compactDelete) to require approval, got \(clearance)")
+                continue
+            }
+            XCTAssertFalse(clearance.mayTap, compactDelete)
+            XCTAssertTrue(reason.contains("deleting"), reason)
+        }
+
+        for safeText in [
+            ctripLabel,
+            "最高使用2136积分抵 ¥21 门店首单优惠 支持微信支付与支付宝付款 退改无忧 详情见规则说明",
+            "张三：刚才那份文件我已经发送给你了，收到后请及时回复并确认删除草稿",
+        ] {
+            let clearance = await core.clearTap(on: safeText, inApp: "ctrip.wireless", named: "携程旅行", waiting: 0.05)
+            XCTAssertEqual(clearance, .clear, safeText)
+            XCTAssertTrue(clearance.mayTap, safeText)
+        }
     }
 
     func testOrdinaryPageClearAndDeleteButtonsDoNotRequireApproval() async {
@@ -221,6 +250,25 @@ final class SensitivityTests: XCTestCase {
         XCTAssertFalse(tap.text.contains("approval_required"), tap.text)
         XCTAssertNil(pageCore.pendingApproval)
         XCTAssertEqual(pageWDA.bodies("POST /wda/tap").count, 1)
+
+        // A compact inline edit group with Cancel and Delete on an ordinary page is not a confirmation dialog.
+        let inlineWDA = FakeWDA()
+        inlineWDA.tree([
+            Node("NavigationBar", "编辑日程", [0, 44, 402, 44]),
+            Node("Other", nil, [16, 200, 370, 120], [
+                Node("StaticText", "编辑备注", [24, 208, 200, 28]),
+                Node("Button", "取消", [24, 256, 150, 44]),
+                Node("Button", "删除", [212, 256, 150, 44]),
+            ]),
+            Node("Cell", "其他日程", [0, 360, 402, 44]),
+        ], app: "Calendar")
+        let (inlineCore, _, _) = makeCore(inlineWDA) { $0.approvalWait = 0; $0.approvalMode = { .off } }
+        let inlineLook = await inlineCore.call("look", [:])
+        XCTAssertTrue(inlineLook.text.contains("4 Button \"删除\""), inlineLook.text)
+        let inlineTap = await inlineCore.call("do", ["actions": [["tap": 4]]])
+        XCTAssertFalse(inlineTap.text.contains("approval_required"), inlineTap.text)
+        XCTAssertNil(inlineCore.pendingApproval)
+        XCTAssertEqual(inlineWDA.bodies("POST /wda/tap").count, 1)
     }
 
     func testDeleteInsideConfirmationDialogsRequiresApproval() async {
@@ -297,6 +345,20 @@ final class SensitivityTests: XCTestCase {
             (
                 "MenuItem English",
                 [Node("MenuItem", "Delete", [180, 164, 190, 44])],
+                1
+            ),
+            (
+                "MenuItem ancestor wrapping Chinese Button",
+                [Node("MenuItem", nil, [180, 164, 190, 44], [
+                    Node("Button", "删除", [180, 164, 190, 44]),
+                ])],
+                1
+            ),
+            (
+                "MenuItem ancestor wrapping English StaticText",
+                [Node("MenuItem", nil, [180, 164, 190, 44], [
+                    Node("StaticText", "Delete", [180, 164, 190, 44]),
+                ])],
                 1
             ),
         ]
