@@ -1,9 +1,18 @@
 import Foundation
 
+/// High-level grouping for browsing apps in the composer's full app picker.
+enum KnownAppCategory: String, CaseIterable, Hashable, Identifiable {
+    case lifestyle
+    case social
+    case system
+
+    var id: String { rawValue }
+}
+
 /// An app Poki knows by name: its bundle ID, the icon Poki carries for it, and its names as the
 /// iPhone shows them. The one list behind the app icons (`AppIconStore`), the home page's pills and
 /// the message field's app capsules (`AppCapsule`).
-struct KnownApp {
+struct KnownApp: Hashable {
     let id: String
     /// `Poki/AppIcons/<icon>.png`, the App Store artwork Poki carries (AppIcons.md); nil when only
     /// the iPhone's own icon or the App Store's lookup can show it.
@@ -15,9 +24,10 @@ struct KnownApp {
     let aliases: [String]
     /// The bundle IDs of its other editions, which an iPhone may have instead (Bilibili's international one).
     let otherIDs: [String]
+    let category: KnownAppCategory
 
     init(_ id: String, icon: String?, _ english: String, _ simplified: String? = nil, _ traditional: String? = nil,
-         aliases: [String] = [], otherIDs: [String] = []) {
+         aliases: [String] = [], otherIDs: [String] = [], category: KnownAppCategory = .system) {
         self.id = id
         self.otherIDs = otherIDs
         self.icon = icon
@@ -25,6 +35,7 @@ struct KnownApp {
         self.simplified = simplified ?? english
         self.traditional = traditional ?? simplified ?? english
         self.aliases = aliases
+        self.category = category
     }
 
     /// Its own bundle ID, then its other editions'.
@@ -112,79 +123,111 @@ enum KnownApps {
 
     /// China store artwork.
     private static let china: [KnownApp] = [
-        KnownApp("com.tencent.xin", icon: "wechat", "WeChat", "微信"),
-        KnownApp("com.alipay.iphoneclient", icon: "alipay", "Alipay", "支付宝", "支付寶"),
-        KnownApp("com.taobao.taobao4iphone", icon: "taobao", "Taobao", "淘宝", "淘寶"),
-        KnownApp("com.360buy.jdmobile", icon: "jd", "JD", "京东", "京東"),
-        KnownApp("com.xunmeng.pinduoduo", icon: "pinduoduo", "Pinduoduo", "拼多多"),
-        KnownApp("com.meituan.imeituan", icon: "meituan", "Meituan", "美团", "美團"),
-        KnownApp("com.meituan.itakeaway", icon: "meituan-waimai", "Meituan Waimai", "美团外卖", "美團外賣"),
+        KnownApp("com.tencent.xin", icon: "wechat", "WeChat", "微信", category: .social),
+        KnownApp("com.alipay.iphoneclient", icon: "alipay", "Alipay", "支付宝", "支付寶", category: .lifestyle),
+        KnownApp("com.taobao.taobao4iphone", icon: "taobao", "Taobao", "淘宝", "淘寶", category: .lifestyle),
+        KnownApp("com.360buy.jdmobile", icon: "jd", "JD", "京东", "京東", category: .lifestyle),
+        KnownApp("com.xunmeng.pinduoduo", icon: "pinduoduo", "Pinduoduo", "拼多多", category: .lifestyle),
+        KnownApp("com.meituan.imeituan", icon: "meituan", "Meituan", "美团", "美團", category: .lifestyle),
+        KnownApp("com.meituan.itakeaway", icon: "meituan-waimai", "Meituan Waimai", "美团外卖", "美團外賣", category: .lifestyle),
         // The App Store lists Ele.me as 淘宝闪购 (Nov 2026); people still say 饿了么.
-        KnownApp("me.ele.ios.eleme", icon: "eleme", "Ele.me", "饿了么", "餓了麼", aliases: ["淘宝闪购", "淘寶閃購"]),
-        KnownApp("com.dianping.dpscope", icon: "dianping", "Dianping", "大众点评", "大眾點評"),
-        KnownApp("com.xingin.discover", icon: "xiaohongshu", "Xiaohongshu", "小红书", "小紅書", aliases: ["RED", "rednote"]),
-        KnownApp("com.ss.iphone.ugc.Aweme", icon: "douyin", "Douyin", "抖音"),
-        KnownApp("com.jiangjia.gif", icon: "kuaishou", "Kuaishou", "快手"),
+        KnownApp("me.ele.ios.eleme", icon: "eleme", "Ele.me", "饿了么", "餓了麼", aliases: ["淘宝闪购", "淘寶閃購"], category: .lifestyle),
+        KnownApp("com.dianping.dpscope", icon: "dianping", "Dianping", "大众点评", "大眾點評", category: .lifestyle),
+        KnownApp("com.xingin.discover", icon: "xiaohongshu", "Xiaohongshu", "小红书", "小紅書", aliases: ["RED", "rednote"], category: .social),
+        KnownApp("com.ss.iphone.ugc.Aweme", icon: "douyin", "Douyin", "抖音", category: .social),
+        KnownApp("com.jiangjia.gif", icon: "kuaishou", "Kuaishou", "快手", category: .social),
         KnownApp("tv.danmaku.bilianime", icon: "bilibili", "Bilibili", "哔哩哔哩", "嗶哩嗶哩", aliases: ["B站"],
-                 otherIDs: ["com.bilibili.inter"]),
-        KnownApp("com.sina.weibo", icon: "weibo", "Weibo", "微博"),
-        KnownApp("com.zhihu.ios", icon: "zhihu", "Zhihu", "知乎"),
-        KnownApp("com.taobao.fleamarket", icon: "xianyu", "Xianyu", "闲鱼", "閒魚"),
-        KnownApp("com.autonavi.amap", icon: "amap", "Amap", "高德地图", "高德地圖"),
-        KnownApp("com.baidu.map", icon: "baidu-maps", "Baidu Maps", "百度地图", "百度地圖"),
-        KnownApp("com.xiaojukeji.didi", icon: "didi", "DiDi", "滴滴出行", aliases: ["滴滴"]),
-        KnownApp("cn.12306.rails12306", icon: "rails12306", "Railway 12306", "铁路12306", "鐵路12306", aliases: ["12306", "Railway12306"]),
-        KnownApp("ctrip.com", icon: "ctrip", "Trip.com", "携程旅行", "攜程旅行", aliases: ["携程", "攜程", "Ctrip"]),
+                 otherIDs: ["com.bilibili.inter"], category: .social),
+        KnownApp("com.sina.weibo", icon: "weibo", "Weibo", "微博", category: .social),
+        KnownApp("com.zhihu.ios", icon: "zhihu", "Zhihu", "知乎", category: .social),
+        KnownApp("com.taobao.fleamarket", icon: "xianyu", "Xianyu", "闲鱼", "閒魚", category: .lifestyle),
+        KnownApp("com.autonavi.amap", icon: "amap", "Amap", "高德地图", "高德地圖", category: .lifestyle),
+        KnownApp("com.baidu.map", icon: "baidu-maps", "Baidu Maps", "百度地图", "百度地圖", category: .lifestyle),
+        KnownApp("com.xiaojukeji.didi", icon: "didi", "DiDi", "滴滴出行", aliases: ["滴滴"], category: .lifestyle),
+        KnownApp("cn.12306.rails12306", icon: "rails12306", "Railway 12306", "铁路12306", "鐵路12306", aliases: ["12306", "Railway12306"], category: .lifestyle),
+        KnownApp("ctrip.com", icon: "ctrip", "Trip.com", "携程旅行", "攜程旅行", aliases: ["携程", "攜程", "Ctrip"], category: .lifestyle),
         KnownApp("com.netease.cloudmusic", icon: "netease-music", "NetEase Cloud Music", "网易云音乐", "網易雲音樂",
-                 aliases: ["网易云", "網易雲"]),
-        KnownApp("com.tencent.QQMusic", icon: "qq-music", "QQ Music", "QQ音乐", "QQ音樂", aliases: ["QQ 音乐", "QQ 音樂"]),
-        KnownApp("com.tencent.mqq", icon: "qq", "QQ"),
-        KnownApp("com.laiwang.DingTalk", icon: "dingtalk", "DingTalk", "钉钉", "釘釘"),
-        KnownApp("com.bytedance.ee.lark", icon: "feishu", "Feishu", "飞书", "飛書", aliases: ["Lark"]),
-        KnownApp("com.tencent.ww", icon: "wecom", "WeCom", "企业微信", "企業微信"),
-        KnownApp("com.baidu.BaiduMobile", icon: "baidu", "Baidu", "百度"),
-        KnownApp("com.tencent.live4iphone", icon: "tencent-video", "Tencent Video", "腾讯视频", "騰訊視頻"),
-        KnownApp("com.qiyi.iphone", icon: "iqiyi", "iQIYI", "爱奇艺", "愛奇藝"),
+                 aliases: ["网易云", "網易雲"], category: .social),
+        KnownApp("com.tencent.QQMusic", icon: "qq-music", "QQ Music", "QQ音乐", "QQ音樂", aliases: ["QQ 音乐", "QQ 音樂"], category: .social),
+        KnownApp("com.tencent.mqq", icon: "qq", "QQ", category: .social),
+        KnownApp("com.laiwang.DingTalk", icon: "dingtalk", "DingTalk", "钉钉", "釘釘", category: .social),
+        KnownApp("com.bytedance.ee.lark", icon: "feishu", "Feishu", "飞书", "飛書", aliases: ["Lark"], category: .social),
+        KnownApp("com.tencent.ww", icon: "wecom", "WeCom", "企业微信", "企業微信", category: .social),
+        KnownApp("com.baidu.BaiduMobile", icon: "baidu", "Baidu", "百度", category: .system),
+        KnownApp("com.tencent.live4iphone", icon: "tencent-video", "Tencent Video", "腾讯视频", "騰訊視頻", category: .social),
+        KnownApp("com.qiyi.iphone", icon: "iqiyi", "iQIYI", "爱奇艺", "愛奇藝", category: .social),
     ]
 
     /// US store artwork.
     private static let english: [KnownApp] = [
-        KnownApp("com.asana.Asana", icon: "asana", "Asana"),
-        KnownApp("com.tinyspeck.chatlyio", icon: "slack", "Slack"),
-        KnownApp("com.ubercab.UberClient", icon: "uber", "Uber"),
-        KnownApp("com.starbucks.mystarbucks", icon: "starbucks", "Starbucks", "星巴克"),
-        KnownApp("com.burbn.instagram", icon: "instagram", "Instagram"),
-        KnownApp("net.whatsapp.WhatsApp", icon: "whatsapp", "WhatsApp"),
-        KnownApp("ph.telegra.Telegraph", icon: "telegram", "Telegram"),
-        KnownApp("com.atebits.Tweetie2", icon: "x", "X"),
-        KnownApp("com.google.ios.youtube", icon: "youtube", "YouTube"),
-        KnownApp("com.google.chrome.ios", icon: "chrome", "Chrome", aliases: ["Google Chrome"]),
-        KnownApp("com.spotify.client", icon: "spotify", "Spotify"),
-        KnownApp("com.zhiliaoapp.musically", icon: "tiktok", "TikTok"),
-        KnownApp("com.google.Gmail", icon: "gmail", "Gmail"),
-        KnownApp("com.google.Maps", icon: "google-maps", "Google Maps", "Google 地图", "Google 地圖"),
-        KnownApp("com.amazon.Amazon", icon: "amazon", "Amazon"),
-        KnownApp("doordash.DoorDashConsumer", icon: "doordash", "DoorDash"),
-        KnownApp("com.ubercab.UberEats", icon: "uber-eats", "Uber Eats"),
-        KnownApp("com.zimride.instant", icon: "lyft", "Lyft"),
-        KnownApp("com.airbnb.app", icon: "airbnb", "Airbnb"),
-        KnownApp("com.netflix.Netflix", icon: "netflix", "Netflix"),
-        KnownApp("com.facebook.Facebook", icon: "facebook", "Facebook"),
-        KnownApp("com.facebook.Messenger", icon: "messenger", "Messenger"),
-        KnownApp("com.linkedin.LinkedIn", icon: "linkedin", "LinkedIn"),
-        KnownApp("com.reddit.Reddit", icon: "reddit", "Reddit"),
-        KnownApp("com.hammerandchisel.discord", icon: "discord", "Discord"),
-        KnownApp("us.zoom.videomeetings", icon: "zoom", "Zoom", aliases: ["Zoom Workplace"]),
-        KnownApp("com.microsoft.skype.teams", icon: "teams", "Teams", aliases: ["Microsoft Teams"]),
-        KnownApp("com.microsoft.Office.Outlook", icon: "outlook", "Outlook", aliases: ["Microsoft Outlook"]),
-        KnownApp("com.yourcompany.PPClient", icon: "paypal", "PayPal"),
-        KnownApp("com.instacart", icon: "instacart", "Instacart"),
-        KnownApp("com.yelp.yelpiphone", icon: "yelp", "Yelp"),
-        KnownApp("pinterest", icon: "pinterest", "Pinterest"),
-        KnownApp("com.toyopagroup.picaboo", icon: "snapchat", "Snapchat"),
-        KnownApp("com.burbn.barcelona", icon: "threads", "Threads"),
-        KnownApp("com.contextoptional.OpenTable", icon: "opentable", "OpenTable"),
+        KnownApp("com.asana.Asana", icon: "asana", "Asana", category: .system),
+        KnownApp("com.tinyspeck.chatlyio", icon: "slack", "Slack", category: .social),
+        KnownApp("com.ubercab.UberClient", icon: "uber", "Uber", category: .lifestyle),
+        KnownApp("com.starbucks.mystarbucks", icon: "starbucks", "Starbucks", "星巴克", category: .lifestyle),
+        KnownApp("com.burbn.instagram", icon: "instagram", "Instagram", category: .social),
+        KnownApp("net.whatsapp.WhatsApp", icon: "whatsapp", "WhatsApp", category: .social),
+        KnownApp("ph.telegra.Telegraph", icon: "telegram", "Telegram", category: .social),
+        KnownApp("com.atebits.Tweetie2", icon: "x", "X", aliases: ["Twitter"], category: .social),
+        KnownApp("com.google.ios.youtube", icon: "youtube", "YouTube", category: .social),
+        KnownApp("com.google.chrome.ios", icon: "chrome", "Chrome", aliases: ["Google Chrome"], category: .system),
+        KnownApp("com.spotify.client", icon: "spotify", "Spotify", category: .social),
+        KnownApp("com.zhiliaoapp.musically", icon: "tiktok", "TikTok", category: .social),
+        KnownApp("com.google.Gmail", icon: "gmail", "Gmail", category: .system),
+        KnownApp("com.google.Maps", icon: "google-maps", "Google Maps", "Google 地图", "Google 地圖", category: .lifestyle),
+        KnownApp("com.amazon.Amazon", icon: "amazon", "Amazon", category: .lifestyle),
+        KnownApp("doordash.DoorDashConsumer", icon: "doordash", "DoorDash", category: .lifestyle),
+        KnownApp("com.ubercab.UberEats", icon: "uber-eats", "Uber Eats", category: .lifestyle),
+        KnownApp("com.zimride.instant", icon: "lyft", "Lyft", category: .lifestyle),
+        KnownApp("com.airbnb.app", icon: "airbnb", "Airbnb", category: .lifestyle),
+        KnownApp("com.netflix.Netflix", icon: "netflix", "Netflix", category: .social),
+        KnownApp("com.facebook.Facebook", icon: "facebook", "Facebook", category: .social),
+        KnownApp("com.facebook.Messenger", icon: "messenger", "Messenger", category: .social),
+        KnownApp("com.linkedin.LinkedIn", icon: "linkedin", "LinkedIn", category: .social),
+        KnownApp("com.reddit.Reddit", icon: "reddit", "Reddit", category: .social),
+        KnownApp("com.hammerandchisel.discord", icon: "discord", "Discord", category: .social),
+        KnownApp("us.zoom.videomeetings", icon: "zoom", "Zoom", aliases: ["Zoom Workplace"], category: .social),
+        KnownApp("com.microsoft.skype.teams", icon: "teams", "Teams", aliases: ["Microsoft Teams"], category: .social),
+        KnownApp("com.microsoft.Office.Outlook", icon: "outlook", "Outlook", aliases: ["Microsoft Outlook"], category: .system),
+        KnownApp("com.yourcompany.PPClient", icon: "paypal", "PayPal", category: .lifestyle),
+        KnownApp("com.instacart", icon: "instacart", "Instacart", category: .lifestyle),
+        KnownApp("com.yelp.yelpiphone", icon: "yelp", "Yelp", category: .lifestyle),
+        KnownApp("pinterest", icon: "pinterest", "Pinterest", category: .social),
+        KnownApp("com.toyopagroup.picaboo", icon: "snapchat", "Snapchat", category: .social),
+        KnownApp("com.burbn.barcelona", icon: "threads", "Threads", category: .social),
+        KnownApp("com.contextoptional.OpenTable", icon: "opentable", "OpenTable", category: .lifestyle),
     ]
+
+    /// Default quick-pick bundle IDs shown in the composer's `+` menu when no recent history exists.
+    static func defaultQuickAppIDs(for language: AppLanguage) -> [String] {
+        switch language {
+        case .simplifiedChinese, .traditionalChinese:
+            ["com.tencent.xin", "com.meituan.itakeaway", "com.xingin.discover"]
+        case .english:
+            ["com.apple.MobileSMS", "com.apple.mobilenotes", "com.apple.Maps"]
+        }
+    }
+
+    /// Default recent bundle IDs shown in the "Recent" strip of the full app browser.
+    static func defaultRecentAppIDs(for language: AppLanguage) -> [String] {
+        switch language {
+        case .simplifiedChinese, .traditionalChinese:
+            [
+                "com.tencent.xin",
+                "com.xingin.discover",
+                "com.meituan.itakeaway",
+                "com.taobao.taobao4iphone",
+                "com.autonavi.amap",
+            ]
+        case .english:
+            [
+                "com.apple.MobileSMS",
+                "com.apple.mobilenotes",
+                "com.apple.Maps",
+                "com.ubercab.UberClient",
+                "com.tinyspeck.chatlyio",
+            ]
+        }
+    }
 
     /// By bundle ID, lower-cased.
     static let byID: [String: KnownApp] = Dictionary(
