@@ -55,12 +55,12 @@ enum WhatsNewCatalog {
                 id: "faster-phone-actions",
                 symbol: "bolt",
                 title: WhatsNewText(
-                    en: "50% Faster Phone Actions",
-                    zhHans: "操作速度提升 50%",
-                    zhHant: "操作速度提升 50%"
+                    en: "Faster Phone Actions",
+                    zhHans: "操作全面提速",
+                    zhHant: "操作全面提速"
                 ),
                 summary: WhatsNewText(
-                    en: "Taps, swipes, and app launches run up to 50% faster, with accurate scrolling and cleanly formatted replies.",
+                    en: "Taps, swipes, and app launches respond noticeably faster, with accurate scrolling and cleanly formatted replies.",
                     zhHans: "点按、滑动、开应用全面提速，长列表翻屏不重不漏，回复分段更清晰。",
                     zhHant: "點按、滑動、開 App 全面提速，長列表翻頁不重不漏，回覆分段更清晰。"
                 )
