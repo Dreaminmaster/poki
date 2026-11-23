@@ -94,6 +94,17 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(h.microphone, [true, false])
     }
 
+    func testStoppedDictationDoesNotPublishLateTranscript() async {
+        let h = Harness()
+        let task = h.voice.finishDictation(Dictation()) {
+            h.voice.stop()
+            return "Old transcript"
+        }
+        await task.value
+        XCTAssertEqual(h.voice.phase, .off)
+        XCTAssertTrue(h.voice.lines.isEmpty)
+    }
+
     private var savedBridge: String?
     private var savedDirect: Any?
 

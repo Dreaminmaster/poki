@@ -698,9 +698,14 @@ final class VoiceModel {
     /// The button let go. Realtime knows by itself when you stopped; dictation sends what it heard.
     func released() {
         guard let dictation, phase == .hearing else { return }
+        finishDictation(dictation, read: dictation.finish)
+    }
+
+    @discardableResult
+    func finishDictation(_ dictation: Dictation, read: @escaping @MainActor () async -> String) -> Task<Void, Never> {
         phase = .thinking
-        Task {
-            let text = await dictation.finish()
+        return Task {
+            let text = await read()
             guard self.dictation === dictation else { return }
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
@@ -723,7 +728,12 @@ final class VoiceModel {
     }
 
     private func startDictation() async {
-        guard await Dictation.allowed() else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
+        phase = .connecting
+        session += 1
+        let number = session
+        let allowed = await Dictation.allowed()
+        guard number == session else { return }
+        guard allowed else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
         let dictation = Dictation()
         dictation.onHeard = { [weak self] text in
             guard let self, self.phase == .hearing else { return }
