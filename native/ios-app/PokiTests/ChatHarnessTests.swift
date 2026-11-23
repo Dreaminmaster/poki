@@ -4101,6 +4101,7 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let beforeRequest: (@Sendable () async -> Void)?
     private let screenLabel: @Sendable () -> String
     private let beforeActivation: (@Sendable (String) async -> Void)?
+    private let activeApp: @Sendable () -> (bundleID: String, name: String)
     private let unavailableApp: String?
     private let onRefusal: (@Sendable (String) -> Void)?
     private let lock = NSLock()
@@ -4110,13 +4111,16 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
-         beforeActivation: (@Sendable (String) async -> Void)? = nil, unavailableApp: String? = nil,
+         beforeActivation: (@Sendable (String) async -> Void)? = nil,
+         activeApp: @escaping @Sendable () -> (bundleID: String, name: String) = { ("com.apple.Preferences", "Settings") },
+         unavailableApp: String? = nil,
          onRefusal: (@Sendable (String) -> Void)? = nil,
          screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
         self.beforeActivation = beforeActivation
+        self.activeApp = activeApp
         self.unavailableApp = unavailableApp
         self.onRefusal = onRefusal
     }
@@ -4142,7 +4146,8 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
         case "/wda/locked": value = false
         case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
         case "/wda/activeAppInfo":
-            value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
+            let app = activeApp()
+            value = ["bundleId": .string(app.bundleID), "name": .string(app.name)]
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
             lock.withLock {

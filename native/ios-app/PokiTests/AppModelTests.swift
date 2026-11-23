@@ -1214,6 +1214,68 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(model.hasOpenInProcessSession)
     }
 
+    func testLiveActivityTapBetweenChatStepsKeepsSessionOpenAndReturnsToTargetApp() async throws {
+        let stateLock = NSLock()
+        let pokiBundle = Bundle.main.bundleIdentifier ?? "nz.zheha.poki"
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        let transport = SessionScreenTransport(
+            session: session,
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let read = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        await waitFor("step finished and model is thinking between steps") { self.model.activityText == "Idle" }
+
+        let workingFace = PokiState(phase: .working, headline: "Looking", thumbnailVersion: 0).face
+        XCTAssertEqual(workingFace.link, URL(string: "poki://activity"))
+
+        stateLock.withLock { front = (pokiBundle, "Poki") }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+
+        await waitFor("target app reactivated after Live Activity tap") {
+            stateLock.withLock { activated.contains("com.apple.Preferences") }
+        }
+        XCTAssertTrue(session.isOpen, "bringing Poki forward between chat steps must keep the automation session open")
+        XCTAssertTrue(model.hasOpenInProcessSession)
+        XCTAssertFalse(model.runnerPaused)
+        XCTAssertEqual(session.closes, 0)
+
+        model.chatTaskEnded(reply: nil, session: "test", acted: true)
+        await waitFor("completed task still closes the session") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        await openSessionForATask()
+        model.wentToBackground()
+        model.becameActive()
+        await waitFor("opening Poki with no active task closes an idle session at once") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        // Explicit Stop on the Live Activity during an active task still closes the session at once.
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+        model.stopFromOutside(AppModel.liveActivityStop)
+        await waitFor("Live Activity Stop still closes the session immediately") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+    }
+
     /// Talk Here starts a relaunched Poki in the background. On iOS 27 its first open asks for no
     /// passcode while the boot's allowance lasts, so it opens there instead of telling the owner to open
     /// Poki; an allowance from another boot, or older than 8 hours, still waits for Poki in front.
