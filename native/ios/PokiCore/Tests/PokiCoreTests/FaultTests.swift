@@ -838,10 +838,6 @@ final class MailTestTests: XCTestCase {
         XCTAssertEqual(reason("Button", "Buy now"), "a payment (\"buy\")")
         XCTAssertEqual(reason("Button", "Pay $12.00"), "a payment (\"pay\")")
         XCTAssertEqual(reason("Button", "Confirm and pay"), "a payment (\"pay\")")
-        XCTAssertNil(reason("Button", "Delete Message"))
-        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil, frame: Rect(x: 40, y: 300, width: 310, height: 180), depth: 1, node: 2, end: 3)
-        let deleteMessage = Element(type: "Button", label: "Delete Message", value: nil, identifier: nil, frame: Rect(x: 56, y: 420, width: 278, height: 44), depth: 2, node: 3, end: 3)
-        XCTAssertEqual(rules.reason(touching: deleteMessage, typing: false, app: mail, secureOnScreen: false, in: [alert, deleteMessage]), "deleting (\"delete\")")
         XCTAssertEqual(reason("Button", "Send"), "sending a message (\"send\")")
         XCTAssertNil(reason("Cell", "Re: Please send the files when you have them, John, Monday"))
     }

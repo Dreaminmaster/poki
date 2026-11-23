@@ -37,15 +37,21 @@ public struct SensitivityRules: Sendable, Equatable {
     private static let actionControlTypes: Set<String> = ["Button", "MenuItem", "Link"]
     private static let lightActionTypes: Set<String> = ["Other", "Text", "StaticText"]
     private static let deleteControlTypes: Set<String> = ["Button", "MenuItem", "Cell", "Other", "StaticText", "Text", "Link"]
-    private static let deleteMenuContainerTypes: Set<String> = ["Menu", "MenuBar", "MenuBarItem", "Popover"]
+    private static let deleteMenuContainerTypes: Set<String> = ["Menu", "MenuBar", "MenuBarItem", "MenuItem", "Popover"]
     private static let deleteDialogContainerTypes: Set<String> = ["Alert", "Sheet", "Dialog"]
     private static let nonDialogContainerTypes: Set<String> = [
         "Application", "Window", "NavigationBar", "TabBar", "Toolbar",
-        "Table", "CollectionView", "ScrollView", "WebView",
+        "Table", "CollectionView", "ScrollView", "WebView", "Cell",
+    ]
+    private static let formInputTypes: Set<String> = [
+        "TextField", "SecureTextField", "SearchField", "TextView", "Switch", "Slider", "Picker",
     ]
     private static let contextContainerTokens = ["contextmenu", "actionsheet", "confirmationdialog", "alertdialog"]
     private static let cancelLabels: Set<String> = [
         "cancel", "取消", "暂不", "不删除", "保留", "keep", "don't delete", "dont delete", "not now",
+    ]
+    private static let confirmationPromptTokens = [
+        "？", "?", "确认", "确定", "是否", "无法恢复", "永久", "confirm", "sure", "cannot be undone", "permanently", "irreversible",
     ]
 
     private static func containsCJK(_ text: String) -> Bool {
@@ -95,6 +101,13 @@ public struct SensitivityRules: Sendable, Equatable {
         }
     }
 
+    private static func isConfirmationPrompt(_ element: Element) -> Bool {
+        guard !actionControlTypes.contains(element.type), !formInputTypes.contains(element.type) else { return false }
+        let lowered = element.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return false }
+        return confirmationPromptTokens.contains { lowered.contains($0) }
+    }
+
     private static func isContextMenuOrDialogContainer(_ element: Element) -> Bool {
         if deleteMenuContainerTypes.contains(element.type) || deleteDialogContainerTypes.contains(element.type) {
             return true
@@ -113,10 +126,11 @@ public struct SensitivityRules: Sendable, Equatable {
             .filter { $0.contains(element) }
             .sorted { ($0.end - $0.node, -$0.depth) < ($1.end - $1.node, -$1.depth) }
         if ancestors.contains(where: isContextMenuOrDialogContainer) { return true }
+        if ancestors.contains(where: { nonDialogContainerTypes.contains($0.type) }) { return false }
         for container in ancestors {
-            if nonDialogContainerTypes.contains(container.type) { continue }
             if !container.frame.isEmpty, container.frame.height > 460 { continue }
             let inside = elements.filter { container.contains($0) }
+            if inside.contains(where: { formInputTypes.contains($0.type) }) { continue }
             let textBearing = inside.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             let actionCount = inside.filter { actionControlTypes.contains($0.type) }.count
             guard textBearing.count <= 12, actionCount <= 6 else { continue }
@@ -126,13 +140,15 @@ public struct SensitivityRules: Sendable, Equatable {
                     && !element.contains(sibling)
                     && isCancelButton(sibling)
             }
-            if hasCancel { return true }
+            let hasPrompt = inside.contains { sibling in
+                sibling.node != element.node
+                    && !sibling.contains(element)
+                    && !element.contains(sibling)
+                    && isConfirmationPrompt(sibling)
+            }
+            if hasCancel && hasPrompt { return true }
         }
         return false
-    }
-
-    static func matches(_ text: String, _ words: [String], elementType: String = "Other") -> String? {
-        matches(text, words, elementType: elementType, allowCJK: true, allowCompactCellCJK: false)
     }
 
     private static func matches(
@@ -171,12 +187,16 @@ public struct SensitivityRules: Sendable, Equatable {
     }
 
     /// Why this action needs approval, or nil.
+    /// Pass `in: elements` when the full accessibility tree is known (allowing ordinary page deletes
+    /// while guarding compact deletes inside menus and confirmation dialogs). Pass `in: nil` when
+    /// only a label is available (such as bridged voice taps), where compact delete labels remain
+    /// guarded because menu/dialog membership cannot be ruled out.
     func reason(
         touching element: Element?,
         typing: Bool,
         app: Foreground?,
         secureOnScreen: Bool,
-        in elements: [Element] = []
+        in elements: [Element]? = nil
     ) -> String? {
         guard enabled else { return nil }
         if let bundle = app?.bundleID, guardedApps.contains(bundle) { return "input in \(app?.describe ?? bundle)" }
@@ -195,9 +215,10 @@ public struct SensitivityRules: Sendable, Equatable {
             }.first
         }
         if let word = match(payments) { return "a payment (\"\(word)\")" }
+        let deleteRequiresApproval = elements.map { Self.isInDeleteMenuOrDialog(element, in: $0) } ?? true
         if Self.isCompactDeleteTarget(element),
-           Self.isInDeleteMenuOrDialog(element, in: elements),
-           let word = match(deletions, allowCompactCellCJK: true) {
+           deleteRequiresApproval,
+           let word = match(deletions, allowCompactCellCJK: elements != nil) {
             return "deleting (\"\(word)\")"
         }
         if let bundle = app?.bundleID, callingApps.contains(bundle) { return "a call (in \(app?.describe ?? bundle))" }

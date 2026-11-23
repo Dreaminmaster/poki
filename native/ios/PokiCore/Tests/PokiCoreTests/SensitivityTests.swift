@@ -7,12 +7,13 @@ final class SensitivityTests: XCTestCase {
         "Tap to pay 12.00元/次",
     ]
 
-    private func reason(_ label: String, type: String = "Button", in elements: [Element] = []) -> String? {
-        SensitivityRules().reason(
-            touching: Element(type: type, label: label, value: nil, identifier: nil,
-                              frame: Rect(x: 0, y: 0, width: 100, height: 44), depth: 1),
+    private func reason(_ label: String, type: String = "Button", in elements: [Element]? = nil) -> String? {
+        let element = Element(type: type, label: label, value: nil, identifier: nil,
+                              frame: Rect(x: 0, y: 0, width: 100, height: 44), depth: 1, node: 2, end: 2)
+        return SensitivityRules().reason(
+            touching: element,
             typing: false, app: Foreground(bundleID: "com.apple.mobilemail", name: "Mail"),
-            secureOnScreen: false, in: elements)
+            secureOnScreen: false, in: elements ?? [element])
     }
 
     func testLongActionButtonsStillRequireApproval() {

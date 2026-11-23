@@ -27,9 +27,15 @@ final class BasicsTests: XCTestCase {
     }
 
     func testSensitiveWordsMatchWholeWords() {
-        XCTAssertEqual(SensitivityRules.matches("Delete Photo", ["delete"]), "delete")
-        XCTAssertNil(SensitivityRules.matches("Display & Brightness", ["pay"]))
-        XCTAssertEqual(SensitivityRules.matches("确认支付", ["支付"]), "支付")
+        let rules = SensitivityRules()
+        let app = Foreground(bundleID: "com.example.app", name: "App")
+        let alert = Element(type: "Alert", label: nil, value: nil, identifier: nil, frame: Rect(x: 40, y: 300, width: 310, height: 180), depth: 1, node: 2, end: 3)
+        let deletePhoto = Element(type: "Button", label: "Delete Photo", value: nil, identifier: nil, frame: Rect(x: 56, y: 420, width: 278, height: 44), depth: 2, node: 3, end: 3)
+        let display = Element(type: "Button", label: "Display & Brightness", value: nil, identifier: nil, frame: Rect(x: 16, y: 100, width: 200, height: 44), depth: 1, node: 2, end: 2)
+        let confirmPay = Element(type: "Other", label: "确认支付", value: nil, identifier: nil, frame: Rect(x: 16, y: 100, width: 120, height: 44), depth: 1, node: 2, end: 2)
+        XCTAssertEqual(rules.reason(touching: deletePhoto, typing: false, app: app, secureOnScreen: false, in: [alert, deletePhoto]), "deleting (\"delete\")")
+        XCTAssertNil(rules.reason(touching: display, typing: false, app: app, secureOnScreen: false, in: [display]))
+        XCTAssertEqual(rules.reason(touching: confirmPay, typing: false, app: app, secureOnScreen: false, in: [confirmPay]), "a payment (\"支付\")")
     }
 }
 
