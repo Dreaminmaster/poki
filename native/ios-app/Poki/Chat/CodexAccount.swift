@@ -91,9 +91,20 @@ enum CodexAccount {
         defer { storageLock.unlock() }
 
         let current = currentAccount(for: home)
-        let items = try Keychain.readAll(service: service)
+        let items: [(account: String, data: Data, modified: Date?, accessible: String?)]
+        do {
+            items = try Keychain.readAll(service: service)
+        } catch {
+            logVoice("Codex Keychain scan failed: OSStatus \((error as NSError).code)")
+            throw error
+        }
         for item in items where item.account.hasPrefix(cliAccountPrefix) && item.account != current {
-            try Keychain.remove(item.account, service: service)
+            do {
+                try Keychain.remove(item.account, service: service)
+            } catch {
+                logVoice("Codex Keychain legacy cleanup failed: OSStatus \((error as NSError).code)")
+                throw error
+            }
         }
     }
 
@@ -101,9 +112,20 @@ enum CodexAccount {
         storageLock.lock()
         defer { storageLock.unlock() }
 
-        let items = try Keychain.readAll(service: service)
+        let items: [(account: String, data: Data, modified: Date?, accessible: String?)]
+        do {
+            items = try Keychain.readAll(service: service)
+        } catch {
+            logVoice("Codex Keychain scan failed: OSStatus \((error as NSError).code)")
+            throw error
+        }
         for item in items where item.account.hasPrefix(cliAccountPrefix) {
-            try Keychain.remove(item.account, service: service)
+            do {
+                try Keychain.remove(item.account, service: service)
+            } catch {
+                logVoice("Codex Keychain cleanup failed: OSStatus \((error as NSError).code)")
+                throw error
+            }
         }
     }
 

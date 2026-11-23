@@ -967,7 +967,7 @@ final class CodexKeychainMigrationTests: XCTestCase {
             "Legacy cli|<old> credentials must be cleared before voice.signOut() runs"
         )
         XCTAssertEqual(gatePrepareState, .empty, "Sign-out gate must suppress migration during account/logout")
-        XCTAssertNil(gateReadToken, "Sign-out gate must block readAccessToken during account/logout")
+        XCTAssertTrue(gateReadToken == nil, "Sign-out gate must block readAccessToken during account/logout")
         XCTAssertNil(currentAfterGatedProbe, "Sign-out gate must prevent migrating cli|<old> back into cli|<current>")
         XCTAssertEqual(legacyAfterGatedProbe, legacyData, "Gated probe must not modify or remove cli|<old>")
 
@@ -977,9 +977,15 @@ final class CodexKeychainMigrationTests: XCTestCase {
         let remainingAfterSignOut = try Keychain.readAll(service: codexService).filter { $0.account.hasPrefix("cli|") }
         XCTAssertTrue(remainingAfterSignOut.isEmpty)
         XCTAssertNil(try Keychain.read("model-key.chatgpt", service: modelKeysService))
-        XCTAssertNil(ModelKeys.key(.chatgpt, service: modelKeysService))
+        XCTAssertTrue(
+            ModelKeys.key(.chatgpt, service: modelKeysService) == nil,
+            "Legacy model-key.chatgpt must be cleared after sign-out"
+        )
         XCTAssertEqual(CodexAccount.prepareStorage(service: codexService, home: home), .empty)
-        XCTAssertNil(CodexAccount.readAccessToken(service: codexService, home: home))
+        XCTAssertTrue(
+            CodexAccount.readAccessToken(service: codexService, home: home) == nil,
+            "CodexAccount.readAccessToken must stay nil after sign-out"
+        )
     }
 
     func testSignOutFailureAfterCurrentKeyDeletionDoesNotReviveLegacyCredential() async throws {
@@ -1098,8 +1104,14 @@ final class CodexKeychainMigrationTests: XCTestCase {
                     .empty,
                     "Legacy cli|<old> credential must not revive after voice.signOut() fails post-current-key deletion"
                 )
-                XCTAssertNil(CodexAccount.accessToken, "CodexAccount.accessToken must stay nil after failed sign-out")
-                XCTAssertNil(CodexAccount.readAccessToken(service: codexService, home: home))
+                XCTAssertTrue(
+                    CodexAccount.accessToken == nil,
+                    "CodexAccount.accessToken must stay nil after failed sign-out"
+                )
+                XCTAssertTrue(
+                    CodexAccount.readAccessToken(service: codexService, home: home) == nil,
+                    "CodexAccount.readAccessToken must stay nil after failed sign-out"
+                )
                 let remaining = try Keychain.readAll(service: codexService).filter { $0.account.hasPrefix("cli|") }
                 XCTAssertTrue(remaining.isEmpty, "No cli|* credentials may remain in isolated service after sign-out fails")
             }
