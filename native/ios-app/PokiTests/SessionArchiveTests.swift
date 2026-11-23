@@ -108,6 +108,23 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
     }
 
+    func testSessionCreatedWhileDirectoryUnavailableIsNotMigrated() throws {
+        try FileManager.default.removeItem(at: folder)
+        try Data("unavailable".utf8).write(to: folder)
+        let first = launch()
+        first.save(voice: "new", started: Date(), lines: [
+            VoiceLine(role: .you, text: "New"),
+            VoiceLine(role: .poki, text: "Reply")
+        ], live: false)
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        first.flush()
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in

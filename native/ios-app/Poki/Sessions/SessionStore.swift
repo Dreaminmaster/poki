@@ -213,6 +213,7 @@ final class SessionStore {
     /// Set once the conversations saved before archiving existed have been archived.
     static let archivedEarlierKey = "sessions.archivedEarlier"
     private static let archivePendingKey = "sessions.archiveMigrationPending"
+    private static let archiveExcludedKey = "sessions.archiveMigrationExcluded"
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
@@ -420,7 +421,8 @@ final class SessionStore {
     /// Freeze the upgrade cohort before changing files. Later sessions are not part of the migration.
     private func archiveCohort(_ candidates: [URL]) -> Set<String>? {
         if let saved = defaults.stringArray(forKey: Self.archivePendingKey) { return Set(saved) }
-        let ids = Set(candidates.map(\.lastPathComponent))
+        let excluded = Set(defaults.stringArray(forKey: Self.archiveExcludedKey) ?? [])
+        let ids = Set(candidates.map(\.lastPathComponent)).subtracting(excluded)
         defaults.set(Array(ids), forKey: Self.archivePendingKey)
         guard defaults.synchronize() else {
             defaults.removeObject(forKey: Self.archivePendingKey)
@@ -440,6 +442,7 @@ final class SessionStore {
         defaults.set(true, forKey: Self.archivedEarlierKey)
         defaults.synchronize()
         defaults.removeObject(forKey: Self.archivePendingKey)
+        defaults.removeObject(forKey: Self.archiveExcludedKey)
     }
 
     private func archiveEarlierInBackground(staged: [SavedSession]) async {
@@ -839,6 +842,13 @@ final class SessionStore {
     // MARK: Files
 
     private func put(_ session: SavedSession) {
+        if !defaults.bool(forKey: Self.archivedEarlierKey), defaults.stringArray(forKey: Self.archivePendingKey) == nil {
+            var excluded = Set(defaults.stringArray(forKey: Self.archiveExcludedKey) ?? [])
+            if excluded.insert(file(session.id).lastPathComponent).inserted {
+                defaults.set(Array(excluded), forKey: Self.archiveExcludedKey)
+                defaults.synchronize()
+            }
+        }
         touchedIDs.insert(session.id)
         deletedIDs.remove(session.id)
         if let i = sessions.firstIndex(where: { $0.id == session.id }) { sessions[i] = session } else { sessions.insert(session, at: 0); trim() }
