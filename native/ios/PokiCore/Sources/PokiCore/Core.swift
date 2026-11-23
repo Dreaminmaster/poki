@@ -430,10 +430,11 @@ public final class PokiCore: @unchecked Sendable {
         approvals.withdrawPending()
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
+        // Bridged voice taps carry only a label with no accessibility tree, so pass `in: nil`.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
+        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false, in: nil) else { return .clear }
         // Never Ask would not stop a tap the rules cannot read, nor one they hold back whatever the way of asking.
-        let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false) == nil
+        let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false, in: nil) == nil
         let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, scope: ApprovalScope(actions: "tap:\(UUID().uuidString)"), stopsWhenOff: stopsWhenOff)
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:

@@ -1856,9 +1856,9 @@ final class Computer: @unchecked Sendable {
         }
         skillStepApp = elements.foreground.bundleID
         let backTarget = kind == .back ? BackTarget(in: elements.all) : nil
-        let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen))
+        let scan = SensitiveScan(front: elements.foreground, secureOnScreen: false, elements: listable(elements.all, screen), allElements: elements.all)
         for press in presses(kind, action, scan, unread: false, backTarget: backTarget) {
-            guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false), reason != approved else { continue }
+            guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false, in: scan.allElements ?? lastAll), reason != approved else { continue }
             return ("the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
         return (nil, backTarget)
@@ -2716,6 +2716,8 @@ final class Computer: @unchecked Sendable {
         var secureOnScreen: Bool
         /// The elements to look under a point in; nil for the latest read (and its numbers).
         var elements: [Element]?
+        /// The full element tree for ancestor context; nil uses `lastAll`.
+        var allElements: [Element]? = nil
     }
 
     /// Each action of a batch that needs the owner's approval, and why, judged on the latest read.
@@ -2804,9 +2806,10 @@ final class Computer: @unchecked Sendable {
         let spec = action[kind.rawValue] ?? .null
         if kind == .drag, spec["to_pane"] != nil, let destination = selectedPane?.other,
            destination != "com.apple.mobilenotes" { return "dropping content into \(destination)" }
+        let tree = scan.read ? (scan.allElements ?? lastAll) : []
         if kind == .tap { scan.typingTarget = unread ? nil : target(spec, in: scan.elements) }
         for press in presses(kind, action, scan, unread: unread) {
-            if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen) { return r }
+            if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen, in: tree) { return r }
             guard press.judged == .tap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
             // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
@@ -2848,11 +2851,11 @@ final class Computer: @unchecked Sendable {
                 scan.read ? scan.typingTarget : nil
             }
             scan.typingTarget = e
-            if let r = rules.reason(touching: e, typing: true, app: scan.front, secureOnScreen: scan.read && scan.secureOnScreen && e == nil) { return r }
+            if let r = rules.reason(touching: e, typing: true, app: scan.front, secureOnScreen: scan.read && scan.secureOnScreen && e == nil, in: tree) { return r }
             if messaging, text.contains(where: \.isNewline), !Self.isSearch(e) { return "sending a message (a return typed in \(app))" }
         case .key:
             let key = spec.text ?? ""
-            if key.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false) != nil {
+            if key.lowercased() == "return", let field = scan.typingTarget, rules.reason(touching: field, typing: true, app: scan.front, secureOnScreen: false, in: tree) != nil {
                 return "submitting a password field"
             }
             // Return is the send key in WeChat, WhatsApp and Telegram: typed text goes out on it.

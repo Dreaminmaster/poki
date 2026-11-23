@@ -34,25 +34,151 @@ public struct SensitivityRules: Sendable, Equatable {
         return rules
     }
 
-    static func matches(_ text: String, _ words: [String], elementType: String = "Other") -> String? {
+    private static let actionControlTypes: Set<String> = ["Button", "MenuItem", "Link"]
+    private static let lightActionTypes: Set<String> = ["Other", "Text", "StaticText"]
+    private static let deleteControlTypes: Set<String> = ["Button", "MenuItem", "Cell", "Other", "StaticText", "Text", "Link"]
+    private static let deleteMenuContainerTypes: Set<String> = ["Menu", "MenuBar", "MenuBarItem", "MenuItem", "Popover"]
+    private static let deleteDialogContainerTypes: Set<String> = ["Alert", "Sheet", "Dialog"]
+    private static let nonDialogContainerTypes: Set<String> = [
+        "Application", "Window", "NavigationBar", "TabBar", "Toolbar",
+        "Table", "CollectionView", "ScrollView", "WebView", "Cell", "Group",
+    ]
+    private static let formInputTypes: Set<String> = [
+        "TextField", "SecureTextField", "SearchField", "TextView", "Switch", "Slider", "Picker",
+    ]
+    private static let contextContainerTokens = ["contextmenu", "actionsheet", "confirmationdialog", "alertdialog"]
+    private static let cancelLabels: Set<String> = [
+        "cancel", "取消", "暂不", "不删除", "保留", "keep", "don't delete", "dont delete", "not now",
+    ]
+    private static let confirmationPromptTokens = [
+        "？", "?", "确认", "确定", "是否", "无法恢复", "永久", "confirm", "sure", "cannot be undone", "permanently", "irreversible",
+    ]
+
+    private static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { $0.value > 0x2E80 }
+    }
+
+    private static func allowsCJKMatch(_ lowered: String, elementType: String, allowCompactCell: Bool = false) -> Bool {
+        let trimmed = lowered.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: \.isNewline) else { return false }
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).count
+        if actionControlTypes.contains(elementType) {
+            return trimmed.count <= 32 && tokens <= 8
+        }
+        if lightActionTypes.contains(elementType) || (allowCompactCell && elementType == "Cell") {
+            return trimmed.count <= 14 && tokens <= 4
+        }
+        return false
+    }
+
+    private static func isOversizedContainer(_ element: Element) -> Bool {
+        let frame = element.frame
+        guard !frame.isEmpty else { return false }
+        if frame.width > 260 && frame.height > 260 { return true }
+        if !actionControlTypes.contains(element.type), frame.height > 160 || frame.area > 60_000 {
+            return true
+        }
+        return false
+    }
+
+    private static func isCompactDeleteTarget(_ element: Element) -> Bool {
+        guard deleteControlTypes.contains(element.type) else { return false }
+        let frame = element.frame
+        if !frame.isEmpty, frame.height > 120 || frame.area > 45_000 { return false }
+        let text = element.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = text.isEmpty ? (element.identifier ?? "").trimmingCharacters(in: .whitespacesAndNewlines) : text
+        guard !label.isEmpty, !label.contains(where: \.isNewline) else { return false }
+        return label.count <= 48 && label.split(whereSeparator: \.isWhitespace).count <= 6
+    }
+
+    private static func isCancelButton(_ element: Element) -> Bool {
+        guard deleteControlTypes.contains(element.type) else { return false }
+        let frame = element.frame
+        if !frame.isEmpty, frame.height > 120 { return false }
+        return [element.text, element.identifier ?? ""].contains { raw in
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return !normalized.isEmpty && cancelLabels.contains(normalized)
+        }
+    }
+
+    private static func isConfirmationPrompt(_ element: Element) -> Bool {
+        guard !actionControlTypes.contains(element.type), !formInputTypes.contains(element.type) else { return false }
+        let lowered = element.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return false }
+        return confirmationPromptTokens.contains { lowered.contains($0) }
+    }
+
+    private static func isContextMenuOrDialogContainer(_ element: Element) -> Bool {
+        if deleteMenuContainerTypes.contains(element.type) || deleteDialogContainerTypes.contains(element.type) {
+            return true
+        }
+        if let id = element.identifier?.lowercased(),
+           contextContainerTokens.contains(where: { id.contains($0) }) {
+            return true
+        }
+        return false
+    }
+
+    private static func isInDeleteMenuOrDialog(_ element: Element, in elements: [Element]) -> Bool {
+        if element.type == "MenuItem" { return true }
+        guard element.node > 0 else { return false }
+        let ancestors = elements
+            .filter { $0.contains(element) }
+            .sorted { ($0.end - $0.node, -$0.depth) < ($1.end - $1.node, -$1.depth) }
+        if ancestors.contains(where: isContextMenuOrDialogContainer) { return true }
+        for container in ancestors {
+            if nonDialogContainerTypes.contains(container.type) { return false }
+            if !container.frame.isEmpty, container.frame.height > 460 { continue }
+            let inside = elements.filter { container.contains($0) }
+            if inside.contains(where: { formInputTypes.contains($0.type) }) { continue }
+            let textBearing = inside.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            let actionCount = inside.filter { actionControlTypes.contains($0.type) }.count
+            guard textBearing.count <= 12, actionCount <= 6 else { continue }
+            let hasCancel = inside.contains { sibling in
+                sibling.node != element.node
+                    && !sibling.contains(element)
+                    && !element.contains(sibling)
+                    && isCancelButton(sibling)
+            }
+            let hasPrompt = inside.contains { sibling in
+                sibling.node != element.node
+                    && !sibling.contains(element)
+                    && !element.contains(sibling)
+                    && isConfirmationPrompt(sibling)
+            }
+            if hasCancel && hasPrompt { return true }
+        }
+        return false
+    }
+
+    private static func matches(
+        _ text: String,
+        _ words: [String],
+        elementType: String,
+        allowCJK: Bool,
+        allowCompactCellCJK: Bool
+    ) -> String? {
         let lowered = text.lowercased()
         // Preserve the base matcher’s whitespace-based short-label protection for every type.
         // Long Buttons and later whole-word matches add protection to that baseline.
         let short = lowered.split(whereSeparator: \.isWhitespace).count <= 4
+        let cjkAllowed = allowCJK && allowsCJKMatch(lowered, elementType: elementType, allowCompactCell: allowCompactCellCJK)
         // Explicit exception agreed for this rule: digits also bound Latin words, so buy1/1pay
         // remain unmatched even though the original matcher treated digits as boundaries.
         let boundary: (Character?) -> Bool = { c in c.map { !$0.isLetter && !$0.isNumber } ?? true }
         for word in words {
             let w = word.lowercased()
             guard !w.isEmpty else { continue }
+            if containsCJK(w) {
+                guard cjkAllowed, lowered.contains(w) else { continue }
+                return word
+            }
             var search = lowered.startIndex..<lowered.endIndex
             while let range = lowered.range(of: w, range: search) {
-                // CJK words match anywhere; Latin words need whole-word boundaries.
-                if w.unicodeScalars.contains(where: { $0.value > 0x2E80 }) { return word }
                 let before = range.lowerBound == lowered.startIndex ? nil : lowered[lowered.index(before: range.lowerBound)]
                 let after = range.upperBound == lowered.endIndex ? nil : lowered[range.upperBound]
                 let opens = lowered[..<range.lowerBound].allSatisfy { !$0.isLetter && !$0.isNumber }
-                if boundary(before) && boundary(after) && (elementType == "Button" || opens || short) { return word }
+                if boundary(before) && boundary(after) && (elementType == "Button" || elementType == "MenuItem" || opens || short) { return word }
                 // An earlier substring ("buying") must not hide a later whole word ("buy").
                 search = range.upperBound..<lowered.endIndex
             }
@@ -61,7 +187,17 @@ public struct SensitivityRules: Sendable, Equatable {
     }
 
     /// Why this action needs approval, or nil.
-    func reason(touching element: Element?, typing: Bool, app: Foreground?, secureOnScreen: Bool) -> String? {
+    /// Pass `in: elements` when the full accessibility tree is known (allowing ordinary page deletes
+    /// while guarding compact deletes inside menus and confirmation dialogs). Pass `in: nil` when
+    /// only a label is available (such as bridged voice taps), where compact delete labels remain
+    /// guarded because menu/dialog membership cannot be ruled out.
+    func reason(
+        touching element: Element?,
+        typing: Bool,
+        app: Foreground?,
+        secureOnScreen: Bool,
+        in elements: [Element]? = nil
+    ) -> String? {
         guard enabled else { return nil }
         if let bundle = app?.bundleID, guardedApps.contains(bundle) { return "input in \(app?.describe ?? bundle)" }
         if typing, secureFields, element?.isSecure == true || (element == nil && secureOnScreen) { return "typing into a password field" }
@@ -72,11 +208,19 @@ public struct SensitivityRules: Sendable, Equatable {
             return nil
         }
         let texts = [element.text, element.identifier ?? ""]
-        func match(_ words: [String]) -> String? {
-            texts.lazy.compactMap { Self.matches($0, words, elementType: element.type) }.first
+        let allowCJK = !Self.isOversizedContainer(element)
+        func match(_ words: [String], allowCompactCellCJK: Bool = false) -> String? {
+            texts.lazy.compactMap {
+                Self.matches($0, words, elementType: element.type, allowCJK: allowCJK, allowCompactCellCJK: allowCompactCellCJK)
+            }.first
         }
         if let word = match(payments) { return "a payment (\"\(word)\")" }
-        if let word = match(deletions) { return "deleting (\"\(word)\")" }
+        let deleteRequiresApproval = elements.map { Self.isInDeleteMenuOrDialog(element, in: $0) } ?? true
+        if Self.isCompactDeleteTarget(element),
+           deleteRequiresApproval,
+           let word = match(deletions, allowCompactCellCJK: elements != nil) {
+            return "deleting (\"\(word)\")"
+        }
         if let bundle = app?.bundleID, callingApps.contains(bundle) { return "a call (in \(app?.describe ?? bundle))" }
         if let word = match(calling) { return "a call (\"\(word)\")" }
         if let bundle = app?.bundleID, messagingApps.contains(bundle), let word = match(sending) {
