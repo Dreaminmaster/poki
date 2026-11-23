@@ -1433,7 +1433,7 @@ final class VoiceModel {
     }
     #endif
 
-    private func closed(_ reason: String, session number: Int, confirmed: Bool = false) {
+    private func closed(_ reason: String, session number: Int, confirmed: Bool = false, lostMessage: String? = nil, note: String? = nil) {
         guard number == session, link != nil else { return }
         if liveCloseTimeout != nil {
             finishLiveClose(reason, confirmed: confirmed)
@@ -1443,8 +1443,8 @@ final class VoiceModel {
         if usesLive && ready { logLiveClose(reason, confirmed: confirmed) }
         endSession()
         session += 1
-        phase = .lost(TalkState.connectionLost)
-        lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
+        phase = .lost(lostMessage ?? TalkState.connectionLost)
+        lines.append(VoiceLine(role: .note, text: note ?? AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
     }
@@ -1466,14 +1466,8 @@ final class VoiceModel {
             || (method == "poki/backend/turnCompleted" && params["status"] as? String == "failed") {
             let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
             let reason = failure.localizedDescription
-            closed("the ChatGPT voice backend failed", session: number, confirmed: true)
             if failure == .signIn { needsChatGPTSignIn = true }
-            phase = .lost(reason)
-            if lines.last?.role == .note {
-                lines[lines.count - 1].text = reason
-            } else {
-                lines.append(VoiceLine(role: .note, text: reason))
-            }
+            closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
             return
         }
         if method == "thread/realtime/transcript/delta", params["role"] as? String == "user" {

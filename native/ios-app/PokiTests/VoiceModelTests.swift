@@ -1917,6 +1917,8 @@ final class VoiceModelTests: XCTestCase {
                 AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
             }
             let h = Harness(codex: codex)
+            var delivered: [[VoiceLine]] = []
+            h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
             defer { h.voice.stop() }
             await h.connect()
 
@@ -1955,7 +1957,9 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertFalse(h.voice.isOn, "terminal backend error must end the silent stall and surface failure")
             XCTAssertEqual(h.voice.phase, .lost(CodexVoice.Failure.backendFailed.localizedDescription))
             XCTAssertEqual(h.voice.talkState?.isFailed, true)
-            XCTAssertEqual(h.voice.lines.filter { $0.role == .note && $0.text == CodexVoice.Failure.backendFailed.localizedDescription }.count, 1)
+            XCTAssertEqual(delivered.count, 1)
+            XCTAssertEqual(delivered.first?.filter { $0.role == .note && $0.text == CodexVoice.Failure.backendFailed.localizedDescription }.count, 1)
+            XCTAssertTrue(h.voice.lines.isEmpty)
             let terminalLogs = newLogs()
             XCTAssertTrue(terminalLogs.contains("Codex backend error: responseStreamDisconnected, retry: false (stream disconnected before completion)"), terminalLogs)
         }
