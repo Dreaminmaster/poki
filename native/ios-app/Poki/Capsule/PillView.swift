@@ -32,12 +32,16 @@ struct PillMetrics {
 /// on a faint white one with a white name.
 struct PillView: View {
     let data: PillTextAttachmentData
+    @Environment(\.colorScheme) private var scheme
 
     private var metrics: PillMetrics { PillMetrics(pointSize: data.fontData.pointSize) }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: metrics.icon * 0.225, style: .continuous)
         let ink = data.onAccent ? Color.white : Color(.label)
+        let fill = data.onAccent
+            ? Color.white.opacity(0.22)
+            : (scheme == .dark ? Color.white.opacity(0.13) : Color(.label).opacity(0.08))
         HStack(spacing: metrics.gap) {
             Group {
                 if let icon = AppIconStore.shared.icon(data.app.id, dark: false) {
@@ -58,7 +62,7 @@ struct PillView: View {
         .padding(.trailing, metrics.trailing)
         .frame(height: metrics.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08), in: RoundedRectangle(cornerRadius: metrics.icon * 0.225 + metrics.leading, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: metrics.icon * 0.225 + metrics.leading, style: .continuous))
         .accessibilityLabel(Text(verbatim: data.label))
     }
 
