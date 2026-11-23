@@ -1541,6 +1541,7 @@ final class VoiceModelTests: XCTestCase {
         let time: FakeTime
         private(set) var links: [FakeConnection] = []
         private(set) var microphone: [Bool] = []
+        private(set) var readyCues = 0
         var link: FakeConnection { links.last! }
 
         @MainActor init(time: FakeTime? = nil, failFirstNetworkPath: Bool = false, openingAudio: OpeningAudioProbe? = nil,
@@ -1552,9 +1553,10 @@ final class VoiceModelTests: XCTestCase {
             self.time = time
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
+            var cued: (() -> Void)!
             voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: { name, arguments, cancellation in
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
-            }, holdMicrophone: { held($0) },
+            }, holdMicrophone: { held($0) }, readyCue: { cued() },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link },
                                time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
             made = { [unowned self] in
@@ -1566,6 +1568,7 @@ final class VoiceModelTests: XCTestCase {
                 return link
             }
             held = { [unowned self] in self.microphone.append($0) }
+            cued = { [unowned self] in self.readyCues += 1 }
             _ = voice.setBridge(BridgeStub.address)
             // As in the app: an ended conversation goes into the chat, and its lines leave the voice model.
             voice.onConversationEnded = { _, _ in }
@@ -3790,5 +3793,93 @@ extension VoiceModelTests {
             XCTAssertEqual(h.voice.phase, .lost(TalkState.connectionLost))
             h.voice.stop()
         }
+    }
+
+    func testForegroundRealtimeReadyCuePlaysOnceOnSessionCreated() async {
+        let h = Harness()
+        await h.connect()
+        XCTAssertEqual(h.voice.phase, .connecting)
+        XCTAssertEqual(h.readyCues, 0, "ready cue must wait until the session is actually ready")
+
+        h.link.play(["type": "session.created"])
+        XCTAssertEqual(h.voice.phase, .listening)
+        XCTAssertEqual(h.readyCues, 1)
+
+        h.link.play(["type": "session.created"])
+        XCTAssertEqual(h.readyCues, 1, "duplicate session.created must not replay the ready cue")
+        h.voice.stop()
+    }
+
+    func testForegroundLiveReadyCuePlaysOnceOnSessionStarted() async {
+        let h = Harness()
+        _ = h.voice.setBridge(BridgeStub.liveAddress)
+        await h.connect()
+        XCTAssertEqual(h.voice.phase, .connecting)
+        XCTAssertEqual(h.readyCues, 0)
+
+        h.link.play(["type": "session.started"])
+        XCTAssertEqual(h.voice.phase, .listening)
+        XCTAssertEqual(h.readyCues, 1)
+
+        h.link.play(["type": "session.started"])
+        XCTAssertEqual(h.readyCues, 1, "duplicate session.started must not replay the ready cue")
+        h.voice.stop()
+    }
+
+    func testForegroundSubscriptionVoiceReadyCuePlaysWhenConnected() async throws {
+        try await withChatGPTSelected {
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(codex: codex)
+            await h.connect()
+            XCTAssertEqual(h.voice.phase, .listening)
+            XCTAssertEqual(h.readyCues, 1)
+            h.voice.stop()
+        }
+    }
+
+    func testBackgroundOpeningCaptureDoesNotReplayReadyCueWhenSessionConnects() async throws {
+        for live in [false, true] {
+            let audio = OpeningAudioProbe()
+            let h = Harness(openingAudio: audio)
+            if live { _ = h.voice.setBridge(BridgeStub.liveAddress) }
+            await h.voice.start(captureOpening: true)
+            XCTAssertTrue(h.voice.isCapturingOpening)
+            XCTAssertEqual(h.microphone, [true])
+            XCTAssertEqual(h.readyCues, 0)
+
+            h.link.play(["type": live ? "session.started" : "session.created"])
+            XCTAssertEqual(h.voice.phase, .listening)
+            XCTAssertEqual(h.readyCues, 0, "background Talk Here already plays its opening cue (live=\(live))")
+            h.voice.stop()
+        }
+
+        try await withChatGPTSelected {
+            let audio = OpeningAudioProbe()
+            let codex = FakeSubscriptionVoice()
+            let h = Harness(openingAudio: audio, codex: codex)
+            await h.voice.start(captureOpening: true)
+            XCTAssertTrue(h.voice.isCapturingOpening)
+            XCTAssertEqual(h.microphone, [true])
+            XCTAssertEqual(h.voice.phase, .listening)
+            XCTAssertEqual(h.readyCues, 0, "background Talk Here with ChatGPT subscription must not play a second cue")
+            h.voice.stop()
+        }
+    }
+
+    /// While the microphone is on (a voice-chat session), iOS keeps system sounds and haptics off unless
+    /// the session allows them, so the ready cue was silent exactly when it plays. Whether the sound is
+    /// heard, and not vibrated for in silent mode, needs a phone; what this holds is the session the
+    /// system consults.
+    func testTheReadyCueIsAllowedToSoundWhileTheMicrophoneIsOn() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+        try session.setActive(true)
+        defer { try? session.setActive(false) }
+        try session.setAllowHapticsAndSystemSoundsDuringRecording(false)
+        XCTAssertFalse(session.allowHapticsAndSystemSoundsDuringRecording, "a recording session starts with system sounds and haptics off")
+
+        VoiceReadyCue.play()
+
+        XCTAssertTrue(session.allowHapticsAndSystemSoundsDuringRecording, "the cue plays while the microphone is on")
     }
 }
