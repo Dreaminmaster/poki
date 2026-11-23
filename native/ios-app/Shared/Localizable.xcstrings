@@ -1,6 +1,403 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Enter your relay’s address first in Settings › External Connections › Address. Poki has no default relay." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter your relay address in Settings › External Connections › Address first. Poki has no default relay."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在“设置 › 外部连接 › 服务地址”中填写远程连接服务地址。Poki 没有默认远程连接服务。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先在「設定 › 外部連線 › 服務地址」中填寫遠端連線服務位址。Poki 沒有預設遠端連線服務。"
+          }
+        }
+      }
+    },
+    "Poki is offline (%@). Check that the phone has internet; Poki reconnects by itself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki is offline (%@). Check your internet connection; Poki reconnects automatically."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已离线（%@）。请检查网络连接，联网后会自动重连。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 已離線（%@）。請檢查網路連線，連網後會自動重連。"
+          }
+        }
+      }
+    },
+    "Poki is shutting down" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在关闭"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 正在關閉"
+          }
+        }
+      }
+    },
+    "Connection to the relay timed out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接远程连接服务超时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線至遠端連線服務逾時"
+          }
+        }
+      }
+    },
+    "The relay did not respond in time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务响应超时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務回應逾時"
+          }
+        }
+      }
+    },
+    "Unexpected response from the relay" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务返回了异常响应"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務回傳了異常回應"
+          }
+        }
+      }
+    },
+    "The relay refused this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务拒绝了此 iPhone 的连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務拒絕了此 iPhone 的連線"
+          }
+        }
+      }
+    },
+    "The relay refused this iPhone (%@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务拒绝了此 iPhone（%@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務拒絕了此 iPhone（%@）"
+          }
+        }
+      }
+    },
+    "The relay closed the connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务关闭了连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務關閉了連線"
+          }
+        }
+      }
+    },
+    "The relay closed the connection (%@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务关闭了连接（%@）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務關閉了連線（%@）"
+          }
+        }
+      }
+    },
+    "Connection replaced by a newer session" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接已被新会话替代"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線已被新工作階段取代"
+          }
+        }
+      }
+    },
+    "Relay authentication failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程连接服务认证失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端連線服務驗證失敗"
+          }
+        }
+      }
+    },
+    "No internet connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无网络连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無網路連線"
+          }
+        }
+      }
+    },
+    "Connection timed out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接超时"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線逾時"
+          }
+        }
+      }
+    },
+    "Could not find the relay server" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到远程连接服务地址"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到遠端連線服務位址"
+          }
+        }
+      }
+    },
+    "Could not connect to the relay server" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法连接到远程连接服务"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連線至遠端連線服務"
+          }
+        }
+      }
+    },
+    "Connection was interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接已中断"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線已中斷"
+          }
+        }
+      }
+    },
+    "Secure connection failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全连接失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全連線失敗"
+          }
+        }
+      }
+    },
+    "Connection failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線失敗"
+          }
+        }
+      }
+    },
+    "Check the local developer connection in Poki Setup → Loopback. Poki retries automatically." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请前往“配置 › 本地连接”检查本地连接，Poki 会自动重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請前往「配置 › 本機連線」檢查本機連線，Poki 會自動重試。"
+          }
+        }
+      }
+    },
+    "Check the developer disk image status in Poki Setup → Pairing. Poki retries automatically." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请前往“配置 › 配对”检查开发者磁盘映像状态，Poki 会自动重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請前往「配置 › 配對」檢查開發者磁碟映像狀態，Poki 會自動重試。"
+          }
+        }
+      }
+    },
+    "The developer disk image in Poki is for another iOS version. Open Poki and let it download the image again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 中的开发者磁盘映像与其他 iOS 版本对应。请打开 Poki 重新下载磁盘映像。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 中的開發者磁碟映像與其他 iOS 版本對應。請打開 Poki 重新下載磁碟映像。"
+          }
+        }
+      }
+    },
+    "The connection to Apple's signing server (gs.apple.com) returned something other than Apple's reply. In your proxy or VPN app, set gs.apple.com to connect directly (DIRECT), or switch to another node, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "访问 Apple 签名服务器（gs.apple.com）时未收到有效响应。请在代理或 VPN App 中将 gs.apple.com 设为直连（DIRECT），或切换其他节点后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存取 Apple 簽名伺服器（gs.apple.com）時未收到有效回應。請在代理或 VPN App 中將 gs.apple.com 設為直連（DIRECT），或切換其他節點後重試。"
+          }
+        }
+      }
+    },
+    "The service comes with the developer disk image. Open Setup and wait until the image is ready, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该服务随开发者磁盘映像提供。请打开“配置”，等待映像就绪后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "該服務隨開發者磁碟映像提供。請打開「配置」，等待映像就緒後重試。"
+          }
+        }
+      }
+    },
     "A proxy app answers instead of this iPhone" : {
       "localizations" : {
         "zh-Hans" : {

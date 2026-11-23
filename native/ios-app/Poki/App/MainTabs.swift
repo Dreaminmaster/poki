@@ -93,7 +93,7 @@ struct AgentsView: View {
         if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
         if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
         if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
-        return Health.relay(model).word
+        return Health.relayStatusText(model)
     }
 
     @Environment(AppModel.self) private var model

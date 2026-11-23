@@ -57,12 +57,16 @@ final class HealthRelayLoopbackTests: XCTestCase {
         for account in keychainAccounts { Keychain.delete(account) }
     }
 
-    private func makeModel(imageMounted: @escaping () -> Bool = { false }) -> AppModel {
+    private func makeModel(
+        imageMounted: @escaping () -> Bool = { false },
+        localVPNAvailable: Bool? = nil
+    ) -> AppModel {
         let model = AppModel(
             launcher: FakeLauncher(),
             pairer: FakePairing(),
             automation: FakeAutomation(),
-            imageMounted: imageMounted
+            imageMounted: imageMounted,
+            localVPNAvailable: localVPNAvailable
         )
         model.setup.runnerInstalled = true
         model.setup.developerMode = true
@@ -225,6 +229,18 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertFalse(Issue.current(model).contains { $0.id == "problem" || $0.id == "loopback" || $0.id == "proxy" },
                        "Issues must not show loopback error when external proxy answers: \(Issue.current(model).map(\.id))")
 
+        // Test-signed external build (`local VPN: unavailable`): stale `.builtIn` with working external
+        // proxy must auto-migrate to `.proxy` and produce zero loopback errors.
+        let externalBuildModel = makeModel(localVPNAvailable: false)
+        defer { externalBuildModel.stopSession() }
+        externalBuildModel.setup.loopback = .builtIn
+        externalBuildModel.loopback.simulate(.working(ms: 1591))
+        externalBuildModel.startSession(reconnectLocal: false)
+        XCTAssertEqual(externalBuildModel.setup.loopback, .proxy)
+        XCTAssertTrue(externalBuildModel.sessionOn)
+        XCTAssertNil(externalBuildModel.problem)
+        XCTAssertFalse(Issue.current(externalBuildModel).contains { $0.id == "problem" || $0.id == "loopback" || $0.id == "proxy" })
+
         // Stale loopback problem set while loopback was down clears once local_ddi makes canStartTasks true.
         let ddiModel = makeModel(imageMounted: { true })
         defer { ddiModel.stopSession() }
@@ -239,6 +255,49 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertFalse(Issue.current(ddiModel).contains { $0.id == "problem" || $0.id == "loopback" })
     }
 
+    /// 5. All PokiCore `RelayStatus.offline(why)` reasons and interpolated pairing-refused problems
+    /// map to localized Simplified/Traditional Chinese without exposing raw English.
+    func testAllRelayOfflineReasonsAndInterpolatedProblemsLocalizeInChinese() {
+        let samples: [(raw: String, expectedZhHans: String)] = [
+            ("stopped", "已停止"),
+            ("Poki is shutting down", "Poki 正在关闭"),
+            ("connecting to the relay did not finish within 15 s", "连接远程连接服务超时"),
+            ("the relay's challenge did not finish within 15 s", "远程连接服务响应超时"),
+            ("the relay's ready did not finish within 15 s", "远程连接服务响应超时"),
+            ("the relay sent no challenge", "远程连接服务返回了异常响应"),
+            ("the relay refused the phone: bad_signature", "远程连接服务认证失败"),
+            ("the relay refused the phone: 403", "远程连接服务拒绝了此 iPhone（403）"),
+            ("the relay closed the connection: replaced", "连接已被新会话替代"),
+            ("the relay closed the connection: no reason", "远程连接服务关闭了连接"),
+            ("Error Domain=NSURLErrorDomain Code=-1009 \"The Internet connection appears to be offline.\"", "无网络连接"),
+            ("Error Domain=NSURLErrorDomain Code=-1001 \"The request timed out.\"", "连接超时"),
+            ("Error Domain=NSURLErrorDomain Code=-1003 \"A server with the specified hostname could not be found.\"", "找不到远程连接服务地址"),
+            ("Error Domain=NSURLErrorDomain Code=-1004 \"Could not connect to the server.\"", "无法连接到远程连接服务"),
+            ("Error Domain=NSPOSIXErrorDomain Code=57 \"Socket is not connected\"", "连接已中断"),
+            ("Error Domain=NSURLErrorDomain Code=-1200 \"An SSL error has occurred\"", "安全连接失败"),
+            ("some unrecognized upstream failure", "连接失败"),
+        ]
+
+        AppLocalization.shared.preference = "zh-Hans"
+        for sample in samples {
+            let reason = Health.relayOfflineReason(sample.raw)
+            XCTAssertEqual(reason, sample.expectedZhHans, "raw: \(sample.raw)")
+            let statusText = Health.relayStatusText(.offline(sample.raw))
+            XCTAssertTrue(statusText.hasPrefix("离线"), "statusText: \(statusText)")
+            XCTAssertTrue(statusText.contains(sample.expectedZhHans), "statusText: \(statusText)")
+            XCTAssertFalse(statusText.contains("Error Domain="), "statusText: \(statusText)")
+        }
+
+        let refused = Issue.localizedProblem("The phone refused the pairing (invalid cert). Pair again in Setup.")
+        XCTAssertTrue(refused.contains("重新配对") && refused.contains("invalid cert"), refused)
+        XCTAssertFalse(refused.contains("The phone refused"), refused)
+
+        AppLocalization.shared.preference = "zh-Hant"
+        XCTAssertEqual(Health.relayOfflineReason("Error Domain=NSURLErrorDomain Code=-1004 \"Could not connect to the server.\""), "無法連線至遠端連線服務")
+        let refusedHant = Issue.localizedProblem("The phone refused the pairing (invalid cert). Pair again in Setup.")
+        XCTAssertTrue(refusedHant.contains("重新配對") && refusedHant.contains("invalid cert"), refusedHant)
+    }
+
     // MARK: - Helpers
 
     private func renderedLabels<Content: View>(of view: Content, model: AppModel) async throws -> [String] {
@@ -247,7 +306,11 @@ final class HealthRelayLoopbackTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: scene.screen.bounds.width, height: 1600)
         window.rootViewController = UIHostingController(
-            rootView: view.environment(model).environment(chat).environment(\.accessibilityEnabled, true)
+            rootView: view
+                .environment(model)
+                .environment(chat)
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.accessibilityEnabled, true)
         )
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
