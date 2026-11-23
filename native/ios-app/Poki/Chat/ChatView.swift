@@ -191,7 +191,7 @@ struct ChatView: View {
                     Label(ActivityWords.local("Waiting for Split View"), systemImage: "rectangle.split.2x1")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
+                ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts, conversationID: chat.sessionID,
                                   send: { chat.send($0, attachments: $1) }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
             }
@@ -1290,7 +1290,9 @@ struct ComposerInputView: View {
     /// pictures) is cleared and the keyboard goes down, as the page first was; an empty field takes
     /// the keyboard.
     var restarts = 0
+    var conversationID = ""
     @State private var attachmentGeneration = UUID()
+    @State private var pickerGeneration = UUID()
     var send: (String, [ChatAttachment]) -> Void
     var stop: () -> Void
     /// Starts the live voice conversation.
@@ -1452,20 +1454,21 @@ struct ComposerInputView: View {
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             picked = []
-            let generation = attachmentGeneration
+            let generation = pickerGeneration
             Task { await addPhotos(items, generation: generation) }
         }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else { return }
+            guard pickerGeneration == attachmentGeneration, case .success(let urls) = result else { return }
             for url in urls { add { try AttachmentReader.file(url) } }
         }
         .fullScreenCover(isPresented: $takingPhoto) {
             CameraPicker { image in
                 takingPhoto = false
-                if let image { add { try AttachmentReader.photo(image) } }
+                if pickerGeneration == attachmentGeneration, let image { add { try AttachmentReader.photo(image) } }
             }
             .ignoresSafeArea()
         }
+        .onChange(of: conversationID) { attachmentGeneration = UUID() }
         .onChange(of: restarts) {
             attachmentGeneration = UUID()
             adding = false
@@ -1589,9 +1592,9 @@ struct ComposerInputView: View {
     /// whole composer.
     private var ways: some View {
         VStack(alignment: .leading, spacing: 0) {
-            way("Photos", "photo", "composer.photos") { choosingPhotos = true }
-            way("Take Photo", "camera", "composer.camera", enabled: UIImagePickerController.isSourceTypeAvailable(.camera)) { takingPhoto = true }
-            way("Files", "folder", "composer.files") { choosingFiles = true }
+            way("Photos", "photo", "composer.photos") { pickerGeneration = attachmentGeneration; choosingPhotos = true }
+            way("Take Photo", "camera", "composer.camera", enabled: UIImagePickerController.isSourceTypeAvailable(.camera)) { pickerGeneration = attachmentGeneration; takingPhoto = true }
+            way("Files", "folder", "composer.files") { pickerGeneration = attachmentGeneration; choosingFiles = true }
         }
         .padding(.vertical, 6)
         .fixedSize()
