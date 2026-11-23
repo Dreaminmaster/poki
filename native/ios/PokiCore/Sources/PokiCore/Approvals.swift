@@ -39,9 +39,8 @@ public struct SensitivityRules: Sendable, Equatable {
     private static let deleteControlTypes: Set<String> = ["Button", "MenuItem", "Cell", "Other", "StaticText", "Text", "Link"]
     private static let deleteMenuContainerTypes: Set<String> = ["Menu", "MenuBar", "MenuBarItem", "MenuItem", "Popover"]
     private static let deleteDialogContainerTypes: Set<String> = ["Alert", "Sheet", "Dialog"]
-    private static let topLevelWindowContainerTypes: Set<String> = ["Application", "Window"]
     private static let nonDialogContainerTypes: Set<String> = [
-        "NavigationBar", "TabBar", "Toolbar",
+        "Application", "Window", "NavigationBar", "TabBar", "Toolbar",
         "Table", "CollectionView", "ScrollView", "WebView", "Cell", "Group",
     ]
     private static let formInputTypes: Set<String> = [
@@ -127,9 +126,8 @@ public struct SensitivityRules: Sendable, Equatable {
             .filter { $0.contains(element) }
             .sorted { ($0.end - $0.node, -$0.depth) < ($1.end - $1.node, -$1.depth) }
         if ancestors.contains(where: isContextMenuOrDialogContainer) { return true }
-        if ancestors.contains(where: { nonDialogContainerTypes.contains($0.type) }) { return false }
         for container in ancestors {
-            if topLevelWindowContainerTypes.contains(container.type) { continue }
+            if nonDialogContainerTypes.contains(container.type) { return false }
             if !container.frame.isEmpty, container.frame.height > 460 { continue }
             let inside = elements.filter { container.contains($0) }
             if inside.contains(where: { formInputTypes.contains($0.type) }) { continue }
