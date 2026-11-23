@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import PiSwiftAI
 import Security
 import XCTest
 @testable import Poki
@@ -578,22 +579,17 @@ final class CodexKeychainMigrationTests: XCTestCase {
     }
 
     func testVoiceRequireAccountReloadsRuntimeCacheWhenStoredCredentialIsReady() async throws {
-        try FileManager.default.createDirectory(at: CodexAccount.home, withIntermediateDirectories: true)
-        let account = try expectedAccountKey(for: CodexAccount.home)
-        let backup = try Keychain.readWithAttributes(account, service: "Codex Auth")
-        defer {
-            try? Keychain.remove(account, service: "Codex Auth")
-            if let backup {
-                try? Keychain.write(backup.data, account: account, service: "Codex Auth")
-            }
-        }
-        try? Keychain.remove(account, service: "Codex Auth")
+        let service = makeTestService()
+        defer { assertServiceCleanedUp(service) }
+        let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let account = try expectedAccountKey(for: home)
         let validData = try makeCredentialData(
             accessToken: makeJWT(exp: Int(Date().timeIntervalSince1970) + 3600, subject: "voice-reload"),
             lastRefresh: "2026-11-23T10:00:00Z"
         )
         try addRawKeychainItem(
-            service: "Codex Auth",
+            service: service,
             account: account,
             data: validData,
             accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -633,7 +629,9 @@ final class CodexKeychainMigrationTests: XCTestCase {
                     push(["id": id, "result": [:]])
                 }
                 return true
-            }
+            },
+            codexService: service,
+            home: home
         )
         defer { voice.stop() }
 
@@ -731,9 +729,13 @@ final class CodexKeychainMigrationTests: XCTestCase {
         var sentMethods: [String] = []
         var reloaded = false
         func push(_ payload: [String: Any]) {
-            guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
-            let text = String(decoding: bytes, as: UTF8.self)
-            Task { @MainActor in emit?(text) }
+            do {
+                let bytes = try JSONSerialization.data(withJSONObject: payload)
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            } catch {
+                XCTFail("Failed to encode mock RPC payload: \(error)")
+            }
         }
 
         let voice = CodexVoice(
@@ -742,8 +744,18 @@ final class CodexKeychainMigrationTests: XCTestCase {
                 return true
             },
             sendBridge: { text in
-                guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
-                      let method = object["method"] as? String,
+                let object: [String: Any]
+                do {
+                    guard let decoded = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                        XCTFail("Expected JSON object in sendBridge payload")
+                        return false
+                    }
+                    object = decoded
+                } catch {
+                    XCTFail("Failed to decode sendBridge payload: \(error)")
+                    return false
+                }
+                guard let method = object["method"] as? String,
                       let id = object["id"] else { return false }
                 sentMethods.append(method)
                 switch method {
@@ -837,8 +849,10 @@ final class CodexKeychainMigrationTests: XCTestCase {
     }
 
     func testSignOutIncludingVoicePreservesCurrentKeyForRemoteRevokeGatesMigrationAndClearsAllCredentials() async throws {
-        let service = makeTestService()
-        defer { assertServiceCleanedUp(service) }
+        let codexService = makeTestService()
+        defer { assertServiceCleanedUp(codexService) }
+        let modelKeysService = makeTestModelKeysService()
+        defer { assertServiceCleanedUp(modelKeysService) }
         let home = try makeTempDirectory().appendingPathComponent("CodexVoice", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let current = try expectedAccountKey(for: home)
@@ -846,8 +860,18 @@ final class CodexKeychainMigrationTests: XCTestCase {
 
         let currentData = try makeCredentialData(accessToken: "tok-active-signout", lastRefresh: "2026-11-23T11:00:00Z")
         let legacyData = try makeCredentialData(accessToken: "tok-legacy-signout", lastRefresh: "2026-11-20T11:00:00Z")
-        try addRawKeychainItem(service: service, account: current, data: currentData, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
-        try addRawKeychainItem(service: service, account: legacyAccount, data: legacyData, accessible: kSecAttrAccessibleWhenUnlocked)
+        try addRawKeychainItem(service: codexService, account: current, data: currentData, accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)
+        try addRawKeychainItem(service: codexService, account: legacyAccount, data: legacyData, accessible: kSecAttrAccessibleWhenUnlocked)
+        try ChatGPTAccount.save(
+            OAuthCredentials(
+                refresh: "legacy-oauth-refresh",
+                access: "legacy-oauth-access",
+                expires: Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000,
+                clientId: "fixture-client"
+            ),
+            service: modelKeysService
+        )
+        XCTAssertNotNil(try Keychain.read("model-key.chatgpt", service: modelKeysService))
 
         var emit: (@MainActor (String) -> Void)?
         var sentMethods: [String] = []
@@ -859,9 +883,13 @@ final class CodexKeychainMigrationTests: XCTestCase {
         var legacyAfterGatedProbe: Data?
         var logoutHookError: Error?
         func push(_ payload: [String: Any]) {
-            guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
-            let text = String(decoding: bytes, as: UTF8.self)
-            Task { @MainActor in emit?(text) }
+            do {
+                let bytes = try JSONSerialization.data(withJSONObject: payload)
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            } catch {
+                XCTFail("Failed to encode mock RPC payload: \(error)")
+            }
         }
 
         let voice = CodexVoice(
@@ -870,8 +898,18 @@ final class CodexKeychainMigrationTests: XCTestCase {
                 return true
             },
             sendBridge: { text in
-                guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
-                      let method = object["method"] as? String,
+                let object: [String: Any]
+                do {
+                    guard let decoded = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                        XCTFail("Expected JSON object in sendBridge payload")
+                        return false
+                    }
+                    object = decoded
+                } catch {
+                    XCTFail("Failed to decode sendBridge payload: \(error)")
+                    return false
+                }
+                guard let method = object["method"] as? String,
                       let id = object["id"] else { return false }
                 sentMethods.append(method)
                 switch method {
@@ -881,13 +919,13 @@ final class CodexKeychainMigrationTests: XCTestCase {
                     push(["id": id, "result": ["thread": ["id": "signout-thread"]]])
                 case "account/logout":
                     do {
-                        logoutObservedCurrentBeforeDelete = try Keychain.read(current, service: service)
-                        logoutObservedLegacyBeforeDelete = try Keychain.read(legacyAccount, service: service)
-                        try Keychain.remove(current, service: service)
-                        gatePrepareState = CodexAccount.prepareStorage(service: service, home: home)
-                        gateReadToken = CodexAccount.readAccessToken(service: service, home: home)
-                        currentAfterGatedProbe = try Keychain.read(current, service: service)
-                        legacyAfterGatedProbe = try Keychain.read(legacyAccount, service: service)
+                        logoutObservedCurrentBeforeDelete = try Keychain.read(current, service: codexService)
+                        logoutObservedLegacyBeforeDelete = try Keychain.read(legacyAccount, service: codexService)
+                        try Keychain.remove(current, service: codexService)
+                        gatePrepareState = CodexAccount.prepareStorage(service: codexService, home: home)
+                        gateReadToken = CodexAccount.readAccessToken(service: codexService, home: home)
+                        currentAfterGatedProbe = try Keychain.read(current, service: codexService)
+                        legacyAfterGatedProbe = try Keychain.read(legacyAccount, service: codexService)
                     } catch {
                         logoutHookError = error
                     }
@@ -897,12 +935,17 @@ final class CodexKeychainMigrationTests: XCTestCase {
                 }
                 return true
             },
-            prepareStorage: { CodexAccount.prepareStorage(service: service, home: home) }
+            codexService: codexService,
+            home: home
         )
         defer { voice.stop() }
 
         try await voice.prepare(onEvent: { _, _ in }, onTool: { _, _ in ("", false, nil) })
-        try await ChatGPTAccount.signOutIncludingVoice(voice: voice, service: service)
+        try await ChatGPTAccount.signOutIncludingVoice(
+            voice: voice,
+            codexService: codexService,
+            modelKeysService: modelKeysService
+        )
 
         XCTAssertNil(logoutHookError, "Unexpected Keychain error inside account/logout hook: \(String(describing: logoutHookError))")
         XCTAssertEqual(sentMethods, ["account/read", "thread/start", "thread/realtime/stop", "account/logout"])
@@ -917,18 +960,26 @@ final class CodexKeychainMigrationTests: XCTestCase {
         XCTAssertNil(currentAfterGatedProbe, "Sign-out gate must prevent migrating cli|<old> back into cli|<current>")
         XCTAssertEqual(legacyAfterGatedProbe, legacyData, "Gated probe must not modify or remove cli|<old>")
 
-        XCTAssertNil(try Keychain.read(current, service: service))
-        XCTAssertNil(try Keychain.read(legacyAccount, service: service))
-        let remainingAfterSignOut = try Keychain.readAll(service: service).filter { $0.account.hasPrefix("cli|") }
+        XCTAssertNil(try Keychain.read(current, service: codexService))
+        XCTAssertNil(try Keychain.read(legacyAccount, service: codexService))
+        let remainingAfterSignOut = try Keychain.readAll(service: codexService).filter { $0.account.hasPrefix("cli|") }
         XCTAssertTrue(remainingAfterSignOut.isEmpty)
-        XCTAssertEqual(CodexAccount.prepareStorage(service: service, home: home), .empty)
-        XCTAssertNil(CodexAccount.readAccessToken(service: service, home: home))
+        XCTAssertNil(try Keychain.read("model-key.chatgpt", service: modelKeysService))
+        XCTAssertNil(ModelKeys.key(.chatgpt, service: modelKeysService))
+        XCTAssertEqual(CodexAccount.prepareStorage(service: codexService, home: home), .empty)
+        XCTAssertNil(CodexAccount.readAccessToken(service: codexService, home: home))
     }
 
     // MARK: - Helpers
 
     private func makeTestService() -> String {
         let service = "Codex Auth Test.\(UUID().uuidString)"
+        createdServices.append(service)
+        return service
+    }
+
+    private func makeTestModelKeysService() -> String {
+        let service = "Poki ModelKeys Test.\(UUID().uuidString)"
         createdServices.append(service)
         return service
     }

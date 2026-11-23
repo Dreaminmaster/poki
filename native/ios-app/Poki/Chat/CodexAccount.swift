@@ -12,14 +12,15 @@ enum CodexAccount {
         case failed(OSStatus)
     }
 
-    static let defaultService = "Codex Auth"
+    @TaskLocal static var defaultService = "Codex Auth"
+    @TaskLocal static var defaultHome: URL?
     private static let cliAccountPrefix = "cli|"
     private static let targetAccessibility = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
     private static let storageLock = NSLock()
     private static var signOutDepth = 0
 
     static var home: URL {
-        URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
+        defaultHome ?? URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
     }
 
     /// The pinned App Server's direct Keychain store. Read the same item for text requests so the
@@ -56,7 +57,7 @@ enum CodexAccount {
         do {
             guard let bytes = try Keychain.read(account, service: service),
                   let signIn = decodeValidSignIn(bytes) else { return nil }
-            return signIn.tokens.accessToken
+            return signIn.accessToken
         } catch {
             logVoice("Codex Keychain read failed: OSStatus \((error as NSError).code)")
             return nil
@@ -110,9 +111,9 @@ enum CodexAccount {
                   item.account != currentAccount,
                   let signIn = decodeValidSignIn(item.data) else { continue }
             let rank = CredentialRank(
-                notExpiringSoon: !expiresSoon(signIn.tokens.accessToken),
-                lastRefresh: parseISO8601(signIn.lastRefresh) ?? .distantPast,
-                jwtExpiry: jwtExpiry(signIn.tokens.accessToken) ?? 0,
+                notExpiringSoon: !expiresSoon(signIn.accessToken),
+                lastRefresh: signIn.lastRefresh ?? .distantPast,
+                jwtExpiry: jwtExpiry(signIn.accessToken) ?? 0,
                 modified: item.modified ?? .distantPast
             )
             if best == nil || best!.rank < rank {
@@ -210,20 +211,30 @@ enum CodexAccount {
         return "\(cliAccountPrefix)\(key)"
     }
 
-    private static func decodeValidSignIn(_ data: Data) -> SignIn? {
+    private static func decodeValidSignIn(_ data: Data) -> ValidSignIn? {
         guard let signIn = try? JSONDecoder().decode(SignIn.self, from: data),
               signIn.authMode == "chatgpt",
               !signIn.tokens.accessToken.isEmpty,
               !signIn.tokens.refreshToken.isEmpty,
-              isValidJWT(signIn.tokens.idToken) else { return nil }
-        return signIn
+              decodeIdClaims(from: signIn.tokens.idToken) != nil else { return nil }
+
+        let parsedLastRefresh: Date?
+        if let rawLastRefresh = signIn.lastRefresh {
+            guard let date = parseRFC3339(rawLastRefresh) else { return nil }
+            parsedLastRefresh = date
+        } else {
+            parsedLastRefresh = nil
+        }
+
+        return ValidSignIn(accessToken: signIn.tokens.accessToken, lastRefresh: parsedLastRefresh)
     }
 
-    private static func isValidJWT(_ token: String) -> Bool {
-        decodeJWTPayload(token) != nil
+    private static func decodeIdClaims(from token: String) -> IdClaims? {
+        guard let payload = decodeJWTPayloadData(token) else { return nil }
+        return try? JSONDecoder().decode(IdClaims.self, from: payload)
     }
 
-    private static func decodeJWTPayload(_ token: String) -> [String: Any]? {
+    private static func decodeJWTPayloadData(_ token: String) -> Data? {
         let parts = token.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3,
               !parts[0].isEmpty, !parts[1].isEmpty, !parts[2].isEmpty else { return nil }
@@ -232,22 +243,93 @@ enum CodexAccount {
               !payloadPart.contains("/"),
               !payloadPart.contains("="),
               let payload = Data(base64URL: payloadPart),
-              let body = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
-        return body
+              payload.base64URL == payloadPart else { return nil }
+        return payload
     }
 
-    private static func parseISO8601(_ value: String?) -> Date? {
-        guard let value, !value.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) { return date }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: value)
+    private static func parseRFC3339(_ value: String) -> Date? {
+        let bytes = Array(value.utf8)
+        guard bytes.count >= 20 else { return nil }
+
+        func digits(_ range: Range<Int>) -> Int? {
+            var result = 0
+            for index in range {
+                let byte = bytes[index]
+                guard byte >= 48 && byte <= 57 else { return nil }
+                result = result * 10 + Int(byte - 48)
+            }
+            return result
+        }
+
+        guard bytes[4] == 45, bytes[7] == 45,
+              bytes[10] == 84 || bytes[10] == 116 || bytes[10] == 32,
+              bytes[13] == 58, bytes[16] == 58,
+              let year = digits(0..<4),
+              let month = digits(5..<7),
+              let day = digits(8..<10),
+              let hour = digits(11..<13),
+              let minute = digits(14..<16),
+              let second = digits(17..<19),
+              (1...12).contains(month),
+              (0...23).contains(hour),
+              (0...59).contains(minute),
+              (0...59).contains(second) else { return nil }
+
+        var index = 19
+        var fractionalSeconds = 0.0
+        if index < bytes.count && bytes[index] == 46 {
+            index += 1
+            let start = index
+            while index < bytes.count && bytes[index] >= 48 && bytes[index] <= 57 {
+                index += 1
+            }
+            let count = index - start
+            guard (1...9).contains(count) else { return nil }
+            var scale = 0.1
+            for position in start..<index {
+                fractionalSeconds += Double(bytes[position] - 48) * scale
+                scale *= 0.1
+            }
+        }
+
+        guard index < bytes.count else { return nil }
+        let offsetSeconds: Int
+        if bytes[index] == 90 || bytes[index] == 122 {
+            guard index + 1 == bytes.count else { return nil }
+            offsetSeconds = 0
+        } else if bytes[index] == 43 || bytes[index] == 45 {
+            let sign = bytes[index] == 43 ? 1 : -1
+            guard index + 6 == bytes.count,
+                  bytes[index + 3] == 58,
+                  let offsetHour = digits((index + 1)..<(index + 3)),
+                  let offsetMinute = digits((index + 4)..<(index + 6)),
+                  (0...23).contains(offsetHour),
+                  (0...59).contains(offsetMinute) else { return nil }
+            offsetSeconds = sign * (offsetHour * 3600 + offsetMinute * 60)
+        } else {
+            return nil
+        }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute,
+            second: second
+        )
+        guard components.isValidDate(in: calendar),
+              let base = calendar.date(from: components) else { return nil }
+        return base.addingTimeInterval(fractionalSeconds - Double(offsetSeconds))
     }
 
     private static func jwtExpiry(_ token: String) -> TimeInterval? {
-        guard let body = decodeJWTPayload(token) else { return nil }
+        guard let payload = decodeJWTPayloadData(token),
+              let body = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
         if let expiry = body["exp"] as? TimeInterval { return expiry }
         if let expiry = body["exp"] as? NSNumber { return expiry.doubleValue }
         return nil
@@ -259,6 +341,11 @@ enum CodexAccount {
         } else {
             Task { @MainActor in AppLog.shared.add("voice", message) }
         }
+    }
+
+    private struct ValidSignIn {
+        let accessToken: String
+        let lastRefresh: Date?
     }
 
     private struct CredentialRank: Comparable {
@@ -283,13 +370,17 @@ enum CodexAccount {
 
     private struct SignIn: Decodable {
         let authMode: String
+        let openAIApiKey: String?
         let tokens: Tokens
         let lastRefresh: String?
+        let personalAccessToken: String?
 
         enum CodingKeys: String, CodingKey {
             case authMode = "auth_mode"
+            case openAIApiKey = "OPENAI_API_KEY"
             case tokens
             case lastRefresh = "last_refresh"
+            case personalAccessToken = "personal_access_token"
         }
     }
 
@@ -297,11 +388,72 @@ enum CodexAccount {
         let accessToken: String
         let refreshToken: String
         let idToken: String
+        let oauthProvenance: AccountOAuthProvenance?
+        let loginOwnerId: String?
+        let accountId: String?
 
         enum CodingKeys: String, CodingKey {
             case accessToken = "access_token"
             case refreshToken = "refresh_token"
             case idToken = "id_token"
+            case oauthProvenance = "oauth_provenance"
+            case loginOwnerId = "login_owner_id"
+            case accountId = "account_id"
+        }
+    }
+
+    private struct AccountOAuthProvenance: Decodable {
+        let issuer: String
+        let clientId: String
+
+        enum CodingKeys: String, CodingKey {
+            case issuer
+            case clientId = "client_id"
+        }
+    }
+
+    private struct IdClaims: Decodable {
+        let email: String?
+        let profile: ProfileClaims?
+        let auth: AuthClaims?
+
+        enum CodingKeys: String, CodingKey {
+            case email
+            case profile = "https://api.openai.com/profile"
+            case auth = "https://api.openai.com/auth"
+        }
+    }
+
+    private struct ProfileClaims: Decodable {
+        let email: String?
+    }
+
+    private struct AuthClaims: Decodable {
+        let chatgptPlanType: String?
+        let chatgptUserId: String?
+        let userId: String?
+        let chatgptAccountId: String?
+        let chatgptAccountIsFedramp: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case chatgptPlanType = "chatgpt_plan_type"
+            case chatgptUserId = "chatgpt_user_id"
+            case userId = "user_id"
+            case chatgptAccountId = "chatgpt_account_id"
+            case chatgptAccountIsFedramp = "chatgpt_account_is_fedramp"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            chatgptPlanType = try container.decodeIfPresent(String.self, forKey: .chatgptPlanType)
+            chatgptUserId = try container.decodeIfPresent(String.self, forKey: .chatgptUserId)
+            userId = try container.decodeIfPresent(String.self, forKey: .userId)
+            chatgptAccountId = try container.decodeIfPresent(String.self, forKey: .chatgptAccountId)
+            if container.contains(.chatgptAccountIsFedramp) {
+                chatgptAccountIsFedramp = try container.decode(Bool.self, forKey: .chatgptAccountIsFedramp)
+            } else {
+                chatgptAccountIsFedramp = false
+            }
         }
     }
 }

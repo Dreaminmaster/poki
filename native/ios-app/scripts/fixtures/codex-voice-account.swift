@@ -14,10 +14,13 @@ enum CodexAccount {
     enum StorageState: Equatable {
         case ready, migrated, empty, locked, failed(Int32)
     }
+    static let defaultService = "Codex Auth"
     static let home = URL.temporaryDirectory.appending(path: "fixture-voice-account")
     @discardableResult
-    static func prepareStorage() -> StorageState { state == .missing ? .empty : .ready }
-    static func ensureAfterFirstUnlock() {}
+    static func prepareStorage(service: String = defaultService, home: URL = CodexAccount.home) -> StorageState {
+        state == .missing ? .empty : .ready
+    }
+    static func ensureAfterFirstUnlock(service: String = defaultService, home: URL = CodexAccount.home) {}
 }
 enum AppLocalization { static func text(_ value: String) -> String { value } }
 final class AppLog {

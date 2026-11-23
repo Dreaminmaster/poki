@@ -66,16 +66,22 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private let startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)?
     @ObservationIgnored private let sendBridge: ((String) -> Bool)?
     @ObservationIgnored private let prepareStorageBridge: (() -> CodexAccount.StorageState)?
+    @ObservationIgnored private let codexService: String
+    @ObservationIgnored private let codexHome: URL
 
     init(startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)? = nil,
          sendBridge: ((String) -> Bool)? = nil,
-         prepareStorage: (() -> CodexAccount.StorageState)? = nil) {
+         prepareStorage: (() -> CodexAccount.StorageState)? = nil,
+         codexService: String = CodexAccount.defaultService,
+         home: URL = CodexAccount.home) {
         self.startBridge = startBridge
         self.sendBridge = sendBridge
         self.prepareStorageBridge = prepareStorage
+        self.codexService = codexService
+        self.codexHome = home
     }
 
-    private var homePath: String { CodexAccount.home.path(percentEncoded: false) }
+    private var homePath: String { codexHome.path(percentEncoded: false) }
 
     func prepare(onEvent: @escaping (String, JSON) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
         let generation = UUID()
@@ -187,7 +193,7 @@ final class CodexVoice: SubscriptionVoice {
     }
 
     private func runPrepareStorage() -> CodexAccount.StorageState {
-        prepareStorageBridge?() ?? CodexAccount.prepareStorage()
+        prepareStorageBridge?() ?? CodexAccount.prepareStorage(service: codexService, home: codexHome)
     }
 
     func cancelLogin() {
@@ -239,7 +245,7 @@ final class CodexVoice: SubscriptionVoice {
         let authorized = try await request("account/read", ["refreshToken": false])
         guard loginAttempt == attempt else { throw CancellationError() }
         guard (authorized["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
-        CodexAccount.ensureAfterFirstUnlock()
+        CodexAccount.ensureAfterFirstUnlock(service: codexService, home: codexHome)
     }
 
     private func check(_ generation: UUID) throws {
