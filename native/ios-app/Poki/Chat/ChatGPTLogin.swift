@@ -60,6 +60,7 @@ enum ChatGPTAccount {
     @MainActor
     static func signOutIncludingVoice() async throws {
         try await CodexVoice.shared.signOut()
+        try CodexAccount.clearStoredCredentials()
         try signOut()
     }
 

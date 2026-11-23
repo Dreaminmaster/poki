@@ -10,7 +10,11 @@ enum VoiceDirect {
         ["type": "function", "name": "look", "description": "fixture", "inputSchema": ["type": "object"]],
     ]
 }
-enum CodexAccount { static let home = URL.temporaryDirectory.appending(path: "fixture-voice-account") }
+enum CodexAccount {
+    static let home = URL.temporaryDirectory.appending(path: "fixture-voice-account")
+    static func prepareStorage() {}
+    static func ensureAfterFirstUnlock() {}
+}
 enum AppLocalization { static func text(_ value: String) -> String { value } }
 final class AppLog {
     static let shared = AppLog()

@@ -192,6 +192,7 @@ final class CodexVoice: SubscriptionVoice {
         let authorized = try await request("account/read", ["refreshToken": false])
         guard loginAttempt == attempt else { throw CancellationError() }
         guard (authorized["account"] as? JSON)?["type"] as? String == "chatgpt" else { throw Failure.signIn }
+        CodexAccount.ensureAfterFirstUnlock()
     }
 
     private func check(_ generation: UUID) throws {
@@ -241,6 +242,7 @@ final class CodexVoice: SubscriptionVoice {
 
     private func startRuntime() throws {
         if running { return }
+        CodexAccount.prepareStorage()
         if let startBridge {
             running = startBridge(homePath) { [weak self] text in self?.receive(text) }
         } else {
