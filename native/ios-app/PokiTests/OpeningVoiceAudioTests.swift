@@ -1,3 +1,4 @@
+import AudioToolbox
 import AVFoundation
 import WebRTC
 import XCTest
@@ -10,17 +11,41 @@ final class OpeningVoiceAudioTests: XCTestCase {
         let preferredInputIOBufferDuration = 0.01
         let preferredOutputIOBufferDuration = 0.01
         private(set) var sent: [Int16] = []
+        private(set) var chunkCounts: [Int] = []
+        private(set) var deliveredSampleTimes: [Double] = []
+        var deliveryStatus: OSStatus = noErr
+        var playoutSamples: [Int16] = []
+        var playoutStatus: OSStatus = noErr
+        var playoutSilent = false
 
         var deliverRecordedData: RTCAudioDeviceDeliverRecordedDataBlock {
-            { [weak self] _, _, _, count, buffer, _, _ in
+            { [weak self] _, timestamp, _, count, buffer, _, _ in
+                guard let self else { return noErr }
+                self.chunkCounts.append(Int(count))
+                self.deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
                 if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
-                    self?.sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
+                    self.sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
                 }
-                return noErr
+                return self.deliveryStatus
             }
         }
         var getPlayoutData: RTCAudioDeviceGetPlayoutDataBlock {
-            { _, _, _, _, _ in noErr }
+            { [weak self] flags, _, _, count, buffer in
+                guard let self else { return noErr }
+                if self.playoutStatus != noErr { return self.playoutStatus }
+                if self.playoutSilent {
+                    flags.pointee.insert(.unitRenderAction_OutputIsSilence)
+                    return noErr
+                }
+                if let destination = buffer.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                    let n = min(Int(count), self.playoutSamples.count)
+                    for i in 0..<n { destination[i] = self.playoutSamples[i] }
+                    if n < Int(count) {
+                        destination.advanced(by: n).update(repeating: 0, count: Int(count) - n)
+                    }
+                }
+                return noErr
+            }
         }
         func notifyAudioInputParametersChange() {}
         func notifyAudioOutputParametersChange() {}
@@ -30,117 +55,120 @@ final class OpeningVoiceAudioTests: XCTestCase {
         func dispatchSync(_ block: @escaping () -> Void) { block() }
     }
 
-    private func makeFourChannelFloatBuffer(
-        sampleRate: Double,
-        frames: AVAudioFrameCount,
-        layoutTag: AudioChannelLayoutTag,
-        channelValues: [Float]
-    ) throws -> AVAudioPCMBuffer {
-        let layout = try XCTUnwrap(AVAudioChannelLayout(layoutTag: layoutTag))
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            interleaved: false,
-            channelLayout: layout
-        )
-        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
-        buffer.frameLength = frames
-        let channels = try XCTUnwrap(buffer.floatChannelData)
-        for ch in 0..<4 {
-            let value = ch < channelValues.count ? channelValues[ch] : 0
-            for frame in 0..<Int(frames) {
-                channels[ch][frame] = value
-            }
-        }
+    private func makeMonoPCM16Buffer(frames: Int, value: Int16) throws -> AVAudioPCMBuffer {
+        let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 1, interleaved: true))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)))
+        buffer.frameLength = AVAudioFrameCount(frames)
+        let data = try XCTUnwrap(buffer.int16ChannelData?[0])
+        data.update(repeating: value, count: frames)
         return buffer
     }
 
-    func testFourChannelDiscreteFloatBufferConvertsToNonZeroMonoPCM16AndDeliversToWebRTC() throws {
-        let probe = DelegateProbe()
+    @MainActor
+    func testAudioUnitRenderErrorLogsExplicitlyAndReleasesSessionOnStop() throws {
+        let priorLogs = Set(AppLog.shared.lines)
+        let session = RTCAudioSession.sharedInstance()
         let audio = OpeningVoiceAudio(session: 1, playReadyChime: false)
-        XCTAssertTrue(audio.initialize(with: probe))
-        XCTAssertTrue(audio.initializeRecording())
-        XCTAssertTrue(audio.startRecording())
+        try audio.startCapture()
+        defer { _ = audio.stopCapture(session: 1) }
 
-        let opening = try makeFourChannelFloatBuffer(
-            sampleRate: 48_000,
-            frames: 480,
-            layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 4,
-            channelValues: [0.25, 0.25, 0.25, 0.25]
+        XCTAssertTrue(audio.ensureRunning(), "startCapture must leave the VPIO audio unit and RTCAudioSession running")
+        XCTAssertTrue(session.isActive)
+
+        var flags: AudioUnitRenderActionFlags = []
+        var timestamp = AudioTimeStamp()
+        let status = audio.handleAudioUnitInput(
+            ioActionFlags: &flags,
+            inTimeStamp: &timestamp,
+            inBusNumber: 99,
+            inNumberFrames: 480
         )
-        XCTAssertTrue(audio.ingestCapturedBuffer(opening, at: AVAudioTime(sampleTime: 0, atRate: 48_000)))
-        XCTAssertEqual(audio.bufferedFrameCount, 480)
+        XCTAssertNotEqual(status, noErr, "Rendering from an invalid AudioUnit bus must return a real CoreAudio OSStatus error")
 
-        XCTAssertTrue(audio.allowSending(session: 1))
-        let liveChannel2Only = try makeFourChannelFloatBuffer(
-            sampleRate: 48_000,
-            frames: 480,
-            layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 4,
-            channelValues: [0.0, 0.0, 0.4, 0.0]
-        )
-        XCTAssertTrue(audio.ingestCapturedBuffer(liveChannel2Only, at: AVAudioTime(sampleTime: 480, atRate: 48_000)))
+        let errorLogs = AppLog.shared.lines.filter {
+            !priorLogs.contains($0) && $0.contains("opening audio unit render error") && $0.contains("\(status)")
+        }
+        XCTAssertFalse(errorLogs.isEmpty, "AudioUnitRender failure must be logged explicitly instead of swallowed silently")
 
-        XCTAssertEqual(probe.sent.count, 960)
-        let openingPeak = probe.sent.prefix(480).map { abs(Int($0)) }.max() ?? 0
-        let livePeak = probe.sent.suffix(480).map { abs(Int($0)) }.max() ?? 0
-        XCTAssertGreaterThan(openingPeak, 4_000, "4-channel DiscreteInOrder Float32 opening audio must not convert to all-zero Int16 samples")
-        XCTAssertGreaterThan(livePeak, 1_500, "4-channel audio with speech on a non-zero channel must be downmixed instead of dropped")
+        _ = audio.stopCapture(session: 1)
+        XCTAssertFalse(audio.ensureRunning())
+        XCTAssertFalse(session.isActive, "Stopping opening capture must release RTCAudioSession")
     }
 
-    func testFourChannelUnknownLayoutAt44100HzResamplesToNonZero48kHzMonoPCM16() throws {
+    func testAudioUnitPlayoutCallbackWritesWebRTCInt16PCMAndHandlesErrors() {
         let probe = DelegateProbe()
+        probe.playoutSamples = [1_234, -5_678, 9_012, -3_456]
         let audio = OpeningVoiceAudio(session: 1, playReadyChime: false)
         XCTAssertTrue(audio.initialize(with: probe))
-        XCTAssertTrue(audio.initializeRecording())
-        XCTAssertTrue(audio.startRecording())
+        XCTAssertTrue(audio.initializePlayout())
+        XCTAssertTrue(audio.startPlayout())
         XCTAssertTrue(audio.allowSending(session: 1))
 
-        let buffer = try makeFourChannelFloatBuffer(
-            sampleRate: 44_100,
-            frames: 441,
-            layoutTag: kAudioChannelLayoutTag_Unknown | 4,
-            channelValues: [0.3, 0.1, 0.2, 0.2]
+        var flags: AudioUnitRenderActionFlags = []
+        var timestamp = AudioTimeStamp()
+        XCTAssertEqual(
+            audio.handleAudioUnitPlayout(ioActionFlags: &flags, inTimeStamp: &timestamp, inNumberFrames: 4, ioData: nil),
+            kAudio_ParamError
         )
-        XCTAssertTrue(audio.ingestCapturedBuffer(buffer, at: AVAudioTime(sampleTime: 0, atRate: 44_100)))
 
-        XCTAssertGreaterThan(probe.sent.count, 400)
-        let peak = probe.sent.map { abs(Int($0)) }.max() ?? 0
-        XCTAssertGreaterThan(peak, 2_000, "4-channel Unknown layout at 44.1 kHz must resample to non-zero 48 kHz mono Int16")
+        var output = [Int16](repeating: 99, count: 4)
+        flags = []
+        let okStatus = output.withUnsafeMutableBufferPointer { buffer -> OSStatus in
+            var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                mNumberChannels: 1,
+                mDataByteSize: UInt32(buffer.count * MemoryLayout<Int16>.stride),
+                mData: buffer.baseAddress
+            ))
+            return audio.handleAudioUnitPlayout(ioActionFlags: &flags, inTimeStamp: &timestamp, inNumberFrames: 4, ioData: &list)
+        }
+        XCTAssertEqual(okStatus, noErr)
+        XCTAssertFalse(flags.contains(.unitRenderAction_OutputIsSilence))
+        XCTAssertEqual(output, [1_234, -5_678, 9_012, -3_456])
+
+        probe.playoutStatus = -50
+        output = [Int16](repeating: 77, count: 4)
+        flags = []
+        let errStatus = output.withUnsafeMutableBufferPointer { buffer -> OSStatus in
+            var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                mNumberChannels: 1,
+                mDataByteSize: UInt32(buffer.count * MemoryLayout<Int16>.stride),
+                mData: buffer.baseAddress
+            ))
+            return audio.handleAudioUnitPlayout(ioActionFlags: &flags, inTimeStamp: &timestamp, inNumberFrames: 4, ioData: &list)
+        }
+        XCTAssertEqual(errStatus, -50)
+        XCTAssertTrue(flags.contains(.unitRenderAction_OutputIsSilence))
+        XCTAssertEqual(output, [0, 0, 0, 0], "Failed WebRTC playout must zero the output buffer and mark silence")
     }
 
     @MainActor
-    func testUnconvertibleOrEmptyBufferLogsErrorAndDoesNotEmitZeroSamples() throws {
+    func testOpeningCaptureDeliversChunkedInt16AudioAndLogsDeliveryErrors() throws {
         let priorLogs = Set(AppLog.shared.lines)
         let probe = DelegateProbe()
         let audio = OpeningVoiceAudio(session: 1, playReadyChime: false)
         XCTAssertTrue(audio.initialize(with: probe))
         XCTAssertTrue(audio.initializeRecording())
         XCTAssertTrue(audio.startRecording())
+
+        let opening = try makeMonoPCM16Buffer(frames: 960, value: 4_200)
+        audio.input(opening, at: AVAudioTime(sampleTime: 0, atRate: 48_000))
+        XCTAssertEqual(audio.bufferedFrameCount, 960)
+        XCTAssertTrue(probe.sent.isEmpty, "Opening audio must stay buffered until WebRTC handoff")
+
         XCTAssertTrue(audio.allowSending(session: 1))
+        let live = try makeMonoPCM16Buffer(frames: 480, value: -2_100)
+        audio.input(live, at: AVAudioTime(sampleTime: 960, atRate: 48_000))
 
-        var invalidASBD = AudioStreamBasicDescription(
-            mSampleRate: 0,
-            mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
-            mBytesPerPacket: 4,
-            mFramesPerPacket: 1,
-            mBytesPerFrame: 4,
-            mChannelsPerFrame: 1,
-            mBitsPerChannel: 32,
-            mReserved: 0
-        )
-        let invalidFormat = try XCTUnwrap(AVAudioFormat(streamDescription: &invalidASBD))
-        let invalidBuffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: invalidFormat, frameCapacity: 480))
-        invalidBuffer.frameLength = 480
+        XCTAssertEqual(probe.chunkCounts, [480, 480, 480])
+        XCTAssertEqual(probe.deliveredSampleTimes, [0, 480, 960])
+        XCTAssertEqual(probe.sent, [Int16](repeating: 4_200, count: 960) + [Int16](repeating: -2_100, count: 480))
 
-        XCTAssertFalse(audio.ingestCapturedBuffer(invalidBuffer, at: AVAudioTime(sampleTime: 0, atRate: 48_000)))
-        XCTAssertEqual(audio.bufferedFrameCount, 0)
-        XCTAssertTrue(probe.sent.isEmpty, "Invalid audio formats must never emit silent zero buffers")
-
-        let newLogs = AppLog.shared.lines.filter { !priorLogs.contains($0) }
-        XCTAssertTrue(
-            newLogs.contains { $0.contains("opening audio") && ($0.contains("error") || $0.contains("failed") || $0.contains("invalid")) },
-            "Conversion failure must be logged explicitly instead of swallowed silently; got \(newLogs)"
-        )
+        probe.deliveryStatus = -50
+        let failing = try makeMonoPCM16Buffer(frames: 480, value: 1_500)
+        audio.input(failing, at: AVAudioTime(sampleTime: 1_440, atRate: 48_000))
+        let deliveryLogs = AppLog.shared.lines.filter {
+            !priorLogs.contains($0) && $0.contains("opening audio deliverRecordedData error") && $0.contains("-50")
+        }
+        XCTAssertFalse(deliveryLogs.isEmpty, "WebRTC deliverRecordedData failure must be logged explicitly")
     }
 }

@@ -3555,25 +3555,28 @@ extension VoiceModelTests {
         _ = audio.initializePlayout()
         _ = audio.startPlayout()
 
-        func renderBlock(_ count: Int) -> (samples: [Float], silent: Bool) {
-            var storage = [Float](repeating: 0, count: count)
-            var silent = ObjCBool(false)
+        func renderBlock(_ count: Int) -> (samples: [Int16], silent: Bool) {
+            var storage = [Int16](repeating: 0, count: count)
+            var flags: AudioUnitRenderActionFlags = []
             var timestamp = AudioTimeStamp()
             storage.withUnsafeMutableBufferPointer { buffer in
                 var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
                     mNumberChannels: 1,
-                    mDataByteSize: UInt32(count * MemoryLayout<Float>.stride),
+                    mDataByteSize: UInt32(count * MemoryLayout<Int16>.stride),
                     mData: buffer.baseAddress
                 ))
-                let status = audio.renderPlayout(silent: &silent, timestamp: &timestamp, frameCount: AVAudioFrameCount(count), output: &list)
+                let status = audio.handleAudioUnitPlayout(ioActionFlags: &flags, inTimeStamp: &timestamp, inNumberFrames: UInt32(count), ioData: &list)
                 XCTAssertEqual(status, noErr)
             }
-            return (storage, silent.boolValue)
+            return (storage, flags.contains(.unitRenderAction_OutputIsSilence))
         }
 
+        let expectedChime = VoiceOpeningFeedback.readyChime.map {
+            Int16(max(-1.0 as Float, min(1.0 as Float, $0)) * 32_767.0)
+        }
         let chimeBlock = renderBlock(VoiceOpeningFeedback.readyChime.count)
         XCTAssertFalse(chimeBlock.silent)
-        XCTAssertEqual(chimeBlock.samples, VoiceOpeningFeedback.readyChime)
+        XCTAssertEqual(chimeBlock.samples, expectedChime)
         XCTAssertEqual(probe.playoutRequests, 0)
 
         let bufferingBlock = renderBlock(480)

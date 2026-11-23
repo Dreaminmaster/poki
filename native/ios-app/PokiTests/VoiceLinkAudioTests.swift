@@ -48,35 +48,34 @@ final class VoiceLinkAudioTests: XCTestCase {
     @MainActor
     func testOpeningCaptureRetryKeepsAudioSessionActiveUntilCaptureReleases() async throws {
         let session = RTCAudioSession.sharedInstance()
-        session.lockForConfiguration()
-        do {
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-            try session.setActive(true)
-        } catch {
-            session.unlockForConfiguration()
-            throw error
-        }
-        session.unlockForConfiguration()
-        defer {
-            session.lockForConfiguration()
-            try? session.setActive(false)
-            session.unlockForConfiguration()
-        }
-
-        let audio = OpeningVoiceAudio(session: 1, playReadyChime: false)
-        let capture = OpeningVoiceCapture(audio: audio)
         let first = VoiceLink(onEvent: { _ in }, onClosed: { _ in })
-        first.useOpeningCapture(capture)
-        defer { first.close() }
+        let capture = try XCTUnwrap(try first.startOpeningCapture(session: 1))
+        defer {
+            first.close()
+            _ = capture.audio.stopCapture(session: 1)
+        }
+        XCTAssertTrue(session.isActive, "Starting opening capture must activate RTCAudioSession")
 
         await connectToUnavailableEndpoint(first)
         XCTAssertTrue(session.isActive)
         first.close()
-        XCTAssertTrue(session.isActive, "Closing the first failed attempt during retry or dictation fallback must keep opening capture's audio session active")
+        XCTAssertTrue(session.isActive, "Closing the first failed attempt must keep opening capture's audio session active for retry")
+
+        let second = VoiceLink(onEvent: { _ in }, onClosed: { _ in })
+        second.useOpeningCapture(capture)
+        defer { second.close() }
+        await connectToUnavailableEndpoint(second)
+        XCTAssertTrue(session.isActive)
+        second.close()
+        XCTAssertTrue(session.isActive, "Closing the failed retry must keep opening capture's audio session active until capture releases")
+
+        _ = capture.audio.stopCapture(session: 1)
+        XCTAssertFalse(session.isActive, "Stopping opening capture must release the final RTCAudioSession activation")
     }
 
     @MainActor
     func testOpeningCaptureConnectionSurvivesRejectedWebRTCConfiguration() async {
+        let priorLogs = Set(AppLog.shared.lines)
         let audioSession = AVAudioSession.sharedInstance()
         let rtcSession = RTCAudioSession.sharedInstance()
         let configuration = RTCAudioSessionConfiguration.webRTC()
@@ -93,6 +92,8 @@ final class VoiceLinkAudioTests: XCTestCase {
 
         await connectToUnavailableEndpoint(link)
         XCTAssertTrue(rtcSession.isActive, "Fallback audio configuration must still activate RTCAudioSession with openingCapture")
+        let fallbackLogs = AppLog.shared.lines.filter { !priorLogs.contains($0) && $0.contains("RTCAudioSession configuration fallback:") }
+        XCTAssertFalse(fallbackLogs.isEmpty, "Rejected WebRTC configuration must log entering the fallback branch")
         link.close()
         XCTAssertFalse(rtcSession.isActive, "Closing VoiceLink must deactivate RTCAudioSession after fallback")
     }

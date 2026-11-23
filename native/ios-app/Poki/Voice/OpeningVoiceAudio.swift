@@ -61,13 +61,10 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     @MainActor private var interruptionObserver: NSObjectProtocol?
     @MainActor private var resetObserver: NSObjectProtocol?
     private let lock = NSLock()
-    private let converterLock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
     private let session: Int
     private var callbackAudioUnit: AudioComponentInstance?
-    private var renderScratch: UnsafeMutablePointer<Int16>
-    private var renderScratchCapacity: Int
 
     private enum State {
         case buffering
@@ -90,7 +87,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     private var delegate: RTCAudioDeviceDelegate?
-    private var tapConverter: AVAudioConverter?
     private var recording = false
     private var playing = false
     private var recordingInitialized = false
@@ -114,7 +110,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var nonZeroTapCallbacks = 0
     private var rawNonZeroTapCallbacks = 0
     private var rawMaxPeak: Float = 0
-    private var conversionErrors = 0
     private var renderErrors = 0
     private var deliveryErrors = 0
 
@@ -144,8 +139,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     init(session: Int, playReadyChime: Bool = true) {
         self.session = session
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
-        renderScratchCapacity = Int(Self.maxFramesPerSlice)
-        renderScratch = .allocate(capacity: renderScratchCapacity)
         super.init()
     }
 
@@ -159,7 +152,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             AudioUnitUninitialize(unit)
             AudioComponentInstanceDispose(unit)
         }
-        renderScratch.deallocate()
     }
 
     @MainActor func startCapture() throws {
@@ -333,7 +325,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 state = .sending
                 let seconds = String(format: "%.2f", Double(queued.count) / Self.sampleRate)
                 let peak = String(format: "%.5f", rawMaxPeak)
-                let summary = "opening audio handoff: queued \(queued.count) frames (\(seconds) s), taps \(tapCallbacks), nonZeroTaps \(nonZeroTapCallbacks), rawNonZero \(rawNonZeroTapCallbacks), rawPeak \(peak), renderErrors \(renderErrors), convErrors \(conversionErrors)"
+                let summary = "opening audio handoff: queued \(queued.count) frames (\(seconds) s), taps \(tapCallbacks), nonZeroTaps \(nonZeroTapCallbacks), rawNonZero \(rawNonZeroTapCallbacks), rawPeak \(peak), renderErrors \(renderErrors), deliveryErrors \(deliveryErrors)"
                 return (true, summary)
             case .sending:
                 return (true, nil)
@@ -458,7 +450,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         return audio
     }
 
-    fileprivate func handleAudioUnitInput(
+    func handleAudioUnitInput(
         ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
         inTimeStamp: UnsafePointer<AudioTimeStamp>,
         inBusNumber: UInt32,
@@ -467,50 +459,47 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         guard let unit = lock.withLock({ callbackAudioUnit }) else { return noErr }
         let count = Int(inNumberFrames)
         guard count > 0 else { return noErr }
-        if count > renderScratchCapacity {
-            renderScratch.deallocate()
-            renderScratch = .allocate(capacity: count)
-            renderScratchCapacity = count
-        }
-        var bufferList = AudioBufferList(
-            mNumberBuffers: 1,
-            mBuffers: AudioBuffer(
-                mNumberChannels: 1,
-                mDataByteSize: UInt32(count * MemoryLayout<Int16>.stride),
-                mData: renderScratch
+        return withUnsafeTemporaryAllocation(of: Int16.self, capacity: count) { storage in
+            var bufferList = AudioBufferList(
+                mNumberBuffers: 1,
+                mBuffers: AudioBuffer(
+                    mNumberChannels: 1,
+                    mDataByteSize: UInt32(count * MemoryLayout<Int16>.stride),
+                    mData: storage.baseAddress
+                )
             )
-        )
-        let status = AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
-        guard status == noErr else {
-            let errCount = lock.withLock { () -> Int in
-                renderErrors += 1
-                return renderErrors
+            let status = AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
+            guard status == noErr else {
+                let errCount = lock.withLock { () -> Int in
+                    renderErrors += 1
+                    return renderErrors
+                }
+                if errCount <= 3 || errCount % 100 == 0 {
+                    Self.logVoice("opening audio unit render error (#\(errCount)): OSStatus \(status)")
+                }
+                return status
             }
-            if errCount <= 3 || errCount % 100 == 0 {
-                Self.logVoice("opening audio unit render error (#\(errCount)): OSStatus \(status)")
+            let samples = UnsafeBufferPointer(start: storage.baseAddress, count: count)
+            var maxSample: Int32 = 0
+            for sample in samples {
+                let magnitude = abs(Int32(sample))
+                if magnitude > maxSample { maxSample = magnitude }
             }
-            return status
-        }
-        let samples = UnsafeBufferPointer(start: renderScratch, count: count)
-        var maxSample: Int32 = 0
-        for sample in samples {
-            let magnitude = abs(Int32(sample))
-            if magnitude > maxSample { maxSample = magnitude }
-        }
-        let peak = Float(maxSample) / 32_768.0
-        lock.withLock {
-            tapCallbacks += 1
-            if maxSample > 0 {
-                nonZeroTapCallbacks += 1
-                rawNonZeroTapCallbacks += 1
+            let peak = Float(maxSample) / 32_768.0
+            lock.withLock {
+                tapCallbacks += 1
+                if maxSample > 0 {
+                    nonZeroTapCallbacks += 1
+                    rawNonZeroTapCallbacks += 1
+                }
+                if peak > rawMaxPeak { rawMaxPeak = peak }
             }
-            if peak > rawMaxPeak { rawMaxPeak = peak }
+            inputSamples(samples, timestamp: inTimeStamp.pointee)
+            return noErr
         }
-        inputSamples(samples, timestamp: inTimeStamp.pointee)
-        return noErr
     }
 
-    fileprivate func handleAudioUnitPlayout(
+    func handleAudioUnitPlayout(
         ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
         inTimeStamp: UnsafePointer<AudioTimeStamp>,
         inNumberFrames: UInt32,
@@ -564,200 +553,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         } else {
             Task { @MainActor in AppLog.shared.add("voice", message) }
         }
-    }
-
-    private func recordConversionError(_ reason: String) {
-        let count = lock.withLock { () -> Int in
-            conversionErrors += 1
-            return conversionErrors
-        }
-        if count <= 3 || count % 100 == 0 {
-            Self.logVoice("opening audio conversion error (#\(count)): \(reason)")
-        }
-    }
-
-    private static func makeValidatedConverter(for format: AVAudioFormat) -> AVAudioConverter? {
-        guard format.sampleRate > 0, format.channelCount > 0, format.commonFormat != .otherFormat else { return nil }
-        let sourceFormat: AVAudioFormat
-        if format.channelCount > 1 {
-            guard format.commonFormat == .pcmFormatFloat32
-                || format.commonFormat == .pcmFormatInt16
-                || format.commonFormat == .pcmFormatInt32,
-                  let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else {
-                return nil
-            }
-            sourceFormat = mono
-        } else {
-            sourceFormat = format
-        }
-        guard let converter = AVAudioConverter(from: sourceFormat, to: Self.channelFormat) else { return nil }
-        converter.downmix = false
-        converter.channelMap = [0]
-        return converter
-    }
-
-    private static func downmixToMonoFloat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        let format = buffer.format
-        let channels = Int(format.channelCount)
-        let frames = Int(buffer.frameLength)
-        guard channels > 1, frames > 0, format.sampleRate > 0,
-              let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false),
-              let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength),
-              let destination = mono.floatChannelData?[0] else { return nil }
-        mono.frameLength = buffer.frameLength
-        let scale = 1.0 / Float(channels)
-        switch format.commonFormat {
-        case .pcmFormatFloat32:
-            if format.isInterleaved {
-                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    let base = frame * channels
-                    for ch in 0..<channels { sum += raw[base + ch] }
-                    destination[frame] = max(-1, min(1, sum * scale))
-                }
-            } else {
-                guard let data = buffer.floatChannelData else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    for ch in 0..<channels { sum += data[ch][frame] }
-                    destination[frame] = max(-1, min(1, sum * scale))
-                }
-            }
-        case .pcmFormatInt16:
-            let norm = scale / 32_768.0
-            if format.isInterleaved {
-                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    let base = frame * channels
-                    for ch in 0..<channels { sum += Float(raw[base + ch]) }
-                    destination[frame] = max(-1, min(1, sum * norm))
-                }
-            } else {
-                guard let data = buffer.int16ChannelData else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    for ch in 0..<channels { sum += Float(data[ch][frame]) }
-                    destination[frame] = max(-1, min(1, sum * norm))
-                }
-            }
-        case .pcmFormatInt32:
-            let norm = scale / 2_147_483_648.0
-            if format.isInterleaved {
-                guard let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int32.self) else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    let base = frame * channels
-                    for ch in 0..<channels { sum += Float(raw[base + ch]) }
-                    destination[frame] = max(-1, min(1, sum * norm))
-                }
-            } else {
-                guard let data = buffer.int32ChannelData else { return nil }
-                for frame in 0..<frames {
-                    var sum: Float = 0
-                    for ch in 0..<channels { sum += Float(data[ch][frame]) }
-                    destination[frame] = max(-1, min(1, sum * norm))
-                }
-            }
-        default:
-            return nil
-        }
-        return mono
-    }
-
-    private static func peakAmplitude(in buffer: AVAudioPCMBuffer) -> Float {
-        let format = buffer.format
-        let channels = Int(format.channelCount)
-        let frames = Int(buffer.frameLength)
-        guard channels > 0, frames > 0 else { return 0 }
-        var peak: Float = 0
-        switch format.commonFormat {
-        case .pcmFormatFloat32:
-            if format.isInterleaved, let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) {
-                for i in 0..<(frames * channels) { peak = max(peak, abs(raw[i])) }
-            } else if let data = buffer.floatChannelData {
-                for ch in 0..<channels {
-                    let ptr = data[ch]
-                    for frame in 0..<frames { peak = max(peak, abs(ptr[frame])) }
-                }
-            }
-        case .pcmFormatInt16:
-            if format.isInterleaved, let raw = buffer.audioBufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
-                for i in 0..<(frames * channels) { peak = max(peak, abs(Float(raw[i])) / 32_768.0) }
-            } else if let data = buffer.int16ChannelData {
-                for ch in 0..<channels {
-                    let ptr = data[ch]
-                    for frame in 0..<frames { peak = max(peak, abs(Float(ptr[frame])) / 32_768.0) }
-                }
-            }
-        default:
-            break
-        }
-        return peak
-    }
-
-    @discardableResult
-    func ingestCapturedBuffer(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) -> Bool {
-        let format = buffer.format
-        guard buffer.frameLength > 0, format.sampleRate > 0, format.channelCount > 0, format.commonFormat != .otherFormat else {
-            recordConversionError("invalid input buffer (frames \(buffer.frameLength), rate \(format.sampleRate), ch \(format.channelCount), common \(format.commonFormat.rawValue))")
-            return false
-        }
-        let rawPeak = Self.peakAmplitude(in: buffer)
-        let sourceBuffer: AVAudioPCMBuffer
-        if format.channelCount > 1 {
-            guard let mono = Self.downmixToMonoFloat(buffer) else {
-                recordConversionError("failed to downmix \(format.channelCount)-channel format \(format.commonFormat.rawValue)")
-                return false
-            }
-            sourceBuffer = mono
-        } else {
-            sourceBuffer = buffer
-        }
-        let capacity = AVAudioFrameCount(ceil(Double(sourceBuffer.frameLength) * Self.sampleRate / sourceBuffer.format.sampleRate)) + 64
-        guard let pcm = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: capacity) else {
-            recordConversionError("failed to allocate output PCM buffer (\(capacity) frames)")
-            return false
-        }
-        var conversionError: NSError?
-        let status: AVAudioConverterOutputStatus? = converterLock.withLock {
-            let converter: AVAudioConverter
-            if let existing = tapConverter, existing.inputFormat == sourceBuffer.format {
-                converter = existing
-            } else {
-                guard let created = Self.makeValidatedConverter(for: sourceBuffer.format) else { return nil }
-                tapConverter = created
-                converter = created
-            }
-            var supplied = false
-            return converter.convert(to: pcm, error: &conversionError) { _, inputStatus in
-                inputStatus.pointee = supplied ? .noDataNow : .haveData
-                defer { supplied = true }
-                return supplied ? nil : sourceBuffer
-            }
-        }
-        guard let status else {
-            recordConversionError("failed to create converter for \(sourceBuffer.format.sampleRate) Hz \(sourceBuffer.format.channelCount) ch")
-            return false
-        }
-        guard status != .error, conversionError == nil, pcm.frameLength > 0 else {
-            let detail = conversionError?.localizedDescription ?? "status \(status.rawValue), frames \(pcm.frameLength)"
-            recordConversionError("AVAudioConverter failed: \(detail)")
-            return false
-        }
-        if let samples = pcm.int16ChannelData?[0] {
-            let frames = UnsafeBufferPointer(start: samples, count: Int(pcm.frameLength))
-            let hasNonZero = lastNonZeroOffset(in: frames) != nil
-            lock.withLock {
-                tapCallbacks += 1
-                if hasNonZero { nonZeroTapCallbacks += 1 }
-                if rawPeak > 0 { rawNonZeroTapCallbacks += 1 }
-                if rawPeak > rawMaxPeak { rawMaxPeak = rawPeak }
-            }
-        }
-        input(pcm, at: time)
-        return true
     }
 
     func input(_ pcm: AVAudioPCMBuffer, at time: AVAudioTime) {
@@ -905,47 +700,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 return .webrtc(delegate)
             }
             return .silence
-        }
-    }
-
-    func renderPlayout(silent: UnsafeMutablePointer<ObjCBool>, timestamp: UnsafePointer<AudioTimeStamp>,
-                       frameCount: AVAudioFrameCount, output: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
-        guard let destination = output.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self) else {
-            return kAudio_ParamError
-        }
-        let count = Int(frameCount)
-        switch selectPlayoutSource(count: count) {
-        case .chime(let range):
-            let chime = VoiceOpeningFeedback.readyChime
-            var write = 0
-            for index in range {
-                destination[write] = chime[index]
-                write += 1
-            }
-            if write < count {
-                destination.advanced(by: write).update(repeating: 0, count: count - write)
-            }
-            return noErr
-        case .silence:
-            silent.pointee = true
-            destination.update(repeating: 0, count: count)
-            return noErr
-        case .webrtc(let delegate):
-            return withUnsafeTemporaryAllocation(of: Int16.self, capacity: count) { samples in
-                var flags: AudioUnitRenderActionFlags = []
-                var audio = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
-                    mNumberChannels: 1, mDataByteSize: frameCount * UInt32(MemoryLayout<Int16>.stride), mData: samples.baseAddress
-                ))
-                let status = delegate.getPlayoutData(&flags, timestamp, 0, frameCount, &audio)
-                guard status == noErr else { return status }
-                if flags.contains(.unitRenderAction_OutputIsSilence) {
-                    silent.pointee = true
-                    destination.update(repeating: 0, count: count)
-                } else {
-                    for index in samples.indices { destination[index] = Float(samples[index]) / 32_768 }
-                }
-                return noErr
-            }
         }
     }
 
