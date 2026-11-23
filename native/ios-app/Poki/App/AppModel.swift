@@ -1499,7 +1499,7 @@ final class AppModel {
     /// the session, so Poki coming forward because of it does not close the session under it.
     private var endingTasks = 0
     private var pendingLiveActivityReturnAt: Date?
-    private var liveActivityReturnTask: Task<Void, Never>?
+    private(set) var liveActivityReturnTask: Task<Void, Never>?
     private var liveActivityTaskGeneration = 0
 
     private var canReturnFromLiveActivity: Bool {

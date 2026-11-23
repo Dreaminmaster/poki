@@ -1281,13 +1281,15 @@ final class InProcessPasscodeTests: XCTestCase {
         let stateLock = NSLock()
         var front = (bundleID: "com.apple.Preferences", name: "Settings")
         var activated: [String] = []
+        var activationAttempts = 0
         var holdNextRequest = false
         var enteredHold = false
         var releaseHold: CheckedContinuation<Void, Never>?
         let transport = SessionScreenTransport(
             session: session,
-            beforeRequest: {
+            beforePathRequest: { path in
                 let shouldHold = stateLock.withLock { () -> Bool in
+                    if path == "/wda/apps/activate" { activationAttempts += 1 }
                     guard holdNextRequest else { return false }
                     holdNextRequest = false
                     enteredHold = true
@@ -1321,16 +1323,17 @@ final class InProcessPasscodeTests: XCTestCase {
         let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
+        let firstReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await firstReturn.value
 
-        await waitFor("target app reactivated even while activeAppInfo still reports SpringBoard") {
-            stateLock.withLock { activated.contains("com.apple.Preferences") }
-        }
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
         XCTAssertTrue(session.isOpen)
         XCTAssertEqual(session.closes, 0)
 
         // Leaving Poki while an in-flight read holds the gate cancels the pending return.
         stateLock.withLock {
             activated.removeAll()
+            activationAttempts = 0
             front = ("com.apple.Preferences", "Settings")
             holdNextRequest = true
             enteredHold = false
@@ -1343,6 +1346,7 @@ final class InProcessPasscodeTests: XCTestCase {
         stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
+        let cancelledReturn = try XCTUnwrap(model.liveActivityReturnTask)
         model.wentToBackground()
         stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
             let continuation = releaseHold
@@ -1351,14 +1355,14 @@ final class InProcessPasscodeTests: XCTestCase {
         }?.resume()
         let heldResult = await heldRead.value
         XCTAssertFalse(heldResult.isError, heldResult.text)
-        // A serialized follow-up look enters the gate after any queued return would have run.
-        let drain1 = await model.runTool("look", arguments: "{}")
-        XCTAssertFalse(drain1.isError, drain1.text)
+        await cancelledReturn.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
         XCTAssertTrue(stateLock.withLock { activated.isEmpty })
 
-        // Leaving Poki before becameActive clears pendingLiveActivityReturnAt without activating later.
+        // Leaving Poki before becameActive clears pendingLiveActivityReturnAt without spawning a return task.
         stateLock.withLock {
             activated.removeAll()
+            activationAttempts = 0
             front = ("com.apple.Preferences", "Settings")
         }
         let prepRead = await model.runTool("look", arguments: "{}")
@@ -1367,8 +1371,8 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.wentToBackground()
         model.becameActive()
-        let drain2 = await model.runTool("look", arguments: "{}")
-        XCTAssertFalse(drain2.isError, drain2.text)
+        XCTAssertNil(model.liveActivityReturnTask)
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
         XCTAssertTrue(stateLock.withLock { activated.isEmpty })
     }
 
@@ -1376,8 +1380,12 @@ final class InProcessPasscodeTests: XCTestCase {
         let stateLock = NSLock()
         var front = (bundleID: "com.apple.Preferences", name: "Settings")
         var activated: [String] = []
+        var activationAttempts = 0
         let transport = SessionScreenTransport(
             session: session,
+            beforePathRequest: { path in
+                if path == "/wda/apps/activate" { stateLock.withLock { activationAttempts += 1 } }
+            },
             beforeActivation: { bundle in
                 stateLock.withLock {
                     activated.append(bundle)
@@ -1403,9 +1411,8 @@ final class InProcessPasscodeTests: XCTestCase {
         let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
-        await waitFor("target app reactivated instead of SpringBoard") {
-            stateLock.withLock { !activated.isEmpty }
-        }
+        let springBoardReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await springBoardReturn.value
         XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
 
         // A read with an empty bundle ID and non-empty name must also fall back to Settings.
@@ -1420,9 +1427,8 @@ final class InProcessPasscodeTests: XCTestCase {
 
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
-        await waitFor("target app reactivated when latest foreground has empty bundle ID") {
-            stateLock.withLock { activated.contains("com.apple.Preferences") }
-        }
+        let emptyBundleReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await emptyBundleReturn.value
         XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
 
         // Ending the task clears previous-task target state so a new task before its first read does not reactivate Settings.
@@ -1439,6 +1445,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
         stateLock.withLock {
             activated.removeAll()
+            activationAttempts = 0
             front = ("com.apple.springboard", "SpringBoard")
         }
         await openSessionForATask()
@@ -1446,8 +1453,9 @@ final class InProcessPasscodeTests: XCTestCase {
         model.wentToBackground()
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
-        let drainNewTask = await model.runTool("look", arguments: "{}")
-        XCTAssertFalse(drainNewTask.isError, drainNewTask.text)
+        let newTaskReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await newTaskReturn.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
         XCTAssertTrue(stateLock.withLock { activated.isEmpty },
                       "a new task before any non-SpringBoard read must not reactivate the previous task's app")
     }
@@ -1456,6 +1464,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let stateLock = NSLock()
         var front = (bundleID: "com.apple.Preferences", name: "Settings")
         var activated: [String] = []
+        var activationAttempts = 0
         var holdPath: String?
         var enteredHold = false
         var releaseHold: CheckedContinuation<Void, Never>?
@@ -1463,6 +1472,7 @@ final class InProcessPasscodeTests: XCTestCase {
             session: session,
             beforePathRequest: { path in
                 let shouldHold = stateLock.withLock { () -> Bool in
+                    if path == "/wda/apps/activate" { activationAttempts += 1 }
                     guard holdPath == path else { return false }
                     holdPath = nil
                     enteredHold = true
@@ -1489,7 +1499,8 @@ final class InProcessPasscodeTests: XCTestCase {
         let initialRead = await model.runTool("look", arguments: "{}")
         XCTAssertFalse(initialRead.isError, initialRead.text)
 
-        // Hold /source (4 s readTimeout) longer than CoreConfig.busyWait (2.0 s) while Poki stays in front.
+        // Hold /source until a concurrent look hits CoreConfig.busyWait and returns busy, proving
+        // the return task outlives busyWait without a fixed sleep.
         stateLock.withLock {
             holdPath = "/source"
             enteredHold = false
@@ -1501,8 +1512,11 @@ final class InProcessPasscodeTests: XCTestCase {
         let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
+        let slowReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
 
-        try await Task.sleep(for: .milliseconds(2300))
+        let busy = await model.runTool("look", arguments: "{}")
+        XCTAssertTrue(busy.text.contains("busy:"), busy.text)
+
         stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
             let continuation = releaseHold
             releaseHold = nil
@@ -1510,15 +1524,16 @@ final class InProcessPasscodeTests: XCTestCase {
         }?.resume()
         let slowResult = await slowRead.value
         XCTAssertFalse(slowResult.isError, slowResult.text)
+        await slowReturnTask.value
 
-        await waitFor("target app reactivated after slow /source read released gate past 2 s busyWait") {
-            stateLock.withLock { activated.contains("com.apple.Preferences") }
-        }
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
         XCTAssertTrue(session.isOpen)
 
-        // Handoff arriving while a pending Live Activity return waits on the gate must cancel it.
+        // Handoff arriving while a pending Live Activity return waits on the gate must cancel it
+        // without issuing any outbound activation attempt even if the session closes later.
         stateLock.withLock {
             activated.removeAll()
+            activationAttempts = 0
             front = ("com.apple.Preferences", "Settings")
             holdPath = "/wda/keys"
             enteredHold = false
@@ -1532,6 +1547,7 @@ final class InProcessPasscodeTests: XCTestCase {
         }
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
+        let handoffReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
         stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
             let continuation = releaseHold
             releaseHold = nil
@@ -1539,11 +1555,13 @@ final class InProcessPasscodeTests: XCTestCase {
         }?.resume()
         let handoffResult = await handoffStep.value
         XCTAssertFalse(handoffResult.isError, handoffResult.text)
+        await handoffReturnTask.value
         await waitFor("handoff reached AppModel and closed automation") {
             self.model.handoffText != nil && !self.session.isOpen
         }
-        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
-                      "a Live Activity return must cancel once handoff is active")
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0,
+                       "a Live Activity return must not send any activation attempt once handoff starts")
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
 
         // Explicit Stop while a slow read holds the gate must also cancel a pending Live Activity return.
         await openSessionForATask()
@@ -1554,6 +1572,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
         stateLock.withLock {
             activated.removeAll()
+            activationAttempts = 0
             front = ("com.apple.Preferences", "Settings")
             holdPath = "/source"
             enteredHold = false
@@ -1565,6 +1584,7 @@ final class InProcessPasscodeTests: XCTestCase {
         }
         XCTAssertEqual(model.open(link: activityLink), .ignored)
         model.becameActive()
+        let stopReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
         model.stopFromOutside(AppModel.liveActivityStop)
         await waitFor("Stop closed the session") { !self.session.isOpen && self.model.runnerPaused }
         stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
@@ -1573,8 +1593,10 @@ final class InProcessPasscodeTests: XCTestCase {
             return continuation
         }?.resume()
         _ = await stoppedRead.value
-        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
-                      "Stop must cancel any pending Live Activity return")
+        await stopReturnTask.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0,
+                       "Stop must cancel any pending Live Activity return before it sends an activation")
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
     }
 
     /// Talk Here starts a relaunched Poki in the background. On iOS 27 its first open asks for no

@@ -2193,3 +2193,100 @@ final class AccessibilityServerMissingTests: XCTestCase {
         XCTAssertEqual(wda.sent.filter { $0.hasSuffix("/wda/apps/terminate") }.count, 1, "a look ends no app: \(looked.text)")
     }
 }
+
+final class LiveActivityReturnCoreTests: XCTestCase {
+    func testBringBackTargetAppRefusesWhenCoreHandoffIsWaitingBeforeShellConsumesEvent() async {
+        let (core, wda, _) = makeCore { $0.busyWait = 0.05 }
+        let read = await core.call("look", [:])
+        XCTAssertFalse(read.isError, read.text)
+
+        let keysHold = LockedBox<(entered: Bool, continuation: CheckedContinuation<Void, Never>?)>((false, nil))
+        wda.set("POST /wda/keys") { _ in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                keysHold.value = (true, continuation)
+            }
+            return (200, ["value": .null])
+        }
+
+        let handoffCall = Task {
+            await core.call("do", ["actions": [["key": "return"], ["handoff": ["kind": "password", "text": "Sign in"]]]])
+        }
+        let enteredDeadline = ContinuousClock.now + .seconds(5)
+        while !keysHold.value.entered || keysHold.value.continuation == nil, ContinuousClock.now < enteredDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(keysHold.value.entered && keysHold.value.continuation != nil)
+
+        // Simulate the shell still having handoffText == nil and inFront == true when the step
+        // transitions into handoff and releases the gate.
+        let returnTask = Task {
+            await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { true })
+        }
+
+        keysHold.update { state -> CheckedContinuation<Void, Never>? in
+            defer { state.continuation = nil }
+            return state.continuation
+        }?.resume()
+
+        let handoffResult = await handoffCall.value
+        XCTAssertFalse(handoffResult.isError, handoffResult.text)
+        let note = await returnTask.value
+        XCTAssertNil(note, "core must refuse Live Activity return once core handoff is waiting, even before shell consumes the event")
+        XCTAssertTrue(wda.bodies("POST /wda/apps/activate").isEmpty,
+                      "must not activate target app while core handoff is waiting")
+    }
+
+    func testBringBackTargetAppWaitsPastControllableBusyWaitWhenStillNeeded() async {
+        let (core, wda, _) = makeCore { $0.busyWait = 0.05 }
+        let initial = await core.call("look", [:])
+        XCTAssertFalse(initial.isError, initial.text)
+
+        let sourceHold = LockedBox<(shouldHold: Bool, entered: Bool, continuation: CheckedContinuation<Void, Never>?)>((true, false, nil))
+        let defaultSource: JSON = ["type": "XCUIElementTypeApplication", "label": "Settings",
+                                   "rect": ["x": 0, "y": 0, "width": 390, "height": 844],
+                                   "children": [["type": "XCUIElementTypeButton", "label": "General",
+                                                 "rect": ["x": 16, "y": 100, "width": 358, "height": 44]]]]
+        wda.set("GET /source") { _ in
+            let hold = sourceHold.update { state -> Bool in
+                guard state.shouldHold else { return false }
+                state.shouldHold = false
+                return true
+            }
+            if hold {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    sourceHold.update { state in
+                        state.entered = true
+                        state.continuation = continuation
+                    }
+                }
+            }
+            return (200, ["value": defaultSource])
+        }
+
+        let slowRead = Task { await core.call("look", [:]) }
+        let enteredDeadline = ContinuousClock.now + .seconds(5)
+        while !sourceHold.value.entered || sourceHold.value.continuation == nil, ContinuousClock.now < enteredDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(sourceHold.value.entered && sourceHold.value.continuation != nil)
+
+        let returnTask = Task {
+            await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { true })
+        }
+
+        // A concurrent look proves config.busyWait (50 ms) elapsed while slowRead still holds the gate.
+        let busy = await core.call("look", [:])
+        XCTAssertTrue(busy.text.contains("busy:"), busy.text)
+
+        sourceHold.update { state -> CheckedContinuation<Void, Never>? in
+            defer { state.continuation = nil }
+            return state.continuation
+        }?.resume()
+        let readResult = await slowRead.value
+        XCTAssertFalse(readResult.isError, readResult.text)
+
+        let note = await returnTask.value
+        XCTAssertNotNil(note)
+        XCTAssertEqual(wda.bodies("POST /wda/apps/activate").compactMap { $0["bundleId"]?.string }, ["com.apple.Preferences"])
+    }
+}
