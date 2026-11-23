@@ -8,7 +8,7 @@ import SwiftUI
 /// approvals, voice).
 enum EarlierVersion {
     nonisolated static func leftTraces(defaults: UserDefaults, sessionsFolder: URL) -> Bool {
-        let settings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model"]
+        let settings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model", WhatsNew.seenVersionKey]
         let conversations = (try? FileManager.default.contentsOfDirectory(at: sessionsFolder, includingPropertiesForKeys: nil))?
             .contains { $0.pathExtension == "json" } ?? false
         return conversations || settings.contains { defaults.object(forKey: $0) != nil }

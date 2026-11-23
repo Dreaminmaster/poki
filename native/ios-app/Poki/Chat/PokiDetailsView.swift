@@ -134,6 +134,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
+                    NavigationLink(value: DetailsRoute.about) {
+                        SettingsRow(title: "About", symbol: "info.circle")
+                    }
+                    .accessibilityIdentifier("details.about")
                     .id(Self.lastRow)
                 } footer: {
                     Text(verbatim: "Poki \(model.signer.installedVersion) (\(model.signer.installedBuild))")
@@ -192,6 +196,8 @@ struct PokiDetailsView: View {
                     InterfaceSizeSettingsView()
                 case .language:
                     LanguageSettingsView()
+                case .about:
+                    AboutSettingsView()
                 } }
                 .settingsPage()
             }
@@ -252,7 +258,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
+    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, about
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey, lockSettings
@@ -680,6 +686,86 @@ private struct LanguageSettingsView: View {
         }
         .navigationTitle(AppLocalization.text("Language"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Settings › About: the installed version and the single re-entry point to What's New.
+struct AboutSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var showsWhatsNew = false
+    @ScaledMetric(relativeTo: .body) private var iconSize = SettingsRowMetrics.iconSize
+    @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
+
+    private var compact: Bool { sizeClass != .regular }
+    private var matchingRelease: WhatsNewRelease? {
+        WhatsNewCatalog.release(for: model.signer.installedVersion)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: min(18, iconSpacing)) {
+                    Group {
+                        if let image = PokiMood.cutout(.ready, small: true) {
+                            Image(uiImage: image).resizable().interpolation(.high).scaledToFit().scaleEffect(1.08)
+                        }
+                    }
+                    .frame(
+                        width: min(SettingsRowMetrics.maximumIconSize, iconSize),
+                        height: min(SettingsRowMetrics.maximumIconSize, iconSize)
+                    )
+                    .background(Tint.portrait, in: .circle)
+                    .clipShape(.circle)
+                    .padding(.vertical, SettingsRowMetrics.iconLineInset)
+                    .accessibilityHidden(true)
+
+                    Text("Current Version")
+                        .font(.body)
+                        .foregroundStyle(Color(.label))
+                    Spacer(minLength: 8)
+                    Text(verbatim: model.signer.installedVersion)
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundStyle(Color(.secondaryLabel))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("about.currentVersion")
+
+                if matchingRelease != nil {
+                    Button { showsWhatsNew = true } label: {
+                        HStack(spacing: 8) {
+                            SettingsRow(title: "What’s New", symbol: "sparkles")
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color(.tertiaryLabel))
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("about.whatsNew")
+                }
+            } footer: {
+                if matchingRelease != nil {
+                    Text("Review what’s new in this version anytime.")
+                }
+            }
+        }
+        .navigationTitle(AppLocalization.text("About"))
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: Binding(get: { showsWhatsNew && compact && matchingRelease != nil }, set: { showsWhatsNew = $0 })) {
+            if let release = matchingRelease {
+                WhatsNewView(release: release) { showsWhatsNew = false }
+            }
+        }
+        .sheet(isPresented: Binding(get: { showsWhatsNew && !compact && matchingRelease != nil }, set: { showsWhatsNew = $0 })) {
+            if let release = matchingRelease {
+                WhatsNewView(release: release) { showsWhatsNew = false }
+                    .presentationSizing(.page)
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 }
 

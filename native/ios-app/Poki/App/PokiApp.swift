@@ -34,7 +34,10 @@ struct PokiApp: App {
         FieldDictation.keepButtonForUpgrade()
         // Whether this phone gets the first run: not when an earlier version was used here. Read before
         // anything this version writes, like the line above.
+        let priorFirstRun = UserDefaults.standard.string(forKey: FirstRun.key)
         FirstRun.decide()
+        // Record the installed version as seen only on a true fresh install so What's New shows after updates.
+        WhatsNew.decide(priorFirstRun: priorFirstRun)
         // Page titles in Geist, the website's typeface (prominent text only).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]
@@ -121,6 +124,9 @@ struct RootView: View {
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    /// The post-update What's New card, presented after Home has appeared.
+    @State private var whatsNewOpen = false
+    @State private var whatsNewGate = WhatsNewLaunchGate()
     @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage(AppInterfaceSize.defaultsKey) private var interfaceSize = AppInterfaceSize.system
     @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
@@ -190,7 +196,7 @@ struct RootView: View {
         )
         // The bear stops drawing where it is out of sight: behind the open drawer or the profile over the
         // chat.
-        .environment(\.bearCovered, threadsOpen || welcoming || (detailsOpen && !showsSidebar))
+        .environment(\.bearCovered, threadsOpen || welcoming || whatsNewOpen || (detailsOpen && !showsSidebar))
     }
 
     @ViewBuilder private func destination(_ route: HomeRoute, split: Bool) -> some View {
@@ -293,6 +299,44 @@ struct RootView: View {
                 navigation
             }
         }
+        .fullScreenCover(
+            isPresented: Binding(get: { whatsNewOpen && !showsSidebar }, set: { whatsNewOpen = $0 }),
+            onDismiss: { WhatsNew.markSeen() }
+        ) {
+            WhatsNewView(release: WhatsNewCatalog.release() ?? WhatsNewCatalog.current) {
+                WhatsNew.markSeen()
+                whatsNewOpen = false
+            }
+        }
+        .sheet(
+            isPresented: Binding(get: { whatsNewOpen && showsSidebar }, set: { whatsNewOpen = $0 }),
+            onDismiss: { WhatsNew.markSeen() }
+        ) {
+            WhatsNewView(release: WhatsNewCatalog.release() ?? WhatsNewCatalog.current) {
+                WhatsNew.markSeen()
+                whatsNewOpen = false
+            }
+            .presentationSizing(.page)
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: curtain) { _, stillUp in
+            if !stillUp { scheduleWhatsNewIfDue() }
+        }
+        .onChange(of: firstFrameDisplayed) { _, displayed in
+            if displayed { scheduleWhatsNewIfDue() }
+        }
+        .onChange(of: welcoming) { _, isWelcoming in
+            if !isWelcoming { scheduleWhatsNewIfDue() }
+        }
+        .onChange(of: detailsOpen) { _, isOpen in
+            if !isOpen { scheduleWhatsNewIfDue() }
+        }
+        .onChange(of: model.pairingUnderWay) { _, pairing in
+            if !pairing { scheduleWhatsNewIfDue() }
+        }
+        .onChange(of: model.signer.installMessage == nil) { _, cleared in
+            if cleared { scheduleWhatsNewIfDue() }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Tint.page.ignoresSafeArea())
         .overlay {
@@ -303,6 +347,7 @@ struct RootView: View {
                 }, done: {
                     curtain = false
                     startupLog?.finish()
+                    scheduleWhatsNewIfDue()
                 })
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -342,6 +387,7 @@ struct RootView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 sceneHasBeenActive = true
+                scheduleWhatsNewIfDue()
                 model.becameActive()
                 HistoryCapture.shared.appDidBecomeActive()
                 AskPoki.refresh()
@@ -408,6 +454,7 @@ struct RootView: View {
             if case .showSetup(let step) = opening { welcomeLink = step }
             return
         }
+        if whatsNewOpen { whatsNewOpen = false }
         // A pairing file or a setup link (from Poki Setup on a computer, AirDrop or Files) opens
         // setup at that step, where the result is shown.
         // Settings covers the screen on iPhone and would hide the question a link raised.
@@ -466,6 +513,7 @@ struct RootView: View {
     /// request can be here before the cover is.
     private func takeEntry() {
         guard scenePhase == .active, let request = PokiEntry.shared.take(), !model.pairingUnderWay, !FirstRun.isDue() else { return }
+        if whatsNewOpen { whatsNewOpen = false }
         detailsOpen = false
         if let handoff = AskPoki.liveSessionID { show(.session(handoff)); return }
         show(.chat)
@@ -563,9 +611,39 @@ struct RootView: View {
             openDetails([DetailsRoute.screenHistory])
         case "updates":
             openDetails([DetailsRoute.updates])
+        case "about":
+            openDetails([DetailsRoute.about])
         case "steps":
             openDetails([DetailsRoute.history])
         default: break
+        }
+    }
+
+    private var whatsNewGateContext: WhatsNewLaunchGate.Context {
+        WhatsNewLaunchGate.Context(
+            firstFrameDisplayed: firstFrameDisplayed,
+            curtainUp: curtain,
+            sceneActive: sceneHasBeenActive && scenePhase == .active,
+            welcoming: welcoming,
+            detailsOpen: detailsOpen,
+            installMessageActive: model.signer.installMessage != nil,
+            pairingUnderWay: model.pairingUnderWay,
+            whatsNewOpen: whatsNewOpen
+        )
+    }
+
+    private func scheduleWhatsNewIfDue() {
+        guard whatsNewGate.beginSchedulingIfReady(
+            context: whatsNewGateContext,
+            isDue: { WhatsNew.isDueAtLaunch() }
+        ) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard whatsNewGate.commitIfStillReady(
+                context: whatsNewGateContext,
+                isDue: { WhatsNew.isDueAtLaunch() }
+            ) else { return }
+            whatsNewOpen = true
         }
     }
 }
