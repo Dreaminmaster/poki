@@ -1500,6 +1500,7 @@ final class AppModel {
     private var endingTasks = 0
     private var pendingLiveActivityReturnAt: Date?
     private(set) var liveActivityReturnTask: Task<Void, Never>?
+    private var liveActivityReturnID: UUID?
     private var liveActivityTaskGeneration = 0
 
     private var canReturnFromLiveActivity: Bool {
@@ -1512,6 +1513,7 @@ final class AppModel {
 
     private func cancelLiveActivityReturn() {
         pendingLiveActivityReturnAt = nil
+        liveActivityReturnID = nil
         liveActivityReturnTask?.cancel()
         liveActivityReturnTask = nil
     }
@@ -1524,8 +1526,16 @@ final class AppModel {
     private func returnToTargetAppFromLiveActivity() {
         guard canReturnFromLiveActivity else { return }
         let generation = liveActivityTaskGeneration
+        let id = UUID()
+        liveActivityReturnID = id
         liveActivityReturnTask?.cancel()
         liveActivityReturnTask = Task { [weak self, core, log] in
+            defer {
+                if let self, self.liveActivityReturnID == id {
+                    self.liveActivityReturnID = nil
+                    self.liveActivityReturnTask = nil
+                }
+            }
             let line = await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { @MainActor [weak self] in
                 guard let self else { return false }
                 return self.liveActivityTaskGeneration == generation && self.inFront && self.canReturnFromLiveActivity

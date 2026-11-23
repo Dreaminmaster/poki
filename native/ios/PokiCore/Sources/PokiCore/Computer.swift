@@ -1721,6 +1721,7 @@ final class Computer: @unchecked Sendable {
     }
 
     func bringBackTargetApp(why: String, check: Bool = true) async -> String? {
+        guard !handoffWaiting, approvals.pending == nil else { return nil }
         let target = workingTarget(lastForeground) ?? workingTarget(lastWorkingApp)
         return await bringBack(from: target, why: why, check: check)
     }
