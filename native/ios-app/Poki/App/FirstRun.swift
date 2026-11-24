@@ -9,7 +9,7 @@ import UserNotifications
 /// approvals, voice).
 enum EarlierVersion {
     nonisolated static func leftTraces(defaults: UserDefaults, sessionsFolder: URL) -> Bool {
-        let settings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model"]
+        let settings = ["setup", "relayAddress", "relayEnabled", "chat.provider", "chat.installationID", "approvals.ask", "wantsOn", "voice.model", WhatsNew.seenVersionKey]
         let conversations = (try? FileManager.default.contentsOfDirectory(at: sessionsFolder, includingPropertiesForKeys: nil))?
             .contains { $0.pathExtension == "json" } ?? false
         return conversations || settings.contains { defaults.object(forKey: $0) != nil }
@@ -78,6 +78,8 @@ enum FirstRun {
     static func finish(defaults: UserDefaults = .standard, version: String = FirstRun.version) {
         defaults.set(Record.done.rawValue, forKey: key)
         if !version.isEmpty { defaults.set(version, forKey: versionKey) }
+        // The welcome is closed: the hint on Poki's picture may show now.
+        PokiMenuTip.welcomeUp = false
     }
 }
 

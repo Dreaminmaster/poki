@@ -5,6 +5,42 @@ import XCTest
 
 @MainActor
 final class TextAttachmentTests: XCTestCase {
+    func testDelayedPhotoImportDoesNotEnterNewDraft() async {
+        var generation = UUID()
+        let old = generation
+        var received: [Data] = []
+        var loads = 0
+        await ComposerPhotoImport.read([1, 2], stillCurrent: { generation == old }, load: { _ in
+            loads += 1
+            generation = UUID()
+            return Data([1])
+        }, receive: { if let data = $0 { received.append(data) } })
+        XCTAssertEqual(loads, 1)
+        XCTAssertTrue(received.isEmpty)
+    }
+
+    func testConversationChangeClearsStagedPhotoAndDropsPendingPhoto() async throws {
+        var draft = ComposerAttachments()
+        let generation = draft.generation
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+        try Data("attachment".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let attachment = try AttachmentReader.file(url)
+        var received = 0
+        await ComposerPhotoImport.read([1, 2], stillCurrent: { draft.generation == generation }, load: { index in
+            if index == 2 {
+                XCTAssertEqual(draft.items.count, 1)
+                draft.reset()
+            }
+            return Data([UInt8(index)])
+        }, receive: { _ in
+            received += 1
+            draft.items.append(attachment)
+        })
+        XCTAssertEqual(received, 1)
+        XCTAssertTrue(draft.items.isEmpty)
+    }
+
     func testPickerAndReaderSupportTextExtensions() throws {
         for ext in ["json", "md", "markdown", "txt"] {
             let type = try XCTUnwrap(UTType(filenameExtension: ext))

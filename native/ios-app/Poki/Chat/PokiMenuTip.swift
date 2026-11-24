@@ -3,13 +3,22 @@ import TipKit
 
 /// The one-time hint that Poki's picture opens its menu (models, approvals and outfits). Beta testers
 /// did not find the menu: a picture reads as a picture, not as a button. The tip points at the picture
-/// on the home page until the menu has been opened once, from the picture or from the name in the
-/// conversation, and then never shows again. The name in the conversation keeps a small chevron for
-/// good (`PokiHead`), as a title menu does in the system's apps.
+/// on the home page once the welcome is closed, shows once, and is done for good when the menu is
+/// opened or the tip is closed. The name in the conversation keeps a small chevron for good
+/// (`PokiHead`), as a title menu does in the system's apps.
 struct PokiMenuTip: Tip {
+    /// A welcome is up at this launch: the tip waits under it rather than floating over it.
+    @Parameter(.transient) static var welcomeUp: Bool = false
+
     var title: Text { Text("Tap Poki") }
     var message: Text? { Text("Choose a model and how Poki asks before acting") }
     var image: Image? { Image(systemName: "hand.tap") }
+
+    var rules: [Rule] { [#Rule(Self.$welcomeUp) { $0 == false }] }
+
+    /// Shown once: a tap outside the tip closes it without counting as an action, and the menu's own
+    /// tap is not always seen, so the count is what keeps it from coming back.
+    var options: [any TipOption] { [Tips.MaxDisplayCount(1)] }
 
     /// The menu was opened, so the hint has done its work.
     static func menuOpened() {
@@ -17,11 +26,12 @@ struct PokiMenuTip: Tip {
     }
 
     /// Once at launch, before any tip view is drawn.
-    static func configure() {
+    static func configure(welcomeUp: Bool) {
         #if DEBUG
         // `-pokiResetTips` shows the hint again on this launch, for the Simulator and screenshots.
         if UserDefaults.standard.bool(forKey: "pokiResetTips") { try? Tips.resetDatastore() }
         #endif
         try? Tips.configure([.displayFrequency(.immediate)])
+        Self.welcomeUp = welcomeUp
     }
 }

@@ -1,13 +1,10 @@
 import Foundation
 import UserNotifications
 
-/// A time-sensitive notification for an approval when no Live Activity can ask (off, dismissed, or
-/// never started), so the person still hears about it. Never both: AppModel's askOwner posts it only
-/// without a Live Activity. Touch and hold
-/// it for Allow (Face ID or the passcode first), Don't Allow, and on a step that turning asking off
-/// reaches, Don't Ask Again (Face ID or the passcode first). PokiCore sends no input while an
-/// approval waits, so only the person can press them.
+/// A time-sensitive notification that keeps an unanswered approval available after iOS collapses
+/// the island. Without a Live Activity, the notification is the immediate prompt.
 enum ApprovalNotice {
+    static let islandReminderDelay: TimeInterval = 8
     static let category = "approval"
     /// The same buttons and Don't Ask Again, for a step the owner can stop being asked about.
     static let optionalCategory = "approval.optional"
@@ -40,7 +37,8 @@ enum ApprovalNotice {
         }
     }
 
-    static func post(_ approval: PendingApproval, caller: String? = nil) {
+    static func post(_ approval: PendingApproval, after delay: TimeInterval = 0) {
+        guard approval.expires.timeIntervalSinceNow > delay else { return }
         let content = UNMutableNotificationContent()
         // The one question, as on the card: from the rules' kind, never the agent's words.
         content.title = approval.question
@@ -49,7 +47,8 @@ enum ApprovalNotice {
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = "approvals"
-        let request = UNNotificationRequest(identifier: "approval-\(approval.id)", content: content, trigger: nil)
+        let trigger = delay > 0 ? UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false) : nil
+        let request = UNNotificationRequest(identifier: "approval-\(approval.id)", content: content, trigger: trigger)
         UNUserNotificationCenter.current().add(request)
     }
 
@@ -66,13 +65,19 @@ final class ApprovalNoticeDelegate: NSObject, UNUserNotificationCenterDelegate, 
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        let id = response.notification.request.content.userInfo["approval"] as? String
+        let action = response.actionIdentifier
         DispatchQueue.main.async {
-            defer { completionHandler() }
-            guard let id = response.notification.request.content.userInfo["approval"] as? String else { return }
-            let action = response.actionIdentifier
-            guard [ApprovalNotice.allow, ApprovalNotice.deny, ApprovalNotice.stopAsking].contains(action) else { return }
-            ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action != ApprovalNotice.deny,
-                                                         stopAsking: action == ApprovalNotice.stopAsking))
+            guard let id, [ApprovalNotice.allow, ApprovalNotice.deny, ApprovalNotice.stopAsking].contains(action) else {
+                completionHandler()
+                return
+            }
+            Task { @MainActor in
+                await ApprovalIntentBridge.submit(ApprovalDecision(approvalID: id, approved: action != ApprovalNotice.deny,
+                                                                   stopAsking: action == ApprovalNotice.stopAsking,
+                                                                   waitForIslandCollapse: false))
+                completionHandler()
+            }
         }
     }
 

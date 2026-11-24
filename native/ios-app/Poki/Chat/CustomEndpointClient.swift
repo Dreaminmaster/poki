@@ -53,17 +53,42 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
     /// The address requests are made for, and the ones to move them to, in order.
     private let primary: String?
     let backups: [String]
+    /// The conversation that owns requests made by this HTTP client. Never take this from global chat state.
+    private let conversationSessionID: String?
 
-    init(inner: any ProviderHTTPClient = DefaultProviderHTTPClient(), primary: String? = nil, backups: [String] = []) {
+    init(inner: any ProviderHTTPClient = DefaultProviderHTTPClient(), primary: String? = nil,
+         backups: [String] = [], conversationSessionID: String? = nil) {
         self.inner = inner
         self.primary = primary.map(ModelCatalog.normalizedAddress)
         self.backups = backups.map(ModelCatalog.normalizedAddress).filter { !$0.isEmpty }
+        self.conversationSessionID = conversationSessionID
     }
 
-    /// The client for one custom provider's model: its first address and the backups that speak the
-    /// same API.
-    convenience init(for model: Model) {
-        self.init(primary: model.baseUrl, backups: Self.backupAddresses(for: model))
+    /// The client for one custom provider's model and one saved conversation.
+    convenience init(for model: Model, sessionID: String? = nil) {
+        self.init(primary: model.baseUrl, backups: Self.backupAddresses(for: model),
+                  conversationSessionID: sessionID)
+    }
+
+    /// A backup URL is a *new* recipient. Do not forward the primary's OpenCode session
+    /// headers into an unrelated gateway. Even for an OpenCode-hosted backup, use the
+    /// request owner's ID, not a header captured from a different request or chat.
+    static func routedFallback(_ request: URLRequest, to url: URL, conversationSessionID: String?) -> URLRequest {
+        var moved = request
+        moved.url = url
+        for name in (moved.allHTTPHeaderFields ?? [:]).keys
+            where name.caseInsensitiveCompare("x-opencode-session") == .orderedSame ||
+                  name.caseInsensitiveCompare("x-opencode-client") == .orderedSame {
+            moved.setValue(nil, forHTTPHeaderField: name)
+        }
+        let host = url.host?.lowercased() ?? ""
+        let trustedOpenCode = url.scheme?.lowercased() == "https"
+            && (host == "opencode.ai" || host.hasSuffix(".opencode.ai"))
+        if trustedOpenCode, let sessionID = conversationSessionID, !sessionID.isEmpty {
+            moved.setValue(sessionID, forHTTPHeaderField: "x-opencode-session")
+            moved.setValue("Poki", forHTTPHeaderField: "x-opencode-client")
+        }
+        return moved
     }
 
     static func backupAddresses(for model: Model) -> [String] {
@@ -97,18 +122,55 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
     /// What the address answered to the last request, or nil before the first.
     var seen: Seen? { lock.withLock { last } }
 
+    /// Only official OpenAI HTTPS endpoints are confirmed to accept OpenAI's prompt-cache body
+    /// field and session-routing headers.
+    static func acceptsSessionCache(url: URL?) -> Bool {
+        guard let url,
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "api.openai.com",
+              url.port == nil || url.port == 443 else {
+            return false
+        }
+        return true
+    }
+
+    /// Strips OpenAI session-cache fields and headers when an outgoing request targets a
+    /// non-official endpoint (for example, when failing over from `api.openai.com` to a
+    /// third-party backup address).
+    static func scopedForDestination(_ request: URLRequest) -> URLRequest {
+        guard !acceptsSessionCache(url: request.url) else { return request }
+        var updated = request
+        if let fields = updated.allHTTPHeaderFields {
+            let dropped: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+            for key in fields.keys where dropped.contains(key.lowercased()) {
+                updated.setValue(nil, forHTTPHeaderField: key)
+            }
+        }
+        if let body = updated.httpBody,
+           var payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+           payload.removeValue(forKey: "prompt_cache_key") != nil,
+           let encoded = try? JSONSerialization.data(withJSONObject: payload) {
+            updated.httpBody = encoded
+            if let fields = updated.allHTTPHeaderFields {
+                for key in fields.keys where key.lowercased() == "content-length" {
+                    updated.setValue("\(encoded.count)", forHTTPHeaderField: key)
+                }
+            }
+        }
+        return updated
+    }
+
     func send(_ request: URLRequest) async throws -> ProviderHTTPResponse {
         try await send(request, timeoutPolicy: .request)
     }
 
     func send(_ request: URLRequest, timeoutPolicy: ProviderHTTPTimeoutPolicy) async throws -> ProviderHTTPResponse {
-        var attempts = [request]
+        var attempts = [Self.scopedForDestination(request)]
         if let primary {
             for backup in backups {
                 guard let url = Self.moved(request.url, from: primary, to: backup) else { continue }
-                var next = request
-                next.url = url
-                attempts.append(next)
+                let next = Self.routedFallback(request, to: url, conversationSessionID: conversationSessionID)
+                attempts.append(Self.scopedForDestination(next))
             }
         }
         var tried: [String] = []

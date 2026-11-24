@@ -331,13 +331,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "后台保活"
+            "value" : "后台运行"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "背景保活"
+            "value" : "背景執行"
           }
         },
         "en" : {
@@ -1126,7 +1126,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在使用准备中重新配对"
+            "value" : "在配置中重新配对"
           }
         },
         "en" : {
@@ -1138,7 +1138,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在使用準備中重配"
+            "value" : "在配置中重配"
           }
         }
       }
@@ -1195,7 +1195,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开代理或在使用准备中重配"
+            "value" : "开代理或在配置中重配"
           }
         },
         "en" : {
@@ -1207,7 +1207,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開代理或在使用準備重配"
+            "value" : "開代理或在配置重配"
           }
         }
       }
@@ -1241,7 +1241,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "后台保活"
+            "value" : "后台运行"
           }
         },
         "en" : {
@@ -1253,7 +1253,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "背景保活"
+            "value" : "背景執行"
           }
         }
       }
@@ -1304,13 +1304,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本机通道"
+            "value" : "本地连接"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本機通道"
+            "value" : "本機連線"
           }
         }
       }
@@ -1321,13 +1321,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本机通道未开"
+            "value" : "本地连接未开"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本機通道未開"
+            "value" : "本機連線未開"
           }
         }
       }
@@ -1338,13 +1338,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本机通道或配对"
+            "value" : "本地连接或配对"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本機通道或配對"
+            "value" : "本機連線或配對"
           }
         }
       }
@@ -1447,13 +1447,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要本机通道"
+            "value" : "需要本地连接"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需要本機通道"
+            "value" : "需要本機連線"
           }
         }
       }
@@ -1567,7 +1567,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在使用准备中下载最新映像"
+            "value" : "在配置中下载最新映像"
           }
         },
         "en" : {
@@ -1579,7 +1579,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在使用準備下載最新映像"
+            "value" : "在配置下載最新映像"
           }
         }
       }
@@ -1613,13 +1613,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在建立隧道"
+            "value" : "正在建立本地连接"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在建立通道"
+            "value" : "正在建立本機連線"
           }
         }
       }
@@ -2551,13 +2551,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用准备"
+            "value" : "配置"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用準備"
+            "value" : "配置"
           }
         },
         "en" : {
@@ -2804,6 +2804,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "向上輕掃"
+          }
+        }
+      }
+    },
+    "Run Poki Anytime again to send as text." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说完后，再运行一次「随时 Poki」转成文字。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "說完後，再執行一次「隨時 Poki」轉成文字。"
           }
         }
       }
@@ -3152,7 +3169,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开启本机通道"
+            "value" : "开启本地连接"
           }
         },
         "en" : {
@@ -3164,7 +3181,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟本機通道"
+            "value" : "開啟本機連線"
           }
         }
       }

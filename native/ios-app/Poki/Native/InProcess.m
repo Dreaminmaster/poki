@@ -610,6 +610,7 @@ static BOOL PKSameDisplay(PKDisplayGeometry a, PKDisplayGeometry b) {
 @interface PKDuoCompanionTask : NSObject
 @property (nonatomic, copy, nullable) NSString *initialPokiPane;
 @property (atomic, strong, nullable) PKWorkspace *target;
+@property (atomic, copy, nullable) NSString *openingBundle;
 @end
 @implementation PKDuoCompanionTask
 @end
@@ -2160,9 +2161,14 @@ static const int PKFrontKey = -1;
         !PKSameDisplay(observed.display, self.displayGeometry) ||
         ![_sessions isCurrent:session generation:observed.generation]) return NO;
     NSString *pokiPane = observed.selectRight ? @"left" : @"right";
-    if (task.initialPokiPane && ![task.initialPokiPane isEqualToString:pokiPane]) return NO;
     @synchronized (self) {
-        if (task != _duoCompanionTask) return NO;
+        if (task != _duoCompanionTask || (task.initialPokiPane && ![task.initialPokiPane isEqualToString:pokiPane])) return NO;
+        if (task.openingBundle) {
+            if (![task.openingBundle isEqualToString:observed.targetBundle]) return NO;
+            task.target = observed;
+            task.openingBundle = nil;
+            return YES;
+        }
         if (!task.target) task.target = observed;
         PKWorkspace *target = task.target;
         return target.selectRight == observed.selectRight &&
@@ -2173,7 +2179,7 @@ static const int PKFrontKey = -1;
 
 - (BOOL)bindDuoCompanionTarget {
     PKDuoCompanionTask *task = self.duoCompanionTask;
-    if (!task || !self.isPokiSceneVisible) return NO;
+    if (!task || task.openingBundle || !self.isPokiSceneVisible) return NO;
     if (task.target) return YES;
     PKDisplayGeometry display = self.displayGeometry;
     if (CGRectIsNull(display.peer)) return NO;
@@ -2231,6 +2237,7 @@ static const int PKFrontKey = -1;
         NSString *ownPane = nil;
         PKWorkspace *unboundCompanion = nil;
         if (companionTask && !pokiVisible) {
+            if (companionTask.openingBundle) return @{};
             PKWorkspace *target = companionTask.target;
             if (!target) return @{};
             chosen = [owner hiddenCompanion:target display:geometry ax:ax session:session generation:generation viewport:&pane];
@@ -2250,7 +2257,7 @@ static const int PKFrontKey = -1;
             if (!companion) return @{};
             if (companionTask) {
                 PKWorkspace *target = companionTask.target;
-                if (target) {
+                if (target && !companionTask.openingBundle) {
                     int targetPID = target.selectRight ? target.rightPID : target.leftPID;
                     if (target.selectRight != companion.selectRight || targetPID != PKAXPid(chosen)) return @{};
                 } else {
@@ -2281,7 +2288,8 @@ static const int PKFrontKey = -1;
         if (chosen && pid > 0) {
             NSString *bundle = [owner bundleForPID:pid session:session] ?: @"";
             if (companionTask && (companionTask != owner.duoCompanionTask ||
-                (!unboundCompanion && ![bundle isEqualToString:companionTask.target.targetBundle]))) return @{};
+                (!unboundCompanion && (companionTask.openingBundle ||
+                 ![bundle isEqualToString:companionTask.target.targetBundle])))) return @{};
             if (unboundCompanion) {
                 unboundCompanion.targetBundle = bundle;
                 answer[@"unboundCompanion"] = unboundCompanion;
@@ -2771,6 +2779,7 @@ CGPoint PKWorkspaceLauncherPoint(NSDictionary<NSString *, NSArray<NSValue *> *> 
             if (name.length) [xml appendFormat:@" name=\"%@\"", PKEscape(name)];
             if (label.length) [xml appendFormat:@" label=\"%@\"", PKEscape(label)];
             if (value.length) [xml appendFormat:@" value=\"%@\"", PKEscape(value)];
+            if ([node respondsToSelector:@selector(isEnabled)] && ![node isEnabled]) [xml appendString:@" enabled=\"false\""];
             if (CGRectIsNull(f) || CGRectIsInfinite(f)) f = CGRectZero;
             else {
                 if (paneRead) f = CGRectIntersection(CGRectOffset(f, treeOffset, 0), clip);
@@ -2847,19 +2856,79 @@ static NSString *PKDaemonReply(NSTimeInterval seconds, void (^send)(void (^)(NSE
     return code;
 }
 
+- (nullable NSString *)activateCompanion:(NSString *)bundle task:(PKDuoCompanionTask *)task pokiPane:(NSString *)pokiPane {
+    PKOutcome *refused;
+    uint64_t generation = 0;
+    id session = [self current:&generation outcome:&refused];
+    if (!session) return refused.code ?: @"no_session";
+    PKDisplayGeometry display = self.displayGeometry;
+    if (self.screenLocked || !self.isPokiSceneVisible || CGRectIsNull(display.peer) ||
+        ![_sessions isCurrent:session generation:generation]) return @"not sent: Poki's Split View is no longer visible";
+    if (display.panePlacementKnown) {
+        NSString *visiblePane = CGRectGetMidX(display.peer) > CGRectGetMidX(display.bounds) ? @"left" : @"right";
+        if (![visiblePane isEqualToString:pokiPane]) return @"not sent: Poki moved to the other pane";
+    }
+
+    id proxy = [session daemonProxy];
+    if (!proxy) return @"not sent: the automation session has no launch service";
+    @synchronized (self) {
+        if (task != _duoCompanionTask || _workspace || (task.initialPokiPane && ![task.initialPokiPane isEqualToString:pokiPane]))
+            return @"not sent: the Split View task changed";
+        if (task.openingBundle) return @"sent, no confirmation: verify the previous app opening first";
+        task.initialPokiPane = pokiPane;
+        task.openingBundle = bundle;
+        _capturedDisplay = nil;
+        _viewport = CGRectNull;
+        [self forgetFront];
+    }
+    NSString *failure = nil;
+    @try {
+        failure = PKDaemonReply(4, ^(void (^reply)(NSError *)) {
+            [proxy _XCT_launchApplicationWithBundleID:bundle arguments:@[] environment:@{} completion:reply];
+        });
+    } @catch (__unused NSException *exception) {
+        return @"sent, no confirmation: iOS did not complete the activation";
+    }
+    if ([failure isEqualToString:@"no_reply"]) return @"sent, no confirmation: iOS did not answer the activation";
+    if (failure) {
+        @synchronized (self) {
+            if ([task.openingBundle isEqualToString:bundle]) task.openingBundle = nil;
+        }
+        return failure;
+    }
+
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 3;
+    do {
+        if (task != self.duoCompanionTask || self.screenLocked || !self.isPokiSceneVisible ||
+            !PKSameDisplay(display, self.displayGeometry)) break;
+        NSDictionary *front = nil;
+        [self front:&front ax:NULL code:NULL timeout:1];
+        if ([front[@"pokiPane"] isEqualToString:pokiPane] && [front[@"bundleId"] isEqualToString:bundle]) return nil;
+        [NSThread sleepForTimeInterval:0.25];
+    } while (NSProcessInfo.processInfo.systemUptime < deadline);
+    return @"sent, no confirmation: the requested app was not verified beside Poki";
+}
+
 /// Opens, brings forward or ends an app through testmanagerd, as XCUIApplication does inside a UI
 /// test: launch ends a running copy first and starts it again, activate brings a running copy forward
 /// (or starts it), terminate ends it. XCUIApplication itself refuses to exist outside a UI test bundle.
 /// Launch and activate return once the app is in front.
 - (nullable NSString *)app:(NSString *)bundle action:(NSString *)action {
     PKWorkspace *selected = self.selectedWorkspace;
+    PKDuoCompanionTask *task = self.duoCompanionTask;
     if (self.hasDuoCompanion || (selected && (selected.leftPID == getpid() || selected.rightPID == getpid()))) {
         NSDictionary *front = nil;
         [self front:&front ax:NULL];
         NSString *ownSide = front[@"pokiPane"] ?: self.duoPlacement;
-        if ([action isEqualToString:@"activate"] && [front[@"pokiPane"] length] && [front[@"bundleId"] isEqualToString:bundle]) return nil;
-        NSString *targetSide = [ownSide isEqualToString:@"left"] ? @"right" : [ownSide isEqualToString:@"right"] ? @"left" : @"opposite";
-        if (self.hasDuoCompanionTask)
+        BOOL activate = [action isEqualToString:@"activate"];
+        if (activate && [front[@"pokiPane"] length] && [front[@"bundleId"] isEqualToString:bundle]) return nil;
+        BOOL onLeft = [ownSide isEqualToString:@"left"], onRight = [ownSide isEqualToString:@"right"];
+        if (task && activate && !selected && (onLeft || onRight) &&
+            ![bundle isEqualToString:NSBundle.mainBundle.bundleIdentifier] && ![bundle isEqualToString:@"com.apple.springboard"]) {
+            return [self activateCompanion:bundle task:task pokiPane:ownSide];
+        }
+        NSString *targetSide = onLeft ? @"right" : onRight ? @"left" : @"opposite";
+        if (task)
             return [NSString stringWithFormat:@"not sent: %@ was not confirmed in the task's %@ pane.", bundle, targetSide];
         return [NSString stringWithFormat:@"not sent: keep Poki in Split View. Ask the owner to open %@ in the %@ pane, then look again.", bundle, targetSide];
     }

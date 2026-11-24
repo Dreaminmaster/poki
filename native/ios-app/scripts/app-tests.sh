@@ -22,10 +22,15 @@ xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 # PokiTests read the English text, as on CI's simulator, whatever language this Mac's simulator uses.
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"; xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true' EXIT
+launch_status=0
 SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="$X/usr/lib/libXCTestBundleInject.dylib" \
 SIMCTL_CHILD_XCTestBundlePath="$APP/PlugIns/PokiTests.xctest" \
 SIMCTL_CHILD_DYLD_FRAMEWORK_PATH="$X/Library/Frameworks:$X/Library/PrivateFrameworks" \
 SIMCTL_CHILD_DYLD_LIBRARY_PATH="$X/usr/lib" \
-  timeout 300 xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -AppleLanguages "(en)" -AppleLocale en_US >"$LOG" 2>&1 || true
+  timeout 300 xcrun simctl launch --console-pty "$UDID" "$BUNDLE" -AppleLanguages "(en)" -AppleLocale en_US >"$LOG" 2>&1 || launch_status=$?
 grep -E "^Test Case|error:|Executed" "$LOG" || true
-grep -q "Test Suite 'All tests' passed" "$LOG"
+if ! grep -q "Test Suite 'All tests' passed" "$LOG"; then
+  printf 'PokiTests did not report success (simctl launch wrapper exited %s). Console tail:\n' "$launch_status" >&2
+  tail -n 80 "$LOG" >&2
+  exit 1
+fi
