@@ -381,14 +381,20 @@ enum ConversationSearchIndex {
     }
 
     /// Reattach result IDs to current saved records after background search completes.
-    /// Both the live search view and tests use this resolver, so deleted sessions never appear.
+    /// Both the live search view and tests use this resolver: a deleted session or replaced
+    /// message must not leave a result that cannot be opened.
     static func resolve(_ matches: [Match], in sessions: [SavedSession]) -> [ConversationSearchHit] {
         let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
         return matches.compactMap { match in
-            guard let session = saved[match.sessionID] else { return nil }
+            guard let session = saved[match.sessionID], hasTarget(match.entryID, in: session) else { return nil }
             return ConversationSearchHit(session: session, entryID: match.entryID,
                                          detail: match.detail, author: match.author, at: match.at)
         }
+    }
+
+    static func hasTarget(_ entryID: UUID?, in session: SavedSession) -> Bool {
+        guard let entryID else { return true }
+        return session.entries.contains { $0.id == entryID }
     }
 
     static func searchableText(_ entry: ChatEntry) -> String? {
@@ -441,60 +447,48 @@ private struct ConversationsSettingsView: View {
 
     @State private var matches: [ConversationSearchHit] = []
     @State private var cachedSnapshot: [ConversationSearchIndex.IndexedSession] = []
-    @State private var cachedRevision: Int?
+    @State private var cachedRevision: UInt64?
     @State private var cachedLocale: String?
-    @State private var searching = false
+    @State private var publishedKey: SearchKey?
 
     private struct SearchKey: Equatable {
         let query: String
-        let revision: Int
+        let revision: UInt64
         let locale: String
     }
 
-    /// Observing just a cheap fingerprint also notices archive/rename/new-message changes.
-    /// Do not read all message bodies every time SwiftUI evaluates the list.
-    private var historyRevision: Int {
-        var hasher = Hasher()
-        for session in store.sessions {
-            hasher.combine(session.id)
-            hasher.combine(session.updated)
-            hasher.combine(session.entries.count)
-            hasher.combine(session.entries.last?.id)
-            hasher.combine(session.name)
-            hasher.combine(session.archived)
-            hasher.combine(session.unarchived)
-        }
-        return hasher.finalize()
+    private var searchKey: SearchKey {
+        SearchKey(query: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                  revision: store.searchRevision, locale: viewLocale.identifier)
     }
 
-    @MainActor private func refreshMatches() async {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+    @MainActor private func refreshMatches(for key: SearchKey) async {
+        guard !Task.isCancelled, key == searchKey else { return }
+        guard !key.query.isEmpty else {
             matches = []
-            searching = false
+            publishedKey = key
             return
         }
-        searching = true
-        matches = []
-        let revision = historyRevision
-        if cachedRevision != revision || cachedLocale != viewLocale.identifier {
-            // Chunk the one-time main-actor snapshot across run-loop turns.
+        // Debounce before rebuilding the snapshot: a live task can save several
+        // updates in quick succession, and a typed query need not rebuild the index.
+        do { try await Task.sleep(for: .milliseconds(180)) }
+        catch { return }
+        guard !Task.isCancelled, key == searchKey else { return }
+
+        if cachedRevision != key.revision || cachedLocale != key.locale {
             var updated: [ConversationSearchIndex.IndexedSession] = []
             for (index, session) in store.ordered.enumerated() {
-                if Task.isCancelled { return }
+                guard !Task.isCancelled, key == searchKey else { return }
                 updated.append(contentsOf: ConversationSearchIndex.snapshot(in: [session]))
                 if index % 8 == 7 { await Task.yield() }
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, key == searchKey else { return }
             cachedSnapshot = updated
-            cachedRevision = revision
-            cachedLocale = viewLocale.identifier
+            cachedRevision = key.revision
+            cachedLocale = key.locale
         }
         let source = cachedSnapshot
-        do { try await Task.sleep(for: .milliseconds(180)) }
-        catch { return }
-        guard !Task.isCancelled else { return }
-
+        let text = key.query
         let work = Task.detached(priority: .userInitiated) {
             ConversationSearchIndex.search(source, query: text)
         }
@@ -503,9 +497,10 @@ private struct ConversationsSettingsView: View {
         } onCancel: {
             work.cancel()
         }
-        guard !Task.isCancelled else { return }
+        // A key change can precede SwiftUI cancelling the previous task.
+        guard !Task.isCancelled, key == searchKey else { return }
         matches = ConversationSearchIndex.resolve(hits, in: store.ordered)
-        searching = false
+        publishedKey = key
     }
 
     /// A static resource key lets SwiftUI resolve the current environment locale at render time.
@@ -521,8 +516,11 @@ private struct ConversationsSettingsView: View {
     }
 
     var body: some View {
+        let key = searchKey
+        let searching = publishedKey != key
+        let currentMatches = searching ? [] : matches
         List {
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if key.query.isEmpty {
                 let archived = store.archivedSessions
                 Section {
                     ForEach(archived) { session in
@@ -551,8 +549,12 @@ private struct ConversationsSettingsView: View {
                         .listRowBackground(Color.clear)
                 }
             } else {
-                ForEach(matches) { hit in
-                    Button { openSession(hit.session.id, hit.entryID) } label: {
+                ForEach(currentMatches) { hit in
+                    Button {
+                        guard publishedKey == searchKey, let session = store.session(hit.session.id),
+                              ConversationSearchIndex.hasTarget(hit.entryID, in: session) else { return }
+                        openSession(hit.session.id, hit.entryID)
+                    } label: {
                         HStack(alignment: .top, spacing: 12) {
                             SessionAvatar(session: hit.session, size: 36)
                             VStack(alignment: .leading, spacing: 4) {
@@ -585,10 +587,10 @@ private struct ConversationsSettingsView: View {
                         Text("Searching messages…", tableName: "ConversationSearch")
                     }
                     .frame(maxWidth: .infinity, minHeight: 64)
-                } else if matches.isEmpty {
+                } else if currentMatches.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
-                if !searching && matches.count == ConversationSearchIndex.displayLimit {
+                if !searching && currentMatches.count == ConversationSearchIndex.displayLimit {
                     Text("Showing the first 150 results. Refine the search to see more.",
                          tableName: "ConversationSearch")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -598,8 +600,8 @@ private struct ConversationsSettingsView: View {
         .navigationTitle(AppLocalization.text("Archived Conversations"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search all messages", tableName: "ConversationSearch"))
-        .task(id: SearchKey(query: query, revision: historyRevision, locale: viewLocale.identifier)) {
-            await refreshMatches()
+        .task(id: key) {
+            await refreshMatches(for: key)
         }
     }
 }

@@ -108,6 +108,22 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertTrue(ConversationSearchIndex.resolve(rawHits, in: [active]).isEmpty)
     }
 
+    func testSearchDropsReplacedMessageButKeepsOtherCurrentHits() {
+        let replaced = ChatEntry(.poki("needle replaced"))
+        let retained = ChatEntry(.you("needle retained", delivered: true))
+        let original = sample(entries: [replaced, retained])
+        let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
+        XCTAssertEqual(raw.count, 2)
+
+        var current = original
+        current.entries[0] = ChatEntry(.poki("needle updated"))
+        let resolved = ConversationSearchIndex.resolve(raw, in: [current])
+        XCTAssertEqual(resolved.map(\.entryID), [retained.id], "A hit is not valid just because its conversation still exists")
+        XCTAssertFalse(ConversationSearchIndex.hasTarget(replaced.id, in: current))
+        XCTAssertTrue(ConversationSearchIndex.hasTarget(retained.id, in: current))
+        XCTAssertTrue(ConversationSearchIndex.hasTarget(nil, in: current))
+    }
+
     func testCancellationClearsPendingSearchWithoutReportingOldHits() async {
         let archive = sample("old", entries: [ChatEntry(.you("needle found", delivered: true))])
         let snapshot = ConversationSearchIndex.snapshot(in: [archive])

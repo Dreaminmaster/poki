@@ -61,6 +61,9 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     /// The item you selected on a result card; nil while it is the one Poki suggested.
     var chosen: String?
     init(_ kind: Kind) { id = UUID(); self.kind = kind }
+    /// A voice transcript is rebuilt from its lines as the call progresses.
+    /// Reuse the line's identity so earlier messages keep their search targets.
+    init(_ kind: Kind, id: UUID) { self.id = id; self.kind = kind }
 
     /// The same delimited owner request for the model, consent evidence and task routing.
     var requestText: String {
