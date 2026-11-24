@@ -24,6 +24,17 @@ private final class HeldProbe {
 
 @MainActor
 final class LoopbackMonitorTests: XCTestCase {
+    func testOwnerDisconnectCancelsReconnectWhileOldTunnelStops() async {
+        var ownerWantsConnection = true
+        var sleeps = 0
+        let mayReconnect = await LoopbackTunnel.waitForDisconnect(isDisconnecting: { true }, wanted: { ownerWantsConnection }, sleep: {
+            sleeps += 1
+            ownerWantsConnection = false
+        })
+        XCTAssertFalse(mayReconnect)
+        XCTAssertEqual(sleeps, 1)
+    }
+
     private func yield(until condition: () -> Bool) async {
         for _ in 0..<500 where !condition() { await Task.yield() }
     }
