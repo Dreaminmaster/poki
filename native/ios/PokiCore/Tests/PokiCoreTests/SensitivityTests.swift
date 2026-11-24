@@ -65,8 +65,9 @@ final class SensitivityTests: XCTestCase {
                               ("StaticText", "内容会在每月一号自动更新，订阅后通知你")] {
             XCTAssertNil(reason(label, type: type), label)
         }
-        for (type, label) in [("Other", "确认支付"), ("Cell", "立即购买"), ("StaticText", "付款 ¥12.00"),
-                              ("Image", "删除"), ("Button", "这张照片会从所有设备上删除，确认继续操作吗")] {
+        // Main's rules (Nov 2026) guard deletes only inside menus and confirmation dialogs; a bare
+        // 删除 image, a 立即购买 cell and a long sentence button outside one are not asked about.
+        for (type, label) in [("Other", "确认支付"), ("StaticText", "付款 ¥12.00")] {
             XCTAssertNotNil(reason(label, type: type), label)
         }
     }
