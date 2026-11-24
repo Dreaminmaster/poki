@@ -290,7 +290,7 @@ enum Harness {
                 parts.append("Poki is in Duo Split View and the task's side is not confirmed yet. Start with look without a pane argument. Wait for the read to confirm the task's app and pane before sending input. Ask the owner for help if the side stays unconfirmed.")
             } else {
                 let target = placement == "left" ? "right" : "left"
-                parts.append("Poki starts in the \(placement) pane of Duo Split View. This task uses the app in the \(target) pane, even when the owner replaces Poki with another app. Use look with no pane argument for that app, or do {launch: bundle id} to confirm it is already there. If the intended app is missing, ask the owner to open it in the \(target) pane and retry the task. Do not go Home, start a fresh launch, or drag across panes.")
+                parts.append("Poki starts in the \(placement) pane of Duo Split View. Use do {launch: bundle id} to open the requested app. Use look without a pane argument to confirm the app is in the \(target) pane before interacting. If you cannot confirm the app, ask the owner to open it in that pane. The task stays in the \(target) pane even when the owner replaces Poki with another app. Do not go Home, use a fresh launch, or drag across panes.")
             }
         }
         // A model decides approvals from what the owner said. A refused step goes through once the
