@@ -8,6 +8,13 @@ import SwiftUI
 /// stays where it is through all of it: the conversations on the left, Poki in the middle, a new
 /// conversation on the right. An approval or a hand-over shows as a card above the message field,
 /// where iOS hides the Dynamic Island while Poki is in front.
+/// One-shot, session-scoped search navigation. A fresh id lets the same hit be reopened.
+struct ConversationSearchJump: Equatable {
+    let sessionID: String
+    let entryID: UUID
+    let requestID = UUID()
+}
+
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
@@ -19,6 +26,9 @@ struct ChatView: View {
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
+    var searchJump: ConversationSearchJump? = nil
+    var revealedSearchEntryID: UUID? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     /// Opens where the OpenAI key for Talk with Poki goes: the key's form, or Live Voice when it is off.
     var openVoiceKey: () -> Void = {}
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
@@ -72,6 +82,7 @@ struct ChatView: View {
 
     /// No message of yours yet: the page is the bear and what you could ask, not a transcript.
     private var isGreeting: Bool {
+        if Self.containsSearchEntry(chat.entries, id: searchJump?.entryID ?? revealedSearchEntryID) { return false }
         guard !chat.running, !voice.isOn, voice.lines.isEmpty else { return false }
         return !chat.entries.contains(where: Self.isContent)
     }
@@ -86,8 +97,22 @@ struct ChatView: View {
 
     /// The conversation without the greeting's lines, which the home page said itself.
     private var shown: [ChatEntry] {
-        guard let first = chat.entries.firstIndex(where: Self.isContent) else { return [] }
-        return chat.entries.enumerated().compactMap { i, entry in
+        Self.transcriptEntries(chat.entries, revealed: searchJump?.entryID ?? revealedSearchEntryID)
+    }
+
+    private static func containsSearchEntry(_ entries: [ChatEntry], id: UUID?) -> Bool {
+        guard let id else { return false }
+        return entries.contains { $0.id == id }
+    }
+
+    static func transcriptEntries(_ entries: [ChatEntry], revealed: UUID?) -> [ChatEntry] {
+        guard let first = entries.firstIndex(where: Self.isContent) else {
+            // A greeting-only conversation normally stays on the home page. A
+            // selected saved row may be shown, but no unrelated opening line.
+            return entries.filter { $0.id == revealed }
+        }
+        return entries.enumerated().compactMap { i, entry in
+            if entry.id == revealed { return entry }
             if i < first, case .poki = entry.kind { return nil }
             return entry
         }
@@ -149,7 +174,8 @@ struct ChatView: View {
         let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
             ? .leading : []
         ZStack {
-            ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+            ChatTranscript(entries: shown, jump: searchJump,
+                           onSearchJumpApplied: onSearchJumpApplied, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
@@ -615,6 +641,8 @@ private struct RiseIn: ViewModifier {
 
 struct ChatTranscript<Footer: View>: View {
     var entries: [ChatEntry]
+    var jump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     var typing = false
     var canRetry = false
     var retry: () -> Void = {}
@@ -659,6 +687,7 @@ struct ChatTranscript<Footer: View>: View {
                 Spacer(minLength: 0)
                 ForEach(Array(entries.enumerated()), id: \.element.id) { i, entry in
                     row(entry, at: i).id(entry.id)
+                        .accessibilityIdentifier("chat.entry.\(entry.id)")
                 }
                 if typing {
                     HStack { TypingBubble(); Spacer(minLength: .messageInsetPadding) }
@@ -673,6 +702,7 @@ struct ChatTranscript<Footer: View>: View {
                 }
                 footer()
             }
+            .scrollTargetLayout()
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity)
@@ -701,6 +731,15 @@ struct ChatTranscript<Footer: View>: View {
         // Your finger stops the chat on its way down to the newest: from there on you are reading.
         .onScrollPhaseChange { _, phase, context in
             if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
+        }
+        .task(id: jump) {
+            // Only read the exact saved entry; never create or send a new action.
+            guard let jump, entries.contains(where: { $0.id == jump.entryID }) else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            follow = .reading
+            position.scrollTo(id: jump.entryID, anchor: .center)
+            onSearchJumpApplied(jump.requestID)
         }
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }

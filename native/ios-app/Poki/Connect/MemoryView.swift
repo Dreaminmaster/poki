@@ -23,12 +23,13 @@ enum MemoryPage: Hashable {
 /// The page for a Memory route.
 struct MemoryDestination: View {
     var page: MemoryPage
+    private var library: MemoryLibrary { .shared }
     var body: some View {
         switch page {
-        case .about(let open): MemoryScopeView(scope: .about, open: open)
-        case .app(let app, let open): MemoryScopeView(scope: .app(app), open: open)
-        case .all(let app, let kind): MemoryScopeView(scope: .all(app, kind))
-        case .recent(let highlight): MemoryRecentView(highlight: highlight)
+        case .about(let open): MemoryScopeView(scope: .about, open: open, library: library)
+        case .app(let app, let open): MemoryScopeView(scope: .app(app), open: open, library: library)
+        case .all(let app, let kind): MemoryScopeView(scope: .all(app, kind), library: library)
+        case .recent(let highlight): MemoryRecentView(highlight: highlight, library: library)
         }
     }
 }
@@ -36,7 +37,7 @@ struct MemoryDestination: View {
 /// Memory's first page.
 struct MemoryView: View {
     var back: () -> Void
-    private let library = MemoryLibrary.shared
+    private var library: MemoryLibrary { .shared }
     @State private var page = MemoryPageState()
     @State private var query = ""
     @State private var importing = false
@@ -272,7 +273,7 @@ enum MemoryScope: Hashable {
 struct MemoryScopeView: View {
     var scope: MemoryScope
     var open: String? = nil
-    private let library = MemoryLibrary.shared
+    var library: MemoryLibrary = .shared
     @State private var page = MemoryPageState()
     static let cap = 4
 
@@ -361,7 +362,7 @@ struct MemoryScopeView: View {
 /// opens its item; Undo puts a change back.
 struct MemoryRecentView: View {
     var highlight: String? = nil
-    private let library = MemoryLibrary.shared
+    var library: MemoryLibrary = .shared
     @State private var filter: MemoryChange.Action?
     @State private var seen: String?
 
@@ -412,6 +413,7 @@ struct MemoryRecentView: View {
                                                            ? .about(open: change.item.id) : .app(change.item.app, open: change.item.id))) {
                 MemoryChangeRow(change: change, highlighted: lit)
             }
+            .accessibilityIdentifier("memory.openChange.\(change.id)")
             .navigationLinkIndicatorVisibility(.hidden)
             .listRowBackground(lit ? Tint.blueSoft : Color(.secondarySystemGroupedBackground))
         } else {
