@@ -703,9 +703,15 @@ final class VoiceModel {
     /// The button let go. Realtime knows by itself when you stopped; dictation sends what it heard.
     func released() {
         guard let dictation, phase == .hearing else { return }
+        finishDictation(dictation, read: dictation.finish)
+    }
+
+    @discardableResult
+    func finishDictation(_ dictation: Dictation, read: @escaping @MainActor () async -> String) -> Task<Void, Never> {
         phase = .thinking
-        Task {
-            let text = await dictation.finish()
+        return Task {
+            let text = await read()
+            guard self.dictation === dictation else { return }
             if lines.last?.role == .you, lines.last?.text != text { lines.removeLast() }
             guard !text.isEmpty else { phase = .listening; return }
             if lines.last?.text != text { lines.append(VoiceLine(role: .you, text: text)) }
@@ -713,35 +719,54 @@ final class VoiceModel {
             if chat.running { lines.append(VoiceLine(role: .note, text: AppLocalization.text(LocalizedStringResource("Poki is still on the last task.")))); phase = .listening; return }
             let before = chat.entries.count
             chat.send(text)
-            while chat.running { try? await Task.sleep(for: .milliseconds(200)) }
+            while chat.running, self.dictation === dictation {
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
+            }
+            guard self.dictation === dictation else { return }
             let reply = chat.entries.dropFirst(before).compactMap { entry -> String? in if case .poki(let t) = entry.kind { return t }; return nil }.last
                 ?? AppLocalization.text(LocalizedStringResource("Done."))
             lines.append(VoiceLine(role: .poki, text: reply))
-            guard self.dictation === dictation else { return }
             phase = .speaking
             dictation.speak(reply.replacingOccurrences(of: "**", with: ""))
         }
     }
 
     private func startDictation() async {
-        guard await Dictation.allowed() else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
+        phase = .connecting
+        session += 1
+        let number = session
+        let allowed = await Dictation.allowed()
+        guard number == session else { return }
+        guard allowed else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
         let dictation = Dictation()
-        dictation.onHeard = { [weak self] text in
-            guard let self, self.phase == .hearing else { return }
-            if self.lines.last?.role == .you { self.lines.removeLast() }
-            self.lines.append(VoiceLine(role: .you, text: text))
-        }
-        dictation.onSpoken = { [weak self] in if self?.phase == .speaking { self?.phase = .listening } }
-        self.dictation = dictation
+        activateDictation(dictation, listen: dictation.listen)
+    }
+
+    func activateDictation(_ dictation: Dictation, listen: () throws -> Void) {
+        bindDictation(dictation)
         holdingMicrophone = true
         do {
-            try dictation.listen()
+            try listen()
             phase = .hearing
             log.add("voice", "dictation to the chat (no Realtime key or bridge)")
         } catch {
             self.dictation = nil
             holdingMicrophone = false
             phase = .lost(VoiceError.reason(for: error))
+        }
+    }
+
+    private func bindDictation(_ dictation: Dictation) {
+        self.dictation = dictation
+        dictation.onHeard = { [weak self, weak dictation] text in
+            guard let self, let dictation, self.dictation === dictation, self.phase == .hearing else { return }
+            if self.lines.last?.role == .you { self.lines.removeLast() }
+            self.lines.append(VoiceLine(role: .you, text: text))
+        }
+        dictation.onSpoken = { [weak self, weak dictation] in
+            guard let self, let dictation, self.dictation === dictation, self.phase == .speaking else { return }
+            self.phase = .listening
         }
     }
 
