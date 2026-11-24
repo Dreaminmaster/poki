@@ -179,6 +179,7 @@ impl Signer {
                 self.account.xcode_token = None;
                 if by_person {
                     self.account.needs_reauth = false;
+                    self.account.rejected_resign_in = false;
                     store::save(&self.account)?;
                 } else {
                     self.persist()?;
@@ -189,6 +190,9 @@ impl Signer {
                 p.keep_password = keep_password;
                 p.anisette = Some(self.client.anisette().source().clone());
                 self.remember_anisette();
+                if by_person {
+                    self.account.rejected_resign_in = false;
+                }
                 self.persist()?;
                 let _ = store::save_pending(&p);
                 self.pending = Some(p.clone());
@@ -336,19 +340,59 @@ impl Signer {
         }
         let fresh = match fetched {
             Ok(t) => t,
-            Err(e) if gsa::is_session_expired(&e) && self.account.password.is_some() => {
+            // An expired session, or one Apple turned away with -22411: sign in again with the kept
+            // password. When Apple wants a code for it, the app asks the person for that code.
+            // Turned away again after a sign-in that the last -22411 started (for example one that
+            // went through a code): wait for the person.
+            Err(e) if gsa::is_session_rejected(&e) && self.account.rejected_resign_in => {
+                tracing::warn!("Apple turned the new session away as well ({e}); waiting for the person to sign in");
+                self.account.xcode_token = None;
+                self.account.needs_reauth = true;
+                store::save(&self.account)?;
+                return Err(e);
+            }
+            Err(e) if (gsa::is_session_expired(&e) || gsa::is_session_rejected(&e)) && self.account.password.is_some() => {
+                let rejected = gsa::is_session_rejected(&e);
+                tracing::warn!("Apple turned the session away ({e}); signing in again with the kept password");
                 let (id, pw) = (session.apple_id.clone(), self.account.password.clone().unwrap());
-                match self.background_sign_in(&id, &pw).await? {
+                // A sign-in that fails on the way (no network, a 503) leaves the old session and
+                // no guard, so the next call tries again.
+                let outcome = self.background_sign_in(&id, &pw).await?;
+                if rejected {
+                    self.account.rejected_resign_in = true;
+                    self.persist()?;
+                }
+                match outcome {
                     None => {
                         let s = self.account.session.clone().unwrap();
-                        self.fetch_xcode_token(&s).await?
+                        match self.fetch_xcode_token(&s).await {
+                            Ok(t) => t,
+                            // The new session was turned away as well. Signing in again by itself
+                            // would only repeat it (and may ask Apple for more codes), so wait for
+                            // the person to sign in.
+                            Err(e2) if rejected && gsa::is_session_rejected(&e2) => {
+                                self.account.xcode_token = None;
+                                self.account.needs_reauth = true;
+                                store::save(&self.account)?;
+                                return Err(e2);
+                            }
+                            Err(e2) => return Err(e2),
+                        }
                     }
                     Some(pending) => return Err(Error::NeedsCode(Box::new(pending))),
                 }
             }
+            // Turned away with no kept password: the person signs in again.
+            Err(e) if gsa::is_session_rejected(&e) => {
+                tracing::warn!("Apple turned the session away ({e}) and no password is kept");
+                self.account.xcode_token = None;
+                let _ = self.persist();
+                return Err(Error::NeedsPerson(gsa::SESSION_EXPIRED.into()));
+            }
             Err(e) => return Err(e),
         };
         self.account.xcode_token = Some(fresh.clone());
+        self.account.rejected_resign_in = false;
         self.persist()?;
         if self.account.needs_reauth {
             return Err(gsa::incomplete_session());
