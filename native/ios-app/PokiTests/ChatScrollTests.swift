@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PokiCore
 import XCTest
 @testable import Poki
 
@@ -35,6 +36,48 @@ final class ChatScrollTests: XCTestCase {
         feed.entries.append(ChatEntry(.poki("Sent. Mom has it. Anything else?")))
         pump(1)
         XCTAssertEqual(scroll.contentOffset.y, reading, accuracy: 1, "A reply must not pull you away from what you are reading")
+    }
+
+    /// Opening and dismissing a saved-message jump only changes scroll position: it must not
+    /// unmount the composer, discard unsent text, or replace the active conversation.
+    func testSearchJumpAndCancellationKeepUnsentChatDraft() throws {
+        let savedChat = UserDefaults.standard.object(forKey: "pokiChat")
+        UserDefaults.standard.set("demo", forKey: "pokiChat")
+        defer { UserDefaults.standard.set(savedChat, forKey: "pokiChat") }
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let chat = ChatModel(app: app)
+        let feed = Feed()
+        self.feed = feed
+        let window = try show(NavigationStack {
+            SearchChatHost(feed: feed)
+        }.environment(app).environment(chat))
+        settle { Self.find(CapsuleTextView.self, in: window) != nil }
+        let field = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        // ChatView's standalone draft is local state, not RootView's persisted pokiDraft.
+        // Exercise the actual composer input before navigation, as the owner would.
+        let draft = "Draft that must remain unsent"
+        field.becomeFirstResponder()
+        field.insertText(draft)
+        settle { field.plainText == draft }
+        XCTAssertEqual(field.plainText, draft)
+        field.resignFirstResponder()
+        let originalID = chat.sessionID
+        let originalEntries = chat.entries
+
+        let selected = try XCTUnwrap(chat.entries.first?.id)
+        feed.jump = ConversationSearchJump(sessionID: originalID, entryID: selected)
+        pump(0.4)
+        let afterJump = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertEqual(afterJump.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.sessionID, originalID)
+
+        feed.jump = nil
+        pump(0.3)
+        let afterCancel = try XCTUnwrap(Self.find(CapsuleTextView.self, in: window))
+        XCTAssertEqual(afterCancel.plainText, "Draft that must remain unsent")
+        XCTAssertEqual(chat.entries, originalEntries)
+        XCTAssertEqual(chat.sessionID, originalID)
     }
 
     func testHomeComposerKeepsItsMarginsInTheDuoLeftPane() throws {
@@ -171,6 +214,7 @@ final class ChatScrollTests: XCTestCase {
             XCTAssertEqual(Self.find(CapsuleTextView.self, in: window)?.text, draft)
             XCTAssertEqual(chat.sessionID, session)
         }
+
     }
 
     /// The owner's case, on the chat page itself with its demo conversation: a new conversation, the
@@ -261,16 +305,27 @@ final class ChatScrollTests: XCTestCase {
     }
 
     private final class Feed: ObservableObject {
+        @Published var jump: ConversationSearchJump?
+        @Published var appliedJump: UUID?
         @Published var entries: [ChatEntry] = (0..<30).flatMap { i in
             [ChatEntry(.you("Question \(i): what is on my calendar this afternoon?", delivered: true)),
              ChatEntry(.poki("Answer \(i): a design review at three and a call with the bank at five."))]
         }
     }
 
+    private struct SearchChatHost: View {
+        @ObservedObject var feed: Feed
+        var body: some View {
+            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {},
+                     openModel: {}, searchJump: feed.jump, openThreads: {})
+        }
+    }
+
     private struct Host: View {
         @ObservedObject var feed: Feed
         var body: some View {
-            ChatTranscript(entries: feed.entries)
+            ChatTranscript(entries: feed.entries, jump: feed.jump,
+                           onSearchJumpApplied: { feed.appliedJump = $0 }) { EmptyView() }
                 .topBar { Color.clear.frame(height: 110) }
                 .bottomBar { Color.clear.frame(height: 80) }
         }

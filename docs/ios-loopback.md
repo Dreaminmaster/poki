@@ -89,8 +89,8 @@ A VPN reporting Connected does not prove that either developer port accepts a co
 A TCP connection does not prove that RemotePairing, its dynamic tunnel listener, or RSD works.
 
 The current product code uses the in-process XCTest session by default. Its launcher first opens
-the local developer connection, then checks the developer image. When that connection fails at TCP
-connect and the image is already mounted on the phone, the launcher reports `running` with code
+the local developer connection, then checks the developer image. If TCP connect fails or the peer
+closes the connection during the opening handshake, and the image is already mounted on the phone, the launcher reports `running` with code
 `local_ddi` instead of waiting for the network. The status keeps the connection error (refused, no
 route, or timed out), and the app writes it to its activity log. One refusal waits instead: while
 the app looks for a moved RemotePairing port in Bonjour (on Wi-Fi, three looks at most), the

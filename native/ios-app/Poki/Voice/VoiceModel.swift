@@ -324,6 +324,7 @@ final class VoiceModel {
     /// Opens the connection for one session: events, then why it closed.
     private let connection: @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection
     private let time: VoiceClock
+    @ObservationIgnored private var lifecycleObservers: [NSObjectProtocol] = []
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
          phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer,
@@ -339,7 +340,7 @@ final class VoiceModel {
         // app you went to, and the Live Activity says what it is doing and carries End. It ends there as
         // it does in front, when nobody speaks for `followUp` after an answer. Only the wait for a server
         // that says nothing is shorter there.
-        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.inBackground = true
@@ -348,11 +349,15 @@ final class VoiceModel {
                 self.lastActivity = self.time.now()
                 if self.ready { self.watchForStall(session: self.session) }
             }
-        }
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.inBackground = false }
-        }
+        })
     }
+    isolated deinit {
+        for observer in lifecycleObservers { NotificationCenter.default.removeObserver(observer) }
+    }
+
     private var holdingMicrophone = false {
         didSet { if holdingMicrophone != oldValue { holdMicrophone(holdingMicrophone) } }
     }
