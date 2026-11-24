@@ -21,7 +21,7 @@ jobs:
         include:
           - pr: search-consistency
             device: iPhone
-            ref: 903fbca9b4f8cf48873b7a0d30c25ab60a2ec7b2
+            ref: 1a3596915b81b8ee856c8c2c1e7a31b823a938db
             tests: 'ConversationSearchTests:17 SessionArchiveTests:18'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
