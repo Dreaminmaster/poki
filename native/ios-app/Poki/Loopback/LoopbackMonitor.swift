@@ -50,9 +50,14 @@ final class LoopbackMonitor {
     private var probeEpoch = 0
     typealias Probe = (_ host: String, _ port: UInt16, _ timeout: TimeInterval) async -> ProbeResult
     private let connect: Probe
+    private let browsePorts: () async -> (ports: [UInt16], problem: String?)
 
-    init(probe: @escaping Probe = { host, port, timeout in await Poki.probe(label: "loopback", host: host, port: port, timeout: timeout) }) {
+    init(probe: @escaping Probe = { host, port, timeout in await Poki.probe(label: "loopback", host: host, port: port, timeout: timeout) },
+         browsePorts: @escaping () async -> (ports: [UInt16], problem: String?) = { await RemotePairingBrowser.ports() },
+         observeNetwork: Bool = true) {
         connect = probe
+        self.browsePorts = browsePorts
+        guard observeNetwork else { return }
         // The default path's interface types change while a proxy app's tunnel is up, so "only
         // cellular" is read from two monitors that each watch one physical interface type.
         path.pathUpdateHandler = { [weak self] path in
@@ -152,14 +157,22 @@ final class LoopbackMonitor {
         portSearchedAt = Date()
         RemotePairingPort.setSearching(true)
         var answer: ProbeResult?
-        let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
+        let search = await RemotePairingPort.search(besides: port, browse: browsePorts) { candidate in
             guard epoch == self.probeEpoch else { return false }
             let result = await self.connect("10.7.0.1", candidate, 1.5)
             guard epoch == self.probeEpoch else { return false }
             if result.outcome == "connected" { answer = result }
             return result.outcome == "connected"
         }
-        guard epoch == probeEpoch else { return nil }
+        guard epoch == probeEpoch else {
+            // A physical change may already have reset the budget; otherwise refund this
+            // incomplete lookup so an exhausted search can run again on the new path.
+            if portLooks > 0 {
+                portLooks -= 1
+                portSearchedAt = .distantPast
+            }
+            return nil
+        }
         // The same finding every 10 s is said once.
         let said = search.said(besides: port)
         if said != portSearchSaid { portSearchSaid = said; AppLog.shared.add("loopback", said) }
@@ -289,7 +302,8 @@ final class LoopbackMonitor {
     }
 
     #if DEBUG
-    func simulateNetworkChange() { networkChanged(physical: true) }
+    func simulateNetworkChange(physical: Bool = true) { networkChanged(physical: physical) }
+    func simulateSearchBudget(_ looks: Int) { portLooks = looks; portSearchedAt = .distantPast }
 
     /// Tests: set the state as a probe result would, running the change hook.
     func simulate(_ next: State) {
