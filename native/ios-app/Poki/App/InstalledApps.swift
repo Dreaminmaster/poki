@@ -118,6 +118,7 @@ final class InstalledApps {
     /// The clock, so a list can grow old.
     var now: () -> Date = { Date() }
 
+    private var pendingRead: Task<Inventory?, Never>?
     private var last: (apps: [App], at: Date)?
     private(set) var lastProblem: String?
     private static let maxAge: TimeInterval = 300
@@ -126,6 +127,14 @@ final class InstalledApps {
     /// back marked not fresh; nil when the list was never read.
     func list() async -> Inventory? {
         if let last, now().timeIntervalSince(last.at) < Self.maxAge { return Inventory(apps: last.apps, fresh: true, readAt: last.at) }
+        if let pendingRead { return await pendingRead.value }
+        let read = Task { await refreshList() }
+        pendingRead = read
+        defer { pendingRead = nil }
+        return await read.value
+    }
+
+    private func refreshList() async -> Inventory? {
         if let request = phone() {
             do {
                 let read = try await fetch(request)
