@@ -2,11 +2,11 @@ name: Fork iOS PR verification
 
 on:
   workflow_dispatch:
-  # Run only when this fork-local test definition changes on default branch.
-  # No product-source pushes or upstream changes activate these costly macOS jobs.
+  # Keep verification isolated from main's automatic Pre-alpha publishing workflow.
+  # Run only for this dedicated fork-local verification branch.
   push:
     branches:
-      - main
+      - ci/search-consistency
     paths:
       - .github/workflows/fork-ios-verify.yml
 
@@ -21,7 +21,7 @@ jobs:
         include:
           - pr: search-consistency
             device: iPhone
-            ref: 1a3596915b81b8ee856c8c2c1e7a31b823a938db
+            ref: 007850271e571009d1d1182a84b89fdc60a4f5f6
             tests: 'ConversationSearchTests:17 SessionArchiveTests:18'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
@@ -138,6 +138,15 @@ jobs:
         run: |
           set -euo pipefail
           native/codex-voice/build.sh build aarch64-apple-ios-sim 2>&1 | tee out/codex-voice-build.log
+      - name: Check the Codex Voice build stamp before Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIB=build/codex-voice/aarch64-apple-ios-sim/target/aarch64-apple-ios-sim/release/libpoki_codex_voice.a
+          test -s "$LIB"
+          test -s "$LIB.sha256"
+          native/codex-voice/build.sh build aarch64-apple-ios-sim | tee out/codex-voice-stamp.log
+          grep -F 'is up to date (cached).' out/codex-voice-stamp.log
       - name: Build actual PokiTests and preserve complete logs
         shell: bash
         run: |
