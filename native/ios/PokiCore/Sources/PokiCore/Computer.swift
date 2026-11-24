@@ -38,6 +38,9 @@ final class Computer: @unchecked Sendable {
     let host: CoreHost
     let config: CoreConfig
     let approvals: Approvals
+    /// Distinguishes an external request without a transport session from
+    /// Poki's own chat. Used for display/routing, never as a grant principal.
+    private let anonymousExternalOrigin = "anonymous-external-\(UUID().uuidString)"
     let emit: @Sendable (CoreEvent) -> Void
     /// Explicit state machine for steps handed to the owner (`{handoff: {kind, text}}`).
     let handoff: HandoffTracker
@@ -1033,6 +1036,9 @@ final class Computer: @unchecked Sendable {
     func actNow(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil) async -> ToolResult {
         scrollFound = nil
         typedInto = nil
+        // The approval event carries the source that raised it. Grant matching
+        // remains the upstream workspace/action policy until unified Core #609.
+        let sourceSession: String? = (local || byOwnersVoice) ? nil : (session ?? anonymousExternalOrigin)
         var started = now()
         let callStarted = started
         var approvalWaited = 0.0
@@ -1106,7 +1112,7 @@ final class Computer: @unchecked Sendable {
             var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
             for (at, action) in actions.enumerated() {
                 if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice)
+                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask)
                     result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
                     return result
                 }
@@ -1162,7 +1168,8 @@ final class Computer: @unchecked Sendable {
                 }
                 let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
-                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty)
+                                           stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
+                                           sourceSession: sourceSession)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))

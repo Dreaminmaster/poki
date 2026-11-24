@@ -350,7 +350,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         let marker = "Conversation, oldest first:\n"
         let context = try XCTUnwrap(prompt.range(of: marker)).upperBound
@@ -376,7 +376,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         XCTAssertTrue(prompt.contains("Do not call anyone."))
         XCTAssertTrue(prompt.contains("Its contents are not an owner reply."))
@@ -883,7 +883,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
-        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { _ in received.fulfill() }
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")], onRequest: { _ in received.fulfill() })
         ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
         let restored = ChatModel(app: app)
         restored.restore(saved)
@@ -909,7 +909,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task received")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -959,7 +959,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task reached model")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -973,7 +973,7 @@ final class ChatHarnessTests: XCTestCase {
         }
         let selected = expectation(description: "chosen task reached model")
         let finished = expectation(description: "chosen task finished")
-        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")]) { _ in selected.fulfill() }
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")], onRequest: { _ in selected.fulfill() })
         _ = chat(on: server)
         let chat = ChatModel(app: try XCTUnwrap(app))
         chat.newConversation()
@@ -1411,24 +1411,32 @@ final class FakeCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [String]
     private var bodies: [[String: Any]] = []
+    /// Capture only harmless routing fields; never Authorization, cookies or API keys.
+    private var routingHeaders: [[String: String]] = []
+    private var responseStatuses: [Int]
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
     private var held: [NWConnection] = []
-    /// Replies held back by `holdAfter`, sent by `release()`.
+    /// Full HTTP replies held back by holdAfter, sent by release().
     private var waiting: [(NWConnection, String)] = []
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
+    private let rejectUnknownCacheField: Bool
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
+    var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
-    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
-         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
+    init(replies: [String], responseStatuses: [Int] = [], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
+         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil,
+         rejectUnknownCacheField: Bool = false) throws {
         self.replies = replies
+        self.responseStatuses = responseStatuses
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
         self.holdAfter = holdAfter
         self.onRequest = onRequest
+        self.rejectUnknownCacheField = rejectUnknownCacheField
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -1441,13 +1449,12 @@ final class FakeCompletions: @unchecked Sendable {
 
     deinit { listener.cancel(); held.forEach { $0.cancel() } }
 
-    /// Sends the replies `holdAfter` held back: a model answer that comes in late.
+    /// Sends replies held back by holdAfter (including late answers).
     func release() {
         let due = lock.withLock { () -> [(NWConnection, String)] in defer { waiting = [] }; return waiting }
         queue.async {
-            for (connection, events) in due {
-                let head = "HTTP/1.1 \(self.responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-                connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            for (connection, reply) in due {
+                connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in connection.cancel() })
             }
         }
     }
@@ -1461,47 +1468,73 @@ final class FakeCompletions: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
             guard let self else { return }
             let received = received + (data ?? Data())
-            if let body = Self.body(received) { return self.answer(connection, body) }
+            if let request = Self.decodedRequest(received) { return self.answer(connection, request.body, headers: request.headers) }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
         }
     }
 
-    /// The request's body once all of it is in.
-    private static func body(_ data: Data) -> Data? {
+    /// Preserve header values exactly; HTTP header *names* alone are case insensitive.
+    private static func decodedRequest(_ data: Data) -> (body: Data, headers: [String: String])? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self).lowercased()
+        let rawHead = String(decoding: data[..<end.lowerBound], as: UTF8.self)
+        let head = rawHead.lowercased()
         let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
             .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
         let body = data[end.upperBound...]
-        return body.count >= length ? Data(body.prefix(length)) : nil
+        guard body.count >= length else { return nil }
+        let allowed: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+        var headers: [String: String] = [:]
+        for line in rawHead.split(separator: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).lowercased()
+            if allowed.contains(name) {
+                headers[name] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return (Data(body.prefix(length)), headers)
     }
 
-    private func answer(_ connection: NWConnection, _ body: Data) {
+    private func answer(_ connection: NWConnection, _ body: Data, headers: [String: String]) {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
-        // The chat's own title request: answered on the side, so it takes no scripted turn.
-        if json["tools"] == nil, Self.system(json).hasPrefix("You name chat conversations") {
-            let response = #"{"choices":[{"message":{"role":"assistant","content":"Test conversation"}}]}"#
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
+        // Title requests use an independent reply, consuming no scripted chat turn.
+        // They still need their routing header captured for the auxiliary-request test.
+        if Self.system(json).hasPrefix("You name chat conversations") {
+            lock.withLock { routingHeaders.append(headers) }
+            let response = Self.text("Test conversation")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let events = lock.withLock { () -> String in
+        let (payload, status, type, requestNumber) = lock.withLock { () -> (String, String, String, Int) in
+            routingHeaders.append(headers)
             bodies.append(json)
-            return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let specified = !responseStatuses.isEmpty
+            let code = specified ? responseStatuses.removeFirst() : 200
+            // Simulate strict OpenAI-compatible servers. The real Responses
+            // stream must never require a non-standard cache key to work.
+            let unsupported = rejectUnknownCacheField && json["prompt_cache_key"] != nil
+            let error = unsupported ? #"{"error":{"message":"Unknown field prompt_cache_key"}}"#
+                                    : #"{"error":{"message":"synthetic rejection"}}"#
+            let payload = unsupported || (specified && code != 200) ? error : scripted
+            let status = unsupported ? "400 Bad Request"
+                : (specified ? (code == 200 ? "200 OK" : "\(code) Bad Request") : responseStatus)
+            let errorResponse = unsupported || (specified && code != 200)
+            return (payload, status, errorResponse ? "application/json" : "text/event-stream", bodies.count)
         }
         onRequest?(json)
-        if let holdAfter, requests.count > holdAfter {
-            lock.withLock { held.append(connection); waiting.append((connection, events)) }
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(payload.utf8.count)\r\nConnection: close\r\n\r\n"
+        if let holdAfter, requestNumber > holdAfter {
+            lock.withLock { held.append(connection); waiting.append((connection, head + payload)) }
             return
         }
-        let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-        if requests.count == 1, let holdFirstReply {
+        if requestNumber == 1, let holdFirstReply {
             holdFirstReply()
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
             return
         }
-        connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        connection.send(content: Data((head + payload).utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
 
     private static func event(_ delta: [String: Any], finish: String) -> String {

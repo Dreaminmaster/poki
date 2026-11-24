@@ -189,7 +189,8 @@ final class ChatModel {
     /// or runner startup resets that history, but does not remove this ceiling.
     static let maxTurns = 500
 
-    init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil, store: SessionStore? = nil) {
+    init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil,
+         store: SessionStore? = nil) {
         let store = store ?? .shared
         self.app = app
         self.store = store
@@ -540,7 +541,7 @@ final class ChatModel {
            let piModel = provider.piModel(model) {
             let id = sessionID
             let store = self.store
-            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel) { store.setAutoName(id, name) } }
+            Task { if let name = await SessionNamer.name(for: message, provider: provider, model: piModel, sessionID: id) { store.setAutoName(id, name) } }
         }
         planID = nil; noteID = nil; cardID = nil; modelPlan = nil
         taskApp = nil
@@ -586,7 +587,7 @@ final class ChatModel {
             var pair: [String] = []
             if !prepared.inSplitView, prepared.namedApps.count >= 2 {
                 let plannedAt = ContinuousClock.now
-                let choice = await chooseSplitView(text: prepared.text, apps: prepared.namedApps, provider: prepared.provider, model: piModel)
+                let choice = await chooseSplitView(text: prepared.text, apps: prepared.namedApps, provider: prepared.provider, model: piModel, sessionID: prepared.runSession)
                 guard runToken == token else { return }
                 AppLog.shared.add("chat", "workspace planning took \(plannedAt.duration(to: .now))")
                 switch choice {
@@ -634,7 +635,7 @@ final class ChatModel {
                 }
                 AppLog.shared.add("chat", "workspace planning confirmed the requested Split View apps")
             }
-            let loop = modelLoop(provider: prepared.provider, model: piModel, inSplitView: splitSession != nil)
+            let loop = modelLoop(provider: prepared.provider, model: piModel, inSplitView: splitSession != nil, sessionID: prepared.runSession)
             let continuation = prepared.resumedTask.map { "The owner selected this saved task to resume: \($0). Recheck the current screen and continue from the saved progress; do not substitute a task from long-term memory." }
             let instructions = [Harness.instructions(for: prepared.resumedTask ?? prepared.message, inSplitView: splitSession != nil), restoredContext, continuation].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message, images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns) { [weak self] text in
@@ -732,10 +733,10 @@ final class ChatModel {
         return Task.isCancelled || runToken != token ? .stopped : .unavailable
     }
 
-    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model) async -> WorkspaceChoice {
+    private func chooseSplitView(text: String, apps: [String], provider: ModelProvider, model: Model, sessionID: String) async -> WorkspaceChoice {
         let names = apps.enumerated().map { "\($0.offset + 1). \(AppIconStore.name($0.element) ?? $0.element)" }.joined(separator: "\n")
         let instructions = "Choose whether two candidate iPhone apps should work side by side for the owner's request. A word may describe an item and just happen to match an app name (for example 写一封邮件 can describe a message, or 照片 can mean an image in Safari). Select only the two apps actually requested. For a side-by-side task such as dragging, comparing, or transferring between two apps, output SPLIT followed by their two numbers separated by spaces, source first if there is a source. Otherwise output NORMAL. Output only that line."
-        let planner = PiLoop(provider: provider, model: model, tools: []) { _ in
+        let planner = PiLoop(provider: provider, model: model, sessionID: sessionID, tools: []) { _ in
             PokiCore.ToolAnswer(text: "Planning only.", jpeg: nil, isError: true)
         }
         var answer = ""
@@ -766,13 +767,14 @@ final class ChatModel {
         AppLocalization.text(LocalizedStringResource("Poki couldn't determine whether to use Split View. Try sending the task again."))
     }
 
-    private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool) -> PiLoop {
+    private func modelLoop(provider: ModelProvider, model: Model, inSplitView: Bool, sessionID: String) -> PiLoop {
         let changedWorkspace = loop.map { $0.inSplitView != inSplitView } ?? false
         if let loop, loop.provider == provider, loop.model.id == model.id,
            loop.model.baseUrl == model.baseUrl, loop.model.provider == model.provider, loop.model.api == model.api,
-           loop.model.reasoning == model.reasoning, loop.hasCurrentCustomBackups, !changedWorkspace { return loop }
+           loop.model.reasoning == model.reasoning, loop.hasCurrentCustomBackups, loop.sessionID == sessionID,
+           !changedWorkspace { return loop }
         // A different workspace starts without old screen evidence.
-        let next = PiLoop(provider: provider, model: model,
+        let next = PiLoop(provider: provider, model: model, sessionID: sessionID,
                           tools: Harness.toolSpecs(inSplitView: inSplitView, includeScreenHistory: true),
                           inSplitView: inSplitView, carrying: changedWorkspace ? [] : loop?.messages ?? []) { [weak self] call in
             guard let self else { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
