@@ -281,7 +281,8 @@ final class OpeningVoiceAudioTests: XCTestCase {
         audio.recordRawInputMetrics(frameCount: 960, maxSample: 2_400, peak: Float(2_400) / 32_768.0)
         let recovered = await waitTask.value
         XCTAssertTrue(recovered, "waitForLiveInput must wake immediately once non-zero hardware audio arrives")
-        XCTAssertTrue(await audio.waitForLiveInput(timeout: .milliseconds(10)),
+        let alreadyLive = await audio.waitForLiveInput(timeout: .milliseconds(10))
+        XCTAssertTrue(alreadyLive,
                       "waitForLiveInput must return true immediately after live input is already observed")
 
         inBackground = false
