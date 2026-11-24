@@ -63,6 +63,33 @@ final class LoopbackMonitorTests: XCTestCase {
         XCTAssertEqual(ports.first, ports.dropFirst().first, "A stale refusal must trigger a fresh pairing probe, not a lockdown check")
     }
 
+    func testInvalidatedThirdSearchIsRetriedOnNewTunnelPath() async {
+        var browsing: CheckedContinuation<(ports: [UInt16], problem: String?), Never>?
+        var searches = 0
+        let monitor = LoopbackMonitor(probe: { _, port, _ in
+            ProbeResult(label: "test", target: "test", outcome: port == 62078 ? "connected" : "refused", milliseconds: 1)
+        }, browsePorts: {
+            searches += 1
+            if searches == 1 { return await withCheckedContinuation { browsing = $0 } }
+            return ([], nil)
+        }, observeNetwork: false)
+        var searchEnded = false
+        monitor.onPairingPortSearchEnded = { searchEnded = true }
+        defer { monitor.pause(); browsing?.resume(returning: ([], nil)); RemotePairingPort.setSearching(false) }
+        monitor.simulateSearchBudget(2)
+        monitor.check()
+        await yield { browsing != nil }
+        XCTAssertNotNil(browsing)
+        monitor.simulateNetworkChange(physical: false)
+        let held = browsing
+        browsing = nil
+        held?.resume(returning: ([], nil))
+        await yield { searches >= 2 }
+        XCTAssertEqual(searches, 2, "The invalidated third search must be retried")
+        await yield { searchEnded }
+        XCTAssertTrue(searchEnded, "An exhausted retry must release the launcher fallback")
+    }
+
     /// A probe that takes longer than the 3 s timer is always overlapped by the next timer tick. That
     /// tick must not throw the finished answer away: the first answer is published even though a tick
     /// arrived while it was in flight, however many rounds the probe takes.
