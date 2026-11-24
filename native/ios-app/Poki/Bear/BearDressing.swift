@@ -182,15 +182,6 @@ final class BearDressing {
                 }
             }
         }
-        if changes.contains(.clothes) {
-            let start: TimeInterval
-            switch motion {
-            case .animated: start = now
-            case .fade: start = next.clothes == nil ? now + 0.15 : -.infinity
-            case .immediate: start = -.infinity
-            }
-            armChange = (armRest, start)
-        }
         for slot in BearOutfitSlot.allCases where next[slot] != selection[slot] || colors[slot] != self.colors[slot] {
             current[slot]?.recolor(colors[slot])
         }
