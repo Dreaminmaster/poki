@@ -1,4 +1,5 @@
 import ActivityKit
+import AudioToolbox
 import AVFoundation
 import PokiCore
 import Speech
@@ -138,6 +139,7 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     @MainActor var remoteSpeech = false
     @MainActor var failNetworkPath = false
     var failSend = false
+    @MainActor var openingCaptureRunning: Bool? = true
     @MainActor private(set) var transportOpened = false
     @MainActor private(set) var attachedOpeningCapture: OpeningVoiceCapture?
     @MainActor fileprivate var openingAudio: OpeningAudioProbe?
@@ -145,12 +147,18 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? {
         onBeforeStartOpeningCapture?()
         guard let openingAudio else { return nil }
-        let capture = openingAudio.makeCapture(session: session)
+        let capture = try openingAudio.makeCapture(session: session)
+        if openingAudio.startRealCapture {
+            openingCaptureRunning = nil
+        }
         useOpeningCapture(capture)
         return capture
     }
     @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?) {
         attachedOpeningCapture = capture
+    }
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool {
+        openingCaptureRunning ?? capture.audio.ensureRunning()
     }
     @MainActor func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws {
         attachRecordingIfNeeded()
@@ -203,13 +211,16 @@ final class FakeConnection: VoiceConnection, @unchecked Sendable {
     }
 }
 
-private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
+private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate, @unchecked Sendable {
     let preferredInputSampleRate = 48_000.0
     let preferredOutputSampleRate = 48_000.0
     let preferredInputIOBufferDuration = 0.01
     let preferredOutputIOBufferDuration = 0.01
-    private(set) var sent: [Int16] = []
-    private(set) var deliveredSampleTimes: [Double] = []
+    private let lock = NSLock()
+    private var _sent: [Int16] = []
+    private var _deliveredSampleTimes: [Double] = []
+    var sent: [Int16] { lock.withLock { _sent } }
+    var deliveredSampleTimes: [Double] { lock.withLock { _deliveredSampleTimes } }
     var transcriptions: [[Int16]] = []
     var notices: [String] = []
     var textTasks: [String] = []
@@ -222,20 +233,28 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
     var playoutRequests = 0
     var announceObservedCaptureStopped: [Bool] = []
     var zeroInputRecoveryEnabled: Bool?
+    var notificationCenter = NotificationCenter()
     var isInBackground = false
+    var startRealCapture = false
     var uptime: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    var queryAudioUnitRunState: @MainActor (AudioComponentInstance) -> OpeningVoiceAudio.AudioUnitRunState = OpeningVoiceAudio.queryCoreAudioRunState
     private(set) var audio: OpeningVoiceAudio!
 
-    @MainActor func makeCapture(session: Int) -> OpeningVoiceCapture {
+    @MainActor func makeCapture(session: Int) throws -> OpeningVoiceCapture {
         let audio = OpeningVoiceAudio(
             session: session,
             zeroInputRecoveryEnabled: zeroInputRecoveryEnabled,
+            notificationCenter: notificationCenter,
             uptime: uptime,
             sleep: sleep,
             isInputMuted: { false },
-            isInBackground: { self.isInBackground }
+            isInBackground: { self.isInBackground },
+            queryAudioUnitRunState: { self.queryAudioUnitRunState($0) }
         )
+        if startRealCapture {
+            try audio.startCapture()
+        }
         self.audio = audio
         return OpeningVoiceCapture(audio: audio)
     }
@@ -272,9 +291,12 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate {
 
     var deliverRecordedData: RTCAudioDeviceDeliverRecordedDataBlock {
         { [weak self] _, timestamp, _, count, buffer, _, _ in
-            self?.deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
-            if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
-                self?.sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
+            guard let self else { return noErr }
+            self.lock.withLock {
+                self._deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
+                if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                    self._sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
+                }
             }
             return noErr
         }
@@ -1569,7 +1591,8 @@ final class VoiceModelTests: XCTestCase {
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) }, readyCue: { cued() },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link },
-                               time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
+                               time: time.clock, monotonicUptime: openingAudio?.uptime ?? { ProcessInfo.processInfo.systemUptime },
+                               openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
             made = { [unowned self] in
                 let link = FakeConnection()
                 link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
@@ -3142,14 +3165,18 @@ extension VoiceModelTests {
         XCTAssertFalse(h.voice.isOn, "Silent background session must be stopped and cleaned up")
         XCTAssertEqual(h.voice.phase, .off)
         XCTAssertFalse(activity.isRunning, "Live Activity must be dismissed when silent background capture is aborted")
-        XCTAssertNil(audio.audio.activeBackgroundRecordingGrant, "Background recording grant must be cleared when startHere exits")
+        XCTAssertFalse(audio.audio.ensureRunning(), "Stopped silent capture must not report running")
     }
 
     func testEarlierTalkHereDeferDoesNotClearNewerSessionGrantOrStopNewerSession() async throws {
+        let clockLock = NSLock()
+        var currentUptime: TimeInterval = 100.0
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .notDetermined
         audio.zeroInputRecoveryEnabled = true
         audio.isInBackground = true
+        audio.startRealCapture = true
+        audio.uptime = { clockLock.withLock { currentUptime } }
         audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
         let h = Harness(openingAudio: audio)
         let activity = ActivityController()
@@ -3171,8 +3198,6 @@ extension VoiceModelTests {
             })
         }
         for await _ in enteredFirstPermission {}
-        let firstAudio = try XCTUnwrap(audio.audio)
-        let grantA = try XCTUnwrap(firstAudio.activeBackgroundRecordingGrant)
 
         // Stop session A while intent A is suspended, then start intent B with its own grant.
         h.voice.stop()
@@ -3189,16 +3214,30 @@ extension VoiceModelTests {
         }
         for await _ in enteredSecondPermission {}
         let secondAudio = try XCTUnwrap(audio.audio)
-        let grantB = try XCTUnwrap(secondAudio.activeBackgroundRecordingGrant)
-        XCTAssertNotEqual(grantA.token, grantB.token)
 
-        // Now let intent A finish and run its defer block: it must NOT touch session B or grant B.
+        // Now let intent A finish and run its defer block: it must NOT touch session B or clear B's grant.
         firstPermissionReleased.finish()
         let outcomeA = await taskA.value
-        XCTAssertEqual(outcomeA, .sessionEnded)
+        XCTAssertEqual(outcomeA, .superseded)
         XCTAssertTrue(h.voice.isOn, "Earlier intent defer must not stop the newer active session")
-        XCTAssertEqual(secondAudio.activeBackgroundRecordingGrant, grantB, "Earlier intent defer must not clear the newer session's background grant")
         XCTAssertTrue(activity.isRunning, "Earlier intent must not tear down the newer session's Live Activity")
+        XCTAssertTrue(secondAudio.ensureRunning())
+
+        // Prove session B's background grant is still active after A's defer ran:
+        // an interruption-ended notification in background before deadline restarts B's real VPIO unit.
+        clockLock.withLock { currentUptime = 101.0 }
+        let activeGrantMarker = "esp1324-grant-preserved-\(UUID().uuidString)"
+        AppLog.shared.add("test", activeGrantMarker)
+        audio.notificationCenter.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let activeGrantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(activeGrantMarker) }).dropFirst())
+        XCTAssertTrue(
+            activeGrantLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }),
+            "Earlier intent defer must not clear the newer session's background grant"
+        )
 
         // Feed live audio and let intent B complete normally.
         audio.feed(480, sample: 2_000)
@@ -3206,7 +3245,212 @@ extension VoiceModelTests {
         let outcomeB = await taskB.value
         XCTAssertEqual(outcomeB, .started)
         XCTAssertTrue(h.voice.isOn)
-        XCTAssertNil(secondAudio.activeBackgroundRecordingGrant, "Intent B clears its own grant on normal exit")
+
+        // Prove intent B cleared its own grant on normal exit (still before original 103.5 deadline).
+        clockLock.withLock { currentUptime = 101.5 }
+        let clearedGrantMarker = "esp1324-grant-cleared-\(UUID().uuidString)"
+        AppLog.shared.add("test", clearedGrantMarker)
+        audio.notificationCenter.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let clearedGrantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(clearedGrantMarker) }).dropFirst())
+        XCTAssertTrue(
+            clearedGrantLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for interruption ended: background recording grant expired; keeping existing unit") }),
+            "Intent B must clear its own background grant on normal exit"
+        )
+
+        h.voice.stop()
+        XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
+    }
+
+    func testSupersededTalkHereNeverReportsNewerSessionLossOrStopsNewerSession() async throws {
+        let audio = OpeningAudioProbe()
+        audio.speechAuthorization = .notDetermined
+        audio.zeroInputRecoveryEnabled = true
+        audio.isInBackground = true
+        audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
+        let h = Harness(openingAudio: audio)
+        let activity = ActivityController()
+        activity.canStart = { false }
+        let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        defer {
+            h.voice.stop()
+            activity.end()
+        }
+
+        let (enteredA, aEntered) = AsyncStream<Void>.makeStream()
+        let (releaseA, aReleased) = AsyncStream<Void>.makeStream()
+        let taskA = Task { @MainActor in
+            await talk.startHere(presentSpeechPermission: { request in
+                aEntered.yield(())
+                aEntered.finish()
+                for await _ in releaseA {}
+                return await request()
+            })
+        }
+        for await _ in enteredA {}
+
+        // End session A and start session B with speech permission denied so B's disconnect enters .lost immediately.
+        h.voice.stop()
+        audio.speechAuthorization = .denied
+        let taskB = Task { @MainActor in
+            await talk.startHere()
+        }
+        await h.time.settle()
+        audio.feed(480, sample: 2_000)
+        let outcomeB = await taskB.value
+        XCTAssertEqual(outcomeB, .started)
+        XCTAssertTrue(h.voice.isOn)
+
+        h.link.onClosed?("session B dropped")
+        guard case .lost(let lossReasonB) = h.voice.phase else {
+            return XCTFail("Expected session B to enter .lost, got \(h.voice.phase)")
+        }
+        XCTAssertFalse(lossReasonB.isEmpty)
+
+        // Now let superseded session A resume: A must return .superseded, never B's .lost(reason).
+        aReleased.finish()
+        let outcomeA = await taskA.value
+        XCTAssertEqual(outcomeA, .superseded, "Superseded intent A must never adopt session B's .lost failure reason")
+
+        // Contrast: when a session itself fails without being superseded, startHere returns .lost(why) bound to that session.
+        URLProtocol.registerClass(BridgeTroubleStub.self)
+        defer { URLProtocol.unregisterClass(BridgeTroubleStub.self) }
+        let failingHarness = Harness()
+        _ = failingHarness.voice.setBridge(BridgeTroubleStub.gone)
+        let failingActivity = ActivityController()
+        failingActivity.canStart = { false }
+        let failingTalk = TalkActivity(voice: failingHarness.voice, activity: failingActivity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        defer { failingActivity.end() }
+        let failedOutcome = await failingTalk.startHere()
+        guard case .lost(let ownReason) = failedOutcome else {
+            return XCTFail("Session's own startup failure must return .lost(reason), got \(failedOutcome)")
+        }
+        XCTAssertFalse(ownReason.isEmpty)
+    }
+
+    func testConcurrentTalkHereCallsWaitingOnLiveCloseBindClaimAndGrantToWinner() async throws {
+        let clockLock = NSLock()
+        var currentUptime: TimeInterval = 200.0
+        let audio = OpeningAudioProbe()
+        audio.speechAuthorization = .notDetermined
+        audio.zeroInputRecoveryEnabled = true
+        audio.isInBackground = true
+        audio.startRealCapture = true
+        audio.uptime = { clockLock.withLock { currentUptime } }
+        audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
+        let h = Harness(openingAudio: audio)
+        let activity = ActivityController()
+        activity.canStart = { false }
+        let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        defer {
+            h.voice.stop()
+            activity.end()
+        }
+
+        // Open a live session, then stop it so liveCloseTimeout is pending (voice.isOn == false).
+        await h.liveTalk()
+        h.voice.stop()
+        XCTAssertFalse(h.voice.isOn)
+
+        let (enteredWinnerPermission, winnerPermissionEntered) = AsyncStream<Void>.makeStream()
+        let (releaseWinnerPermission, winnerPermissionReleased) = AsyncStream<Void>.makeStream()
+        var winnerIndex: Int?
+        func makePresenter(_ index: Int) -> SpeechPermissionPresenter {
+            { request in
+                winnerIndex = index
+                winnerPermissionEntered.yield(())
+                winnerPermissionEntered.finish()
+                for await _ in releaseWinnerPermission {}
+                return await request()
+            }
+        }
+
+        // Start two concurrent Talk Here intents while the previous live session is still closing.
+        let taskA = Task { @MainActor in await talk.startHere(presentSpeechPermission: makePresenter(0)) }
+        let taskB = Task { @MainActor in await talk.startHere(presentSpeechPermission: makePresenter(1)) }
+        await h.time.settle()
+
+        // Complete the old live close timeout so both waiting starts resume.
+        await h.time.advance(3)
+        for await _ in enteredWinnerPermission {}
+        let winner = try XCTUnwrap(winnerIndex)
+        let loserOutcome = winner == 0 ? await taskB.value : await taskA.value
+        XCTAssertEqual(loserOutcome, .superseded, "Losing concurrent start must return .superseded")
+        XCTAssertTrue(h.voice.isOn, "Losing concurrent start must not stop the winning session")
+        XCTAssertTrue(activity.isRunning, "Losing concurrent start must not dismiss the winning Live Activity")
+        XCTAssertTrue(audio.audio.ensureRunning(), "Winning session's real VPIO unit must remain active")
+
+        // Prove the winner holds its own active background grant and the loser's defer did not clear it.
+        clockLock.withLock { currentUptime = 201.0 }
+        let grantMarker = "esp1324-concurrent-winner-grant-\(UUID().uuidString)"
+        AppLog.shared.add("test", grantMarker)
+        audio.notificationCenter.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let grantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(grantMarker) }).dropFirst())
+        XCTAssertTrue(
+            grantLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }),
+            "Winning concurrent start must keep its background grant after the losing start exits"
+        )
+
+        audio.feed(480, sample: 2_000)
+        winnerPermissionReleased.finish()
+        let winnerOutcome = winner == 0 ? await taskA.value : await taskB.value
+        XCTAssertEqual(winnerOutcome, .started)
+        XCTAssertTrue(h.voice.isOn)
+
+        h.voice.stop()
+        await h.time.advance(3)
+        XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
+    }
+
+    func testTalkHereAbortsAndReportsMicrophoneUnavailableWhenAudioUnitStopsWithoutGrant() async throws {
+        let clockLock = NSLock()
+        var currentUptime: TimeInterval = 300.0
+        var stopUnitOnNextQuery = true
+        let audio = OpeningAudioProbe()
+        audio.speechAuthorization = .authorized
+        audio.zeroInputRecoveryEnabled = false
+        audio.isInBackground = true
+        audio.startRealCapture = true
+        audio.uptime = { clockLock.withLock { currentUptime } }
+        audio.queryAudioUnitRunState = { unit in
+            if stopUnitOnNextQuery {
+                stopUnitOnNextQuery = false
+                clockLock.withLock { currentUptime = 304.0 }
+                let stopStatus = AudioOutputUnitStop(unit)
+                XCTAssertEqual(stopStatus, noErr)
+            }
+            return OpeningVoiceAudio.queryCoreAudioRunState(unit)
+        }
+        let h = Harness(openingAudio: audio)
+        let activity = ActivityController()
+        activity.canStart = { false }
+        let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        defer {
+            h.voice.stop()
+            activity.end()
+        }
+
+        let marker = "esp1324-stopped-without-grant-\(UUID().uuidString)"
+        AppLog.shared.add("test", marker)
+        let outcome = await talk.startHere()
+        let newLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst())
+
+        XCTAssertEqual(outcome, .microphoneUnavailable, "Stopped VPIO unit with expired grant must fail Talk Here with .microphoneUnavailable")
+        XCTAssertFalse(h.voice.isOn, "Silent session must be stopped when ensureRunning reports inactive")
+        XCTAssertEqual(h.voice.phase, .off)
+        XCTAssertFalse(activity.isRunning)
+        XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
+        XCTAssertTrue(
+            newLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for ensureRunning: background recording grant expired; keeping existing unit") }),
+            "ensureRunning must reject background restart without tearing down the unit before TalkActivity stops the session"
+        )
     }
 
     /// The screenshot behind a step reaches the model as an image right after the step's output and before
@@ -3669,10 +3913,9 @@ extension VoiceModelTests {
         }
 
         // Verify independent audio/quantization contract instead of duplicating the production formula:
-        // 0.18 s at 48 kHz (8,640 frames), zero-crossing start, audible non-clipping bipolar PCM within 1 LSB.
+        // zero-crossing start, audible non-clipping bipolar PCM within 1 LSB, followed by silence.
         let chimeBlock = renderBlock(8_640)
         XCTAssertFalse(chimeBlock.silent)
-        XCTAssertEqual(chimeBlock.samples.count, 8_640)
         XCTAssertEqual(chimeBlock.samples.first, 0, "Ready chime must start at zero crossing to avoid a click")
         let maxPositive = chimeBlock.samples.max() ?? 0
         let minNegative = chimeBlock.samples.min() ?? 0

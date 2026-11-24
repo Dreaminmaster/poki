@@ -332,15 +332,27 @@ final class VoiceModel {
     private var openingDictation: Task<Void, Never>?
     var isCapturingOpening: Bool { openingCapture != nil }
     private var backgroundRecordingGrant: (grant: BackgroundRecordingGrant, session: Int?)?
+    private var lostReasonsBySession: [Int: String] = [:]
     private let monotonicUptime: @Sendable () -> TimeInterval
 
-    func beginBackgroundRecordingGrant(
+    private func setLost(_ reason: String, session number: Int) {
+        phase = .lost(reason)
+        lostReasonsBySession[number] = reason
+        if lostReasonsBySession.count > 16 {
+            let cutoff = session - 16
+            lostReasonsBySession = lostReasonsBySession.filter { $0.key >= cutoff }
+        }
+    }
+
+    func lostReason(forSession number: Int) -> String? {
+        lostReasonsBySession[number]
+    }
+
+    func makeBackgroundRecordingGrant(
         token: UUID,
         duration: TimeInterval = OpeningAudioRecoveryPolicy.defaultBackgroundGrantDuration
     ) -> BackgroundRecordingGrant {
-        let grant = BackgroundRecordingGrant(token: token, deadline: monotonicUptime() + duration)
-        backgroundRecordingGrant = (grant, nil)
-        return grant
+        BackgroundRecordingGrant(token: token, deadline: monotonicUptime() + duration)
     }
 
     func endBackgroundRecordingGrant(token: UUID) {
@@ -369,11 +381,13 @@ final class VoiceModel {
         return await audio.waitForLiveInput(timeout: timeout)
     }
 
-    func ensureBackgroundAudioActive(session number: Int? = nil) -> Bool {
-        if let number, number != session { return false }
-        guard let audio = openingCapture?.audio else { return true }
-        guard audio.hasHardwareCapture else { return true }
-        return audio.ensureRunning()
+    func ensureBackgroundAudioActive(session number: Int) -> Bool {
+        guard number == session else { return false }
+        guard let capture = openingCapture else { return true }
+        if let link {
+            return link.ensureOpeningCaptureRunning(capture)
+        }
+        return capture.audio.ensureRunning()
     }
     private var usesLive = false
     private var appAudio: AppAudioContext?
@@ -758,14 +772,19 @@ final class VoiceModel {
     @discardableResult
     func start(microphone: Bool = true, captureOpening: Bool = false,
                backgroundRecordingGrant grant: BackgroundRecordingGrant? = nil,
-               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async -> Int? {
+               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() },
+               onSessionClaimed: (@MainActor (Int) -> Bool)? = nil) async -> Int? {
         if let liveCloseTimeout { await liveCloseTimeout.value }
         guard !isOn else { return nil }
+        let nextSession = session + 1
+        if let onSessionClaimed, !onSessionClaimed(nextSession) {
+            return nil
+        }
         phase = .connecting
         needsChatGPTSignIn = false
-        session += 1
+        session = nextSession
         let number = session
-        if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+        if let grant {
             backgroundRecordingGrant = (grant, number)
         }
         openingSpeechAuthorized = false
@@ -778,10 +797,10 @@ final class VoiceModel {
         let subscription = wantsSubscription && appAudio == nil
         if !subscription, key == nil, bridge == nil, !rehearsing {
             if VoiceDirect.canDictate, microphone, appAudio == nil {
-                await startDictation()
+                await startDictation(session: number)
             } else {
                 appAudio = nil
-                phase = .lost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words)
+                setLost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words, session: number)
             }
             return number
         }
@@ -954,7 +973,7 @@ final class VoiceModel {
                 closeConnection("could not connect")
                 holdingMicrophone = false
             }
-            phase = .lost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error))
+            setLost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error), session: number)
             needsChatGPTSignIn = error as? CodexVoice.Failure == .signIn
             return number
         }
@@ -995,7 +1014,7 @@ final class VoiceModel {
         _ = releaseOpeningCapture(session: number)
         endVoiceConnection()
         session += 1
-        phase = .lost(Self.openingAudioUnsent)
+        setLost(Self.openingAudioUnsent, session: number)
         return false
     }
 
@@ -1014,7 +1033,7 @@ final class VoiceModel {
             endSession()
             session += 1
             let note = Self.openingUncertainAfterAction
-            phase = .lost(note)
+            setLost(note, session: number)
             lines.append(VoiceLine(role: .note, text: note))
             endTranscript()
             return true
@@ -1038,14 +1057,14 @@ final class VoiceModel {
         }
         guard authorized else {
             _ = releaseOpeningCapture(session: number, forDictation: false)
-            phase = .lost(Self.openingSpeechUnavailable)
+            setLost(Self.openingSpeechUnavailable, session: number)
             openingDictation = Task { [weak self] in
                 guard let self else { return }
                 defer {
                     if session == number { openingDictation = nil }
                 }
                 await openingSpeech.announce(Self.openingSpeechUnavailable)
-                if session == number { phase = .lost(Self.openingSpeechUnavailable) }
+                if session == number { setLost(Self.openingSpeechUnavailable, session: number) }
             }
             return true
         }
@@ -1082,9 +1101,9 @@ final class VoiceModel {
                 if session == number { phase = .off }
             } else {
                 let why = text?.isEmpty == false ? Self.openingAudioUnsent : Self.openingSpeechUnavailable
-                phase = .lost(why)
+                setLost(why, session: number)
                 await openingSpeech.announce(why)
-                if session == number { phase = .lost(why) }
+                if session == number { setLost(why, session: number) }
             }
         }
         return true
@@ -1486,8 +1505,11 @@ final class VoiceModel {
         }
     }
 
-    private func startDictation() async {
-        guard await Dictation.allowed() else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
+    private func startDictation(session number: Int) async {
+        guard await Dictation.allowed() else {
+            setLost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki.")), session: number)
+            return
+        }
         let dictation = Dictation()
         dictation.onHeard = { [weak self] text in
             guard let self, self.phase == .hearing else { return }
@@ -1504,7 +1526,7 @@ final class VoiceModel {
         } catch {
             self.dictation = nil
             holdingMicrophone = false
-            phase = .lost(VoiceError.reason(for: error))
+            setLost(VoiceError.reason(for: error), session: number)
         }
     }
 
@@ -1566,7 +1588,7 @@ final class VoiceModel {
         if usesLive && ready { logLiveClose(reason, confirmed: confirmed) }
         endSession()
         session += 1
-        phase = .lost(lostMessage ?? TalkState.connectionLost)
+        setLost(lostMessage ?? TalkState.connectionLost, session: number)
         lines.append(VoiceLine(role: .note, text: note ?? AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
@@ -1582,7 +1604,7 @@ final class VoiceModel {
             closed("the ChatGPT voice session ended", session: number, confirmed: method == "thread/realtime/closed")
             if needsSignIn {
                 needsChatGPTSignIn = true
-                phase = .lost(CodexVoice.Failure.signIn.localizedDescription)
+                setLost(CodexVoice.Failure.signIn.localizedDescription, session: number)
             }
         case "thread/realtime/itemAdded":
             guard (params["item"] as? CodexVoice.JSON)?["type"] as? String == "handoff_request" else { return }

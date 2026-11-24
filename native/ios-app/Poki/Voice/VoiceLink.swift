@@ -8,6 +8,7 @@ protocol VoiceConnection: AnyObject, Sendable {
     @MainActor func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws
     @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture?
     @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?)
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool
     func hasRemoteSpeech() async -> Bool
     @discardableResult func send(_ event: [String: Any]) -> Bool
     func setRemoteVolume(_ value: Double)
@@ -19,6 +20,7 @@ extension VoiceConnection {
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws { throw VoiceError.noWebRTC }
     func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? { nil }
     func useOpeningCapture(_ capture: OpeningVoiceCapture?) {}
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool { capture.audio.ensureRunning() }
     func hasRemoteSpeech() async -> Bool { false }
 }
 

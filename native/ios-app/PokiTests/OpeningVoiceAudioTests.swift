@@ -1,45 +1,162 @@
 import AudioToolbox
 import AVFoundation
+import Observation
 import WebRTC
 import XCTest
 @testable import Poki
 
 final class OpeningVoiceAudioTests: XCTestCase {
-    private final class DelegateProbe: NSObject, RTCAudioDeviceDelegate {
+    private final class DelegateProbe: NSObject, RTCAudioDeviceDelegate, @unchecked Sendable {
         let preferredInputSampleRate = 48_000.0
         let preferredOutputSampleRate = 48_000.0
         let preferredInputIOBufferDuration = 0.01
         let preferredOutputIOBufferDuration = 0.01
-        private(set) var sent: [Int16] = []
-        private(set) var chunkCounts: [Int] = []
-        private(set) var deliveredSampleTimes: [Double] = []
-        var deliveryStatus: OSStatus = noErr
-        var playoutSamples: [Int16] = []
-        var playoutStatus: OSStatus = noErr
-        var playoutSilent = false
+        private let lock = NSLock()
+        private var _sent: [Int16] = []
+        private var _chunkCounts: [Int] = []
+        private var _deliveredSampleTimes: [Double] = []
+        private var _recordedCallbackCount = 0
+        private var _inputInterruptedCount = 0
+        private var _outputInterruptedCount = 0
+        private var _deliveryStatus: OSStatus = noErr
+        private var _playoutSamples: [Int16] = []
+        private var _playoutStatus: OSStatus = noErr
+        private var _playoutSilent = false
+        private var recordedWaiters: [(id: UUID, target: Int, continuation: CheckedContinuation<Int?, Never>)] = []
+        private var inputInterruptedWaiters: [(id: UUID, target: Int, continuation: CheckedContinuation<Int?, Never>)] = []
+
+        var sent: [Int16] { lock.withLock { _sent } }
+        var chunkCounts: [Int] { lock.withLock { _chunkCounts } }
+        var deliveredSampleTimes: [Double] { lock.withLock { _deliveredSampleTimes } }
+        var recordedCallbackCount: Int { lock.withLock { _recordedCallbackCount } }
+        var inputInterruptedCount: Int { lock.withLock { _inputInterruptedCount } }
+        var outputInterruptedCount: Int { lock.withLock { _outputInterruptedCount } }
+        var deliveryStatus: OSStatus {
+            get { lock.withLock { _deliveryStatus } }
+            set { lock.withLock { _deliveryStatus = newValue } }
+        }
+        var playoutSamples: [Int16] {
+            get { lock.withLock { _playoutSamples } }
+            set { lock.withLock { _playoutSamples = newValue } }
+        }
+        var playoutStatus: OSStatus {
+            get { lock.withLock { _playoutStatus } }
+            set { lock.withLock { _playoutStatus = newValue } }
+        }
+        var playoutSilent: Bool {
+            get { lock.withLock { _playoutSilent } }
+            set { lock.withLock { _playoutSilent = newValue } }
+        }
+
+        func waitForRecordedCallback(
+            after priorCount: Int,
+            timeout: Duration = .seconds(5),
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async -> Int {
+            let target = priorCount + 1
+            let waiterID = UUID()
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled, let self else { return }
+                let expired: CheckedContinuation<Int?, Never>? = self.lock.withLock {
+                    guard let index = self.recordedWaiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.recordedWaiters.remove(at: index).continuation
+                }
+                expired?.resume(returning: nil)
+            }
+            let result: Int? = await withCheckedContinuation { continuation in
+                let immediate: Int? = lock.withLock {
+                    if _recordedCallbackCount >= target {
+                        return _recordedCallbackCount
+                    }
+                    recordedWaiters.append((waiterID, target, continuation))
+                    return nil
+                }
+                if let immediate {
+                    continuation.resume(returning: immediate)
+                }
+            }
+            timeoutTask.cancel()
+            guard let result else {
+                XCTFail("Timed out waiting for recorded callback after \(priorCount)", file: file, line: line)
+                return priorCount
+            }
+            return result
+        }
+
+        func waitForInputInterrupted(
+            after priorCount: Int,
+            timeout: Duration = .seconds(5),
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async -> Int {
+            let target = priorCount + 1
+            let waiterID = UUID()
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled, let self else { return }
+                let expired: CheckedContinuation<Int?, Never>? = self.lock.withLock {
+                    guard let index = self.inputInterruptedWaiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.inputInterruptedWaiters.remove(at: index).continuation
+                }
+                expired?.resume(returning: nil)
+            }
+            let result: Int? = await withCheckedContinuation { continuation in
+                let immediate: Int? = lock.withLock {
+                    if _inputInterruptedCount >= target {
+                        return _inputInterruptedCount
+                    }
+                    inputInterruptedWaiters.append((waiterID, target, continuation))
+                    return nil
+                }
+                if let immediate {
+                    continuation.resume(returning: immediate)
+                }
+            }
+            timeoutTask.cancel()
+            guard let result else {
+                XCTFail("Timed out waiting for input interruption notification after \(priorCount)", file: file, line: line)
+                return priorCount
+            }
+            return result
+        }
 
         var deliverRecordedData: RTCAudioDeviceDeliverRecordedDataBlock {
             { [weak self] _, timestamp, _, count, buffer, _, _ in
                 guard let self else { return noErr }
-                self.chunkCounts.append(Int(count))
-                self.deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
-                if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
-                    self.sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
+                let (status, waking, total): (OSStatus, [CheckedContinuation<Int?, Never>], Int) = self.lock.withLock {
+                    self._recordedCallbackCount += 1
+                    self._chunkCounts.append(Int(count))
+                    self._deliveredSampleTimes.append(timestamp.pointee.mSampleTime)
+                    if let data = buffer?.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                        self._sent.append(contentsOf: UnsafeBufferPointer(start: data, count: Int(count)))
+                    }
+                    let countNow = self._recordedCallbackCount
+                    let ready = self.recordedWaiters.filter { countNow >= $0.target }.map(\.continuation)
+                    self.recordedWaiters.removeAll { countNow >= $0.target }
+                    return (self._deliveryStatus, ready, countNow)
                 }
-                return self.deliveryStatus
+                for waiter in waking {
+                    waiter.resume(returning: total)
+                }
+                return status
             }
         }
         var getPlayoutData: RTCAudioDeviceGetPlayoutDataBlock {
             { [weak self] flags, _, _, count, buffer in
                 guard let self else { return noErr }
-                if self.playoutStatus != noErr { return self.playoutStatus }
-                if self.playoutSilent {
+                let (status, silent, samples) = self.lock.withLock {
+                    (self._playoutStatus, self._playoutSilent, self._playoutSamples)
+                }
+                if status != noErr { return status }
+                if silent {
                     flags.pointee.insert(.unitRenderAction_OutputIsSilence)
                     return noErr
                 }
                 if let destination = buffer.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
-                    let n = min(Int(count), self.playoutSamples.count)
-                    for i in 0..<n { destination[i] = self.playoutSamples[i] }
+                    let n = min(Int(count), samples.count)
+                    for i in 0..<n { destination[i] = samples[i] }
                     if n < Int(count) {
                         destination.advanced(by: n).update(repeating: 0, count: Int(count) - n)
                     }
@@ -49,10 +166,81 @@ final class OpeningVoiceAudioTests: XCTestCase {
         }
         func notifyAudioInputParametersChange() {}
         func notifyAudioOutputParametersChange() {}
-        func notifyAudioInputInterrupted() {}
-        func notifyAudioOutputInterrupted() {}
+        func notifyAudioInputInterrupted() {
+            let (waking, total): ([CheckedContinuation<Int?, Never>], Int) = lock.withLock {
+                _inputInterruptedCount += 1
+                let countNow = _inputInterruptedCount
+                let ready = inputInterruptedWaiters.filter { countNow >= $0.target }.map(\.continuation)
+                inputInterruptedWaiters.removeAll { countNow >= $0.target }
+                return (ready, countNow)
+            }
+            for waiter in waking {
+                waiter.resume(returning: total)
+            }
+        }
+        func notifyAudioOutputInterrupted() {
+            lock.withLock { _outputInterruptedCount += 1 }
+        }
         func dispatchAsync(_ block: @escaping () -> Void) { block() }
         func dispatchSync(_ block: @escaping () -> Void) { block() }
+    }
+
+    @MainActor
+    private func addLogMarker(_ label: String) -> String {
+        let marker = "opening-audio-test-\(label)-\(UUID().uuidString)"
+        AppLog.shared.add("test", marker)
+        return marker
+    }
+
+    @MainActor
+    private func logs(after marker: String) -> [String] {
+        Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst())
+    }
+
+    @MainActor
+    private func waitForLogLine(
+        after marker: String,
+        timeout: Duration = .seconds(5),
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        matching predicate: @escaping @MainActor (String) -> Bool
+    ) async -> String? {
+        if let existing = logs(after: marker).first(where: predicate) {
+            return existing
+        }
+        let (stream, continuation) = AsyncStream<Bool>.makeStream()
+        let timeoutTask = Task {
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            continuation.yield(false)
+            continuation.finish()
+        }
+        defer {
+            timeoutTask.cancel()
+            continuation.finish()
+        }
+        func armObservation() {
+            withObservationTracking {
+                _ = AppLog.shared.lines
+            } onChange: {
+                Task { @MainActor in
+                    continuation.yield(true)
+                }
+            }
+        }
+        armObservation()
+        for await changed in stream {
+            if let match = logs(after: marker).first(where: predicate) {
+                return match
+            }
+            if !changed {
+                XCTFail("Timed out waiting for expected log line after \(marker)", file: file, line: line)
+                return nil
+            }
+            armObservation()
+        }
+        XCTFail("Log observation ended before expected log line after \(marker)", file: file, line: line)
+        return nil
     }
 
     private func makeMonoPCM16Buffer(frames: Int, value: Int16) throws -> AVAudioPCMBuffer {
@@ -342,15 +530,18 @@ final class OpeningVoiceAudioTests: XCTestCase {
     }
 
     @MainActor
-    func testExpiredBackgroundGrantPreservesRunningAudioUnitAndForegroundRecoveryRestartsAndDeliversSpeech() async throws {
-        let priorLogs = Set(AppLog.shared.lines)
+    func testExpiredBackgroundGrantPreservesRunningAudioUnitAcrossEveryTriggerAndForegroundRecovers() async throws {
         let session = RTCAudioSession.sharedInstance()
         let center = NotificationCenter()
         let clockLock = NSLock()
         var currentUptime: TimeInterval = 500.0
         let readUptime: @Sendable () -> TimeInterval = { clockLock.withLock { currentUptime } }
         var inBackground = true
+        var stopUnitOnNextQuery = false
+        var overrideRunState: OpeningVoiceAudio.AudioUnitRunState?
+        var queriedUnits: [AudioComponentInstance] = []
 
+        let probe = DelegateProbe()
         let audio = OpeningVoiceAudio(
             session: 1,
             playReadyChime: false,
@@ -358,119 +549,280 @@ final class OpeningVoiceAudioTests: XCTestCase {
             notificationCenter: center,
             uptime: readUptime,
             isInputMuted: { false },
-            isInBackground: { inBackground }
+            isInBackground: { inBackground },
+            queryAudioUnitRunState: { unit in
+                queriedUnits.append(unit)
+                if let overrideRunState {
+                    return overrideRunState
+                }
+                if stopUnitOnNextQuery {
+                    stopUnitOnNextQuery = false
+                    let stopStatus = AudioOutputUnitStop(unit)
+                    XCTAssertEqual(stopStatus, noErr, "AudioOutputUnitStop must stop the real VPIO unit")
+                }
+                return OpeningVoiceAudio.queryCoreAudioRunState(unit)
+            }
         )
+        XCTAssertTrue(audio.initialize(with: probe))
+        XCTAssertTrue(audio.initializeRecording())
+        XCTAssertTrue(audio.startRecording())
+        XCTAssertTrue(audio.allowSending(session: 1))
         try audio.startCapture()
         defer { _ = audio.stopCapture(session: 1) }
 
-        let originalUnit = try XCTUnwrap(audio.audioUnitIdentity, "startCapture must create a real VPIO AudioComponentInstance")
-        XCTAssertTrue(audio.ensureRunning())
+        XCTAssertTrue(audio.ensureRunning(), "startCapture must leave real VPIO running")
         XCTAssertTrue(session.isActive)
+        var lastCallbackCount = await probe.waitForRecordedCallback(after: 0)
 
         // Install grant expiring at 503.5 and advance monotonic clock past deadline.
         audio.setBackgroundRecordingGrant(BackgroundRecordingGrant(token: UUID(), deadline: 503.5))
         clockLock.withLock { currentUptime = 503.6 }
 
-        let zeroChunk = try makeMonoPCM16Buffer(frames: 960, value: 0)
-        for index in 0..<75 {
-            audio.input(zeroChunk, at: AVAudioTime(sampleTime: AVAudioFramePosition(index * 960), atRate: 48_000))
-        }
+        // Entry 1: spatial playback capabilities changed (synchronous on main queue).
+        let spatialMarker = addLogMarker("spatial-expired")
         center.post(name: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification, object: nil)
-        center.post(
-            name: AVAudioSession.interruptionNotification,
-            object: nil,
-            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
-        )
-        center.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
-
-        // Drain main-queue notification observer tasks.
-        try await Task.sleep(for: .milliseconds(50))
-
-        XCTAssertEqual(
-            audio.audioUnitIdentity,
-            originalUnit,
-            "Expired background grant must never tear down or replace a running VPIO audioUnit"
-        )
-        XCTAssertTrue(audio.ensureRunning(), "Running audioUnit must remain alive after skipped background restarts")
-        XCTAssertTrue(session.isActive)
-        let skippedLogs = AppLog.shared.lines.filter {
-            !priorLogs.contains($0) && $0.contains("background recording grant expired; keeping existing unit")
-        }
-        XCTAssertFalse(skippedLogs.isEmpty, "Skipping background restart after grant expiry must be logged")
-        XCTAssertGreaterThanOrEqual(audio.bufferedFrameCount, 75 * 960, "Skipped restart must leave buffered state untouched until real recovery runs")
-
-        // Moving to foreground allows a real lifecycle VPIO restart and keeps RTCAudioSession balanced.
-        inBackground = false
-        center.post(
-            name: AVAudioSession.interruptionNotification,
-            object: nil,
-            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
-        )
-        let restartDeadline = Date().addingTimeInterval(2.0)
-        while Date() < restartDeadline {
-            if AppLog.shared.lines.contains(where: { !priorLogs.contains($0) && $0.contains("opening audio unit restarted after interruption ended") }) {
-                break
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        let spatialLogs = logs(after: spatialMarker)
         XCTAssertTrue(
-            AppLog.shared.lines.contains(where: { !priorLogs.contains($0) && $0.contains("opening audio unit restarted after interruption ended") }),
-            "Foreground interruption-end recovery must run the real VPIO restart path"
+            spatialLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for spatial playback capabilities changed: background recording grant expired; keeping existing unit") }),
+            "Spatial notification after grant expiry must log its own skip decision"
         )
-        XCTAssertTrue(audio.ensureRunning(), "Real VPIO restart must leave the audio unit and RTCAudioSession active")
+        XCTAssertFalse(spatialLogs.contains(where: { $0.contains("opening audio unit started:") || $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 0)
+        XCTAssertEqual(probe.outputInterruptedCount, 0)
+        XCTAssertTrue(audio.ensureRunning())
+        XCTAssertTrue(session.isActive)
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        // Entry 2: audio session interruption ended (synchronous on main queue).
+        let interruptionMarker = addLogMarker("interruption-expired")
+        center.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let interruptionLogs = logs(after: interruptionMarker)
+        XCTAssertTrue(
+            interruptionLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for interruption ended: background recording grant expired; keeping existing unit") }),
+            "Interruption-ended notification after grant expiry must log its own skip decision"
+        )
+        XCTAssertFalse(interruptionLogs.contains(where: { $0.contains("opening audio unit started:") || $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 0)
+        XCTAssertEqual(probe.outputInterruptedCount, 0)
+        XCTAssertTrue(audio.ensureRunning())
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        // Entry 3: media services were reset (synchronous on main queue).
+        let resetMarker = addLogMarker("reset-expired")
+        center.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        let resetLogs = logs(after: resetMarker)
+        XCTAssertTrue(
+            resetLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for media services reset: background recording grant expired; keeping existing unit") }),
+            "Media-services-reset notification after grant expiry must log its own skip decision"
+        )
+        XCTAssertFalse(resetLogs.contains(where: { $0.contains("opening audio unit started:") || $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 0)
+        XCTAssertEqual(probe.outputInterruptedCount, 0)
+        XCTAssertTrue(audio.ensureRunning())
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        // Entry 4a: ensureRunning() sees a genuinely stopped CoreAudio VPIO unit while grant is expired.
+        // It must NOT tear down or replace the existing unit, and must return false.
+        let ensureExpiredMarker = addLogMarker("ensure-expired")
+        queriedUnits.removeAll()
+        stopUnitOnNextQuery = true
+        XCTAssertFalse(
+            audio.ensureRunning(),
+            "ensureRunning must return false when CoreAudio reports the VPIO unit stopped and background grant is expired"
+        )
+        let ensureExpiredLogs = logs(after: ensureExpiredMarker)
+        XCTAssertTrue(
+            ensureExpiredLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for ensureRunning: background recording grant expired; keeping existing unit") }),
+            "ensureRunning after grant expiry must log its own skip decision"
+        )
+        XCTAssertFalse(ensureExpiredLogs.contains(where: { $0.contains("opening audio unit started:") || $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 0)
+        XCTAssertEqual(probe.outputInterruptedCount, 0)
+        XCTAssertEqual(queriedUnits.count, 2, "ensureRunning must query before and after skipping restart")
+        XCTAssertEqual(queriedUnits.first, queriedUnits.last, "Expired ensureRunning must keep the exact existing AudioUnit")
+
+        // Entry 4b: moving to foreground allows ensureRunning() to recover the real stopped VPIO unit.
+        inBackground = false
+        let ensureForegroundMarker = addLogMarker("ensure-foreground")
+        XCTAssertTrue(audio.ensureRunning(), "Foreground ensureRunning must restart a stopped VPIO unit and report running")
+        let ensureForegroundLogs = logs(after: ensureForegroundMarker)
+        XCTAssertTrue(ensureForegroundLogs.contains(where: { $0.contains("opening audio unit restarted after ensureRunning") }))
+        XCTAssertTrue(ensureForegroundLogs.contains(where: { $0.contains("opening audio unit started:") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 1)
+        XCTAssertEqual(probe.outputInterruptedCount, 1)
+        XCTAssertTrue(session.isActive)
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        // Entry 4c: unknown CoreAudio status (status != noErr) must return false WITHOUT tearing down the running unit.
+        let ensureUnknownMarker = addLogMarker("ensure-unknown")
+        overrideRunState = .unknown(kAudioUnitErr_Uninitialized)
+        XCTAssertFalse(audio.ensureRunning(), "Unknown CoreAudio run state must return false instead of reporting healthy")
+        overrideRunState = nil
+        let ensureUnknownLogs = logs(after: ensureUnknownMarker)
+        XCTAssertTrue(ensureUnknownLogs.contains(where: { $0.contains("could not query VPIO state") && $0.contains("\(kAudioUnitErr_Uninitialized)") }))
+        XCTAssertFalse(ensureUnknownLogs.contains(where: { $0.contains("opening audio unit started:") || $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 1, "Unknown run state must preserve the existing AudioUnit")
+        XCTAssertTrue(audio.ensureRunning(), "Existing VPIO unit must still be running after an unknown-state query")
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        // Foreground lifecycle notifications replace the real VPIO unit and notify WebRTC synchronously.
+        let fgInterruptionMarker = addLogMarker("fg-interruption")
+        center.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let fgInterruptionLogs = logs(after: fgInterruptionMarker)
+        XCTAssertTrue(fgInterruptionLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 2)
+        XCTAssertTrue(audio.ensureRunning())
+        lastCallbackCount = await probe.waitForRecordedCallback(after: lastCallbackCount)
+
+        let fgResetMarker = addLogMarker("fg-reset")
+        center.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        let fgResetLogs = logs(after: fgResetMarker)
+        XCTAssertTrue(fgResetLogs.contains(where: { $0.contains("opening audio unit restarted after media services reset") }))
+        XCTAssertEqual(probe.inputInterruptedCount, 3)
+        XCTAssertTrue(audio.ensureRunning())
+        _ = await probe.waitForRecordedCallback(after: lastCallbackCount)
 
         _ = audio.stopCapture(session: 1)
-        XCTAssertNil(audio.audioUnitIdentity)
         XCTAssertFalse(audio.ensureRunning())
         XCTAssertFalse(session.isActive, "stopCapture must balance all RTCAudioSession activations including real restarts")
+    }
 
-        // Sustained exact-zero input (before any non-zero hardware audio) clears the dead 72,000-frame
-        // leading silence buffer, runs real VPIO recovery, delivers subsequent speech cleanly, and balances stop.
-        let recoveryPriorLogs = Set(AppLog.shared.lines)
-        let zeroRecoveryAudio = OpeningVoiceAudio(
+    private final class RenderTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var initialUnit: AudioComponentInstance?
+        private var replacedUnitObserved = false
+
+        func record(_ unit: AudioComponentInstance) -> Bool {
+            lock.withLock {
+                if initialUnit == nil {
+                    initialUnit = unit
+                    return true
+                }
+                if unit == initialUnit {
+                    return true
+                }
+                replacedUnitObserved = true
+                return false
+            }
+        }
+
+        var sawReplacedUnit: Bool {
+            lock.withLock { replacedUnitObserved }
+        }
+    }
+
+    @MainActor
+    func testSustainedZeroInputThroughRealVPIOSkipsWhenGrantExpiredAndRecoversInForeground() async throws {
+        let session = RTCAudioSession.sharedInstance()
+        let center = NotificationCenter()
+        let clockLock = NSLock()
+        var currentUptime: TimeInterval = 500.0
+        let readUptime: @Sendable () -> TimeInterval = { clockLock.withLock { currentUptime } }
+
+        // Part 1: Sustained zero input from real VPIO AudioUnitRender with expired background grant
+        // skips restart and keeps the exact same running unit delivering callbacks, independent of host room noise.
+        let expiredTracker = RenderTracker()
+        let expiredProbe = DelegateProbe()
+        let expiredAudio = OpeningVoiceAudio(
+            session: 1,
+            playReadyChime: false,
+            zeroInputRecoveryEnabled: true,
+            notificationCenter: center,
+            uptime: readUptime,
+            isInputMuted: { false },
+            isInBackground: { true },
+            renderAudioUnitInput: { unit, flags, timestamp, bus, frames, bufferList in
+                let status = OpeningVoiceAudio.renderCoreAudioInput(unit, flags, timestamp, bus, frames, bufferList)
+                guard status == noErr else { return status }
+                _ = expiredTracker.record(unit)
+                if let data = bufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                    data.update(repeating: 0, count: Int(frames))
+                }
+                return noErr
+            }
+        )
+        expiredAudio.setBackgroundRecordingGrant(BackgroundRecordingGrant(token: UUID(), deadline: 503.5))
+        clockLock.withLock { currentUptime = 503.6 }
+        XCTAssertTrue(expiredAudio.initialize(with: expiredProbe))
+        XCTAssertTrue(expiredAudio.initializeRecording())
+        XCTAssertTrue(expiredAudio.startRecording())
+        XCTAssertTrue(expiredAudio.allowSending(session: 1))
+        let expiredMarker = addLogMarker("sustained-zero-expired")
+        try expiredAudio.startCapture()
+        defer { _ = expiredAudio.stopCapture(session: 1) }
+
+        let skipLine = await waitForLogLine(after: expiredMarker, timeout: .seconds(6)) {
+            $0.contains("opening audio skipped VPIO restart for sustained zero input (#1): background recording grant expired; keeping existing unit")
+        }
+        XCTAssertNotNil(skipLine)
+        let expiredLogs = logs(after: expiredMarker)
+        XCTAssertFalse(expiredLogs.contains(where: { $0.contains("opening audio unit restarted") }))
+        XCTAssertEqual(expiredProbe.inputInterruptedCount, 0)
+        XCTAssertEqual(expiredProbe.outputInterruptedCount, 0)
+        XCTAssertTrue(expiredAudio.ensureRunning())
+        let callbackAfterSkip = expiredProbe.recordedCallbackCount
+        let nextCallbackAfterSkip = await expiredProbe.waitForRecordedCallback(after: callbackAfterSkip, timeout: .seconds(5))
+        XCTAssertGreaterThan(nextCallbackAfterSkip, callbackAfterSkip)
+        XCTAssertFalse(expiredTracker.sawReplacedUnit, "Expired sustained zero input must keep rendering on the original AudioUnit")
+
+        _ = expiredAudio.stopCapture(session: 1)
+        XCTAssertFalse(expiredAudio.ensureRunning())
+        XCTAssertFalse(session.isActive)
+
+        // Part 2: Sustained zero input from an already-running real VPIO unit in foreground
+        // clears the stale 72,000-frame zero buffer, replaces the running VPIO unit, and resumes callbacks on the new unit.
+        let recoveryTracker = RenderTracker()
+        let recoveryProbe = DelegateProbe()
+        let recoveryAudio = OpeningVoiceAudio(
             session: 2,
             playReadyChime: false,
             zeroInputRecoveryEnabled: true,
             notificationCenter: center,
             uptime: readUptime,
             isInputMuted: { false },
-            isInBackground: { false }
-        )
-        defer { _ = zeroRecoveryAudio.stopCapture(session: 2) }
-        for index in 0..<75 {
-            zeroRecoveryAudio.input(zeroChunk, at: AVAudioTime(sampleTime: AVAudioFramePosition(index * 960), atRate: 48_000))
-        }
-        let zeroRecoveryDeadline = Date().addingTimeInterval(2.0)
-        while Date() < zeroRecoveryDeadline {
-            if AppLog.shared.lines.contains(where: { !recoveryPriorLogs.contains($0) && $0.contains("opening audio unit restarted after sustained zero input (#1)") }) {
-                break
+            isInBackground: { false },
+            renderAudioUnitInput: { unit, flags, timestamp, bus, frames, bufferList in
+                let status = OpeningVoiceAudio.renderCoreAudioInput(unit, flags, timestamp, bus, frames, bufferList)
+                guard status == noErr else { return status }
+                if recoveryTracker.record(unit),
+                   let data = bufferList.pointee.mBuffers.mData?.assumingMemoryBound(to: Int16.self) {
+                    data.update(repeating: 0, count: Int(frames))
+                }
+                return noErr
             }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        XCTAssertTrue(
-            AppLog.shared.lines.contains(where: { !recoveryPriorLogs.contains($0) && $0.contains("opening audio unit restarted after sustained zero input (#1)") }),
-            "Sustained zero input in foreground must run real VPIO restart"
         )
-        XCTAssertNotNil(zeroRecoveryAudio.audioUnitIdentity)
-        XCTAssertTrue(zeroRecoveryAudio.ensureRunning())
-        XCTAssertLessThan(zeroRecoveryAudio.bufferedFrameCount, 75 * 960, "Real zero-input recovery while buffering must clear the stale 72,000-frame zero prefix")
+        XCTAssertTrue(recoveryAudio.initialize(with: recoveryProbe))
+        XCTAssertTrue(recoveryAudio.initializeRecording())
+        XCTAssertTrue(recoveryAudio.startRecording())
+        let recoveryMarker = addLogMarker("sustained-zero-foreground")
+        try recoveryAudio.startCapture()
+        defer { _ = recoveryAudio.stopCapture(session: 2) }
 
-        let probe = DelegateProbe()
-        XCTAssertTrue(zeroRecoveryAudio.initialize(with: probe))
-        XCTAssertTrue(zeroRecoveryAudio.initializeRecording())
-        XCTAssertTrue(zeroRecoveryAudio.startRecording())
-        let openingSpeech = try makeMonoPCM16Buffer(frames: 480, value: 2_400)
-        zeroRecoveryAudio.input(openingSpeech, at: AVAudioTime(sampleTime: 0, atRate: 48_000))
-        XCTAssertTrue(zeroRecoveryAudio.allowSending(session: 2))
-        let liveSpeech = try makeMonoPCM16Buffer(frames: 480, value: -1_200)
-        zeroRecoveryAudio.input(liveSpeech, at: AVAudioTime(sampleTime: 480, atRate: 48_000))
-        XCTAssertTrue(probe.sent.contains(2_400), "Buffered speech after real recovery must reach WebRTC")
-        XCTAssertTrue(probe.sent.contains(-1_200), "Live speech after real recovery must reach WebRTC")
-        XCTAssertLessThan(probe.sent.count, 75 * 960, "Handoff after real recovery must not include the cleared 72,000-frame dead silence prefix")
+        let interruptedCount = await recoveryProbe.waitForInputInterrupted(after: 0, timeout: .seconds(6))
+        XCTAssertEqual(interruptedCount, 1)
+        let recoveryLogs = logs(after: recoveryMarker)
+        XCTAssertTrue(
+            recoveryLogs.contains(where: { $0.contains("opening audio unit restarted after sustained zero input (#1)") }),
+            "Sustained zero input from real VPIO in foreground must replace the running audio unit"
+        )
+        XCTAssertTrue(recoveryAudio.ensureRunning())
+        XCTAssertLessThan(recoveryAudio.bufferedFrameCount, 72_000, "Real zero-input recovery while buffering must clear the stale 72,000-frame zero prefix")
 
-        _ = zeroRecoveryAudio.stopCapture(session: 2)
-        XCTAssertNil(zeroRecoveryAudio.audioUnitIdentity)
-        XCTAssertFalse(zeroRecoveryAudio.ensureRunning())
+        XCTAssertTrue(recoveryAudio.allowSending(session: 2))
+        let postRecoveryCallbacks = await recoveryProbe.waitForRecordedCallback(after: 0, timeout: .seconds(5))
+        XCTAssertGreaterThan(postRecoveryCallbacks, 0, "Replaced VPIO unit must continue delivering real AudioUnitRender callbacks")
+        XCTAssertTrue(recoveryTracker.sawReplacedUnit, "Real AudioUnitRender callbacks after recovery must come from the replaced AudioUnit")
+
+        _ = recoveryAudio.stopCapture(session: 2)
+        XCTAssertFalse(recoveryAudio.ensureRunning())
         XCTAssertFalse(session.isActive, "stopCapture must release RTCAudioSession after sustained zero-input restart")
     }
 
@@ -541,12 +893,24 @@ final class OpeningVoiceAudioTests: XCTestCase {
         let stoppedResult = await stoppedAudio.awaitLiveInputWait(stopWait, timeout: .seconds(60))
         XCTAssertEqual(stoppedResult, .stopped, "stopCapture must wake waiters immediately with .stopped")
 
-        // 6. Cancelling an in-flight wait resolves immediately with .cancelled.
+        // 6. Cancelling an in-flight wait after it has actually suspended resolves immediately with .cancelled.
+        let (enteredSleep, sleepEntered) = AsyncStream<Void>.makeStream()
+        let (sleepCancelled, markSleepCancelled) = AsyncStream<Void>.makeStream()
         let cancelAudio = OpeningVoiceAudio(
             session: 4,
             playReadyChime: false,
             zeroInputRecoveryEnabled: true,
-            sleep: neverFinishSleep,
+            sleep: { _ in
+                sleepEntered.yield(())
+                sleepEntered.finish()
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch is CancellationError {
+                    markSleepCancelled.yield(())
+                    markSleepCancelled.finish()
+                    throw CancellationError()
+                }
+            },
             isInputMuted: { false },
             isInBackground: { false }
         )
@@ -554,8 +918,11 @@ final class OpeningVoiceAudioTests: XCTestCase {
         let inFlightTask = Task { @MainActor in
             await cancelAudio.awaitLiveInputWait(cancelWait, timeout: .seconds(60))
         }
+        for await _ in enteredSleep {}
+        await Task.yield()
         inFlightTask.cancel()
         let inFlightCancelled = await inFlightTask.value
         XCTAssertEqual(inFlightCancelled, .cancelled)
+        for await _ in sleepCancelled {}
     }
 }

@@ -57,9 +57,48 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         mReserved: 0
     )
 
+    enum AudioUnitRunState: Equatable, Sendable {
+        case running
+        case stopped
+        case unknown(OSStatus)
+    }
+
+    typealias CoreAudioInputRenderer = @Sendable (
+        AudioComponentInstance,
+        UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        UnsafePointer<AudioTimeStamp>,
+        UInt32,
+        UInt32,
+        UnsafeMutablePointer<AudioBufferList>
+    ) -> OSStatus
+
+    static func renderCoreAudioInput(
+        _ unit: AudioComponentInstance,
+        _ ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        _ inTimeStamp: UnsafePointer<AudioTimeStamp>,
+        _ inBusNumber: UInt32,
+        _ inNumberFrames: UInt32,
+        _ ioData: UnsafeMutablePointer<AudioBufferList>
+    ) -> OSStatus {
+        AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData)
+    }
+
+    @MainActor static func queryCoreAudioRunState(_ unit: AudioComponentInstance) -> AudioUnitRunState {
+        var isRunning: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_IsRunning,
+            kAudioUnitScope_Global,
+            0,
+            &isRunning,
+            &size
+        )
+        guard status == noErr else { return .unknown(status) }
+        return isRunning != 0 ? .running : .stopped
+    }
+
     @MainActor private var audioUnit: AudioComponentInstance?
-    @MainActor private var audioUnitRunning = false
-    @MainActor private(set) var hasHardwareCapture = false
     @MainActor private var audioSessionActivations = 0
     @MainActor private var interruptionObserver: NSObjectProtocol?
     @MainActor private var resetObserver: NSObjectProtocol?
@@ -71,12 +110,15 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private let sleep: @Sendable (Duration) async throws -> Void
     private let isInputMuted: @MainActor () -> Bool
     private let isInBackground: @MainActor () -> Bool
+    private let queryAudioUnitRunState: @MainActor (AudioComponentInstance) -> AudioUnitRunState
+    private let renderAudioUnitInput: CoreAudioInputRenderer
     private let lock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
     private let session: Int
     private var callbackAudioUnit: AudioComponentInstance?
     private var recoveryPolicy: OpeningAudioRecoveryPolicy
+    private var observedLiveInput = false
 
     private enum State {
         case buffering
@@ -147,16 +189,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         lock.withLock { overflow }
     }
     var hasObservedNonZeroInput: Bool {
-        lock.withLock { recoveryPolicy.hasObservedNonZeroInput }
-    }
-    var isZeroInputRecoveryEnabled: Bool {
-        lock.withLock { recoveryPolicy.enabled }
-    }
-    @MainActor var audioUnitIdentity: UnsafeRawPointer? {
-        audioUnit.map { UnsafeRawPointer($0) }
-    }
-    @MainActor var activeBackgroundRecordingGrant: BackgroundRecordingGrant? {
-        lock.withLock { recoveryPolicy.backgroundGrant }
+        lock.withLock { observedLiveInput || recoveryPolicy.hasObservedNonZeroInput }
     }
 
     init(
@@ -167,7 +200,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         isInputMuted: @escaping @MainActor () -> Bool = { AVAudioApplication.shared.isInputMuted },
-        isInBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background }
+        isInBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background },
+        queryAudioUnitRunState: @escaping @MainActor (AudioComponentInstance) -> AudioUnitRunState = OpeningVoiceAudio.queryCoreAudioRunState,
+        renderAudioUnitInput: @escaping CoreAudioInputRenderer = OpeningVoiceAudio.renderCoreAudioInput
     ) {
         self.session = session
         #if targetEnvironment(simulator)
@@ -181,6 +216,8 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         self.sleep = sleep
         self.isInputMuted = isInputMuted
         self.isInBackground = isInBackground
+        self.queryAudioUnitRunState = queryAudioUnitRunState
+        self.renderAudioUnitInput = renderAudioUnitInput
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
         super.init()
     }
@@ -213,7 +250,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     @MainActor func startCapture() throws {
-        hasHardwareCapture = true
         let muted = isInputMuted()
         lock.withLock { recoveryPolicy.setInputMuted(muted) }
         try VoiceLink.activateAudioSession(configure: true)
@@ -237,11 +273,18 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     @MainActor func ensureRunning() -> Bool {
-        guard audioUnit != nil || audioUnitRunning else { return false }
-        if !audioUnitRunning {
+        guard let unit = audioUnit else { return false }
+        switch queryAudioUnitRunState(unit) {
+        case .running:
+            return RTCAudioSession.sharedInstance().isActive
+        case .stopped:
             restartAudioUnit(trigger: .ensureRunning)
+            guard let currentUnit = audioUnit else { return false }
+            return queryAudioUnitRunState(currentUnit) == .running && RTCAudioSession.sharedInstance().isActive
+        case .unknown(let status):
+            Self.logVoice("opening audio ensureRunning could not query VPIO state (OSStatus \(status)); keeping existing unit")
+            return false
         }
-        return audioUnit != nil && audioUnitRunning && RTCAudioSession.sharedInstance().isActive
     }
 
     @MainActor private func configureAndStartAudioUnit() throws {
@@ -274,7 +317,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 ])
             }
             audioUnit = unit
-            audioUnitRunning = true
             let session = AVAudioSession.sharedInstance()
             Self.logVoice("opening audio unit started: 48000 Hz 1 ch Int16 VPIO, sessionRate=\(Int(session.sampleRate)), inputCh=\(session.inputNumberOfChannels), muted=\(AVAudioApplication.shared.isInputMuted)")
         } catch {
@@ -324,7 +366,6 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     @MainActor private func stopAudioUnit() {
         let unit = audioUnit
         audioUnit = nil
-        audioUnitRunning = false
         guard let unit else { return }
         AudioOutputUnitStop(unit)
         lock.withLock { callbackAudioUnit = nil }
@@ -341,21 +382,21 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         ) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-            Task { @MainActor in self?.restartAudioUnit(trigger: .interruptionEnded) }
+            MainActor.assumeIsolated { self?.restartAudioUnit(trigger: .interruptionEnded) }
         }
         resetObserver = notificationCenter.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.restartAudioUnit(trigger: .mediaServicesReset) }
+            MainActor.assumeIsolated { self?.restartAudioUnit(trigger: .mediaServicesReset) }
         }
         spatialObserver = notificationCenter.addObserver(
             forName: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.recoverFromZeroInput(trigger: .spatialCapabilitiesChanged)
             }
         }
@@ -364,7 +405,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.handleAppBecameActive()
             }
         }
@@ -373,7 +414,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 let muted = self.isInputMuted()
                 self.lock.withLock { self.recoveryPolicy.setInputMuted(muted) }
@@ -420,7 +461,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 recoveryPolicy.setInputMuted(true)
                 return .immediate(.skippedMuted)
             }
-            if recoveryPolicy.hasObservedNonZeroInput { return .immediate(.live) }
+            if observedLiveInput || recoveryPolicy.hasObservedNonZeroInput { return .immediate(.live) }
             if case .stopped = state { return .immediate(.stopped) }
             let waiterID = UUID()
             let (stream, continuation) = AsyncStream<LiveInputWaitResult>.makeStream()
@@ -493,20 +534,12 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 inBackground: inBackground,
                 now: now
             )
-            if case .restart(_, let clearZeroBuffer) = decision,
-               clearZeroBuffer,
-               case .buffering = state,
-               lastNonZeroOpeningFrame == 0 {
-                queued.removeAll(keepingCapacity: true)
-                readIndex = 0
-                openingEndFrame = 0
-            }
             return (decision, recoveryPolicy.tapCallbacks, recoveryPolicy.zeroInputFrames)
         }
         switch evaluated.decision {
-        case .restart(let attempt, _):
+        case .restart(let attempt, let clearZeroBuffer):
             Self.logVoice("opening audio restarting VPIO for \(trigger.logDescription) (attempt \(attempt), taps=\(evaluated.taps), zeroFrames=\(evaluated.zeroFrames))")
-            restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
+            restartAudioUnit(trigger: trigger, alreadyAuthorized: true, clearZeroBuffer: clearZeroBuffer)
         case .restartLifecycle:
             restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
         case .skip(.backgroundGrantExpired):
@@ -518,7 +551,8 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     @MainActor private func restartAudioUnit(
         trigger: OpeningAudioRecoveryPolicy.RestartTrigger,
-        alreadyAuthorized: Bool = false
+        alreadyAuthorized: Bool = false,
+        clearZeroBuffer: Bool = false
     ) {
         let inBackground = isInBackground()
         let now = uptime()
@@ -526,19 +560,32 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             let isStopped: Bool
             if case .stopped = state { isStopped = true } else { isStopped = false }
             if isStopped { return .skip(.stopped) }
+            let decision: OpeningAudioRecoveryPolicy.RestartDecision
             if alreadyAuthorized {
                 guard recoveryPolicy.canRestartInEnvironment(inBackground: inBackground, now: now) else {
                     return .skip(.backgroundGrantExpired)
                 }
-                return .restartLifecycle
+                decision = .restartLifecycle
+            } else {
+                decision = recoveryPolicy.evaluateRestart(
+                    trigger: trigger,
+                    isStopped: false,
+                    isInputMuted: false,
+                    inBackground: inBackground,
+                    now: now
+                )
             }
-            return recoveryPolicy.evaluateRestart(
-                trigger: trigger,
-                isStopped: false,
-                isInputMuted: false,
-                inBackground: inBackground,
-                now: now
-            )
+            switch decision {
+            case .restart, .restartLifecycle:
+                if clearZeroBuffer, case .buffering = state, lastNonZeroOpeningFrame == 0 {
+                    queued.removeAll(keepingCapacity: true)
+                    readIndex = 0
+                    openingEndFrame = 0
+                }
+            case .skip:
+                break
+            }
+            return decision
         }
         switch allowed {
         case .restart, .restartLifecycle:
@@ -722,7 +769,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                     mData: storage.baseAddress
                 )
             )
-            let status = AudioUnitRender(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
+            let status = renderAudioUnitInput(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
             guard status == noErr else {
                 let errCount = lock.withLock { () -> Int in
                     renderErrors += 1
@@ -747,24 +794,14 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     }
 
     private func recordRawInputMetrics(frameCount: Int, maxSample: Int32, peak: Float) {
-        let (observation, liveWaiters): (OpeningAudioRecoveryPolicy.InputObservation, [AsyncStream<LiveInputWaitResult>.Continuation]) = lock.withLock {
+        let observation: OpeningAudioRecoveryPolicy.InputObservation = lock.withLock {
             let isStopped: Bool
             if case .stopped = state { isStopped = true } else { isStopped = false }
             if maxSample > 0 {
                 nonZeroTapCallbacks += 1
             }
             if peak > rawMaxPeak { rawMaxPeak = peak }
-            let observation = recoveryPolicy.recordInput(frameCount: frameCount, maxSample: maxSample, isStopped: isStopped)
-            if maxSample > 0 {
-                let waiters = Array(liveInputWaiters.values)
-                liveInputWaiters.removeAll()
-                return (observation, waiters)
-            }
-            return (observation, [])
-        }
-        for waiter in liveWaiters {
-            waiter.yield(.live)
-            waiter.finish()
+            return recoveryPolicy.recordInput(frameCount: frameCount, maxSample: maxSample, isStopped: isStopped)
         }
         switch observation {
         case .none:
@@ -840,46 +877,48 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         let count = Int(pcm.frameLength)
         guard count > 0 else { return }
         let sourceFrames = UnsafeBufferPointer(start: source, count: count)
-        var maxSample: Int32 = 0
-        for sample in sourceFrames {
-            let magnitude = abs(Int32(sample))
-            if magnitude > maxSample { maxSample = magnitude }
-        }
-        let peak = Float(maxSample) / 32_768.0
-        recordRawInputMetrics(frameCount: count, maxSample: maxSample, peak: peak)
         inputSamples(sourceFrames, timestamp: time.audioTimeStamp)
     }
 
     private func inputSamples(_ sourceFrames: UnsafeBufferPointer<Int16>, timestamp: AudioTimeStamp) {
         let count = sourceFrames.count
         guard count > 0 else { return }
-        sendLock.withLock {
-            let delivery: Delivery = lock.withLock {
+        let nonZeroEnd = lastNonZeroOffset(in: sourceFrames)
+        let liveWaiters: [AsyncStream<LiveInputWaitResult>.Continuation] = sendLock.withLock {
+            let (delivery, waiters): (Delivery, [AsyncStream<LiveInputWaitResult>.Continuation]) = lock.withLock {
+                var waking: [AsyncStream<LiveInputWaitResult>.Continuation] = []
+                if nonZeroEnd != nil {
+                    observedLiveInput = true
+                    if !liveInputWaiters.isEmpty {
+                        waking = Array(liveInputWaiters.values)
+                        liveInputWaiters.removeAll()
+                    }
+                }
                 switch state {
                 case .buffering:
                     let previousEnd = queued.count
                     bufferLocked(sourceFrames)
                     if !overflow {
                         openingEndFrame = queued.count
-                        if let nonZeroEnd = lastNonZeroOffset(in: sourceFrames) {
+                        if let nonZeroEnd {
                             lastNonZeroOpeningFrame = max(lastNonZeroOpeningFrame, previousEnd + nonZeroEnd)
                         }
                     }
-                    return .none
+                    return (.none, waking)
                 case .waitingForOwner(let completion):
                     bufferLocked(sourceFrames)
                     if overflow {
                         state = .readyForDictation
                         completion.finish()
                     }
-                    return .none
+                    return (.none, waking)
                 case .sending:
                     rememberForRecoveryLocked(sourceFrames)
                     guard recording, let delegate else {
                         bufferLocked(sourceFrames)
-                        return .none
+                        return (.none, waking)
                     }
-                    guard !overflow else { return .none }
+                    guard !overflow else { return (.none, waking) }
                     if readIndex < queued.count {
                         queued.append(contentsOf: sourceFrames)
                         let pending = readIndex == 0 ? queued : Array(queued[readIndex...])
@@ -890,23 +929,28 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                         }
                         deliveredFrames += pending.count
                         evaluateOpeningConfirmedLocked()
-                        return .queued(delegate, pending)
+                        return (.queued(delegate, pending), waking)
                     }
                     deliveredFrames += count
                     evaluateOpeningConfirmedLocked()
-                    return .live(delegate)
+                    return (.live(delegate), waking)
                 case .readyForDictation, .stopped:
-                    return .none
+                    return (.none, waking)
                 }
             }
             switch delivery {
             case .none:
-                return
+                break
             case .live(let delegate):
                 deliverChunked(sourceFrames, to: delegate, timestamp: timestamp)
             case .queued(let delegate, let pending):
                 pending.withUnsafeBufferPointer { deliverChunked($0, to: delegate, timestamp: timestamp) }
             }
+            return waiters
+        }
+        for waiter in liveWaiters {
+            waiter.yield(.live)
+            waiter.finish()
         }
     }
 
