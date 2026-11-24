@@ -16,6 +16,111 @@ import XCTest
 /// was tapped into the page, so a test reads the page to see whether a tap happened.
 @MainActor
 final class BrowserGuardTests: XCTestCase {
+    func testStopClearsLoadingAndIgnoresLateNavigationCallbacks() throws {
+        let browser = PokiBrowser()
+        let navigation = try XCTUnwrap(browser.webView.loadHTMLString("<p>Page</p>", baseURL: nil))
+        browser.approveMainFrameNavigation(navigation)
+        browser.webView(browser.webView, didStartProvisionalNavigation: navigation)
+        XCTAssertTrue(browser.isLoading)
+
+        browser.taskStopped()
+        XCTAssertFalse(browser.isLoading)
+        browser.webView(browser.webView, didStartProvisionalNavigation: navigation)
+        XCTAssertFalse(browser.isLoading, "A queued callback must not restart a stopped load")
+    }
+
+    func testStopBeforeFirstProvisionalCallbackDoesNotRestartLoading() throws {
+        let browser = PokiBrowser()
+        let navigation = try XCTUnwrap(browser.webView.loadHTMLString("<p>Page</p>", baseURL: nil))
+        browser.taskStopped()
+
+        browser.webView(browser.webView, didStartProvisionalNavigation: navigation)
+
+        XCTAssertFalse(browser.isLoading)
+    }
+
+    func testNewPolicyDoesNotReadmitStoppedNavigationEvenForSameURL() throws {
+        guard #available(iOS 27.0, *) else { throw XCTSkip("Requires WebKit navigation identity in the policy callback") }
+        let browser = PokiBrowser()
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "about:blank")))
+        let old = try XCTUnwrap(browser.webView.load(request))
+        browser.approveMainFrameNavigation(old)
+        browser.taskStopped()
+        let new = try XCTUnwrap(browser.webView.load(request))
+        browser.approveMainFrameNavigation(new)
+
+        browser.webView(browser.webView, didStartProvisionalNavigation: old)
+        XCTAssertFalse(browser.isLoading, "Approving a new request must not revive the old navigation")
+
+        browser.webView(browser.webView, didStartProvisionalNavigation: new)
+        XCTAssertTrue(browser.isLoading)
+        browser.webView(browser.webView, didFailProvisionalNavigation: old, withError: URLError(.cancelled))
+        XCTAssertTrue(browser.isLoading, "A late failure must not finish the new navigation")
+        browser.webView(browser.webView, didFinish: new)
+        XCTAssertFalse(browser.isLoading)
+    }
+
+    func testActWaitsForSlowLinkAfterStopOnOlderWebKit() async throws {
+        if #available(iOS 27.0, *) { throw XCTSkip("Requires the older WebKit policy callback") }
+        let priorLocalFixtures = BrowserAddress.allowsLocal
+        BrowserAddress.allowsLocal = true
+        defer { BrowserAddress.allowsLocal = priorLocalFixtures }
+        let pages = try PageServer(pages: [
+            "/first": "<title>First</title><a id='next' href='/second'>Next</a>",
+            "/second": "<title>Second</title>",
+        ], delayedPath: "/second")
+        let browser = PokiBrowser()
+        let first = try XCTUnwrap(URL(string: "http://127.0.0.1:\(pages.port)/first"))
+        await browser.open(first)
+        _ = try XCTUnwrap(browser.url, "The fixture must load before Stop")
+        XCTAssertEqual(browser.url?.path, "/first")
+        let second = try XCTUnwrap(URL(string: "http://127.0.0.1:\(pages.port)/second"))
+        let stopped = try XCTUnwrap(browser.webView.load(URLRequest(url: second)))
+        browser.taskStopped()
+
+        let lateStart = expectation(description: "New policy decision delivered before the delayed old start")
+        browser.didAllowMainFrameForTesting = { [weak browser] in
+            guard let browser else { return }
+            browser.didAllowMainFrameForTesting = nil
+            browser.webView(browser.webView, didStartProvisionalNavigation: stopped)
+            XCTAssertFalse(browser.isLoading, "A delayed start must not claim a new policy decision")
+            lateStart.fulfill()
+        }
+
+        let clicked = await browser.act {
+            (try? await browser.webView.evaluateJavaScript("document.querySelector('#next').click(); true")) as? Bool
+        }
+        await fulfillment(of: [lateStart], timeout: 1)
+        XCTAssertEqual(clicked, true)
+        XCTAssertEqual(browser.url?.path, "/second")
+        let title = try await browser.webView.evaluateJavaScript("document.title") as? String
+        XCTAssertEqual(title, "Second")
+    }
+
+    func testPageInitiatedNavigationAfterStopUpdatesBrowser() async throws {
+        let pages = try PageServer(pages: [
+            "/first": "<html><title>First</title></html>",
+            "/second": "<html><title>Second</title></html>",
+        ])
+        let browser = PokiBrowser()
+        let first = try XCTUnwrap(URL(string: "http://127.0.0.1:\(pages.port)/first"))
+        await browser.open(first)
+        XCTAssertEqual(browser.url?.path, "/first")
+        browser.taskStopped()
+
+        let loaded = expectation(description: "Page-initiated navigation finished")
+        let observation = browser.webView.observe(\.isLoading, options: [.new]) { view, _ in
+            if !view.isLoading, view.url?.path == "/second" { loaded.fulfill() }
+        }
+        defer { observation.invalidate() }
+        _ = try await browser.webView.evaluateJavaScript("setTimeout(() => { location.href = '/second' }, 0);")
+        await fulfillment(of: [loaded], timeout: 5)
+        XCTAssertEqual(browser.url?.path, "/second")
+        let title = try await browser.webView.evaluateJavaScript("document.title") as? String
+        XCTAssertEqual(title, "Second")
+        XCTAssertFalse(browser.isLoading)
+    }
+
     func testCancelledOwnerWaitLeavesThePageWithTheOwner() async {
         let browser = PokiBrowser()
         browser.takeOver()
@@ -498,11 +603,13 @@ final class PageServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "page-server")
     private let pages: [String: String]
+    private let delayedPath: String?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
 
-    init(pages: [String: String]) throws {
+    init(pages: [String: String], delayedPath: String? = nil) throws {
         self.pages = pages
+        self.delayedPath = delayedPath
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -529,7 +636,16 @@ final class PageServer: @unchecked Sendable {
                 let body = self.pages[path] ?? ""
                 let status = self.pages[path] == nil ? "404 Not Found" : "200 OK"
                 let head = "HTTP/1.1 \(status)\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
-                return connection.send(content: Data((head + body).utf8), completion: .contentProcessed { _ in connection.cancel() })
+                let response = Data((head + body).utf8)
+                let send: @Sendable () -> Void = {
+                    connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+                }
+                if path == self.delayedPath {
+                    self.queue.asyncAfter(deadline: .now() + 2, execute: send)
+                } else {
+                    send()
+                }
+                return
             }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
