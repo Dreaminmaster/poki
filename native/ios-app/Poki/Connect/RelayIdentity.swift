@@ -45,8 +45,12 @@ final class RelayIdentity {
     private(set) var secrets: [ConnectorSecret] = []
     private(set) var error: String?
     private var key: Curve25519.Signing.PrivateKey?
+    private let storage: PokiStorage
 
-    init() { load() }
+    init(storage: PokiStorage = .live) {
+        self.storage = storage
+        load()
+    }
 
     var publicKey: Data? { key?.publicKey.rawRepresentation }
     var signingKey: Curve25519.Signing.PrivateKey? { key }
@@ -104,14 +108,14 @@ final class RelayIdentity {
 
     private func load() {
         do {
-            if let raw = try Keychain.read(Self.keyAccount) {
+            if let raw = try Keychain.read(Self.keyAccount, storage: storage) {
                 key = try Curve25519.Signing.PrivateKey(rawRepresentation: raw)
             } else {
                 let made = Curve25519.Signing.PrivateKey()
-                try Keychain.write(made.rawRepresentation, account: Self.keyAccount)
+                try Keychain.write(made.rawRepresentation, account: Self.keyAccount, storage: storage)
                 key = made
             }
-            if let data = try Keychain.read(Self.secretsAccount) { secrets = (try? JSONDecoder().decode([ConnectorSecret].self, from: data)) ?? [] }
+            if let data = try Keychain.read(Self.secretsAccount, storage: storage) { secrets = (try? JSONDecoder().decode([ConnectorSecret].self, from: data)) ?? [] }
             label = base32(key!.publicKey.rawRepresentation)
         } catch {
             self.error = "\(error)"
@@ -119,16 +123,59 @@ final class RelayIdentity {
     }
 
     private func save() {
-        do { try Keychain.write(try JSONEncoder().encode(secrets), account: Self.secretsAccount) }
+        do { try Keychain.write(try JSONEncoder().encode(secrets), account: Self.secretsAccount, storage: storage) }
         catch { self.error = "\(error)" }
     }
 }
 
-enum Keychain {
-    private static let service = "nz.zheha.poki"
+/// Immutable storage boundary binding defaults, app-group defaults, Keychain services,
+/// Codex home directory, and pairing file location explicitly per instance.
+struct PokiStorage: @unchecked Sendable {
+    let defaults: UserDefaults
+    let appGroupDefaults: UserDefaults
+    let keychainService: String
+    let codexService: String
+    let codexHome: URL
+    let pairingFileURL: URL
 
-    static func read(_ account: String) throws -> Data? {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account, kSecReturnData as String: true]
+    var phonePairingFileURL: URL {
+        pairingFileURL.deletingLastPathComponent().appendingPathComponent("pairing-phone.plist")
+    }
+
+    static let live = PokiStorage(
+        defaults: .standard,
+        appGroupDefaults: SharedContainer.defaults,
+        keychainService: Keychain.defaultServiceName,
+        codexService: CodexAccount.defaultServiceName,
+        codexHome: URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory),
+        pairingFileURL: AppFiles.pairingFile
+    )
+}
+
+extension AppLocalization {
+    convenience init(storage: PokiStorage) {
+        self.init(defaults: storage.defaults, appGroupDefaults: storage.appGroupDefaults)
+    }
+}
+
+enum Keychain {
+    static let defaultServiceName = "nz.zheha.poki"
+    static let defaultService = defaultServiceName
+
+    static func read(_ account: String, storage: PokiStorage) throws -> Data? {
+        try read(account, service: storage.keychainService)
+    }
+
+    static func write(_ data: Data, account: String, storage: PokiStorage) throws {
+        try write(data, account: account, service: storage.keychainService)
+    }
+
+    static func delete(_ account: String, storage: PokiStorage) {
+        delete(account, service: storage.keychainService)
+    }
+
+    static func read(_ account: String, service name: String = defaultService) throws -> Data? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account, kSecReturnData as String: true]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -136,8 +183,59 @@ enum Keychain {
         return result as? Data
     }
 
-    static func write(_ data: Data, account: String) throws {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    static func readWithAttributes(
+        _ account: String,
+        service name: String = defaultService
+    ) throws -> (data: Data, modified: Date?, accessible: String?)? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        guard let item = result as? [String: Any],
+              let data = item[kSecValueData as String] as? Data else { return nil }
+        return (
+            data: data,
+            modified: item[kSecAttrModificationDate as String] as? Date,
+            accessible: item[kSecAttrAccessible as String] as? String
+        )
+    }
+
+    static func readAll(
+        service name: String
+    ) throws -> [(account: String, data: Data, modified: Date?, accessible: String?)] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecReturnData as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        guard let items = result as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  let data = item[kSecValueData as String] as? Data else { return nil }
+            return (
+                account: account,
+                data: data,
+                modified: item[kSecAttrModificationDate as String] as? Date,
+                accessible: item[kSecAttrAccessible as String] as? String
+            )
+        }
+    }
+
+    static func write(_ data: Data, account: String, service name: String = defaultService) throws {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
@@ -149,12 +247,31 @@ enum Keychain {
         guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
     }
 
-    static func delete(_ account: String) {
-        try? remove(account)
+    static func updateAccessibility(
+        _ account: String,
+        service name: String = defaultService,
+        accessible: CFString
+    ) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: name,
+            kSecAttrAccount as String: account,
+        ]
+        let attributes: [String: Any] = [
+            kSecAttrAccessible as String: accessible,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        guard status == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
     }
 
-    static func remove(_ account: String) throws {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    static func delete(_ account: String, service name: String = defaultService) {
+        try? remove(account, service: name)
+    }
+
+    static func remove(_ account: String, service name: String = defaultService) throws {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let status = SecItemDelete(base as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
@@ -165,8 +282,16 @@ enum Keychain {
 extension RelayAddress {
     /// The relay the person entered in Connect, kept across launches. Poki has no default relay.
     static var saved: RelayAddress? {
-        get { UserDefaults.standard.string(forKey: "relayAddress").flatMap { RelayAddress($0) } }
-        set { UserDefaults.standard.set(newValue?.origin.absoluteString, forKey: "relayAddress") }
+        get { saved(in: .live) }
+        set { setSaved(newValue, in: .live) }
+    }
+
+    static func saved(in storage: PokiStorage = .live) -> RelayAddress? {
+        storage.defaults.string(forKey: "relayAddress").flatMap { RelayAddress($0) }
+    }
+
+    static func setSaved(_ address: RelayAddress?, in storage: PokiStorage = .live) {
+        storage.defaults.set(address?.origin.absoluteString, forKey: "relayAddress")
     }
 }
 

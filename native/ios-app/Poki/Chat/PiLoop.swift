@@ -21,9 +21,11 @@ final class PiLoop {
 
     let provider: ModelProvider
     let model: Model
+    let sessionID: String
     let inSplitView: Bool
     private let agent: Agent
-    private let allTools: [AgentTool]
+    private let toolVariants: [ToolVariant]
+    private let toolPolicy = ToolPolicy()
     private let gate = StopGate()
     /// A custom address's HTTP client, which repairs a doubled `data:` stream and keeps what the address
     /// answered for the log.
@@ -36,6 +38,68 @@ final class PiLoop {
         set { shelf.tools = newValue }
     }
 
+    private struct FinishToolCache: @unchecked Sendable {
+        private final class Store: @unchecked Sendable {
+            let lock = NSLock()
+            var tools: [Harness.ResultCardMode: AgentTool] = [:]
+        }
+        private let store = Store()
+        private let execute: AgentToolExecute
+
+        init(execute: @escaping AgentToolExecute) { self.execute = execute }
+
+        func tool(resultCardMode: Harness.ResultCardMode) -> AgentTool {
+            if let cached = store.lock.withLock({ store.tools[resultCardMode] }) { return cached }
+            let spec = Harness.finishTask(resultCardMode: resultCardMode)
+            let built = AgentTool(label: spec.name, name: spec.name, description: spec.description,
+                                  parameters: spec.schema.mapValues { AnyCodable($0) }, execute: execute)
+            return store.lock.withLock {
+                if let existing = store.tools[resultCardMode] { return existing }
+                store.tools[resultCardMode] = built
+                return built
+            }
+        }
+    }
+
+    private enum ToolVariant: Sendable {
+        case standard(withMemory: AgentTool, withoutMemory: AgentTool)
+        case finish(FinishToolCache)
+    }
+
+    private final class ToolPolicy: @unchecked Sendable {
+        private let lock = NSLock()
+        private var includeMemoryAttribution = true
+        private var includeCountedScroll = true
+        private var includeCountedScrollReply = true
+        private var rendersCards = true
+        private var resultCardMode: Harness.ResultCardMode = .all
+
+        func set(includeMemoryAttribution: Bool,
+                 includeCountedScroll: Bool,
+                 includeCountedScrollReply: Bool,
+                 rendersCards: Bool,
+                 resultCardMode: Harness.ResultCardMode) {
+            lock.withLock {
+                self.includeMemoryAttribution = includeMemoryAttribution
+                self.includeCountedScroll = includeCountedScroll
+                self.includeCountedScrollReply = includeCountedScrollReply
+                self.rendersCards = rendersCards
+                self.resultCardMode = resultCardMode
+            }
+        }
+
+        func observeApp(_ bundleID: String) {
+            lock.withLock {
+                guard rendersCards else { return }
+                resultCardMode = resultCardMode.including(app: bundleID)
+            }
+        }
+
+        func current() -> (memoryAttribution: Bool, countedScroll: Bool, countedScrollReply: Bool, resultCardMode: Harness.ResultCardMode) {
+            lock.withLock { (includeMemoryAttribution, includeCountedScroll, includeCountedScrollReply, resultCardMode) }
+        }
+    }
+
     var signature: String { "pi:\(provider.rawValue)/\(model.id)" }
     var messages: [AgentMessage] { agent.state.messages }
     var hasCurrentCustomBackups: Bool {
@@ -43,19 +107,54 @@ final class PiLoop {
         return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
     }
 
-    init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
+    /// Keep custom provider requests identified as Poki without imitating another client.
+    static func clientIdentity(version: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) -> ClientIdentity {
+        let cleanVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agent = "Poki/\(cleanVersion.flatMap { $0.isEmpty ? nil : $0 } ?? "dev")"
+        return ClientIdentity(
+            userAgent: .custom(agent),
+            attribution: .value(ClientAttribution(name: "Poki", url: "https://github.com/JosssphZhou/poki"))
+        )
+    }
+
+    /// Only forward `sessionId` to providers confirmed to accept OpenAI's `prompt_cache_key`
+    /// and session-routing headers. Arbitrary custom gateways frequently reject unknown Responses
+    /// parameters with HTTP 400 (`unsupported_parameter`), so custom endpoints receive `sessionId`
+    /// only when targeting official `api.openai.com`.
+    nonisolated static func sessionCacheKey(for provider: ModelProvider, model: Model, sessionID: String?) -> String? {
+        guard let sessionID, !sessionID.isEmpty else { return nil }
+        switch provider {
+        case .openai, .chatgpt:
+            return sessionID
+        case .custom:
+            return URL(string: model.baseUrl)?.host?.lowercased() == "api.openai.com" ? sessionID : nil
+        case .anthropic, .deepseek, .gemini, .openrouter:
+            return nil
+        }
+    }
+
+    convenience init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, sessionId: String? = nil,
+                     carrying messages: [AgentMessage] = [],
+                     perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
+        self.init(provider: provider, model: model, sessionID: sessionId ?? "", tools: tools,
+                  inSplitView: inSplitView, carrying: messages, perform: perform)
+    }
+
+    init(provider: ModelProvider, model: Model, sessionID: String, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
         self.provider = provider
         self.model = model
+        self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
-        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model, sessionID: sessionID) : nil
         self.endpoint = endpoint
         let stall = self.stall
         let shelf = self.shelf
         let grants = HistoryDeliveryGrants()
-        let agentTools = tools.map { spec in
-            AgentTool(label: spec.name, name: spec.name, description: spec.description, parameters: spec.schema.mapValues { AnyCodable($0) }) { id, params, signal, _ in
+        let policy = self.toolPolicy
+        let variants = tools.map { spec -> ToolVariant in
+            let execute: AgentToolExecute = { id, params, signal, _ in
                 if gate.stopped { return Self.result(PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true)) }
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = .sortedKeys
@@ -64,12 +163,16 @@ final class PiLoop {
                 // `signal`: cancelling the call stops a `do` before its next action.
                 let revision = spec.name == "screen_history" ? HistoryCapture.agentQueryRevision : nil
                 if spec.name == "screen_history" { grants.record(id, revision: revision) }
+                let trace = ChatStepTiming.current
+                let action = trace.map { "action=\($0.nextAction()) tool=\(spec.name)" } ?? ""
+                trace?.record("action_start", action)
                 let call = Task { @MainActor in await perform(ToolCall(id: id, name: spec.name, arguments: arguments)) }
                 let forget = signal?.onCancel { call.cancel() }
                 defer { forget?() }
                 let rawAnswer = await call.value
                 let answer = spec.name == "screen_history"
                     ? HistoryCapture.validateAgentAnswer(rawAnswer, revision: revision) : rawAnswer
+                trace?.record("action_end", "\(action) ok=\(!answer.isError)")
                 // The call and what it left on the screen, so a task that keeps working is told from a
                 // loop: the arguments have sorted keys, and the screen has no clock or read time in it.
                 if spec.name == Harness.countedScrollReplyTool, !answer.isError {
@@ -83,14 +186,29 @@ final class PiLoop {
                 }
                 return Self.result(answer)
             }
+            if spec.name == "finish_task" {
+                return .finish(FinishToolCache(execute: execute))
+            }
+            let stripped = Harness.withoutActionMemoryIDs(spec)
+            let withMemory = AgentTool(label: spec.name, name: spec.name, description: spec.description,
+                                       parameters: spec.schema.mapValues { AnyCodable($0) }, execute: execute)
+            let withoutMemory = AgentTool(label: stripped.name, name: stripped.name, description: stripped.description,
+                                          parameters: stripped.schema.mapValues { AnyCodable($0) }, execute: execute)
+            return .standard(withMemory: withMemory, withoutMemory: withoutMemory)
         }
-        allTools = agentTools
+        toolVariants = variants
         // agent/pi-session.mjs: low thinking, one tool call at a time. Pi copies the
         // tool list at prompt start; prepareRequest updates its *live* context each turn.
         agent = Agent(AgentOptions(
             initialState: AgentState(model: model, thinkingLevel: .low,
-                                     tools: Self.availableTools(agentTools, allowed: HistoryCapture.agentQueryAllowed), messages: messages),
+                                     tools: Self.availableTools(variants, allowed: HistoryCapture.agentQueryAllowed,
+                                                                includeMemoryAttribution: true,
+                                                                includeCountedScroll: true,
+                                                                includeCountedScrollReply: true,
+                                                                resultCardMode: .all),
+                                     messages: messages),
             streamFn: { model, transcript, options in
+                if provider.signsIn, options.apiKey == nil { throw ChatGPTAccount.SignInRequired() }
                 // API credentials may have suspended after prepareRequest. Recheck at
                 // the last request boundary too; never add a tool the live context lacks.
                 let revision = HistoryCapture.agentQueryRevision
@@ -98,6 +216,32 @@ final class PiLoop {
                 var messages = transcript.messages.map { message -> PiSwiftAI.Message in
                     guard case .toolResult(let result) = message else { return message }
                     return .toolResult(grants.validated(result, revision: revision))
+                }
+                let isPicture: (ContentBlock) -> Bool = { block in
+                    if case .image = block { return true }
+                    return false
+                }
+                var keptObservationPicture = false
+                var keptRetrievedPicture = false
+                for index in messages.indices.reversed() {
+                    guard case .toolResult(var result) = messages[index] else { continue }
+                    let keep: Bool
+                    switch result.toolName {
+                    case "look", "do":
+                        guard result.content.contains(where: isPicture) else { continue }
+                        keep = !keptObservationPicture
+                        keptObservationPicture = true
+                    case "get_screenshot":
+                        guard result.content.contains(where: isPicture) else { continue }
+                        keep = !keptObservationPicture && !keptRetrievedPicture
+                        keptRetrievedPicture = true
+                    default:
+                        continue
+                    }
+                    if !keep {
+                        result.content.removeAll(where: isPicture)
+                        messages[index] = .toolResult(result)
+                    }
                 }
                 if let index = messages.indices.first, case .system(var system) = messages[index],
                    case .text(let text) = system.content {
@@ -109,8 +253,36 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if provider == .custom {
+                    // PiSwift uses sessionId for both OpenCode's routing header and
+                    // the OpenAI Responses prompt_cache_key. Generic compatible
+                    // gateways may reject that extra JSON field, even when their
+                    // connection check succeeds. Preserve the SDK's narrowly scoped
+                    // OpenCode header, and only forward prompt_cache_key to official
+                    // api.openai.com endpoints.
+                    options.headers = openCodeSessionHeaders(
+                        model: model, sessionId: sessionID, headers: options.headers)
+                    options.sessionId = Self.sessionCacheKey(for: provider, model: model, sessionID: sessionID)
+                }
+                if provider.signsIn, model.provider == "openai-codex" {
+                    options.httpClient = ChatGPTAccount.ResponsesClient(transport: DefaultProviderHTTPClient(env: options.env))
+                }
+                if let trace = ChatStepTiming.current {
+                    if model.api == .openAIResponses {
+                        let onPayload = options.onPayload
+                        options.onPayload = { payload in
+                            let updated = try await onPayload?(payload)
+                            trace.record("model_request", "boundary=payload_ready bytes=\((updated ?? payload).json.utf8.count)")
+                            return updated
+                        }
+                    } else {
+                        trace.record("model_request", "boundary=provider_handoff")
+                    }
+                }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
+            sessionId: Self.sessionCacheKey(for: provider, model: model, sessionID: sessionID),
+            identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
             prepareToolResultMessage: { result in
@@ -118,7 +290,12 @@ final class PiLoop {
             },
             prepareRequest: { request, _ in
                 let revision = HistoryCapture.agentQueryRevision
-                let tools = Self.availableTools(agentTools, allowed: revision != nil) + shelf.tools
+                let currentPolicy = policy.current()
+                let tools = Self.availableTools(variants, allowed: revision != nil,
+                                                includeMemoryAttribution: currentPolicy.memoryAttribution,
+                                                includeCountedScroll: currentPolicy.countedScroll,
+                                                includeCountedScrollReply: currentPolicy.countedScrollReply,
+                                                resultCardMode: currentPolicy.resultCardMode) + shelf.tools
                 var context = request.context
                 context.tools = tools
                 context.messages = context.messages.map { message in
@@ -143,14 +320,34 @@ final class PiLoop {
         ))
     }
 
+    /// Widens the active task's result-card schema when a card-capable app is launched or read.
+    func observeApp(_ bundleID: String) {
+        toolPolicy.observeApp(bundleID)
+    }
+
     /// The owner's message (with the JPEGs of its photos and PDFs) under this task's instructions, then
     /// pi's loop until the model answers without tools, `stop()`, a repeated call or pair on the same
     /// screen, or `maxTurns` model turns (a ceiling for a model that runs away). Owner waits reset the
     /// stall history. `onText` gets each finished text block.
-    func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
+    func run(_ text: String, images: [Data] = [], instructions: String, maxTurns: Int,
+             includeMemoryAttribution: Bool = true,
+             includeCountedScroll: Bool = true,
+             includeCountedScrollReply: Bool = true,
+             rendersCards: Bool = true,
+             resultCardMode: Harness.ResultCardMode = .all,
+             timing: ChatStepTiming? = nil, onText: @escaping @MainActor (String) -> Void) async -> Outcome {
         gate.reset()
         stall.reset()
-        agent.tools = Self.availableTools(allTools, allowed: HistoryCapture.agentQueryAllowed) + shelf.tools
+        toolPolicy.set(includeMemoryAttribution: includeMemoryAttribution,
+                       includeCountedScroll: includeCountedScroll,
+                       includeCountedScrollReply: includeCountedScrollReply,
+                       rendersCards: rendersCards,
+                       resultCardMode: resultCardMode)
+        agent.tools = Self.availableTools(toolVariants, allowed: HistoryCapture.agentQueryAllowed,
+                                          includeMemoryAttribution: includeMemoryAttribution,
+                                          includeCountedScroll: includeCountedScroll,
+                                          includeCountedScrollReply: includeCountedScrollReply,
+                                          resultCardMode: resultCardMode) + shelf.tools
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -159,8 +356,16 @@ final class PiLoop {
         let unsubscribe = agent.subscribe { event, _ in
             switch event {
             case .turnStart:
+                timing?.beginTurn()
                 if turns.increment() > maxTurns { gate.end(.overTurns) }
                 if gate.stopped { agent.abort() }
+            case .messageUpdate(_, let event):
+                switch event {
+                case .textDelta(_, let delta, _) where !delta.isEmpty: timing?.firstOutput(.text)
+                case .thinkingDelta(_, let delta, _) where !delta.isEmpty: timing?.firstOutput(.reasoning)
+                case .toolCallStart: timing?.firstOutput(.tool)
+                default: break
+                }
             case .messageEnd(.assistant(let reply)):
                 if reply.stopReason == .error { failure.set(reply.errorMessage ?? "") }
                 let texts = reply.content.compactMap { block -> String? in
@@ -168,13 +373,17 @@ final class PiLoop {
                     let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     return text.isEmpty ? nil : text
                 }
+                if !texts.isEmpty { timing?.firstOutput(.text, boundary: "message_end") }
+                timing?.record("model_complete", "stop=\(reply.stopReason.rawValue)")
                 if !texts.isEmpty { await MainActor.run { texts.forEach(onText) } }
             default: break
             }
         }
         defer { unsubscribe() }
         do {
-            try await agent.prompt(text, images: images.map { ImageContent(data: $0.base64EncodedString(), mimeType: "image/jpeg") })
+            try await ChatStepTiming.$current.withValue(timing) {
+                try await agent.prompt(text, images: images.map { ImageContent(data: $0.base64EncodedString(), mimeType: "image/jpeg") })
+            }
         } catch {
             failure.set(error.localizedDescription)
         }
@@ -218,8 +427,25 @@ final class PiLoop {
         agent.messages = messages
     }
 
-    nonisolated static func availableTools(_ tools: [AgentTool], allowed: Bool) -> [AgentTool] {
-        tools.filter { $0.name != "screen_history" || allowed }
+    private nonisolated static func availableTools(_ variants: [ToolVariant], allowed: Bool,
+                                                   includeMemoryAttribution: Bool,
+                                                   includeCountedScroll: Bool,
+                                                   includeCountedScrollReply: Bool,
+                                                   resultCardMode: Harness.ResultCardMode) -> [AgentTool] {
+        variants.compactMap { variant in
+            let tool: AgentTool
+            switch variant {
+            case .standard(let withMemory, let withoutMemory):
+                tool = includeMemoryAttribution ? withMemory : withoutMemory
+            case .finish(let cache):
+                tool = cache.tool(resultCardMode: resultCardMode)
+            }
+            if tool.name == "screen_history", !allowed { return nil }
+            if tool.name == "get_screenshot", resultCardMode == .none { return nil }
+            if tool.name == "count_messages", !includeCountedScroll { return nil }
+            if tool.name == Harness.countedScrollReplyTool, !(includeCountedScroll && includeCountedScrollReply) { return nil }
+            return tool
+        }
     }
 
     private nonisolated static func result(_ answer: PokiCore.ToolAnswer) -> AgentToolResult {
@@ -228,11 +454,16 @@ final class PiLoop {
         return AgentToolResult(content: content, isError: answer.isError)
     }
 
-    /// The provider's message for the owner. pi never puts the key in it; a sign-in that ran out says so.
+    /// The provider's message for the owner. ChatGPT errors can contain the upstream response body.
     private static func words(_ message: String, provider: ModelProvider) -> String {
+        if provider.signsIn {
+            if ConnectionCheck.statusIn(message) == 401 || message.contains(ChatGPTAccount.signInAgain) {
+                return ChatGPTAccount.signInAgain
+            }
+            return AppLocalization.text(LocalizedStringResource("\(provider.name), \(AppLocalization.text("the request failed."))"))
+        }
         if message.contains("No API key") || message.contains("missingApiKey") || message.isEmpty && !ModelKeys.hasKey(provider) {
-            return provider.signsIn ? AppLocalization.text(LocalizedStringResource("Sign in to ChatGPT again. Open Settings, then Models."))
-                                    : AppLocalization.text(LocalizedStringResource("Add your \(provider.name) key. Open Settings, then Models."))
+            return AppLocalization.text(LocalizedStringResource("Add your \(provider.name) key. Open Settings, then Models."))
         }
         // The provider's stream ended on an error event with nothing in it (the library prints the
         // missing fields as "undefined"): said plainly, with what is left of it when there is any.

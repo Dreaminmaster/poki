@@ -6,7 +6,7 @@ license: AGPL-3.0-only
 
 # Install or update Poki on an iPhone
 
-This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in the repository's `AGENTS.md`. Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
+This installs the standalone Poki app on the user's iPhone through Poki Setup's helper, without its window. It is not the Poki MCP install or update in [docs/install-with-an-agent.md](../../docs/install-with-an-agent.md). Works from Claude Code, Codex or any agent that can run a shell command on the user's Mac.
 
 For a first install, start the installer, relay its person stops, and verify its result. For an update, complete the preservation checks below before any installation command.
 
@@ -16,7 +16,7 @@ Pick one branch:
 - **Update.** Poki is on the iPhone and the user asks to update it, or Poki's own update failed, could not download or stopped moving. Follow "Update an installed Poki". Poki's own update downloads from R2 with a GitHub network-failure fallback on the iPhone, and that download sometimes cannot reach GitHub; this branch is the backup, where the Mac downloads the build and installs it over USB.
 - **Stuck on "Finishing the update".** Follow "When Poki's own update stalls".
 
-In current builds, open the conversations drawer and tap Settings at the bottom. Local Connection is under Settings > Connection; model accounts are under Settings > Models; version and renewal are under Settings > Signing & Updates. Older builds may place these under Automation > Setup, General > Updates, or Connection > Signing & Updates. Give the user the path their build shows.
+In current builds, open the conversations drawer and tap Settings at the bottom. Local Connection is under Settings > Setup; model accounts are under Settings > Models; version and renewal are under Settings > Signing & Updates. Older builds may place these under Connection, Automation > Setup, General > Updates, or Connection > Signing & Updates. Give the user the path their build shows.
 
 ## Before you start
 
@@ -56,7 +56,7 @@ Each line is one JSON event with an `at` time:
 - `{"event":"result","ok":true,"check":{...}}` is the last line only when the checks passed without manual steps left unverified.
 - A result with `ok:false` and `unverified` exits with code 3. Relay every entry's `say`, including instructions from skipped steps. Have the user finish them in Poki and confirm each result. Report what was manually confirmed and what remains unverified; do not call the phone ready just because the app was installed. Older Poki Setup without Xcode can require manual model-key entry and loopback setup.
 
-Some helper prompts still name older pages. After relaying the prompt, give the current path: Setup > Connect to this iPhone means Settings > Connection > Local Connection (Settings > Automation > Setup > Local Connection in older 0.4.0 builds); Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
+Some helper prompts still name older pages. After relaying the prompt, give the current path: Setup > Connect to this iPhone means Settings > Setup > Local Connection (Settings > Connection > Local Connection or Settings > Automation > Setup > Local Connection in older builds); Agents > Accounts and Models means Settings > Models > Add Account. Do not follow a helper instruction to delete an existing app.
 
 Several iPhones plugged in: list them with `node bin/install-iphone.mjs phones` and add `--udid <udid>`.
 
@@ -76,7 +76,7 @@ The installer runs these in order. Most need nobody. Each step is complete when 
 10. **`relay`** Deploys the relay when `CLOUDFLARE_API_TOKEN` is set or Poki Setup keeps a token. Skipped otherwise. Poki and its own chat work without it; agents on other computers need it.
 11. **`check`** Self-check: the install record, Developer Mode, pairing, disk image and relay.
 
-Poki turns itself on after this install, and ticks Developer Mode and UI Automation in Settings > Connection once it runs. The iPhone's own switch for UI Automation (iOS Settings > Developer > Enable UI Automation) is still the user's to turn on; Poki's UI Automation row and Allow UI Automation page says so. When Poki first opens it asks for Automation Mode: tell the user to tap Continue and enter the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until they turn it on again.
+Poki turns itself on after this install, and ticks Developer Mode and UI Automation in Settings > Setup once it runs. The iPhone's own switch for UI Automation (iOS Settings > Developer > Enable UI Automation) is still the user's to turn on; Poki's UI Automation row and Allow UI Automation page says so. When Poki first opens it asks for Automation Mode: tell the user to tap Continue and enter the iPhone passcode on iOS's screen. If they cancel, Poki does not ask again until they turn it on again.
 
 ## Download source and failures
 
@@ -128,7 +128,7 @@ A paid developer membership is not required. A free Apple Account works. Poki Se
 
 ## No VPN app
 
-Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the phone routes that address back to the phone. Poki offers instructions for the free LocalDevVPN from the App Store. In Poki it is listed at Settings > Connection > Local Connection (the Turn On Loopback page), under Use Your Proxy App, with its steps. At the `loopback` stop, tell the user `say`, and to install LocalDevVPN when they have no VPN app. Done when the `loopback` step ends `done`. If the user does not want a VPN app now, Poki stays installed but cannot operate other apps: after 15 minutes the installer exits with code 3; report the local connection as not set up.
+Poki reaches the iPhone's developer services at 10.7.0.1, and a VPN app on the phone routes that address back to the phone. Poki offers instructions for the free LocalDevVPN from the App Store. In Poki it is listed at Settings > Setup > Local Connection (the Turn On Loopback page), under Use Your Proxy App, with its steps. At the `loopback` stop, tell the user `say`, and to install LocalDevVPN when they have no VPN app. Done when the `loopback` step ends `done`. If the user does not want a VPN app now, Poki stays installed but cannot operate other apps: after 15 minutes the installer exits with code 3; report the local connection as not set up.
 
 ## What to keep running
 
@@ -138,7 +138,7 @@ Tell the user these after the result:
 - **Or Poki renews itself.** The installer gives Poki this Mac's signing key, but not the Apple sign-in. When the user signs in at Settings > Signing & Updates > Apple Account (Signing Options > Apple Account in older builds), Poki prepares a renewal 3 days before signing ends and asks the user to tap Install Renewal or Install Update.
 - **Keep the VPN app connected and Developer Mode on.** Poki needs 10.7.0.1 to operate the phone and to install its own updates and renewals.
 
-With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command refuses equal builds; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
+With neither renewal, Poki stops opening when signing ends. Poki warns on its home screen and with a daily notification in the last 2 days. For an existing installation, use the update branch below when installing a newer build. Renewal downloads the newest release on the Mac's channel and can also update the app; explain the selected version before proceeding. The update-only command requires a higher app version or a higher build within the same version; an explicitly requested signature refresh needs its own preservation review. Done when the user knows which renewal method is configured, the signing expiry, and which apps must remain running. Automatic renewal while asleep, locked, or disconnected has not been verified here.
 
 ## Connect this agent to Poki
 
@@ -169,12 +169,12 @@ Use this branch when an existing Poki cannot download its update on the iPhone. 
    node bin/install-iphone.mjs --update-only --json
    ```
 
-3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects equal or lower builds, non-Beta targets or identity mismatches, changed app groups, and missing extensions. Historical phone and computer channel preferences converge to Beta. It performs no pairing, model-key transfer, signing-identity import or relay deployment.
+3. Read the installed version, numeric build, channel and team verification status, followed by the target version and build. Team and device identifiers are deliberately withheld from output. The helper reads the live installation, requests fresh public metadata from the running app, checks the original record and public certificate, and inspects the downloaded IPA. It rejects older app versions, equal or lower builds within the same version, non-Beta targets, identity mismatches, changed app groups, and missing extensions. Historical phone and computer channel preferences converge to Beta. It performs no pairing, model-key transfer, signing-identity import or relay deployment.
 4. On exit **2**, quote the single `reason` sentence and stop. Say that installation did not start; the only phone-side preflight write is a non-secret freshness request. Do not fall back to `run --reinstall`, unguarded `renew`, uninstalling the app, replacing certificates or clearing its data. An unavailable public snapshot is a compatibility limitation, not permission to infer identity from the Mac's record.
 5. On exit **3**, report installation as failed or unconfirmed and keep Poki installed. On exit **4**, report that installation finished but the target version was not verified. Resolve the named failure before another update-only attempt. Never describe either result as success.
 6. Exit **0** means the live installed version and build matched the inspected target after guarded renewal. A result with `simulated: true` proves only the simulated path. For a real update, ask the user to open Poki and confirm conversations, model accounts, settings, signing options, release channel, connections and required extensions. Do not display secret values. Done only when the version matches and those retained items are confirmed.
 
-In current builds the update page is Settings > Signing & Updates; earlier builds may use Settings > Connection > Signing & Updates or Settings > General > Updates. This path only installs a higher numeric build. An equal-build signature refresh is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
+In current builds the update page is Settings > Signing & Updates; earlier builds may use Settings > Connection > Signing & Updates or Settings > General > Updates. A signature refresh of the same version and build is a separate operation and must not be substituted automatically. Physical-device preservation remains unverified until the checks above are performed on the intended phone.
 
 ## When Poki's own update stalls
 

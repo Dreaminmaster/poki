@@ -40,7 +40,7 @@ final class InstalledApps {
     static let cacheMaxAge: TimeInterval = 30 * 86_400
 
     init() {
-        if let saved = Self.savedList() { publish(saved) }
+        if let saved = Self.savedList() { publish(saved, current: false) }
     }
 
     private static func savedList() -> [App]? {
@@ -51,10 +51,10 @@ final class InstalledApps {
     }
 
     /// The list goes to the names, icons and capsules (DynamicApps), and to the file when `save`.
-    private func publish(_ list: [App], save: Bool = false) {
+    private func publish(_ list: [App], save: Bool = false, current: Bool = false) {
         DynamicApps.set(list.compactMap { app in
             (app.name ?? app.bundleName).map { DynamicApps.Entry(id: app.id, name: $0, user: app.type == "User") }
-        })
+        }, current: current)
         AppIconStore.shared.directoryChanged()
         if save { Self.keep(list) }
     }
@@ -118,6 +118,7 @@ final class InstalledApps {
     /// The clock, so a list can grow old.
     var now: () -> Date = { Date() }
 
+    private var pendingRead: Task<Inventory?, Never>?
     private var last: (apps: [App], at: Date)?
     private(set) var lastProblem: String?
     private static let maxAge: TimeInterval = 300
@@ -126,18 +127,28 @@ final class InstalledApps {
     /// back marked not fresh; nil when the list was never read.
     func list() async -> Inventory? {
         if let last, now().timeIntervalSince(last.at) < Self.maxAge { return Inventory(apps: last.apps, fresh: true, readAt: last.at) }
+        if let pendingRead { return await pendingRead.value }
+        let read = Task { await refreshList() }
+        pendingRead = read
+        defer { pendingRead = nil }
+        return await read.value
+    }
+
+    private func refreshList() async -> Inventory? {
         if let request = phone() {
             do {
                 let read = try await fetch(request)
                 let at = now()
                 last = (apps: read, at: at); lastProblem = nil
-                publish(read, save: true)
+                publish(read, save: true, current: true)
                 return Inventory(apps: read, fresh: true, readAt: at)
             } catch {
                 lastProblem = error.localizedDescription
+                DynamicApps.clearCurrent()
             }
         } else {
             lastProblem = "the loopback to the phone is not on"
+            DynamicApps.clearCurrent()
         }
         return last.map { Inventory(apps: $0.apps, fresh: false, readAt: $0.at) }
     }

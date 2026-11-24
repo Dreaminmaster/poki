@@ -111,7 +111,7 @@ extension ActivityFace.Bottom {
     var hasLine: Bool { if case .progress(let line, _) = self { line } else { false } }
     var isProgress: Bool { if case .progress = self { true } else { false } }
     var isHandoff: Bool { if case .handoff = self { true } else { false } }
-    var isApproval: Bool { switch self { case .approval, .deciding: true; default: false } }
+    var isApproval: Bool { if case .approval = self { true } else { false } }
 }
 
 extension ActivityFace {
@@ -718,14 +718,6 @@ private struct Control: View {
         case .approval(let id):
             ApprovalButtons(approvalID: id, surface: surface, stopAsking: face.offersStopAsking)
                 .transition(.activityRow)
-        case .deciding(let text):
-            Text(text)
-                .font(theme.button)
-                .foregroundStyle(palette.text)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: ActivityMetrics.button, maxHeight: ActivityMetrics.button)
-                .background(palette.buttonFill, in: .capsule)
-                .contentTransition(.interpolate)
         case .handoff(let id):
             HandoffDoneButton(handoffID: id, surface: surface)
                 .transition(.activityRow)

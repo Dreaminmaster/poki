@@ -125,6 +125,7 @@ struct CustomProviderEditor: View {
     @State private var key = ""
     @State private var results: [UUID: Outcome] = [:]
     @State private var testing = false
+    @State private var connectionTest: Task<Void, Never>?
     @State private var saved = false
     @State private var failed = false
     /// The hosts the saved key was saved for.
@@ -247,6 +248,17 @@ struct CustomProviderEditor: View {
             }
             .navigationTitle(Text(verbatim: id == nil ? ModelProvider.custom.name : draft.displayName))
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: draft.endpoints.first?.url) { _, _ in discovery.reset() }
+            .onChange(of: key) { _, _ in discovery.reset() }
+            .onDisappear {
+                discovery.cancel()
+                connectionTest?.cancel()
+                connectionTest = nil
+                testing = false
+            }
+            .sheet(isPresented: $discovery.presenting) {
+                CustomModelPicker(models: discovery.models, selection: $draft.model)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
@@ -322,19 +334,25 @@ struct CustomProviderEditor: View {
     /// test found becomes the provider's own when it had none, and with `closeIfPassed` the pane
     /// closes when the first address works.
     private func test(closeIfPassed: Bool) {
+        connectionTest?.cancel()
         testing = true
         results = [:]
         let endpoints = filled
         let draft = self.draft
         let keys = Dictionary(uniqueKeysWithValues: endpoints.map { ($0.id, key(for: $0.url)) })
-        Task {
+        connectionTest = Task {
+            defer { if !Task.isCancelled { connectionTest = nil } }
+            guard !Task.isCancelled else { return }
             for endpoint in endpoints {
                 let run = await CustomProviders.testConnection(to: endpoint, key: keys[endpoint.id] ?? "", draft: draft)
+                guard !Task.isCancelled else { return }
                 results[endpoint.id] = Outcome(result: run.result, api: run.api)
             }
             testing = false
             if closeIfPassed, let first = endpoints.first, results[first.id]?.result.passed == true {
-                try? await Task.sleep(for: .milliseconds(900))
+                do { try await Task.sleep(for: .milliseconds(900)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 dismiss()
             }
         }

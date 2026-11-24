@@ -608,5 +608,23 @@
       "ko": "#380에서 결제 판단이 메시지 전송 판단보다 먼저 이루어지도록 지키는 테스트를 추가해, Mail의 “Send money” 같은 버튼도 계속 승인을 먼저 받습니다.",
       "es": "Añadió en #380 una prueba que mantiene la comprobación de pagos antes que la de envío de mensajes, de modo que un botón “Send money” en Mail sigue pidiendo aprobación."
     }
+  },
+  "We1wenhA0": {
+    "status": "counted",
+    "categories": [
+      "promotion"
+    ],
+    "basis": [
+      "social media"
+    ],
+    "summary": "Spread the word about Poki on social media and brought in new users.",
+    "lines": {
+      "en": "Spread the word about Poki on social media and brought in new users.",
+      "zh-CN": "在社交媒体上推广 Poki，带来了新用户。",
+      "zh-TW": "在社群媒體上推廣 Poki，帶來了新使用者。",
+      "ja": "ソーシャルメディアで Poki を広め、新しいユーザーを呼び込みました。",
+      "ko": "소셜 미디어에서 Poki를 알려 새로운 사용자를 끌어들였습니다.",
+      "es": "Dio a conocer Poki en las redes sociales y atrajo a nuevos usuarios."
+    }
   }
 }

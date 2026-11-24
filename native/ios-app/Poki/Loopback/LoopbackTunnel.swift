@@ -22,6 +22,7 @@ final class LoopbackTunnel {
     /// VPN being detected when a try comes (best effort: a VPN that sets no proxy, such as Tailscale, may not be detected). Opening Poki dials nothing.
     private var reconnect = ReconnectPlan()
     private var reconnectTask: Task<Void, Never>?
+    private var reconnectID: UUID?
     private var reconnecting = false
     /// When Poki itself last stopped the tunnel. The tunnel hears that as a stop by the user, and its
     /// "stopped on purpose" notification must not cancel the retry Poki queued right after.
@@ -140,6 +141,7 @@ final class LoopbackTunnel {
         reconnect.ownerStopped()
         reconnectTask?.cancel()
         reconnectTask = nil
+        reconnectID = nil
         reconnecting = false
         // A connection still being brought up cannot be stopped yet; it is stopped when that ends.
         if busy { stopAfterBringUp = true; return }
@@ -209,6 +211,7 @@ final class LoopbackTunnel {
         reconnect.ownerStopped()
         reconnectTask?.cancel()
         reconnectTask = nil
+        reconnectID = nil
         reconnecting = false
     }
 
@@ -232,22 +235,42 @@ final class LoopbackTunnel {
         }
         let wait = seconds * Double.random(in: 0.8...1.2)
         AppLog.shared.add("loopback", "local VPN: reconnecting in \(Int(wait.rounded())) s (\(cause))")
+        let id = UUID()
+        reconnectID = id
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
             guard let self, !Task.isCancelled else { return }
-            self.reconnectTask = nil
+            defer {
+                if self.reconnectID == id { self.reconnectTask = nil; self.reconnectID = nil }
+            }
             // A change the owner started a moment ago finishes first.
             for _ in 0..<10 where self.busy { try? await Task.sleep(for: .milliseconds(500)) }
             guard !Task.isCancelled, self.wanted(), !self.busy else { return }
             // Poki's own tunnel stops first; what is left is somebody else's.
-            for _ in 0..<10 where self.manager?.connection.status == .disconnecting { try? await Task.sleep(for: .milliseconds(500)) }
+            guard await Self.waitForDisconnect(
+                isDisconnecting: { self.manager?.connection.status == .disconnecting },
+                wanted: { self.wanted() }
+            ) else { return }
             if self.anotherVPNIsOn() {
                 self.yieldToAnotherVPN()
                 return
             }
+            self.reconnectTask = nil
+            self.reconnectID = nil
             self.reconnecting = true
             do { try await self.bringUp() } catch { self.reconnecting = false }
         }
+    }
+
+    /// Wait for the old tunnel to stop, while respecting a cancellation or change in owner intent.
+    static func waitForDisconnect(isDisconnecting: () -> Bool, wanted: () -> Bool,
+                                  sleep: () async throws -> Void = { try await Task.sleep(for: .milliseconds(500)) }) async -> Bool {
+        for _ in 0..<10 {
+            guard !Task.isCancelled, wanted() else { return false }
+            guard isDisconnecting() else { return true }
+            do { try await sleep() } catch { return false }
+        }
+        return !Task.isCancelled && wanted()
     }
 
     /// The interfaces iOS keeps scoped network settings for, one per active network or tunnel.

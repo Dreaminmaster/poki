@@ -61,6 +61,71 @@ struct ItemPictureSources {
     }
 }
 
+final class TaskScreenshotStore: @unchecked Sendable {
+    private struct Entry {
+        let task: String
+        let at: Double
+        let fileURL: URL
+    }
+
+    static let lifetime: Double = 120
+
+    private let lock = NSLock()
+    private let root: URL
+    private let clock: @Sendable () -> Double
+    private var entries: [String: Entry] = [:]
+
+    init(root: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("poki-task-screenshots-\(UUID().uuidString.lowercased())", isDirectory: true),
+         clock: @escaping @Sendable () -> Double = { now() }) {
+        self.root = root
+        self.clock = clock
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func record(_ jpeg: Data, id: String, task: String) {
+        let at = clock()
+        let fileURL = root.appendingPathComponent("\(id).jpg")
+        let expired: [URL] = lock.withLock { removeExpiredLocked(at: at) }
+        for url in expired { try? FileManager.default.removeItem(at: url) }
+        guard (try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)) != nil,
+              (try? jpeg.write(to: fileURL, options: .atomic)) != nil else { return }
+        lock.withLock {
+            entries[id] = Entry(task: task, at: at, fileURL: fileURL)
+        }
+    }
+
+    func screenshot(_ id: String, task: String) -> Data? {
+        let at = clock()
+        let (target, expired): (URL?, [URL]) = lock.withLock {
+            let stale = removeExpiredLocked(at: at)
+            guard let entry = entries[id], entry.task == task, at - entry.at < Self.lifetime else {
+                return (nil, stale)
+            }
+            return (entry.fileURL, stale)
+        }
+        for url in expired { try? FileManager.default.removeItem(at: url) }
+        guard let target else { return nil }
+        return try? Data(contentsOf: target)
+    }
+
+    func clear(task: String) {
+        let removed: [URL] = lock.withLock {
+            let keys = entries.compactMap { $0.value.task == task ? $0.key : nil }
+            return keys.compactMap { entries.removeValue(forKey: $0)?.fileURL }
+        }
+        for url in removed { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private func removeExpiredLocked(at: Double) -> [URL] {
+        let keys = entries.compactMap { at - $0.value.at >= Self.lifetime ? $0.key : nil }
+        return keys.compactMap { entries.removeValue(forKey: $0)?.fileURL }
+    }
+}
+
 enum ItemPictureFit {
     /// Where an item's picture is, from the box the model gave in the picture's points: the image
     /// element that matches the box best, so a rough box still cuts the whole picture, else the box
