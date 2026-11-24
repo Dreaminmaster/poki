@@ -310,6 +310,8 @@ struct StartFlowPage: View {
             .navigationBarTitleDisplayMode(.inline)
             .settingsPage()
             .bottomBar(softEdge: true) { StartButtons(primary: "Continue", action: goOn) }
+        case .item(.appleAccount):
+            StartAppleAccountPage(goOn: goOn)
         case .summary:
             WelcomePanel(kind: kind, path: $path, finish: finish)
         }

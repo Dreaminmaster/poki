@@ -46515,6 +46515,70 @@
           }
         }
       }
+    },
+    "Keep Poki Opening" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Poki 保持可用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Poki 保持可用"
+          }
+        }
+      }
+    },
+    "Your free Apple Account signs Poki for 7 days at a time. Sign in here so Poki can renew itself before it stops opening." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的免费 Apple 账户每次为 Poki 签名 7 天。在这里登录后，Poki 就能在无法打开之前自行续期。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的免費 Apple 帳號每次為 Poki 簽名 7 天。在這裡登入後，Poki 就能在無法打開之前自行續期。"
+          }
+        }
+      }
+    },
+    "Sign in so Poki keeps opening" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录后 Poki 才能持续打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登入後 Poki 才能持續打開"
+          }
+        }
+      }
+    },
+    "A free Apple Account signs Poki for 7 days. Signed in here, Poki renews itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "免费 Apple 账户为 Poki 签名 7 天。在这里登录后，Poki 会自行续期。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "免費 Apple 帳號為 Poki 簽名 7 天。在這裡登入後，Poki 會自行續期。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

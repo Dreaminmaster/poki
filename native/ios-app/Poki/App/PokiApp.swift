@@ -127,6 +127,16 @@ struct RootView: View {
     private var welcoming: Bool { welcome != nil }
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    /// The Apple Account sign-in for a free account's install, as a sheet after setup (`RenewSignIn`).
+    /// `-pokiScreen renewSignIn` opens it at launch for screenshots.
+    @State private var renewAsk = UserDefaults.standard.string(forKey: "pokiScreen") == "renewSignIn"
+    /// The welcome closed at this launch, or Poki Setup put Poki here just before it.
+    @State private var afterSetup = false
+    private var renewDue: Bool {
+        RenewSignIn.shouldAsk(freeSigning: model.signer.freeSigning, needsAccount: model.signer.needsAppleAccountForRenewal,
+                              statusKnown: model.signer.status != nil, afterSetup: afterSetup && !welcoming && !curtain,
+                              expiry: model.signer.expiry, askedFor: RenewSignIn.askedFor())
+    }
     @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage(AppInterfaceSize.defaultsKey) private var interfaceSize = AppInterfaceSize.system
     @AppStorage(Appearance.key) private var appearance = Appearance.automatic.rawValue
@@ -320,7 +330,11 @@ struct RootView: View {
             Text("The update is almost in. Poki will close to finish it. Open Poki again afterwards.")
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
-        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && model.signer.installMessage == nil))
+        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && !renewAsk && model.signer.installMessage == nil))
+        .sheet(isPresented: $renewAsk) { RenewSignInSheet() }
+        .onChange(of: welcoming) { was, now in if was, !now { afterSetup = true } }
+        .onChange(of: renewDue, initial: true) { _, due in if due { renewAsk = true } }
+        .task { if model.signer.handedAtLaunch { afterSetup = true } }
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 sceneHasBeenActive = true

@@ -85,7 +85,11 @@ struct AccountPage: View {
                     .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
             }
             // Signing in again is for the same account, so its Apple ID is already there.
-            .onAppear { if appleID.isEmpty, signer.sessionExpired { appleID = signer.status?.apple_id ?? "" } }
+            // After Poki Setup, the Apple ID it signed Poki with.
+            .onAppear {
+                if appleID.isEmpty, signer.sessionExpired { appleID = signer.status?.apple_id ?? "" }
+                if appleID.isEmpty, let handed = signer.handedAppleID { appleID = handed }
+            }
             // The account is still stored, so it can be signed out here as when its sign-in works.
             if signer.sessionExpired, signer.signedIn {
                 Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
