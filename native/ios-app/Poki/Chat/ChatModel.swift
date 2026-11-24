@@ -2033,8 +2033,13 @@ struct TaskResult: Decodable, Equatable {
         answer = (try? c.decodeIfPresent(Answer.self, forKey: .answer)) ?? nil
         guard c.contains(.card), (try? c.decodeNil(forKey: .card)) == false else { return }
         do {
-            let card = try c.decode(ResultCard.self, forKey: .card)
-            if let problem = card.problem { cardProblem = problem } else { self.card = card }
+            var card = try c.decode(ResultCard.self, forKey: .card)
+            if let problem = card.problem {
+                cardProblem = problem
+            } else {
+                if card.nextProblem != nil { card.next = nil }
+                self.card = card
+            }
         } catch {
             cardProblem = "the card is not in the described form: " + Self.place(error)
         }

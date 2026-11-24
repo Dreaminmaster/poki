@@ -90,12 +90,27 @@ struct ResultCard: Codable, Equatable {
         guard !items.isEmpty else { return "a card needs at least one item" }
         guard Set(items.map(\.id)).count == items.count else { return "item ids must be unique" }
         guard items.contains(where: { $0.id == recommended }) else { return "recommended must be one of the item ids" }
-        for action in [primary] + (next.map { [$0] } ?? []) {
-            if action.label.isBlank || action.say.isBlank { return "primary and next need a label and a say" }
-            // A sentence with no field would send the suggested item whichever one is selected.
-            if !action.say.contains(Self.field) { return "primary.say and next.say must name the selected item with {field}, such as {title}" }
+        return look.problem(items) ?? actionProblem(primary, named: "primary")
+    }
+
+    var nextProblem: String? {
+        next.flatMap { actionProblem($0, named: "next") }
+    }
+
+    private func actionProblem(_ action: Action, named name: String) -> String? {
+        if action.label.isBlank || action.say.isBlank { return "\(name) needs a label and a say" }
+        let sayFields = action.say.matches(of: Self.field)
+        guard !sayFields.isEmpty else {
+            return "\(name).say must name the selected item with {field}, such as {title}"
         }
-        return look.problem(items)
+        let fields = action.label.matches(of: Self.field) + sayFields
+        for item in items {
+            let selection = selected(item.id)
+            if let missing = fields.first(where: { selection.text(String($0.1)) == nil }) {
+                return "\(name) references missing field {\(missing.1)} on item \(item.id)"
+            }
+        }
+        return nil
     }
 
     /// The card's facts for the model when a conversation is opened again.
