@@ -509,7 +509,7 @@ final class AppModel {
         }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
-        if storage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
+        if resolvedStorage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
             wantsOn = true
             log.add("session", "installed by Poki Setup: Poki turns on by itself")
         }
@@ -521,7 +521,7 @@ final class AppModel {
         SessionStore.shared.connectorAgent = { [identity] hash in
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
-        if storage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
+        if resolvedStorage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
         NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
@@ -530,7 +530,7 @@ final class AppModel {
         // step done while Turn on said this build has no local VPN.
         if setup.loopback == .builtIn, !isLocalVPNAvailable {
             setup.loopback = .proxy
-            setup.save(storage: storage)
+            setup.save(storage: resolvedStorage)
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
     }
