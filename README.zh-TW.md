@@ -15,7 +15,7 @@
 <!-- badges:start -->
 <p align="center">
   <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.6_Beta-blue" alt="Poki App 0.4.6 Beta"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.5.0_Beta-blue" alt="Poki App 0.5.0 Beta"></a>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
@@ -60,7 +60,7 @@ Poki 是開源的 iPhone agent，能替你操作整台 iPhone。Poki 應用程�
    從 https://github.com/JosssphZhou/poki 把 Poki 安裝到我的 iPhone 上
    ```
 
-   也可以從 [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) 下載 macOS 版（`.dmg`）或 Windows 版（`.exe`）Poki Setup，依視窗指示操作。
+   也可以從 [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.9) 下載 macOS 版（`.dmg`）或 Windows 版（`.exe`）Poki Setup，依視窗指示操作。
 2. **完成連線並設定模型帳號。** 依 iOS 提示點選「信任」、開啟開發者模式與自動化模式，設定將 `10.7.0.1` 路由回本機的外部代理通道（例如免費的 LocalDevVPN），再用 ChatGPT Plus 或 Pro 登入，或填入 Anthropic、OpenAI、Gemini、DeepSeek、OpenRouter、OpenCode Go 的 API 金鑰，或接入 OpenAI 相容服務。
 3. **執行第一個任務。** 開啟 Poki 並傳送：
 
