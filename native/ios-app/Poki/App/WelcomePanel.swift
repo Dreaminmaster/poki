@@ -127,7 +127,8 @@ struct SetupSections: View {
     private var appleAccountSection: some View {
         let needs = model.signer.needsAppleAccountForRenewal
         return Section {
-            NavigationLink { AppleAccountPage() } label: {
+            // Settings' own page, in the system's look, as the steps open from this list.
+            NavigationLink { AppleAccountPage().outsideStartFlow() } label: {
                 SettingsRow(title: "Apple Account", caption: needs ? "Sign in so Poki keeps opening" : nil,
                             symbol: "person.crop.circle", value: needs ? nil : model.signer.status?.apple_id,
                             warns: needs, accessory: needs ? nil : .done)
