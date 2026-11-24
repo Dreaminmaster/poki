@@ -311,9 +311,13 @@ final class SessionArchiveTests: XCTestCase {
         let store = launch()
         XCTAssertEqual(store.listed.count, SessionStore.limit)
         XCTAssertNil(store.session("listed-0"), "the oldest listed conversation is the one over the limit")
+        // trim removes the in-memory row immediately, but queues its file deletion.
+        // Drain the serial write queue before asserting on disk or reopening the store.
+        store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("listed-0.json").path))
         XCTAssertEqual(Set(store.archivedSessions.map(\.id)), Set(archived.map(\.id)), "no archived conversation is taken")
         let relaunched = launch()
+        XCTAssertNil(relaunched.session("listed-0"), "the evicted conversation must not return after reload")
         for session in archived { XCTAssertEqual(relaunched.session(session.id)?.entries, session.entries) }
     }
 
