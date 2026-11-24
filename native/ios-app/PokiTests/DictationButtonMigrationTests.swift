@@ -21,6 +21,28 @@ final class DictationButtonMigrationTests: XCTestCase {
         UserDefaults().removePersistentDomain(forName: suite)
     }
 
+    @MainActor
+    func testLatePermissionDenialDoesNotChangeNewRequest() async {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let field = FieldDictation()
+        var first: CheckedContinuation<Bool, Never>?
+        var second: CheckedContinuation<Bool, Never>?
+        field.start(model, after: "old", allowed: { await withCheckedContinuation { first = $0 } })
+        for _ in 0..<100 where first == nil { await Task.yield() }
+        field.stop(model)
+        field.start(model, after: "new", allowed: { await withCheckedContinuation { second = $0 } })
+        for _ in 0..<100 where second == nil { await Task.yield() }
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(second)
+        first?.resume(returning: false)
+        first = nil
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertNil(field.problem)
+        XCTAssertEqual(field.base, "new ")
+        field.stop(model)
+        second?.resume(returning: false)
+    }
+
     private func launch() { FieldDictation.keepButtonForUpgrade(defaults: defaults, sessionsFolder: folder) }
     private var written: Bool? { defaults.object(forKey: FieldDictation.buttonKey) as? Bool }
 

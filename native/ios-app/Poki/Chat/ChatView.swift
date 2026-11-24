@@ -1768,17 +1768,22 @@ final class FieldDictation {
     private var engine: Dictation?
     /// Between the tap and the microphone being on (the permission question can sit in between).
     private var starting = false
+    private var generation = UUID()
 
-    func start(_ model: AppModel, after current: String) {
+    func start(_ model: AppModel, after current: String, allowed: @escaping @MainActor () async -> Bool = { await Dictation.allowed() }) {
         guard !on, !starting else { return }
         model.prepareForTask()
         starting = true
+        let currentGeneration = UUID()
+        generation = currentGeneration
         problem = nil
         let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
         base = trimmed.isEmpty ? "" : trimmed + " "
         text = ""
         Task {
-            guard await Dictation.allowed() else {
+            let allowed = await allowed()
+            guard generation == currentGeneration, starting else { return }
+            guard allowed else {
                 starting = false
                 problem = AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition. Allow them in Settings › Poki."))
                 return
@@ -1786,7 +1791,10 @@ final class FieldDictation {
             guard starting else { return }
             starting = false
             let engine = Dictation()
-            engine.onHeard = { [weak self] heard in self?.text = heard }
+            engine.onHeard = { [weak self] heard in
+                guard let self, self.generation == currentGeneration, self.on else { return }
+                self.text = heard
+            }
             model.background.pauseAudio()
             do {
                 try engine.listen()
@@ -1801,16 +1809,18 @@ final class FieldDictation {
 
     /// Send was tapped: dictation ends, also one that was still asking for the microphone.
     func cancel(_ model: AppModel) {
-        starting = false
         stop(model)
     }
 
     func stop(_ model: AppModel) {
+        starting = false
+        generation = UUID()
         guard on, let engine else { return }
         on = false
         self.engine = nil
         Task {
             _ = await engine.finish()
+            guard self.engine == nil, !model.voice.isOn else { return }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             model.background.resumeAudio()
         }
