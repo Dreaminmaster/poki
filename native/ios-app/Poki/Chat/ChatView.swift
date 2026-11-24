@@ -157,17 +157,19 @@ struct ChatView: View {
         let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
             ? .leading : []
         ZStack {
-            ChatTranscript(entries: shown, jump: searchJump,
-                           onSearchJumpApplied: onSearchJumpApplied, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
-                           live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil || chat.contextAsk != nil,
-                           handedOver: model.handoffText != nil || sampleScene == "handoff",
-                           plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
-                           shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
-                           cardActions: cardActions) {
-                if !home, let hint = currentSetupHint {
-                    SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
-                }
-                if !home {
+            // The empty home page mounts no transcript (main #679): its scroll view and tracking cost
+            // time on every launch and keystroke for nothing on screen.
+            if !home {
+                ChatTranscript(entries: shown, jump: searchJump,
+                               onSearchJumpApplied: onSearchJumpApplied, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+                               live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil || chat.contextAsk != nil,
+                               handedOver: model.handoffText != nil || sampleScene == "handoff",
+                               plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
+                               shot: shot, rise: reduceMotion || !(sampleScene == nil || sampleScene == "demo") ? nil : rise,
+                               cardActions: cardActions) {
+                    if let hint = currentSetupHint {
+                        SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
+                    }
                     LiveVoiceTranscript(voice: voice)
                 }
             }
