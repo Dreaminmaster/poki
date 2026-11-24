@@ -133,17 +133,20 @@ final class LoopbackMonitor {
     /// The remote pairing port does not answer although 10.7.0.1 reaches this iPhone: looks the
     /// port up in Bonjour (three times at most, never on cellular alone; `lookDue`) and, when one
     /// answers, uses it from here on.
-    private func movedPairingPort(from port: UInt16) async -> ProbeResult? {
+    private func movedPairingPort(from port: UInt16, epoch: Int) async -> ProbeResult? {
         guard RemotePairingPort.lookDue(cellularOnly: cellularOnly, looks: portLooks, lastAt: portSearchedAt, now: Date()) else { return nil }
         portLooks += 1
         portSearchedAt = Date()
         RemotePairingPort.setSearching(true)
         var answer: ProbeResult?
         let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
+            guard epoch == self.probeEpoch else { return false }
             let result = await self.connect("10.7.0.1", candidate, 1.5)
+            guard epoch == self.probeEpoch else { return false }
             if result.outcome == "connected" { answer = result }
             return result.outcome == "connected"
         }
+        guard epoch == probeEpoch else { return nil }
         // The same finding every 10 s is said once.
         let said = search.said(besides: port)
         if said != portSearchSaid { portSearchSaid = said; AppLog.shared.add("loopback", said) }
@@ -184,36 +187,35 @@ final class LoopbackMonitor {
         checkQueued = false
         let epoch = probeEpoch
         Task {
+            defer {
+                running = false
+                if epoch != probeEpoch || checkQueued { check() }
+            }
             let port = RemotePairingPort.current
             var result = await connect("10.7.0.1", port, 1.5)
+            guard epoch == probeEpoch else { return }
             if result.outcome == "connected" {
                 if portLooks > 0 { resetPortSearch() }
             } else {
                 let lockdown = await connect("10.7.0.1", 62078, 1.5)
+                guard epoch == probeEpoch else { return }
                 // 10.7.0.1 reaches this iPhone (lockdown answers, or the phone refused the port), and
                 // the remote pairing service is not on the port Poki uses: iOS may have moved it.
                 // Without this the page says Working while every connection is refused.
                 if lockdown.outcome == "connected" || result.outcome == "refused" {
-                    result = await movedPairingPort(from: port) ?? lockdown
+                    result = await movedPairingPort(from: port, epoch: epoch) ?? lockdown
                 } else {
                     // 10.7.0.1 does not reach this iPhone at all: not a moved port.
                     endPortSearch()
                     result = lockdown
                 }
             }
-            running = false
-            // A network change makes this answer stale: ask again. A timer tick or resume() that came
-            // while the probe was in flight does not: the answer stands, and one more check follows it.
-            if epoch != probeEpoch {
-                check()
-                return
-            }
+            guard epoch == probeEpoch else { return }
             let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
             publish(next, log: true)
-            if checkQueued { check() }
         }
     }
 
@@ -229,6 +231,8 @@ final class LoopbackMonitor {
     }
 
     #if DEBUG
+    func simulateNetworkChange() { networkChanged(physical: true) }
+
     /// Tests: set the state as a probe result would, running the change hook.
     func simulate(_ next: State) {
         publish(next, log: false)

@@ -28,6 +28,30 @@ final class LoopbackMonitorTests: XCTestCase {
         for _ in 0..<500 where !condition() { await Task.yield() }
     }
 
+    func testOldProbeDoesNotStartLockdownCheckAfterNetworkChanges() async {
+        var ports: [UInt16] = []
+        var first: CheckedContinuation<Void, Never>?
+        let monitor = LoopbackMonitor(probe: { _, port, _ in
+            ports.append(port)
+            if ports.count == 1 {
+                await withCheckedContinuation { first = $0 }
+                return ProbeResult(label: "loopback", target: "old", outcome: "refused", milliseconds: 1)
+            }
+            return ProbeResult(label: "loopback", target: "new", outcome: "connected", milliseconds: 1)
+        })
+        defer { monitor.pause(); first?.resume() }
+        monitor.check()
+        await yield { first != nil }
+        XCTAssertNotNil(first)
+        monitor.simulateNetworkChange()
+        let continuation = first
+        first = nil
+        continuation?.resume()
+        await yield { ports.count >= 2 }
+        XCTAssertGreaterThanOrEqual(ports.count, 2)
+        XCTAssertEqual(ports.first, ports.dropFirst().first, "A stale refusal must trigger a fresh pairing probe, not a lockdown check")
+    }
+
     /// A probe that takes longer than the 3 s timer is always overlapped by the next timer tick. That
     /// tick must not throw the finished answer away: the first answer is published even though a tick
     /// arrived while it was in flight, however many rounds the probe takes.
