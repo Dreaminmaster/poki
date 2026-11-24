@@ -23,7 +23,7 @@ struct SensesShareCard: View {
             if let item = share.item {
                 HStack(alignment: .top, spacing: 8) {
                     AppIconView(app: item.app, size: 18)
-                    Text(verbatim: item.title).font(.subheadline.weight(.medium)).foregroundStyle(Color(.label))
+                    Text(verbatim: item.title).font(.allo(.subheadline, .medium)).foregroundStyle(Color(.label))
                         .lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -31,11 +31,11 @@ struct SensesShareCard: View {
                 .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 12, style: .continuous))
                 .accessibilityElement(children: .combine)
             }
-            Text(verbatim: share.answer).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+            Text(verbatim: share.answer).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                 .fixedSize(horizontal: false, vertical: true)
             if note.state == .asking, !note.reason.isEmpty {
                 Text(verbatim: AppLocalization.bundle.localizedString(forKey: note.reason, value: note.reason, table: nil))
-                    .font(.footnote).foregroundStyle(Tint.amberInk).fixedSize(horizontal: false, vertical: true)
+                    .font(.allo(.footnote)).foregroundStyle(Tint.amberInk).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 12).padding(.horizontal, 14)
@@ -48,8 +48,8 @@ struct SensesShareCard: View {
         HStack(spacing: 12) {
             icons
             VStack(alignment: .leading, spacing: 2) {
-                Text("Screen History").font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
-                Text(verbatim: subline).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text("Screen History").font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label))
+                Text(verbatim: subline).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
             Spacer(minLength: 6)
@@ -62,7 +62,7 @@ struct SensesShareCard: View {
     @ViewBuilder private var icons: some View {
         let apps = share.apps.prefix(3).map(\.app)
         if apps.isEmpty {
-            Image(systemName: "clock.arrow.circlepath").font(.body.weight(.semibold)).foregroundStyle(Color(.secondaryLabel))
+            Image(systemName: "clock.arrow.circlepath").font(.allo(.body, .semibold)).foregroundStyle(Color(.secondaryLabel))
                 .frame(width: 32, height: 32).background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8, style: .continuous))
         } else {
             HStack(spacing: -12) {
@@ -119,8 +119,8 @@ struct SensesShareCard: View {
             HStack(spacing: 10) {
                 AppIconView(app: use.app, size: 22)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: HistoryNames.app(use.app)).font(.subheadline).foregroundStyle(Color(.label)).lineLimit(1)
-                    Text(verbatim: when).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                    Text(verbatim: HistoryNames.app(use.app)).font(.allo(.subheadline)).foregroundStyle(Color(.label)).lineLimit(1)
+                    Text(verbatim: when).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                 }
                 Spacer(minLength: 6)
                 Text(Duration.seconds(use.minutes * 60), format: .units(allowed: [.hours, .minutes], width: .abbreviated))
