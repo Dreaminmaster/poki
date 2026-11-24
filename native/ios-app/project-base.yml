@@ -45,8 +45,10 @@ targets:
     platform: iOS
     sources:
       - path: Poki
-        # The launch screen's sources; scripts/make-assets.sh puts them in the asset catalogue.
-        excludes: [LaunchArt/**]
+        # The launch screen's and the connectors' marks: scripts/make-assets.sh puts them in the asset
+        # catalogue (Connector-<name>), so the raw files stay out of the bundle, where Asana's logo
+        # would collide with the app icon of the same name in Poki/AppIcons.
+        excludes: [LaunchArt/**, ConnectorIcons/**]
       - path: Shared
       # The gym scorecard (native/ios-gym/check), run in-process by the Debug probe's `gym` mode.
       - path: ../ios-gym/check/GymScorecard.swift

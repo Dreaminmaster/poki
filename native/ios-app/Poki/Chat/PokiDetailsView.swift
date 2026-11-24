@@ -312,9 +312,8 @@ struct PokiDetailsView: View {
 enum DetailsRoute: Hashable {
     case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, about
     case sessionPreview(String)
-    /// Security's own page (its four rows), Screen History's settings (the page the Senses gear opens
-    /// too) and Face ID & Passcode.
-    case security, screenHistorySettings, lockSettings
+    /// Screen History's settings (the page the Senses gear opens too) and Face ID & Passcode.
+    case screenHistorySettings, lockSettings
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey
