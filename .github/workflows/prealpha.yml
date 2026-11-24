@@ -85,6 +85,13 @@ jobs:
             ~/.cargo/registry
             native/launcher/target
           key: ${{ steps.build.outputs.rust-key }}
+      - if: always() && steps.build.outcome == 'success' && steps.build.outputs.codex-voice-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a
+            build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a.sha256
+          key: ${{ steps.build.outputs.codex-voice-key }}
       - if: always() && steps.build.outcome == 'success'
         uses: actions/cache/save@v4
         with:
@@ -99,6 +106,7 @@ jobs:
         run: |
           echo "## Poki v${{ steps.v.outputs.version }} (${{ steps.v.outputs.build }}) Pre-alpha" >> "$GITHUB_STEP_SUMMARY"
           echo "Rust library from cache: ${{ steps.build.outputs.rust-hit || 'false' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Codex Voice library from cache: ${{ steps.build.outputs.codex-voice-hit || 'false' }}" >> "$GITHUB_STEP_SUMMARY"
 
   resolve-hotfix:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'

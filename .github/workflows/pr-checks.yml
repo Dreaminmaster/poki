@@ -73,4 +73,4 @@ jobs:
         with:
           node-version: '24'
       - name: Release publication contracts
-        run: node --test test/publish-r2.test.mjs test/publish-compat.test.mjs test/hotfix-release.test.mjs
+        run: node --test test/publish-r2.test.mjs test/publish-compat.test.mjs test/hotfix-release.test.mjs test/codex-voice-build.test.mjs

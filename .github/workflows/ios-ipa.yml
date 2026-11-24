@@ -41,6 +41,13 @@ jobs:
             ~/.cargo/registry
             native/launcher/target
           key: ${{ steps.build.outputs.rust-key }}
+      - if: steps.build.outputs.codex-voice-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a
+            build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a.sha256
+          key: ${{ steps.build.outputs.codex-voice-key }}
       - uses: actions/cache/save@v4
         with:
           path: |
