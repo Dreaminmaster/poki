@@ -149,10 +149,11 @@ final class ActivityController {
         guard fromIntent || canStart() else { return }
         if state.isQuiet, hidesWhenIdle() { lastError = nil; return }
         guard enabled else { lastError = "Live Activities are off for Poki (Settings > Poki > Live Activities)."; return }
+        guard let content = content() else { return }
         // A Live Activity left from an earlier run of the app is replaced.
         for old in Activity<PokiActivityAttributes>.activities { Task { await old.end(nil, dismissalPolicy: .immediate) } }
         do {
-            let started = try Activity.request(attributes: PokiActivityAttributes(deviceName: deviceName), content: content(), pushType: nil)
+            let started = try Activity.request(attributes: PokiActivityAttributes(deviceName: deviceName), content: content, pushType: nil)
             activity = started
             budget = UpdateBudget()
             lastError = nil
@@ -205,7 +206,7 @@ final class ActivityController {
         // A finished run or a problem stays on the Lock Screen with its final content for a while (HIG:
         // end at once, keep the outcome readable); anything else goes at once.
         let final: ActivityContent<PokiState>? = state.phase.isRunOutcome || state.phase == .problem
-            ? ActivityContent(state: Self.fittedState(state), staleDate: nil, relevanceScore: 0) : nil
+            ? Self.fittedState(state).map { ActivityContent(state: $0, staleDate: nil, relevanceScore: 0) } : nil
         let policy = dismissalPolicy ?? (final == nil ? .immediate : .after(.now.addingTimeInterval(15 * 60)))
         state.guide = nil; state.pin = nil; state.since = nil; state.event = nil; state.previous = nil
         state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.decision = nil; state.plan = nil
@@ -551,8 +552,8 @@ final class ActivityController {
     }
 
     /// Updates go out one after another, so an alert is never overtaken by an older update.
-    private func enqueue(_ content: ActivityContent<PokiState>, alert: AlertConfiguration?) {
-        guard let activity else { return }
+    private func enqueue(_ content: ActivityContent<PokiState>?, alert: AlertConfiguration?) {
+        guard let content, let activity else { return }
         let previous = tail
         tally.sent += 1
         let queued = Date()
@@ -577,7 +578,7 @@ final class ActivityController {
 
     /// ActivityKit refuses a state over 4 KB. Ours is far smaller, but long texts from an agent are cut
     /// so an update is never lost to size.
-    private static func fittedState(_ original: PokiState) -> PokiState {
+    private static func fittedState(_ original: PokiState) -> PokiState? {
         var state = original
         let encoder = JSONEncoder()
         func fits() -> Bool { (try? encoder.encode(state).count).map { $0 <= 3_500 } ?? false }
@@ -631,11 +632,23 @@ final class ActivityController {
                 state.task = nil
             }
         }
-        return state
+        if !fits() {
+            // Escaping can expand even the shortened strings. Keep actionable identifiers intact.
+            state.headline = ""
+            state.approval?.app = ""
+            state.approval?.summary = ""
+            state.approval?.reason = ""
+            state.handoff?.text = nil
+            state.handoff?.app = nil
+        }
+        return fits() ? state : nil
     }
 
-    func content() -> ActivityContent<PokiState> {
-        let state = Self.fittedState(state)
+    func content() -> ActivityContent<PokiState>? {
+        guard let state = Self.fittedState(state) else {
+            AppLog.shared.add("activity", "Live Activity state exceeds the payload budget")
+            return nil
+        }
         // An approval goes stale when it expires. A run goes stale when no update has come for ten
         // minutes (Poki was closed or suspended), and then says it is not updating.
         let stale = state.approval?.expires ?? (state.phase == .working ? Date.now.addingTimeInterval(600) : nil)
