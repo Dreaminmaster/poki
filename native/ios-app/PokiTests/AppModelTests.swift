@@ -1283,6 +1283,53 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertTrue(model.hasOpenInProcessSession)
     }
 
+    /// Field report on 0.5.0 Beta 1: iOS's Automation Running banner never went away and the app had
+    /// to be force-quit. iOS's close does not wait for an open under way, so an open that answered
+    /// ready after the task had ended (or the owner stopped, or Poki stood by) left Automation Mode on
+    /// with nothing left to close it. The late session is closed, or paused where the close kept it.
+    func testAnOpenThatAnswersAfterTheTaskEndedIsClosed() async {
+        for system in [27, 26] {
+            useSystem(system)
+            await prepareWithoutPhoneTask()
+            session.holdNextOpen()
+            model.wakeRunner()
+            await waitFor("iOS \(system): the open is under way") { self.session.isHoldingOpen }
+            await model.chatTaskBegan()
+            model.chatTaskEnded(reply: nil, session: "test", acted: true)
+            await waitFor("iOS \(system): the end of the task stood by") { self.model.runnerPaused && self.model.lastInProcessClose != nil }
+            let pauses = session.pauses
+
+            session.answer(nil)
+            if system == 27 {
+                await waitFor("iOS 27: the session the late open left on is closed") { !self.session.isOpen }
+            } else {
+                await waitFor("iOS 26: the late session is kept with Automation Mode off") { self.session.pauses > pauses }
+            }
+            XCTAssertFalse(model.hasOpenInProcessSession, "iOS \(system)")
+            XCTAssertTrue(model.runnerPaused, "iOS \(system): Poki stays standing by")
+
+            await lookForTheNextTask()
+            XCTAssertTrue(session.isOpen && model.hasOpenInProcessSession, "iOS \(system): the next task opens automation again")
+        }
+    }
+
+    /// The owner's Stop during an open: the session that opens after it closes on every iOS.
+    func testAnOpenThatAnswersAfterTheOwnersStopIsClosed() async {
+        for system in [27, 26] {
+            useSystem(system)
+            await prepareWithoutPhoneTask()
+            session.holdNextOpen()
+            model.wakeRunner()
+            await waitFor("iOS \(system): the open is under way") { self.session.isHoldingOpen }
+            model.pauseRunner(byOwner: true)
+            await waitFor("iOS \(system): the stop closed") { self.model.runnerPaused && self.model.lastInProcessClose != nil }
+
+            session.answer(nil)
+            await waitFor("iOS \(system): the session the late open left on is closed") { !self.session.isOpen }
+            XCTAssertFalse(model.hasOpenInProcessSession, "iOS \(system)")
+        }
+    }
+
     func testLiveActivityTapBetweenChatStepsKeepsSessionOpenAndReturnsToTargetApp() async throws {
         let stateLock = NSLock()
         let pokiBundle = Bundle.main.bundleIdentifier ?? "nz.zheha.poki"
