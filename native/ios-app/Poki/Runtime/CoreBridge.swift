@@ -52,6 +52,7 @@ struct RunnerStatus: Sendable, Equatable, Decodable {
     /// The launcher's short code for what to do, e.g. "ddi_bad" (download the image again).
     var code: String?
     var pairing: String?
+    var loopbackHandshakeDropped: Bool?
     static let idle = RunnerStatus(state: "idle")
 
     var isRunning: Bool { state == "running" }

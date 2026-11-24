@@ -2570,6 +2570,8 @@ final class AppModel {
             return (AppLocalization.text(LocalizedStringResource("iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode.")), false)
         case .failed(let code, _) where loopback.cellularOnly:
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again.")), false)
+        case .failed(let code, _) where runner.loopbackHandshakeDropped == true:
+            return (AppLocalization.text(LocalizedStringResource("The loopback connection closed during the opening handshake, and Poki could not open its own automation session (\(code)). Check the loopback in Setup, then try again.")), true)
         case .failed(let code, _):
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again.")), true)
         }

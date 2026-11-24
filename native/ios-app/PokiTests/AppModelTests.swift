@@ -951,7 +951,7 @@ final class InProcessPasscodeTests: XCTestCase {
 
     /// On cellular the launcher reports `local_ddi`: the image is mounted, and nothing reached the
     /// phone's developer services. Holds the session's open that this starts.
-    private func handOverToTheMountedImage() async {
+    private func handOverToTheMountedImage(handshakeDropped: Bool? = nil) async {
         model.wakeRunner()
         // On the simulator the launcher is WebDriverAgent on the Mac; its answer comes first.
         await waitFor("the simulator's runner check answered") { ["failed", "running"].contains(self.model.runner.state) }
@@ -961,7 +961,7 @@ final class InProcessPasscodeTests: XCTestCase {
         model.setup.uiAutomation = false
         session.holdNextOpen()
         model.wakeRunner()
-        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi", loopbackHandshakeDropped: handshakeDropped))
         await waitFor("the local open is under way") { self.session.isHoldingOpen }
     }
 
@@ -1017,6 +1017,22 @@ final class InProcessPasscodeTests: XCTestCase {
         let hint = SetupIssueHint.first(model: model)
         XCTAssertEqual(hint?.message, model.localSessionTrouble?.text)
         XCTAssertEqual(hint?.target, .setup)
+    }
+
+    func testDroppedHandshakeAndLocalOpenFailureReachHomeAndChat() async {
+        let savedLanguage = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = savedLanguage }
+        await handOverToTheMountedImage(handshakeDropped: true)
+        model.setup.developerMode = true
+        model.setup.uiAutomation = true
+        session.answer(["ok": false, "code": "missing_framework"])
+        await waitFor("the local failure is reported") { self.model.localSessionTrouble != nil }
+        let message = model.localSessionTrouble?.text ?? ""
+        XCTAssertTrue(message.contains("closed during the opening handshake"), message)
+        XCTAssertTrue(message.contains("automation session (missing_framework)"), message)
+        XCTAssertEqual(SetupIssueHint.first(model: model)?.message, message)
+        XCTAssertEqual(SetupIssueHint.home(model: model)?.message, message)
     }
 
     /// A local open that fails waits for the loopback; when it answers again the launcher goes the
