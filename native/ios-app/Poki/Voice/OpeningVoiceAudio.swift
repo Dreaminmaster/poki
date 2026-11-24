@@ -41,12 +41,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private static let maxFramesPerSlice: UInt32 = 4_096
     // Covers two connection attempts plus fallback dictation without unbounded memory growth.
     static let maxOpeningFrames = Int(sampleRate) * 180
-    // Cumulative exact-zero frames (every 1.5 s from 1.5 s to 12.0 s at 48 kHz) before restarting
-    // VPIO to recover from sticky remote-control / Oneness input mute without an interruption notice.
-    static let zeroInputRecoveryThresholds = [72_000, 144_000, 216_000, 288_000, 360_000, 432_000, 504_000, 576_000]
-    static let maxZeroInputRecoveryRestarts = 10
-    static let defaultLiveInputWaitTimeout: Duration = .seconds(8)
-    private static let minSpatialNotificationRestartInterval: TimeInterval = 0.5
+    static let defaultLiveInputWaitTimeout: Duration = .seconds(OpeningAudioRecoveryPolicy.defaultLiveInputWaitTimeoutSeconds)
     private static let channelFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true
     )!
@@ -64,22 +59,24 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     @MainActor private var audioUnit: AudioComponentInstance?
     @MainActor private var audioUnitRunning = false
-    @MainActor private var holdsAudioSession = false
+    @MainActor private(set) var hasHardwareCapture = false
+    @MainActor private var audioSessionActivations = 0
     @MainActor private var interruptionObserver: NSObjectProtocol?
     @MainActor private var resetObserver: NSObjectProtocol?
     @MainActor private var spatialObserver: NSObjectProtocol?
     @MainActor private var foregroundObserver: NSObjectProtocol?
-    @MainActor private var lastSpatialZeroInputRestartAt = Date.distantPast
-    @MainActor var backgroundRecordingIntentActive = false
-    private let zeroInputRecoveryEnabled: Bool
+    @MainActor private var inputMuteObserver: NSObjectProtocol?
+    private let notificationCenter: NotificationCenter
+    private let uptime: @Sendable () -> TimeInterval
+    private let sleep: @Sendable (Duration) async throws -> Void
     private let isInputMuted: @MainActor () -> Bool
     private let isInBackground: @MainActor () -> Bool
-    private let restartAudioUnitOverride: (@MainActor (String) -> Void)?
     private let lock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
     private let session: Int
     private var callbackAudioUnit: AudioComponentInstance?
+    private var recoveryPolicy: OpeningAudioRecoveryPolicy
 
     private enum State {
         case buffering
@@ -121,15 +118,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var phoneActionStarted = false
     private var remoteReplied = false
     private var openingConfirmed = false
-    private var tapCallbacks = 0
     private var nonZeroTapCallbacks = 0
-    private var rawNonZeroTapCallbacks = 0
     private var rawMaxPeak: Float = 0
-    private var zeroInputFrames = 0
-    private var zeroInputRecoveryAttempts = 0
-    private var zeroInputRecoveryPending = false
-    private var loggedNonZeroRecovery = false
-    private var liveInputWaiters: [UUID: AsyncStream<Bool>.Continuation] = [:]
+    private var liveInputWaiters: [UUID: AsyncStream<LiveInputWaitResult>.Continuation] = [:]
     private var renderErrors = 0
     private var deliveryErrors = 0
 
@@ -156,32 +147,46 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         lock.withLock { overflow }
     }
     var hasObservedNonZeroInput: Bool {
-        lock.withLock { rawNonZeroTapCallbacks > 0 }
+        lock.withLock { recoveryPolicy.hasObservedNonZeroInput }
+    }
+    var isZeroInputRecoveryEnabled: Bool {
+        lock.withLock { recoveryPolicy.enabled }
+    }
+    @MainActor var audioUnitIdentity: UnsafeRawPointer? {
+        audioUnit.map { UnsafeRawPointer($0) }
+    }
+    @MainActor var activeBackgroundRecordingGrant: BackgroundRecordingGrant? {
+        lock.withLock { recoveryPolicy.backgroundGrant }
     }
 
     init(
         session: Int,
         playReadyChime: Bool = true,
         zeroInputRecoveryEnabled: Bool? = nil,
+        notificationCenter: NotificationCenter = .default,
+        uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         isInputMuted: @escaping @MainActor () -> Bool = { AVAudioApplication.shared.isInputMuted },
-        isInBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background },
-        restartAudioUnit: (@MainActor (String) -> Void)? = nil
+        isInBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background }
     ) {
         self.session = session
         #if targetEnvironment(simulator)
-        self.zeroInputRecoveryEnabled = zeroInputRecoveryEnabled ?? false
+        let recoveryEnabled = zeroInputRecoveryEnabled ?? false
         #else
-        self.zeroInputRecoveryEnabled = zeroInputRecoveryEnabled ?? true
+        let recoveryEnabled = zeroInputRecoveryEnabled ?? true
         #endif
+        self.recoveryPolicy = OpeningAudioRecoveryPolicy(enabled: recoveryEnabled)
+        self.notificationCenter = notificationCenter
+        self.uptime = uptime
+        self.sleep = sleep
         self.isInputMuted = isInputMuted
         self.isInBackground = isInBackground
-        self.restartAudioUnitOverride = restartAudioUnit
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
         super.init()
     }
 
     deinit {
-        let (unit, waiters): (AudioComponentInstance?, [AsyncStream<Bool>.Continuation]) = lock.withLock {
+        let (unit, waiters): (AudioComponentInstance?, [AsyncStream<LiveInputWaitResult>.Continuation]) = lock.withLock {
             let current = callbackAudioUnit
             callbackAudioUnit = nil
             let pending = Array(liveInputWaiters.values)
@@ -189,7 +194,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             return (current, pending)
         }
         for waiter in waiters {
-            waiter.yield(false)
+            waiter.yield(.stopped)
             waiter.finish()
         }
         if let unit {
@@ -199,29 +204,44 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         }
     }
 
+    @MainActor func setBackgroundRecordingGrant(_ grant: BackgroundRecordingGrant?) {
+        lock.withLock { recoveryPolicy.setBackgroundGrant(grant) }
+    }
+
+    @MainActor func clearBackgroundRecordingGrant(token: UUID) {
+        lock.withLock { recoveryPolicy.clearBackgroundGrant(token: token) }
+    }
+
     @MainActor func startCapture() throws {
+        hasHardwareCapture = true
+        let muted = isInputMuted()
+        lock.withLock { recoveryPolicy.setInputMuted(muted) }
         try VoiceLink.activateAudioSession(configure: true)
-        holdsAudioSession = true
+        audioSessionActivations += 1
         do {
             try configureAndStartAudioUnit()
             observeAudioLifecycle()
         } catch {
             removeAudioLifecycleObservers()
             stopAudioUnit()
-            if holdsAudioSession {
-                holdsAudioSession = false
-                VoiceLink.deactivateAudioSession()
-            }
+            releaseAudioSessionActivations()
             throw error
+        }
+    }
+
+    @MainActor private func releaseAudioSessionActivations() {
+        while audioSessionActivations > 0 {
+            audioSessionActivations -= 1
+            VoiceLink.deactivateAudioSession()
         }
     }
 
     @MainActor func ensureRunning() -> Bool {
         guard audioUnit != nil || audioUnitRunning else { return false }
         if !audioUnitRunning {
-            restartAudioUnit(reason: "ensureRunning")
+            restartAudioUnit(trigger: .ensureRunning)
         }
-        return audioUnitRunning && RTCAudioSession.sharedInstance().isActive
+        return audioUnit != nil && audioUnitRunning && RTCAudioSession.sharedInstance().isActive
     }
 
     @MainActor private func configureAndStartAudioUnit() throws {
@@ -314,159 +334,234 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     @MainActor private func observeAudioLifecycle() {
         removeAudioLifecycleObservers()
-        interruptionObserver = NotificationCenter.default.addObserver(
+        interruptionObserver = notificationCenter.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil,
             queue: .main
         ) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-            Task { @MainActor in self?.restartAudioUnit(reason: "interruption ended") }
+            Task { @MainActor in self?.restartAudioUnit(trigger: .interruptionEnded) }
         }
-        resetObserver = NotificationCenter.default.addObserver(
+        resetObserver = notificationCenter.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.restartAudioUnit(reason: "media services reset") }
+            Task { @MainActor in self?.restartAudioUnit(trigger: .mediaServicesReset) }
         }
-        spatialObserver = NotificationCenter.default.addObserver(
+        spatialObserver = notificationCenter.addObserver(
             forName: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.recoverFromZeroInput(
-                    reason: "spatial playback capabilities changed",
-                    requiresExistingZeroInput: true,
-                    fromSpatialNotification: true
-                )
+                self?.recoverFromZeroInput(trigger: .spatialCapabilitiesChanged)
             }
         }
-        foregroundObserver = NotificationCenter.default.addObserver(
+        foregroundObserver = notificationCenter.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.recoverFromZeroInput(reason: "app became active", requiresExistingZeroInput: true)
+                self?.handleAppBecameActive()
+            }
+        }
+        inputMuteObserver = notificationCenter.addObserver(
+            forName: AVAudioApplication.inputMuteStateChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let muted = self.isInputMuted()
+                self.lock.withLock { self.recoveryPolicy.setInputMuted(muted) }
             }
         }
     }
 
+    @MainActor private func handleAppBecameActive() {
+        lock.withLock { recoveryPolicy.noteForeground() }
+        recoverFromZeroInput(trigger: .appBecameActive)
+    }
+
     @MainActor private func removeAudioLifecycleObservers() {
-        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
-        if let resetObserver { NotificationCenter.default.removeObserver(resetObserver) }
-        if let spatialObserver { NotificationCenter.default.removeObserver(spatialObserver) }
-        if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
+        if let interruptionObserver { notificationCenter.removeObserver(interruptionObserver) }
+        if let resetObserver { notificationCenter.removeObserver(resetObserver) }
+        if let spatialObserver { notificationCenter.removeObserver(spatialObserver) }
+        if let foregroundObserver { notificationCenter.removeObserver(foregroundObserver) }
+        if let inputMuteObserver { notificationCenter.removeObserver(inputMuteObserver) }
         interruptionObserver = nil
         resetObserver = nil
         spatialObserver = nil
         foregroundObserver = nil
+        inputMuteObserver = nil
     }
 
-    @MainActor func waitForLiveInput(timeout: Duration = defaultLiveInputWaitTimeout) async -> Bool {
-        guard zeroInputRecoveryEnabled, !isInputMuted() else {
-            return hasObservedNonZeroInput
+    struct LiveInputWait {
+        fileprivate enum Backing {
+            case immediate(LiveInputWaitResult)
+            case stream(UUID, AsyncStream<LiveInputWaitResult>)
         }
-        let waiterID = UUID()
-        let stream: AsyncStream<Bool>? = lock.withLock {
-            if rawNonZeroTapCallbacks > 0 { return nil }
-            if case .stopped = state { return nil }
-            let (stream, continuation) = AsyncStream<Bool>.makeStream()
+        fileprivate let backing: Backing
+    }
+
+    /// Synchronously registers a waiter before suspension so callers can deterministically observe
+    /// wakeup, stop release, cancellation, or timeout without scheduling races.
+    @MainActor func startLiveInputWait() -> LiveInputWait {
+        if Task.isCancelled {
+            return LiveInputWait(backing: .immediate(.cancelled))
+        }
+        let muted = isInputMuted()
+        let immediateOrStream: LiveInputWait.Backing = lock.withLock {
+            if !recoveryPolicy.enabled { return .immediate(.skippedDisabled) }
+            if muted {
+                recoveryPolicy.setInputMuted(true)
+                return .immediate(.skippedMuted)
+            }
+            if recoveryPolicy.hasObservedNonZeroInput { return .immediate(.live) }
+            if case .stopped = state { return .immediate(.stopped) }
+            let waiterID = UUID()
+            let (stream, continuation) = AsyncStream<LiveInputWaitResult>.makeStream()
             liveInputWaiters[waiterID] = continuation
-            return stream
+            return .stream(waiterID, stream)
         }
-        guard let stream else { return hasObservedNonZeroInput }
-        let timeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: timeout)
-            guard !Task.isCancelled else { return }
-            self?.finishLiveInputWaiter(id: waiterID, live: false)
-        }
-        defer {
-            timeoutTask.cancel()
-            finishLiveInputWaiter(id: waiterID, live: false)
-        }
-        var received = false
-        for await live in stream {
-            received = live
-            break
-        }
-        return received
+        return LiveInputWait(backing: immediateOrStream)
     }
 
-    private func finishLiveInputWaiter(id: UUID, live: Bool) {
+    @MainActor func awaitLiveInputWait(
+        _ wait: LiveInputWait,
+        timeout: Duration = defaultLiveInputWaitTimeout
+    ) async -> LiveInputWaitResult {
+        switch wait.backing {
+        case .immediate(let result):
+            return Task.isCancelled ? .cancelled : result
+        case .stream(let waiterID, let stream):
+            if Task.isCancelled {
+                finishLiveInputWaiter(id: waiterID, result: .cancelled)
+                return .cancelled
+            }
+            let timeoutTask = Task { [weak self, sleep] in
+                do {
+                    try await sleep(timeout)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                self?.finishLiveInputWaiter(id: waiterID, result: .timedOut)
+            }
+            defer {
+                timeoutTask.cancel()
+                finishLiveInputWaiter(id: waiterID, result: .cancelled)
+            }
+            return await withTaskCancellationHandler {
+                var result: LiveInputWaitResult = .cancelled
+                for await outcome in stream {
+                    result = outcome
+                    break
+                }
+                return result
+            } onCancel: { [weak self] in
+                self?.finishLiveInputWaiter(id: waiterID, result: .cancelled)
+            }
+        }
+    }
+
+    @MainActor func waitForLiveInput(timeout: Duration = defaultLiveInputWaitTimeout) async -> LiveInputWaitResult {
+        let wait = startLiveInputWait()
+        return await awaitLiveInputWait(wait, timeout: timeout)
+    }
+
+    private func finishLiveInputWaiter(id: UUID, result: LiveInputWaitResult) {
         let waiter = lock.withLock { liveInputWaiters.removeValue(forKey: id) }
-        waiter?.yield(live)
+        waiter?.yield(result)
         waiter?.finish()
     }
 
-    @MainActor func recoverFromZeroInput(
-        reason: String,
-        requiresExistingZeroInput: Bool = false,
-        fromSpatialNotification: Bool = false
-    ) {
-        guard zeroInputRecoveryEnabled else { return }
-        if isInputMuted() {
-            lock.withLock { zeroInputRecoveryPending = false }
-            return
-        }
-        // iOS rejects starting a new recording AudioUnit in the background once AudioRecordingIntent
-        // ends (CMSUtility_IsAllowedToStartRecording / OSStatus 2003329396). Never tear down a running
-        // unit outside the intent window in the background; recover on foreground or interruption end.
-        if isInBackground(), !backgroundRecordingIntentActive {
-            lock.withLock { zeroInputRecoveryPending = false }
-            return
-        }
-        let now = Date()
-        if fromSpatialNotification,
-           now.timeIntervalSince(lastSpatialZeroInputRestartAt) < Self.minSpatialNotificationRestartInterval {
-            return
-        }
-        let plan: (attempt: Int, taps: Int, zeroFrames: Int)? = lock.withLock {
-            zeroInputRecoveryPending = false
-            if case .stopped = state { return nil }
-            guard rawNonZeroTapCallbacks == 0 else { return nil }
-            if requiresExistingZeroInput, tapCallbacks == 0 { return nil }
-            guard zeroInputRecoveryAttempts < Self.maxZeroInputRecoveryRestarts else { return nil }
-            zeroInputRecoveryAttempts += 1
-            if case .buffering = state, lastNonZeroOpeningFrame == 0 {
+    @MainActor private func recoverFromZeroInput(trigger: OpeningAudioRecoveryPolicy.RestartTrigger) {
+        let muted = isInputMuted()
+        let inBackground = isInBackground()
+        let now = uptime()
+        let evaluated: (decision: OpeningAudioRecoveryPolicy.RestartDecision, taps: Int, zeroFrames: Int) = lock.withLock {
+            let isStopped: Bool
+            if case .stopped = state { isStopped = true } else { isStopped = false }
+            let decision = recoveryPolicy.evaluateRestart(
+                trigger: trigger,
+                isStopped: isStopped,
+                isInputMuted: muted,
+                inBackground: inBackground,
+                now: now
+            )
+            if case .restart(_, let clearZeroBuffer) = decision,
+               clearZeroBuffer,
+               case .buffering = state,
+               lastNonZeroOpeningFrame == 0 {
                 queued.removeAll(keepingCapacity: true)
                 readIndex = 0
                 openingEndFrame = 0
             }
-            return (zeroInputRecoveryAttempts, tapCallbacks, zeroInputFrames)
+            return (decision, recoveryPolicy.tapCallbacks, recoveryPolicy.zeroInputFrames)
         }
-        guard let plan else { return }
-        if fromSpatialNotification {
-            lastSpatialZeroInputRestartAt = now
-        }
-        Self.logVoice("opening audio restarting VPIO for \(reason) (attempt \(plan.attempt), taps=\(plan.taps), zeroFrames=\(plan.zeroFrames))")
-        if let restartAudioUnitOverride {
-            restartAudioUnitOverride(reason)
-        } else {
-            restartAudioUnit(reason: reason)
+        switch evaluated.decision {
+        case .restart(let attempt, _):
+            Self.logVoice("opening audio restarting VPIO for \(trigger.logDescription) (attempt \(attempt), taps=\(evaluated.taps), zeroFrames=\(evaluated.zeroFrames))")
+            restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
+        case .restartLifecycle:
+            restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
+        case .skip(.backgroundGrantExpired):
+            Self.logVoice("opening audio skipped VPIO restart for \(trigger.logDescription): background recording grant expired; keeping existing unit")
+        case .skip:
+            break
         }
     }
 
-    @MainActor private func restartAudioUnit(reason: String) {
-        let stopped: Bool = lock.withLock {
-            if case .stopped = state { return true }
-            return false
+    @MainActor private func restartAudioUnit(
+        trigger: OpeningAudioRecoveryPolicy.RestartTrigger,
+        alreadyAuthorized: Bool = false
+    ) {
+        let inBackground = isInBackground()
+        let now = uptime()
+        let allowed: OpeningAudioRecoveryPolicy.RestartDecision = lock.withLock {
+            let isStopped: Bool
+            if case .stopped = state { isStopped = true } else { isStopped = false }
+            if isStopped { return .skip(.stopped) }
+            if alreadyAuthorized {
+                guard recoveryPolicy.canRestartInEnvironment(inBackground: inBackground, now: now) else {
+                    return .skip(.backgroundGrantExpired)
+                }
+                return .restartLifecycle
+            }
+            return recoveryPolicy.evaluateRestart(
+                trigger: trigger,
+                isStopped: false,
+                isInputMuted: false,
+                inBackground: inBackground,
+                now: now
+            )
         }
-        guard !stopped else { return }
+        switch allowed {
+        case .restart, .restartLifecycle:
+            break
+        case .skip(.backgroundGrantExpired):
+            Self.logVoice("opening audio skipped VPIO restart for \(trigger.logDescription): background recording grant expired; keeping existing unit")
+            return
+        case .skip:
+            return
+        }
         stopAudioUnit()
         do {
-            try AVAudioSession.sharedInstance().setActive(true)
+            try VoiceLink.activateAudioSession(configure: false)
+            audioSessionActivations += 1
             try configureAndStartAudioUnit()
-            Self.logVoice("opening audio unit restarted after \(reason)")
+            Self.logVoice("opening audio unit restarted after \(trigger.logDescription)")
             let currentDelegate = lock.withLock { delegate }
             currentDelegate?.dispatchAsync {
                 currentDelegate?.notifyAudioInputInterrupted()
                 currentDelegate?.notifyAudioOutputInterrupted()
             }
         } catch {
-            Self.logVoice("opening audio unit restart failed after \(reason): \(error.localizedDescription)")
+            Self.logVoice("opening audio unit restart failed after \(trigger.logDescription): \(error.localizedDescription)")
         }
     }
 
@@ -480,7 +575,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 state = .sending
                 let seconds = String(format: "%.2f", Double(queued.count) / Self.sampleRate)
                 let peak = String(format: "%.5f", rawMaxPeak)
-                let summary = "opening audio handoff: queued \(queued.count) frames (\(seconds) s), taps \(tapCallbacks), nonZeroTaps \(nonZeroTapCallbacks), rawNonZero \(rawNonZeroTapCallbacks), rawPeak \(peak), renderErrors \(renderErrors), deliveryErrors \(deliveryErrors)"
+                let summary = "opening audio handoff: queued \(queued.count) frames (\(seconds) s), taps \(recoveryPolicy.tapCallbacks), nonZeroTaps \(nonZeroTapCallbacks), rawNonZero \(recoveryPolicy.rawNonZeroTapCallbacks), rawPeak \(peak), renderErrors \(renderErrors), deliveryErrors \(deliveryErrors)"
                 return (true, summary)
             case .sending:
                 return (true, nil)
@@ -574,7 +669,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     /// Revokes the media callback immediately before stopping the engine or waiting for protocol close.
     @MainActor func stopCapture(session: Int, forDictation: Bool = false) -> AVAudioPCMBuffer? {
         guard session == self.session else { return nil }
-        let stopped: (wasRunning: Bool, completeRecording: [Int16]?, waiters: [AsyncStream<Bool>.Continuation]) = sendLock.withLock {
+        let stopped: (wasRunning: Bool, completeRecording: [Int16]?, waiters: [AsyncStream<LiveInputWaitResult>.Continuation]) = sendLock.withLock {
             lock.withLock {
                 if case .stopped = state { return (false, nil, []) }
                 let samples: [Int16]?
@@ -586,6 +681,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 queued.removeAll()
                 recovery.removeAll()
                 readIndex = 0
+                recoveryPolicy.setBackgroundGrant(nil)
                 let waiters = Array(liveInputWaiters.values)
                 liveInputWaiters.removeAll()
                 if case .waitingForOwner(let completion) = previous { completion.finish() }
@@ -593,16 +689,13 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             }
         }
         for waiter in stopped.waiters {
-            waiter.yield(false)
+            waiter.yield(.stopped)
             waiter.finish()
         }
         guard stopped.wasRunning else { return nil }
         removeAudioLifecycleObservers()
         stopAudioUnit()
-        if holdsAudioSession {
-            holdsAudioSession = false
-            VoiceLink.deactivateAudioSession()
-        }
+        releaseAudioSessionActivations()
         guard let samples = stopped.completeRecording, !samples.isEmpty,
               let audio = AVAudioPCMBuffer(pcmFormat: Self.channelFormat, frameCapacity: AVAudioFrameCount(samples.count)),
               let data = audio.int16ChannelData?[0] else { return nil }
@@ -653,52 +746,34 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         }
     }
 
-    func recordRawInputMetrics(frameCount: Int, maxSample: Int32, peak: Float) {
-        enum Action {
-            case none
-            case restart(Int)
-            case recovered(Int, Float)
-        }
-        let (action, liveWaiters): (Action, [AsyncStream<Bool>.Continuation]) = lock.withLock {
-            tapCallbacks += 1
+    private func recordRawInputMetrics(frameCount: Int, maxSample: Int32, peak: Float) {
+        let (observation, liveWaiters): (OpeningAudioRecoveryPolicy.InputObservation, [AsyncStream<LiveInputWaitResult>.Continuation]) = lock.withLock {
+            let isStopped: Bool
+            if case .stopped = state { isStopped = true } else { isStopped = false }
             if maxSample > 0 {
                 nonZeroTapCallbacks += 1
-                rawNonZeroTapCallbacks += 1
-                if peak > rawMaxPeak { rawMaxPeak = peak }
-                zeroInputFrames = 0
-                zeroInputRecoveryPending = false
-                let waiters = Array(liveInputWaiters.values)
-                liveInputWaiters.removeAll()
-                if zeroInputRecoveryAttempts > 0, !loggedNonZeroRecovery {
-                    loggedNonZeroRecovery = true
-                    return (.recovered(zeroInputRecoveryAttempts, peak), waiters)
-                }
-                return (.none, waiters)
             }
             if peak > rawMaxPeak { rawMaxPeak = peak }
-            guard zeroInputRecoveryEnabled, rawNonZeroTapCallbacks == 0 else { return (.none, []) }
-            if case .stopped = state { return (.none, []) }
-            zeroInputFrames += frameCount
-            guard !zeroInputRecoveryPending,
-                  zeroInputRecoveryAttempts < Self.zeroInputRecoveryThresholds.count,
-                  zeroInputFrames >= Self.zeroInputRecoveryThresholds[zeroInputRecoveryAttempts] else {
-                return (.none, [])
+            let observation = recoveryPolicy.recordInput(frameCount: frameCount, maxSample: maxSample, isStopped: isStopped)
+            if maxSample > 0 {
+                let waiters = Array(liveInputWaiters.values)
+                liveInputWaiters.removeAll()
+                return (observation, waiters)
             }
-            zeroInputRecoveryPending = true
-            return (.restart(zeroInputRecoveryAttempts + 1), [])
+            return (observation, [])
         }
         for waiter in liveWaiters {
-            waiter.yield(true)
+            waiter.yield(.live)
             waiter.finish()
         }
-        switch action {
+        switch observation {
         case .none:
             break
-        case .restart(let attempt):
+        case .requestZeroInputRecovery(let attempt):
             Task { @MainActor [weak self] in
-                self?.recoverFromZeroInput(reason: "sustained zero input (#\(attempt))")
+                self?.recoverFromZeroInput(trigger: .sustainedZeroInput(attempt: attempt))
             }
-        case .recovered(let attempts, let peak):
+        case .recoveredNonZero(let attempts):
             let formatted = String(format: "%.5f", peak)
             Self.logVoice("opening audio recovered non-zero input after \(attempts) VPIO restart(s): peak=\(formatted)")
         }
@@ -762,7 +837,16 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     func input(_ pcm: AVAudioPCMBuffer, at time: AVAudioTime) {
         guard let source = pcm.int16ChannelData?[0] else { return }
-        let sourceFrames = UnsafeBufferPointer(start: source, count: Int(pcm.frameLength))
+        let count = Int(pcm.frameLength)
+        guard count > 0 else { return }
+        let sourceFrames = UnsafeBufferPointer(start: source, count: count)
+        var maxSample: Int32 = 0
+        for sample in sourceFrames {
+            let magnitude = abs(Int32(sample))
+            if magnitude > maxSample { maxSample = magnitude }
+        }
+        let peak = Float(maxSample) / 32_768.0
+        recordRawInputMetrics(frameCount: count, maxSample: maxSample, peak: peak)
         inputSamples(sourceFrames, timestamp: time.audioTimeStamp)
     }
 

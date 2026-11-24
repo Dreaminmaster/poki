@@ -4,6 +4,14 @@ import Foundation
 // the code is written here. The talk goes into the state's existing `voice` field, follows the talk's
 // phase, and takes the Live Activity with it when it ends only if nothing else is on it.
 
+/// Result of attempting to start Talk Here in the background.
+enum TalkHereOutcome: Equatable {
+    case started
+    case liveActivityUnavailable
+    case microphoneUnavailable
+    case sessionEnded
+}
+
 /// The Live Activity during a talk with Poki, in front and while a step of the talk has Poki in another
 /// app: it says whether Poki is listening, working or speaking, and its End ends the talk.
 @MainActor
@@ -19,6 +27,7 @@ final class TalkActivity {
     private let endFromLiveActivityAction: (@MainActor () -> Void)?
     private var shown: PokiState.Voice?
     private var wasMidTurn = false
+    private var activeIntentToken: UUID?
     /// What EndTalkIntent's notification reaches; it holds this weakly, so an ended TalkActivity hears nothing.
     private let mailbox: Mailbox
 
@@ -83,23 +92,72 @@ final class TalkActivity {
     /// Talk Here (TalkHereIntent), with Poki in the background: the Live Activity starts first in
     /// Connecting while the intent runs, and switches to Listening once background capture starts,
     /// because iOS ends an app that records in the background without an active Live Activity.
-    func startHere(presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async -> Bool {
+    func startHere(
+        presentSpeechPermission: SpeechPermissionPresenter = { request in await request() },
+        liveInputWaitTimeout: Duration? = nil
+    ) async -> TalkHereOutcome {
+        let intentToken = UUID()
+        activeIntentToken = intentToken
         show(.connecting, fromIntent: true)
         guard activity.isRunning else {
-            show(nil)
-            return false
+            if activeIntentToken == intentToken {
+                activeIntentToken = nil
+                show(nil)
+            }
+            return .liveActivityUnavailable
         }
-        voice.setBackgroundRecordingIntentActive(true)
-        defer { voice.setBackgroundRecordingIntentActive(false) }
-        await voice.start(captureOpening: true, presentSpeechPermission: presentSpeechPermission)
+        let grant = voice.beginBackgroundRecordingGrant(token: intentToken)
+        defer {
+            voice.endBackgroundRecordingGrant(token: intentToken)
+            if activeIntentToken == intentToken {
+                activeIntentToken = nil
+            }
+        }
+        guard let startedSession = await voice.start(
+            captureOpening: true,
+            backgroundRecordingGrant: grant,
+            presentSpeechPermission: presentSpeechPermission
+        ) else {
+            if activeIntentToken == intentToken {
+                show(Self.state(of: voice))
+            }
+            return .sessionEnded
+        }
+        guard activeIntentToken == intentToken, voice.ownsSession(startedSession) else {
+            return .sessionEnded
+        }
         show(Self.state(of: voice))
-        // Keep AudioRecordingIntent active long enough for VPIO zero-input recovery to restart if
-        // remote-control / Oneness mute was active at launch; returns immediately once live audio arrives.
-        if voice.isOn {
-            _ = await voice.waitForOpeningLiveInput()
-            show(Self.state(of: voice))
+        guard voice.isOn else {
+            return .sessionEnded
         }
-        return true
+        // Keep AudioRecordingIntent active long enough for VPIO zero-input recovery within the safe
+        // monotonic window; returns immediately once live audio arrives or if capture stops.
+        let timeout = liveInputWaitTimeout ?? voice.recommendedLiveInputWaitTimeout(for: grant)
+        let waitResult = await voice.waitForOpeningLiveInput(session: startedSession, timeout: timeout)
+        guard activeIntentToken == intentToken, voice.ownsSession(startedSession) else {
+            return .sessionEnded
+        }
+        show(Self.state(of: voice))
+        guard voice.isOn else {
+            return .sessionEnded
+        }
+        switch waitResult {
+        case .live, .skippedMuted, .skippedDisabled:
+            guard voice.ensureBackgroundAudioActive(session: startedSession) else {
+                AppLog.shared.add("voice", "Talk Here: background audio inactive for session \(startedSession); stopping silent session")
+                voice.stop(ifOwningSession: startedSession)
+                show(Self.state(of: voice))
+                return .microphoneUnavailable
+            }
+            return .started
+        case .timedOut:
+            AppLog.shared.add("voice", "Talk Here: opening microphone stayed silent for session \(startedSession); stopping silent session")
+            voice.stop(ifOwningSession: startedSession)
+            show(Self.state(of: voice))
+            return .microphoneUnavailable
+        case .stopped, .cancelled:
+            return .sessionEnded
+        }
     }
 
     fileprivate func endFromLiveActivity() {

@@ -331,20 +331,49 @@ final class VoiceModel {
     private(set) var waitsForOpeningDictation = false
     private var openingDictation: Task<Void, Never>?
     var isCapturingOpening: Bool { openingCapture != nil }
-    private var backgroundRecordingIntentActive = false
+    private var backgroundRecordingGrant: (grant: BackgroundRecordingGrant, session: Int?)?
+    private let monotonicUptime: @Sendable () -> TimeInterval
 
-    func setBackgroundRecordingIntentActive(_ active: Bool) {
-        backgroundRecordingIntentActive = active
-        openingCapture?.audio.backgroundRecordingIntentActive = active
+    func beginBackgroundRecordingGrant(
+        token: UUID,
+        duration: TimeInterval = OpeningAudioRecoveryPolicy.defaultBackgroundGrantDuration
+    ) -> BackgroundRecordingGrant {
+        let grant = BackgroundRecordingGrant(token: token, deadline: monotonicUptime() + duration)
+        backgroundRecordingGrant = (grant, nil)
+        return grant
     }
 
-    func waitForOpeningLiveInput(timeout: Duration = OpeningVoiceAudio.defaultLiveInputWaitTimeout) async -> Bool {
-        guard let audio = openingCapture?.audio else { return true }
+    func endBackgroundRecordingGrant(token: UUID) {
+        if backgroundRecordingGrant?.grant.token == token {
+            backgroundRecordingGrant = nil
+        }
+        openingCapture?.audio.clearBackgroundRecordingGrant(token: token)
+    }
+
+    func ownsSession(_ number: Int) -> Bool {
+        session == number
+    }
+
+    func recommendedLiveInputWaitTimeout(for grant: BackgroundRecordingGrant) -> Duration {
+        let remaining = grant.deadline - monotonicUptime()
+        let seconds = max(0.5, min(OpeningAudioRecoveryPolicy.defaultLiveInputWaitTimeoutSeconds, remaining + 1.0))
+        return .seconds(seconds)
+    }
+
+    func waitForOpeningLiveInput(
+        session number: Int,
+        timeout: Duration = OpeningVoiceAudio.defaultLiveInputWaitTimeout
+    ) async -> LiveInputWaitResult {
+        guard number == session else { return .stopped }
+        guard let audio = openingCapture?.audio else { return .skippedDisabled }
         return await audio.waitForLiveInput(timeout: timeout)
     }
 
-    func ensureBackgroundAudioActive() -> Bool {
-        openingCapture?.audio.ensureRunning() ?? true
+    func ensureBackgroundAudioActive(session number: Int? = nil) -> Bool {
+        if let number, number != session { return false }
+        guard let audio = openingCapture?.audio else { return true }
+        guard audio.hasHardwareCapture else { return true }
+        return audio.ensureRunning()
     }
     private var usesLive = false
     private var appAudio: AppAudioContext?
@@ -552,6 +581,7 @@ final class VoiceModel {
          readyCue: @escaping @MainActor () -> Void = { VoiceReadyCue.play() },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock(),
+         monotonicUptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          openingSpeech: OpeningSpeech = .system,
          recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() },
          codex: (any SubscriptionVoice)? = nil) {
@@ -561,6 +591,7 @@ final class VoiceModel {
         self.readyCue = readyCue
         self.connection = connection
         self.time = time
+        self.monotonicUptime = monotonicUptime
         self.openingSpeech = openingSpeech
         self.recentAppAudio = recentAppAudio
         self.codex = codex ?? CodexVoice.shared
@@ -724,17 +755,22 @@ final class VoiceModel {
         #endif
     }
 
+    @discardableResult
     func start(microphone: Bool = true, captureOpening: Bool = false,
-               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async {
+               backgroundRecordingGrant grant: BackgroundRecordingGrant? = nil,
+               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async -> Int? {
         if let liveCloseTimeout { await liveCloseTimeout.value }
-        guard !isOn else { return }
+        guard !isOn else { return nil }
         phase = .connecting
         needsChatGPTSignIn = false
         session += 1
         let number = session
+        if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+            backgroundRecordingGrant = (grant, number)
+        }
         openingSpeechAuthorized = false
         let context = microphone ? await recentAppAudio() : nil
-        guard number == session else { return }
+        guard number == session else { return nil }
         appAudio = context
         let account = VoiceDirect.account
         let key = VoiceDirect.apiKey(for: account)
@@ -747,7 +783,7 @@ final class VoiceModel {
                 appAudio = nil
                 phase = .lost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words)
             }
-            return
+            return number
         }
         let bridge = self.bridge
         func configuration() async throws -> VoiceBridge.Token {
@@ -836,12 +872,14 @@ final class VoiceModel {
                 let captureStarted = time.now()
                 holdingMicrophone = true
                 openingCapture = try openingLink.startOpeningCapture(session: number)
-                openingCapture?.audio.backgroundRecordingIntentActive = backgroundRecordingIntentActive
+                if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+                    openingCapture?.audio.setBackgroundRecordingGrant(grant)
+                }
                 if openingCapture != nil {
                     let firstTimeAuth = openingSpeech.authorizationStatus() == .notDetermined
                     let authStart = time.now()
                     let authorized = await openingSpeech.authorize(present: presentSpeechPermission)
-                    guard number == session else { return }
+                    guard number == session else { return nil }
                     let authMS = max(0, Int(time.now().timeIntervalSince(authStart) * 1000))
                     openingTiming = (captureStarted, firstTimeAuth, authMS, nil, false)
                     openingSpeechAuthorized = authorized
@@ -849,7 +887,7 @@ final class VoiceModel {
             }
             var token = try await configuration()
             // Ended (End, or the button again) while the key was exchanged.
-            guard number == session else { return }
+            guard number == session else { return nil }
             transcript = ("voice-\(UUID().uuidString.prefix(8).lowercased())", Date(), lines.count)
             if microphone { holdingMicrophone = true }
             if subscription {
@@ -862,18 +900,18 @@ final class VoiceModel {
             } catch VoiceError.noPath {
                 // No path opened: once more, off VPN interfaces (Poki's loopback, a proxy
                 // app) and with a fresh key, before telling the owner.
-                guard number == session else { return }
+                guard number == session else { return nil }
                 closeConnection("network path failed; retrying without VPN interfaces")
                 ready = false
                 phase = .connecting
                 if subscription { codex.stop() }
                 token = try await configuration()
-                guard number == session else { return }
+                guard number == session else { return nil }
                 let second = makeLink(attempt: 2, direct: true)
                 second.useOpeningCapture(openingCapture)
                 try await connect(second, token, direct: true)
             }
-            guard number == session, liveCloseTimeout == nil, let link else { return }
+            guard number == session, liveCloseTimeout == nil, let link else { return nil }
             connectionOpen = true
             if var timing = openingTiming {
                 timing.connectedMS = max(0, Int(time.now().timeIntervalSince(timing.started) * 1000))
@@ -887,7 +925,7 @@ final class VoiceModel {
             }
             if !sendOpeningAudioIfReady() {
                 if !waitsForOpeningDictation { await openingDictation?.value }
-                return
+                return number
             }
             lastActivity = time.now()
             if subscription {
@@ -897,14 +935,15 @@ final class VoiceModel {
             watchForStall(session: number)
             link.setRemoteVolume(muted || liveSpeechStopped ? 0 : 1)
             if usesLive { watchLivePlayback(link, session: number) }
+            return number
         } catch {
             // Ended while connecting: stop() already put everything back.
-            guard number == session, liveCloseTimeout == nil else { return }
+            guard number == session, liveCloseTimeout == nil else { return nil }
             log.add("voice", "could not connect: \(error.localizedDescription)")
             if startOpeningDictation() {
                 // Return control to Shortcuts so the owner can run Poki Anytime again.
                 if !waitsForOpeningDictation { await openingDictation?.value }
-                return
+                return number
             }
             transcript = nil
             appAudio = nil
@@ -917,6 +956,7 @@ final class VoiceModel {
             }
             phase = .lost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error))
             needsChatGPTSignIn = error as? CodexVoice.Failure == .signIn
+            return number
         }
     }
 
@@ -1105,6 +1145,12 @@ final class VoiceModel {
         lines.removeAll()
     }
 
+    /// Ends the conversation only if the caller still owns the active session.
+    func stop(ifOwningSession expectedSession: Int) {
+        guard expectedSession == session else { return }
+        stop()
+    }
+
     /// Ends the conversation. Calls already running keep running; the next session hears how they ended.
     func stop() {
         guard liveCloseTimeout == nil else { return }
@@ -1154,6 +1200,9 @@ final class VoiceModel {
     /// Drops the connection and the state of its turns; calls already running keep running. The lines of
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
+        if backgroundRecordingGrant?.session == session {
+            backgroundRecordingGrant = nil
+        }
         releaseOpeningCapture(session: session)
         openingDictation?.cancel()
         openingDictation = nil

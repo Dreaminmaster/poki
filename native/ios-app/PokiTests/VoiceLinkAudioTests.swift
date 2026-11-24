@@ -6,10 +6,13 @@ import XCTest
 final class VoiceLinkAudioTests: XCTestCase {
     @MainActor
     func testClosingTalkReleasesAudioAfterRejectedConfiguration() async {
+        // Warm up one-time WebRTC audio defaults first so injecting an invalid category exercises
+        // the fallback branch reliably even when this test runs alone.
         let warmup = VoiceLink(onEvent: { _ in }, onClosed: { _ in })
         await connectToUnavailableEndpoint(warmup)
         warmup.close()
 
+        let priorLogs = Set(AppLog.shared.lines)
         let audio = AVAudioSession.sharedInstance()
         let session = RTCAudioSession.sharedInstance()
         let configuration = RTCAudioSessionConfiguration.webRTC()
@@ -23,6 +26,12 @@ final class VoiceLinkAudioTests: XCTestCase {
         defer { link.close() }
         await connectToUnavailableEndpoint(link)
         XCTAssertTrue(session.isActive)
+        XCTAssertEqual(audio.category, .playAndRecord)
+        XCTAssertEqual(audio.mode, .voiceChat)
+        let fallbackLogs = AppLog.shared.lines.filter {
+            !priorLogs.contains($0) && $0.contains("RTCAudioSession configuration fallback:")
+        }
+        XCTAssertFalse(fallbackLogs.isEmpty, "Rejected WebRTC configuration must enter and log the fallback branch")
         link.close()
         XCTAssertFalse(session.isActive, "Closing the talk should release the recording session")
     }
@@ -71,31 +80,6 @@ final class VoiceLinkAudioTests: XCTestCase {
 
         _ = capture.audio.stopCapture(session: 1)
         XCTAssertFalse(session.isActive, "Stopping opening capture must release the final RTCAudioSession activation")
-    }
-
-    @MainActor
-    func testOpeningCaptureConnectionSurvivesRejectedWebRTCConfiguration() async {
-        let priorLogs = Set(AppLog.shared.lines)
-        let audioSession = AVAudioSession.sharedInstance()
-        let rtcSession = RTCAudioSession.sharedInstance()
-        let configuration = RTCAudioSessionConfiguration.webRTC()
-        let savedCategory = configuration.category
-        let invalidCategory = AVAudioSession.Category(rawValue: "InvalidOpeningCategory")
-        XCTAssertThrowsError(try audioSession.setCategory(invalidCategory))
-        configuration.category = invalidCategory.rawValue
-        defer { configuration.category = savedCategory }
-
-        let capture = OpeningVoiceCapture(audio: OpeningVoiceAudio(session: 1, playReadyChime: false))
-        let link = VoiceLink(onEvent: { _ in }, onClosed: { _ in })
-        link.useOpeningCapture(capture)
-        defer { link.close() }
-
-        await connectToUnavailableEndpoint(link)
-        XCTAssertTrue(rtcSession.isActive, "Fallback audio configuration must still activate RTCAudioSession with openingCapture")
-        let fallbackLogs = AppLog.shared.lines.filter { !priorLogs.contains($0) && $0.contains("RTCAudioSession configuration fallback:") }
-        XCTAssertFalse(fallbackLogs.isEmpty, "Rejected WebRTC configuration must log entering the fallback branch")
-        link.close()
-        XCTAssertFalse(rtcSession.isActive, "Closing VoiceLink must deactivate RTCAudioSession after fallback")
     }
 
     @MainActor

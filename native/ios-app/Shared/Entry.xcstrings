@@ -513,6 +513,38 @@
         }
       }
     },
+    "Poki couldn’t capture the microphone in the background, so it opens to talk." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 没能在后台获取到麦克风，所以打开 Poki 来说话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 沒能在背景取得麥克風，所以打開 Poki 來說話。"
+          }
+        }
+      }
+    },
+    "Poki couldn’t capture the microphone in the background. Open Poki to talk." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 没能在后台获取到麦克风，请打开 Poki 来说话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 沒能在背景取得麥克風，請打開 Poki 來說話。"
+          }
+        }
+      }
+    },
     "Allow Poki to use the microphone first." : {
       "localizations" : {
         "zh-Hans" : {
