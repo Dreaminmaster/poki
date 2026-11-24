@@ -247,12 +247,20 @@ struct ChatModelChoice: Hashable, Identifiable, Sendable {
 enum ModelKeys {
     @TaskLocal static var defaultService = "nz.zheha.poki"
 
+    static var activeService: String {
+        defaultService == Keychain.defaultServiceName ? PokiStorage.keychainService : defaultService
+    }
+
+    private static func resolveService(_ service: String) -> String {
+        service == Keychain.defaultServiceName ? activeService : service
+    }
+
     private static func account(_ provider: ModelProvider) -> String { "model-key.\(provider.rawValue)" }
 
     /// For a custom provider, the key of the one the chat uses now (`CustomProviders.current`).
     static func key(_ provider: ModelProvider, service: String = defaultService) -> String? {
         if provider == .custom { return CustomProviders.current.flatMap { CustomProviders.key($0.id) } }
-        guard let data = try? Keychain.read(account(provider), service: service), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
+        guard let data = try? Keychain.read(account(provider), service: resolveService(service)), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
         return key
     }
 
@@ -264,7 +272,7 @@ enum ModelKeys {
             return try CustomProviders.saveKey(key, for: current.id)
         }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        try Keychain.write(Data(trimmed.utf8), account: account(provider), service: service)
+        try Keychain.write(Data(trimmed.utf8), account: account(provider), service: resolveService(service))
         saved += 1
     }
 
@@ -273,12 +281,12 @@ enum ModelKeys {
             if let current = CustomProviders.current { CustomProviders.removeKey(current.id) }
             return
         }
-        try? Keychain.remove(account(provider), service: service)
+        try? Keychain.remove(account(provider), service: resolveService(service))
         saved += 1
     }
 
     static func removeChatGPTSignIn(service: String = defaultService) throws {
-        try Keychain.remove(account(.chatgpt), service: service)
+        try Keychain.remove(account(.chatgpt), service: resolveService(service))
         saved += 1
     }
 
@@ -302,7 +310,7 @@ enum ModelKeys {
         var provider = CustomProviders.current ?? CustomProvider()
         change(&provider)
         CustomProviders.upsert(provider)
-        UserDefaults.standard.set(provider.id.uuidString, forKey: CustomProviders.selectedKey)
+        PokiStorage.defaults.set(provider.id.uuidString, forKey: CustomProviders.selectedKey)
     }
 
     /// A different address never inherits the previous service's secret.
@@ -333,7 +341,7 @@ enum ModelKeys {
         if !typed.isEmpty { try CustomProviders.saveKey(typed, for: provider.id) }
         else if !keepKey, CustomProviders.key(provider.id) != nil { CustomProviders.removeKey(provider.id) }
         let saved = CustomProviders.upsert(provider)
-        UserDefaults.standard.set(saved.id.uuidString, forKey: CustomProviders.selectedKey)
+        PokiStorage.defaults.set(saved.id.uuidString, forKey: CustomProviders.selectedKey)
         guard !saved.model.isEmpty, saved.primary != nil else { return }
         selectedProvider = .custom
         selectedModel = CustomProviders.choiceID(saved.id, saved.model)
@@ -351,23 +359,23 @@ enum ModelKeys {
     }
 
     static var selectedProvider: ModelProvider {
-        get { UserDefaults.standard.string(forKey: "chat.provider").flatMap(ModelProvider.init(rawValue:)) ?? .anthropic }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "chat.provider"); saved += 1 }
+        get { PokiStorage.defaults.string(forKey: "chat.provider").flatMap(ModelProvider.init(rawValue:)) ?? .anthropic }
+        set { PokiStorage.defaults.set(newValue.rawValue, forKey: "chat.provider"); saved += 1 }
     }
 
     /// Each provider's model: its first (Claude Sonnet 5.5, GPT-6.1 Terra) unless the owner picks another.
     static func model(for provider: ModelProvider) -> String {
         let available = ModelCatalog.available(provider)
-        let saved = UserDefaults.standard.string(forKey: "chat.model.\(provider.rawValue)")
+        let saved = PokiStorage.defaults.string(forKey: "chat.model.\(provider.rawValue)")
         return saved.flatMap { id in available.contains { $0.id == id } ? id : nil } ?? available.first?.id ?? provider.models.first?.id ?? ""
     }
 
     static var selectedModel: String {
         get { model(for: selectedProvider) }
         set {
-            UserDefaults.standard.set(newValue, forKey: "chat.model.\(selectedProvider.rawValue)")
+            PokiStorage.defaults.set(newValue, forKey: "chat.model.\(selectedProvider.rawValue)")
             if selectedProvider == .custom, let chosen = CustomProviders.parse(newValue) {
-                UserDefaults.standard.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
+                PokiStorage.defaults.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
             }
         }
     }

@@ -1516,22 +1516,25 @@ final class VoiceModelTests: XCTestCase {
         statusHarness.voice.stop()
     }
 
-    private var savedBridge: String?
-    private var savedDirect: Any?
+    private var storage: IsolatedTestStorage!
 
-    override func setUp() {
-        savedBridge = UserDefaults.standard.string(forKey: "voiceBridge")
-        savedDirect = UserDefaults.standard.object(forKey: "voice.openai.enabled")
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        storage = try IsolatedTestStorage(prefix: "voice-model")
+        storage.activate()
         // The token comes from the stubbed bridge, never from an OpenAI key this simulator may hold.
         VoiceDirect.enabled = false
         BridgeStub.resetScreenshots()
         URLProtocol.registerClass(BridgeStub.self)
     }
 
-    override func tearDown() {
+    override func tearDownWithError() throws {
         URLProtocol.unregisterClass(BridgeStub.self)
-        UserDefaults.standard.set(savedBridge, forKey: "voiceBridge")
-        UserDefaults.standard.set(savedDirect, forKey: "voice.openai.enabled")
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
+        }
+        try super.tearDownWithError()
     }
 
     /// One VoiceModel with its connections (one per conversation), its time, and what Poki was told about
@@ -1807,7 +1810,10 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                prepareStorage: { .ready },
+                codexService: PokiStorage.codexService,
+                home: CodexAccount.home
             )
             var called: [(name: String, arguments: String)] = []
             let marker = UUID().uuidString
@@ -1854,6 +1860,10 @@ final class VoiceModelTests: XCTestCase {
                 "threadId": "fixture-thread", "tool": "shell_command",
                 "arguments": ["cmd": "secret-cmd"],
             ]])
+            push(["id": 904, "method": "item/tool/call", "params": [
+                "threadId": "fixture-thread", "tool": "private_peer_tool_secret_token",
+                "arguments": ["note": "never-log-tool-name"],
+            ]])
             await h.time.settle()
 
             XCTAssertEqual(called.map(\.name), ["open_app"])
@@ -1865,16 +1875,20 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(versionText.contains("ios_version"), versionText)
             let rejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 903 }?["result"] as? [String: Any])
             XCTAssertEqual(rejectedReply["success"] as? Bool, false)
+            let privateRejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 904 }?["result"] as? [String: Any])
+            XCTAssertEqual(privateRejectedReply["success"] as? Bool, false)
 
             let logs = newLogs()
             XCTAssertTrue(logs.contains("\(expectedTools.count) tools"), logs)
             XCTAssertTrue(logs.contains("\(expectedInstructions.count) chars"), logs)
             XCTAssertTrue(logs.contains("Codex tool requested: open_app"), logs)
             XCTAssertTrue(logs.contains("Codex tool executed: open_app"), logs)
-            XCTAssertTrue(logs.contains("Codex tool requested: shell_command"), logs)
-            XCTAssertTrue(logs.contains("Codex tool rejected: shell_command"), logs)
+            XCTAssertTrue(logs.contains("Codex tool rejected: disallowed (disallowed tool)"), logs)
+            XCTAssertFalse(logs.contains("shell_command"), "disallowed peer tool name must not be written to diagnostics: \(logs)")
+            XCTAssertFalse(logs.contains("private_peer_tool_secret_token"), "arbitrary disallowed tool name must not be written to diagnostics: \(logs)")
             XCTAssertFalse(logs.contains("do-not-log-this-phrase"), logs)
             XCTAssertFalse(logs.contains("secret-cmd"), logs)
+            XCTAssertFalse(logs.contains("never-log-tool-name"), logs)
 
             push(["method": "thread/realtime/itemAdded", "params": [
                 "threadId": "fixture-thread", "item": ["type": "handoff_request"],
@@ -1921,7 +1935,10 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                prepareStorage: { .ready },
+                codexService: PokiStorage.codexService,
+                home: CodexAccount.home
             )
             let marker = UUID().uuidString
             AppLog.shared.add("test", marker)
@@ -2062,16 +2079,20 @@ final class VoiceModelTests: XCTestCase {
     }
 
     private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
-        let selected = UserDefaults.standard.object(forKey: "chat.provider")
-        let saved = ModelKeys.key(.chatgpt)
-        defer {
-            ModelKeys.remove(.chatgpt)
-            if let saved { try? ModelKeys.save(saved, for: .chatgpt) }
-            UserDefaults.standard.set(selected, forKey: "chat.provider")
+        let isolated = try IsolatedTestStorage(prefix: "voice-chatgpt")
+        var runError: Error?
+        do {
+            try await PokiStorage.withScope(isolated.scope) {
+                VoiceDirect.enabled = false
+                try ModelKeys.save(#"{"access":"fixture-access","refresh":"fixture-refresh","expires":1,"clientId":"fixture-registration"}"#, for: .chatgpt)
+                ModelKeys.selectedProvider = .chatgpt
+                try await run()
+            }
+        } catch {
+            runError = error
         }
-        try ModelKeys.save(#"{"access":"fixture-access","refresh":"fixture-refresh","expires":1,"clientId":"fixture-registration"}"#, for: .chatgpt)
-        ModelKeys.selectedProvider = .chatgpt
-        try await run()
+        try isolated.tearDown()
+        if let runError { throw runError }
     }
 
     /// Said once, answered once: in the foreground the conversation stays open until ended; in the
@@ -2398,7 +2419,10 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                prepareStorage: { .ready },
+                codexService: PokiStorage.codexService,
+                home: CodexAccount.home
             )
             let h = Harness(codex: codex)
             defer {
@@ -2469,6 +2493,94 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(link2.closed)
             NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
         }
+    }
+
+    /// SP-1 regression: an empty or unaccepted Codex `handoff_request` that never emits `poki/backend/turnStarted`
+    /// must time out of pending handoff state after `codexHandoffGrace` and return to normal 60 s background idle
+    /// shutdown so the microphone is released. Conversely, once `poki/backend/turnStarted` confirms a backend turn,
+    /// the session must stay open past `codexHandoffGrace`, `backgroundStall`, and `backgroundFollowUp`.
+    func testCodexUnconfirmedHandoffTimesOutToBackgroundIdleAndReleasesMicrophone() async throws {
+        // Seed outer scope like a pre-configured host to prove `withChatGPTSelected` preserves host credentials and prefs.
+        try ModelKeys.save("host-chatgpt-credential", for: .chatgpt)
+        ModelKeys.selectedProvider = .openai
+
+        try await withChatGPTSelected {
+            // 1. Bare handoff_request with no turnStarted: waits codexHandoffGrace (10 s), returns to .listening,
+            // then ends after 60 s background idle and releases the microphone.
+            let codex1 = FakeSubscriptionVoice()
+            let h1 = Harness(codex: codex1)
+            defer {
+                h1.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+            await h1.connect()
+            let link1 = try XCTUnwrap(h1.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+            codex1.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h1.time.settle()
+            XCTAssertEqual(h1.voice.phase, .thinking)
+            XCTAssertTrue(h1.voice.midTurn)
+
+            await h1.time.advance(9)
+            XCTAssertTrue(h1.voice.isOn, "pending handoff must stay open within codexHandoffGrace")
+            XCTAssertEqual(h1.voice.phase, .thinking)
+
+            await h1.time.advance(1)
+            XCTAssertTrue(h1.voice.isOn, "timing out an unconfirmed handoff returns to idle rather than abruptly failing")
+            XCTAssertEqual(h1.voice.phase, .listening)
+            XCTAssertFalse(h1.voice.midTurn)
+
+            await h1.time.advance(59)
+            XCTAssertTrue(h1.voice.isOn, "background idle must still grant the full 60 s window after returning to idle")
+            await h1.time.advance(1)
+            XCTAssertFalse(h1.voice.isOn, "unconfirmed handoff must release the microphone after returning to background idle")
+            XCTAssertEqual(h1.voice.phase, .off)
+            XCTAssertTrue(link1.closed)
+            XCTAssertEqual(h1.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+            // 2. Transcript done + unconfirmed handoff with no frontend speech and no turnStarted:
+            // unconfirmed handoff must not mask backgroundStall (30 s).
+            let codex2 = FakeSubscriptionVoice()
+            let h2 = Harness(codex: codex2)
+            defer { h2.voice.stop() }
+            await h2.connect()
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            codex2.notify("thread/realtime/transcript/done", ["role": "user", "text": "Check mail"])
+            codex2.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h2.time.advance(29)
+            XCTAssertTrue(h2.voice.isOn)
+            await h2.time.advance(1)
+            XCTAssertFalse(h2.voice.isOn, "unconfirmed handoff must not suppress background stall timeout when awaitingAnswer is still due")
+            XCTAssertEqual(h2.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+            // 3. Handoff confirmed by turnStarted within grace window stays open across long backend silence until turnCompleted.
+            let codex3 = FakeSubscriptionVoice()
+            let h3 = Harness(codex: codex3)
+            defer { h3.voice.stop() }
+            await h3.connect()
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            codex3.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h3.time.advance(5)
+            codex3.notify("poki/backend/turnStarted", [:])
+            await h3.time.advance(80)
+            XCTAssertTrue(h3.voice.isOn, "confirmed backend turn must not be interrupted by handoff grace, stall, or idle timers")
+            XCTAssertEqual(h3.voice.phase, .thinking)
+            XCTAssertTrue(h3.voice.midTurn)
+
+            codex3.notify("poki/backend/turnCompleted", ["status": "completed"])
+            await h3.time.settle()
+            XCTAssertEqual(h3.voice.phase, .listening)
+            await h3.time.advance(60)
+            XCTAssertFalse(h3.voice.isOn)
+            XCTAssertEqual(h3.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+
+        XCTAssertEqual(ModelKeys.key(.chatgpt), "host-chatgpt-credential")
+        XCTAssertEqual(ModelKeys.selectedProvider, .openai)
     }
 
     func testCodexRunningPhoneToolStaysOpenInForegroundAndBackgroundUntilFinished() async throws {
@@ -2976,7 +3088,8 @@ extension VoiceModelTests {
         XCTAssertFalse(h.voice.isOn)
         XCTAssertNil(h.voice.talkState)
         XCTAssertNil(h.voice.bridge)
-        XCTAssertNil(UserDefaults.standard.string(forKey: "voiceBridge"))
+        XCTAssertNil(PokiStorage.defaults.string(forKey: "voiceBridge"))
+        XCTAssertNil(VoiceBridge.saved)
         XCTAssertFalse(h.voice.canTalkLive)
     }
 

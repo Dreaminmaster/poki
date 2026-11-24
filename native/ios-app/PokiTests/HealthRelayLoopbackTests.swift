@@ -7,54 +7,24 @@ import XCTest
 @MainActor
 final class HealthRelayLoopbackTests: XCTestCase {
     private var savedLanguage = AppLocalization.system
-    private let defaultsKeys = [
-        "chat.provider",
-        "chat.customURL",
-        "chat.customModel",
-        "custom.providers",
-        "chat.customProvider",
-        "chat.model.custom",
-        "chat.apiKey.anthropic",
-        "chat.apiKey.openai",
-        "chat.apiKey.gemini",
-        "chat.apiKey.deepseek",
-        "chat.apiKey.openrouter",
-        "relayAddress",
-        "relayEnabled",
-        "wantsOn",
-    ]
-    private var savedDefaults: [String: Any] = [:]
-    private var savedSetup = SetupState()
-    private var savedKeychain: [String: Data?] = [:]
-    private let keychainAccounts = [
-        "api.anthropic",
-        "api.openai",
-        "api.gemini",
-        "api.deepseek",
-        "api.openrouter",
-        "chatgpt.oauth.v1",
-    ]
+    private var storage: IsolatedTestStorage!
 
     override func setUp() async throws {
         savedLanguage = AppLocalization.shared.preference
-        savedSetup = SetupState.load()
-        for key in defaultsKeys { savedDefaults[key] = UserDefaults.standard.object(forKey: key) }
-        for account in keychainAccounts { savedKeychain[account] = try? Keychain.read(account) }
+        storage = try IsolatedTestStorage(prefix: "health-relay-loopback")
+        storage.activate()
     }
 
     override func tearDown() async throws {
         AppLocalization.shared.preference = savedLanguage
-        for key in defaultsKeys { UserDefaults.standard.set(savedDefaults[key], forKey: key) }
-        for (account, value) in savedKeychain {
-            if let value { try? Keychain.write(value, account: account) }
-            else { Keychain.delete(account) }
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
         }
-        savedSetup.save()
     }
 
-    private func clearModelKeysAndRelay() {
-        for key in defaultsKeys { UserDefaults.standard.removeObject(forKey: key) }
-        for account in keychainAccounts { Keychain.delete(account) }
+    private func resetIsolatedState() throws {
+        try storage.reset()
     }
 
     private func makeModel(
@@ -77,7 +47,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// 1. Simplified and Traditional Chinese UI must localize `AppModel.noRelay` in
     /// `Issue.current(model)`, `PokiDetailsView` ("需要处理"), and `SetupSettingsPage` without raw English.
     func testChineseUILocalizesNoRelayProblemInIssuesDetailsAndSetup() async throws {
-        clearModelKeysAndRelay()
+        try resetIsolatedState()
         XCTAssertFalse(ModelKeys.hasUsableKey, "test precondition: no usable model key")
 
         let model = makeModel()
@@ -127,7 +97,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// `AgentsAndRelayView`, `AgentsView`, and `Issue.current(model)`, and disabling the relay switch
     /// must settle to `.off` (not `.offline("stopped")`) and remove the offline issue.
     func testChineseUILocalizesRelayOfflineStatusAcrossViewsAndDisablingClearsIssue() async throws {
-        clearModelKeysAndRelay()
+        try resetIsolatedState()
         AppLocalization.shared.preference = "zh-Hans"
 
         let model = makeModel()
@@ -273,7 +243,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertNil(model.problem, "choosing external proxy must clear built-in VPN attention")
 
         // Non-loopback problem (noRelay) must NOT be cleared when loopback recovers.
-        clearModelKeysAndRelay()
+        try resetIsolatedState()
         let noRelayModel = makeModel()
         defer { noRelayModel.stopSession() }
         noRelayModel.setup.loopback = .proxy
@@ -505,6 +475,34 @@ final class HealthRelayLoopbackTests: XCTestCase {
         let refusedCertHant = Issue.localizedProblem("The phone refused the pairing (invalid cert). Pair again in Setup.")
         XCTAssertTrue(refusedCertHant.contains("重新配對") && refusedCertHant.contains("配對憑證已失效或不受信任"), refusedCertHant)
         XCTAssertFalse(refusedCertHant.contains("invalid cert"), refusedCertHant)
+    }
+
+    /// 6. Isolated test storage keeps a pre-configured host's real credentials and preferences intact
+    /// while establishing an empty `ModelKeys.hasUsableKey == false` precondition inside the nested test scope.
+    func testIsolatedStoragePreservesPreconfiguredHostCredentialsAndPreferences() throws {
+        // Seed the outer test scope as a simulated pre-configured host with real model-key.* and preferences.
+        try ModelKeys.save("test-host-openai-credential", for: .openai)
+        ModelKeys.selectedProvider = .openai
+        RelayAddress.saved = RelayAddress("https://host-relay.example")
+        XCTAssertTrue(ModelKeys.hasUsableKey)
+
+        let inner = try IsolatedTestStorage(prefix: "health-relay-inner")
+        defer { try? inner.tearDown() }
+        try PokiStorage.withScope(inner.scope) {
+            XCTAssertFalse(ModelKeys.hasUsableKey, "inner isolated scope must not inherit host model keys")
+            XCTAssertNil(RelayAddress.saved, "inner isolated scope must not inherit host relay address")
+            let model = makeModel()
+            defer { model.stopSession() }
+            model.setup.loopback = .proxy
+            model.loopback.simulate(.working(ms: 12))
+            model.startSession()
+            XCTAssertEqual(model.problem, AppModel.noRelay)
+        }
+
+        XCTAssertEqual(ModelKeys.key(.openai), "test-host-openai-credential")
+        XCTAssertEqual(ModelKeys.selectedProvider, .openai)
+        XCTAssertEqual(RelayAddress.saved?.origin.absoluteString, "https://host-relay.example")
+        XCTAssertTrue(ModelKeys.hasUsableKey)
     }
 
     // MARK: - Helpers

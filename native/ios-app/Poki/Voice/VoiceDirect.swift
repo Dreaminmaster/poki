@@ -70,8 +70,8 @@ enum VoiceDirect {
 
     /// The owner's switch in Accounts › OpenAI › Live Voice (on unless turned off).
     static var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: "voice.openai.enabled") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "voice.openai.enabled"); ModelKeys.saved += 1 }
+        get { PokiStorage.defaults.object(forKey: "voice.openai.enabled") as? Bool ?? true }
+        set { PokiStorage.defaults.set(newValue, forKey: "voice.openai.enabled"); ModelKeys.saved += 1 }
     }
 
     /// Live voice on one account. One account runs it at a time: switching one on switches the others off.
@@ -91,7 +91,7 @@ enum VoiceDirect {
         CustomProviders.all = providers
         switch account {
         case .openai: enabled = on
-        case .custom: if on { UserDefaults.standard.set(false, forKey: "voice.openai.enabled") }
+        case .custom: if on { PokiStorage.defaults.set(false, forKey: "voice.openai.enabled") }
         }
         ModelKeys.saved += 1
     }

@@ -23,8 +23,8 @@ struct VoiceBridge: Equatable {
     var display: String { "\(base.host() ?? "")\(base.port.map { ":\($0)" } ?? "")" }
 
     static var saved: VoiceBridge? {
-        get { UserDefaults.standard.string(forKey: "voiceBridge").flatMap(VoiceBridge.init) }
-        set { UserDefaults.standard.set(newValue?.base.absoluteString, forKey: "voiceBridge") }
+        get { PokiStorage.defaults.string(forKey: "voiceBridge").flatMap(VoiceBridge.init) }
+        set { PokiStorage.defaults.set(newValue?.base.absoluteString, forKey: "voiceBridge") }
     }
 
     struct Token: Decodable {
@@ -335,6 +335,8 @@ final class VoiceModel {
     private var appAudio: AppAudioContext?
     private var usesCodexLive = false
     private var codexBackendBusy = false
+    private var codexHandoffPending = false
+    private var codexHandoffTimeout: Task<Void, Never>?
     private var activeCodexTools = 0
     private var liveCloseTimeout: Task<Void, Never>?
     private var liveUsageSeconds: Double?
@@ -496,6 +498,9 @@ final class VoiceModel {
 
     /// How long a background conversation waits while completely idle before ending and releasing the microphone.
     static let backgroundFollowUp: Duration = .seconds(60)
+    /// How long an unconfirmed Codex `handoff_request` may hold the session busy before timing out
+    /// back to idle when no backend turn starts (e.g. an empty handoff transcript).
+    static let codexHandoffGrace: Duration = .seconds(10)
     /// A conversation opened this soon after the last one ended is told the last turns.
     static let carryOver: TimeInterval = 5 * 60
     static let carriedLines = 6
@@ -1151,6 +1156,7 @@ final class VoiceModel {
             usesCodexLive = false
         }
         codexBackendBusy = false
+        clearCodexHandoff()
         activeCodexTools = 0
         keepOpen()
         openingTiming = nil
@@ -1204,15 +1210,20 @@ final class VoiceModel {
     /// false, not by a guess at a pause (ESP-954).
     var midTurn: Bool { isOn && (answerDue || phase == .thinking) }
 
+    /// A confirmed Codex backend turn or local phone tool is running.
     private var codexBusy: Bool { codexBackendBusy || activeCodexTools > 0 }
+
+    /// Confirmed Codex work, or a freshly requested handoff awaiting `turnStarted`.
+    private var codexWorkPending: Bool { codexBusy || codexHandoffPending }
 
     private var answerDue: Bool {
         awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse || pendingRealtimeTurns > 0
-            || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running } || codexBusy
+            || phase == .hearing || phase == .speaking || calls.contains { $0.state == .running } || codexWorkPending
     }
 
     /// The server owes something: the end of the person's speech, an answer, the end of the audio. A step
     /// that is running is not the server's to answer for, and it has its own time limits.
+    /// An unconfirmed `handoff_request` must not suppress server stall detection before `turnStarted`.
     private var waitingOnServer: Bool {
         !ready || (awaitingAnswer || liveAwaitingPlayback || !liveResultReceipts.isEmpty || activeResponse != nil || wantsResponse
             || pendingRealtimeTurns > 0 || phase == .hearing || phase == .speaking)
@@ -1325,7 +1336,7 @@ final class VoiceModel {
                         suppressedWhileHearing = 0
                         if phase == .speaking {
                             let working = awaitingAnswer || liveAwaitingPlayback || activeResponse != nil
-                                || calls.contains { $0.state == .running } || codexBusy
+                                || calls.contains { $0.state == .running } || codexWorkPending
                             phase = working ? .thinking : .listening
                             endIfDone()
                         }
@@ -1465,7 +1476,7 @@ final class VoiceModel {
         liveAwaitingPlayback = false
         for index in calls.indices where !calls[index].delivered { calls[index].silentResult = true }
         link.setRemoteVolume(0)
-        phase = (calls.contains { $0.state == .running } || codexBusy) ? .thinking : .listening
+        phase = (calls.contains { $0.state == .running } || codexWorkPending) ? .thinking : .listening
         if ready { link.send(note(message)) }
         endIfDone()
     }
@@ -1506,6 +1517,28 @@ final class VoiceModel {
 
     // MARK: Events
 
+    private func clearCodexHandoff() {
+        codexHandoffTimeout?.cancel()
+        codexHandoffTimeout = nil
+        codexHandoffPending = false
+    }
+
+    private func beginCodexHandoff(session number: Int) {
+        guard !codexBackendBusy else { return }
+        codexHandoffPending = true
+        codexHandoffTimeout?.cancel()
+        codexHandoffTimeout = Task { [weak self, time] in
+            await time.sleep(Self.codexHandoffGrace)
+            guard let self, !Task.isCancelled, number == session, isOn else { return }
+            codexHandoffTimeout = nil
+            guard codexHandoffPending else { return }
+            codexHandoffPending = false
+            log.add("voice", "Codex realtime handoff started no backend turn within \(Self.codexHandoffGrace): returning to idle")
+            if phase == .thinking, !answerDue { phase = .listening }
+            endIfDone()
+        }
+    }
+
     private func handleCodex(_ method: String, params: CodexVoice.JSON, session number: Int) {
         guard number == session, usesCodexLive, let link else { return }
         switch method {
@@ -1518,16 +1551,18 @@ final class VoiceModel {
             }
         case "thread/realtime/itemAdded":
             guard (params["item"] as? CodexVoice.JSON)?["type"] as? String == "handoff_request" else { return }
-            codexBackendBusy = true
             lastActivity = time.now()
             keepOpen()
+            beginCodexHandoff(session: number)
             if phase != .speaking && phase != .hearing { phase = .thinking }
         case "poki/backend/turnStarted":
+            clearCodexHandoff()
             codexBackendBusy = true
             lastActivity = time.now()
             keepOpen()
             if phase != .speaking && phase != .hearing { phase = .thinking }
         case "poki/backend/turnCompleted":
+            clearCodexHandoff()
             codexBackendBusy = false
             awaitingAnswer = false
             lastActivity = time.now()
@@ -1541,6 +1576,7 @@ final class VoiceModel {
             if phase == .thinking, !answerDue { phase = .listening }
             endIfDone()
         case "poki/backend/error":
+            clearCodexHandoff()
             lastActivity = time.now()
             if params["willRetry"] as? Bool == true {
                 codexBackendBusy = true
@@ -1569,7 +1605,7 @@ final class VoiceModel {
                 keepOpen()
                 if text.isEmpty {
                     if phase == .hearing {
-                        phase = codexBusy ? .thinking : .listening
+                        phase = codexWorkPending ? .thinking : .listening
                         endIfDone()
                     }
                     return

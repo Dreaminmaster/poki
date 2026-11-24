@@ -28,16 +28,16 @@ struct SetupState: Codable, Equatable {
     /// or a signing tool that could not keep the container), the copy in the Keychain, which outlives
     /// the app's container as long as the same team signs it. See `SetupVault`.
     static func load() -> SetupState {
-        if let data = UserDefaults.standard.data(forKey: "setup"), let state = try? JSONDecoder().decode(SetupState.self, from: data) { return state }
+        if let data = PokiStorage.defaults.data(forKey: "setup"), let state = try? JSONDecoder().decode(SetupState.self, from: data) { return state }
         if let data = SetupVault.readSetup(), let state = try? JSONDecoder().decode(SetupState.self, from: data) {
-            UserDefaults.standard.set(data, forKey: "setup")
+            PokiStorage.defaults.set(data, forKey: "setup")
             return state
         }
         return SetupState()
     }
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: "setup")
+        PokiStorage.defaults.set(data, forKey: "setup")
         SetupVault.storeSetup(data)
     }
 }

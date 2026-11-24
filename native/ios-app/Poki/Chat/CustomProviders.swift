@@ -92,12 +92,12 @@ enum CustomProviders {
     static var all: [CustomProvider] {
         get {
             migrateIfNeeded()
-            guard let data = UserDefaults.standard.data(forKey: storeKey),
+            guard let data = PokiStorage.defaults.data(forKey: storeKey),
                   let providers = try? JSONDecoder().decode([CustomProvider].self, from: data) else { return [] }
             return providers
         }
         set {
-            if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: storeKey) }
+            if let data = try? JSONEncoder().encode(newValue) { PokiStorage.defaults.set(data, forKey: storeKey) }
         }
     }
 
@@ -169,9 +169,9 @@ enum CustomProviders {
         let wasSelected = ModelKeys.selectedProvider == .custom && parse(ModelKeys.selectedModel)?.provider == id
         removeKey(id)
         ModelCatalog.invalidateCustom(id)
-        UserDefaults.standard.removeObject(forKey: "models.listed.voice.custom.\(id.uuidString)")
+        PokiStorage.defaults.removeObject(forKey: "models.listed.voice.custom.\(id.uuidString)")
         all = all.filter { $0.id != id }
-        if UserDefaults.standard.string(forKey: selectedKey) == id.uuidString { UserDefaults.standard.removeObject(forKey: selectedKey) }
+        if PokiStorage.defaults.string(forKey: selectedKey) == id.uuidString { PokiStorage.defaults.removeObject(forKey: selectedKey) }
         if wasSelected, let next = ModelCatalog.available(.custom).first {
             ModelKeys.selectedModel = next.id
         }
@@ -183,7 +183,7 @@ enum CustomProviders {
     static var current: CustomProvider? {
         let list = all
         if let chosen = parse(ModelKeys.model(for: .custom)), let match = list.first(where: { $0.id == chosen.provider }) { return match }
-        if let saved = UserDefaults.standard.string(forKey: selectedKey).flatMap(UUID.init(uuidString:)),
+        if let saved = PokiStorage.defaults.string(forKey: selectedKey).flatMap(UUID.init(uuidString:)),
            let match = list.first(where: { $0.id == saved }) { return match }
         return list.first
     }
@@ -239,7 +239,7 @@ enum CustomProviders {
     /// `chat.customModel` and the keychain's `model-key.custom`. They become the first provider, with
     /// its model list, its switched-on models and the chat's choice carried over.
     private static func migrateIfNeeded() {
-        let defaults = UserDefaults.standard
+        let defaults = PokiStorage.defaults
         let stored = defaults.data(forKey: storeKey)
         let url = defaults.string(forKey: "chat.customURL") ?? ""
         let model = defaults.string(forKey: "chat.customModel") ?? ""

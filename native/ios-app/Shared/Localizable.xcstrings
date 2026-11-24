@@ -23825,18 +23825,24 @@
         }
       }
     },
-    "Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet." : {
+    "Sensitive steps are paying, deleting in menus or confirmation dialogs, sending a message, placing a call, typing a password, and anything in Wallet." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sensitive steps are paying, deleting in menus or confirmation dialogs, sending a message, placing a call, typing a password, and anything in Wallet."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "敏感步骤包括付款、删除、发送信息、拨打电话、键入密码，以及“钱包”中的任何操作。"
+            "value" : "敏感步骤包括付款、菜单或确认弹窗中的删除、发送信息、拨打电话、键入密码，以及“钱包”中的任何操作。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "敏感步驟包括付款、刪除、傳送資訊、撥打電話、鍵入密碼，以及「錢包」中的任何操作。"
+            "value" : "敏感步驟包括付款、選單或確認彈窗中的刪除、傳送資訊、撥打電話、鍵入密碼，以及「錢包」中的任何操作。"
           }
         }
       }
@@ -34634,68 +34640,68 @@
         }
       }
     },
-    "Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation." : {
+    "Optional steps continue without asking. Payments, deletions in menus and confirmation dialogs, and Wallet actions still require your confirmation." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可选步骤无需询问直接继续。付款、删除及“钱包”操作仍需你本人确认。"
+            "value" : "可选步骤无需询问直接继续。付款、菜单和确认弹窗中的删除以及“钱包”操作仍需你本人确认。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可選步驟無需詢問直接繼續。付款、刪除及「錢包」操作仍需你本人確認。"
+            "value" : "可選步驟無需詢問直接繼續。付款、選單和確認彈窗中的刪除以及「錢包」操作仍需你本人確認。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Optional steps continue without asking. Payments, deletions, and Wallet actions still require your confirmation."
+            "value" : "Optional steps continue without asking. Payments, deletions in menus and confirmation dialogs, and Wallet actions still require your confirmation."
           }
         }
       }
     },
-    "Payments, deletions and actions in Wallet always need your confirmation." : {
+    "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、删除及“钱包”操作始终需要你确认。"
+            "value" : "付款、菜单和确认弹窗中的删除以及“钱包”操作始终需要你确认。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、刪除及「錢包」操作始終需要你確認。"
+            "value" : "付款、選單和確認彈窗中的刪除以及「錢包」操作始終需要你確認。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Payments, deletions, and Wallet actions always require your confirmation."
+            "value" : "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation."
           }
         }
       }
     },
-    "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking." : {
+    "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、删除及“钱包”操作始终需要你确认，其他敏感步骤直接进行。"
+            "value" : "付款、菜单和确认弹窗中的删除以及“钱包”操作始终需要你确认，其他敏感步骤直接进行。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
+            "value" : "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、刪除及「錢包」操作始終需要你確認，其他敏感步驟直接進行。"
+            "value" : "付款、選單和確認彈窗中的刪除以及「錢包」操作始終需要你確認，其他敏感步驟直接進行。"
           }
         }
       }

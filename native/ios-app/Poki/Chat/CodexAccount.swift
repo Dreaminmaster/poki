@@ -12,6 +12,7 @@ enum CodexAccount {
         case failed(OSStatus)
     }
 
+    static let defaultServiceName = "Codex Auth"
     @TaskLocal static var defaultService = "Codex Auth"
     @TaskLocal static var defaultHome: URL?
     private static let cliAccountPrefix = "cli|"
@@ -19,8 +20,16 @@ enum CodexAccount {
     private static let storageLock = NSLock()
     private static var signOutDepth = 0
 
+    static var activeService: String {
+        defaultService == defaultServiceName ? PokiStorage.codexService : defaultService
+    }
+
+    private static func resolveService(_ service: String) -> String {
+        service == defaultServiceName ? activeService : service
+    }
+
     static var home: URL {
-        defaultHome ?? URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
+        defaultHome ?? PokiStorage.codexHome ?? URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
     }
 
     /// The pinned App Server's direct Keychain store. Read the same item for text requests so the
@@ -42,6 +51,7 @@ enum CodexAccount {
     }
 
     static func readAccessToken(service: String = defaultService, home: URL = CodexAccount.home) -> String? {
+        let service = resolveService(service)
         storageLock.lock()
         defer { storageLock.unlock() }
 
@@ -66,6 +76,7 @@ enum CodexAccount {
 
     @discardableResult
     static func prepareStorage(service: String = defaultService, home: URL = CodexAccount.home) -> StorageState {
+        let service = resolveService(service)
         storageLock.lock()
         defer { storageLock.unlock() }
         guard signOutDepth == 0 else { return .empty }
@@ -73,6 +84,7 @@ enum CodexAccount {
     }
 
     static func ensureAfterFirstUnlock(service: String = defaultService, home: URL = CodexAccount.home) {
+        let service = resolveService(service)
         storageLock.lock()
         defer { storageLock.unlock() }
         guard signOutDepth == 0 else { return }
@@ -87,6 +99,7 @@ enum CodexAccount {
     }
 
     static func clearLegacyCredentials(service: String = defaultService, home: URL = CodexAccount.home) throws {
+        let service = resolveService(service)
         storageLock.lock()
         defer { storageLock.unlock() }
 
@@ -109,6 +122,7 @@ enum CodexAccount {
     }
 
     static func clearStoredCredentials(service: String = defaultService) throws {
+        let service = resolveService(service)
         storageLock.lock()
         defer { storageLock.unlock() }
 

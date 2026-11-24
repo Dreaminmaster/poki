@@ -25,7 +25,7 @@ enum ApprovalClassifier {
     typealias Level = ApprovalLevel
 
     /// The saved choice; before there was one, what 752's two switches did (`ApprovalChoice.resolve`).
-    nonisolated static var mode: Mode { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).mode }
+    nonisolated static var mode: Mode { ApprovalChoice.resolve(PokiStorage.defaults.object(forKey:)).mode }
 
     /// A chat model with a key: without one there is nobody to ask.
     static var hasModel: Bool {
@@ -212,7 +212,7 @@ extension ApprovalLevel {
         }
     }
     /// The saved sensitivity (`ApprovalChoice.resolve`).
-    static var saved: ApprovalLevel { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).level }
+    static var saved: ApprovalLevel { ApprovalChoice.resolve(PokiStorage.defaults.object(forKey:)).level }
     var rule: String {
         switch self {
         case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."

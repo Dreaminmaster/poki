@@ -8,19 +8,12 @@ import XCTest
 final class PokiMenuTests: XCTestCase {
     private var window: UIWindow?
     private var savedLanguage = AppLocalization.system
-    private var savedApprovalMode: Any?
-    private var savedProvider: Any?
-    private var savedCustomProviders: Any?
-    private var savedCustomSelected: Any?
-    private var savedCustomModel: Any?
+    private var storage: IsolatedTestStorage!
 
     override func setUp() async throws {
         savedLanguage = AppLocalization.shared.preference
-        savedApprovalMode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
-        savedProvider = UserDefaults.standard.object(forKey: "chat.provider")
-        savedCustomProviders = UserDefaults.standard.object(forKey: CustomProviders.storeKey)
-        savedCustomSelected = UserDefaults.standard.object(forKey: CustomProviders.selectedKey)
-        savedCustomModel = UserDefaults.standard.object(forKey: "chat.model.custom")
+        storage = try IsolatedTestStorage(prefix: "poki-menu")
+        storage.activate()
         AppLocalization.shared.preference = "en"
     }
 
@@ -28,11 +21,10 @@ final class PokiMenuTests: XCTestCase {
         window?.isHidden = true
         window = nil
         AppLocalization.shared.preference = savedLanguage
-        UserDefaults.standard.set(savedApprovalMode, forKey: ApprovalClassifier.modeKey)
-        UserDefaults.standard.set(savedProvider, forKey: "chat.provider")
-        UserDefaults.standard.set(savedCustomProviders, forKey: CustomProviders.storeKey)
-        UserDefaults.standard.set(savedCustomSelected, forKey: CustomProviders.selectedKey)
-        UserDefaults.standard.set(savedCustomModel, forKey: "chat.model.custom")
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
+        }
     }
 
     func testHomeBearMenuAnchorsBelowAvatarWithoutCoveringFace() throws {

@@ -31,14 +31,14 @@ enum ModelCatalog {
     }
 
     static func enabled(_ provider: ModelProvider) -> Set<String> {
-        if let saved = UserDefaults.standard.stringArray(forKey: "models.enabled.\(provider.rawValue)") { return Set(saved) }
+        if let saved = PokiStorage.defaults.stringArray(forKey: "models.enabled.\(provider.rawValue)") { return Set(saved) }
         return defaults(provider)
     }
 
     static func set(_ id: String, on: Bool, for provider: ModelProvider, notify: Bool = true) {
         var ids = enabled(provider)
         if on { ids.insert(id) } else { ids.remove(id) }
-        UserDefaults.standard.set(Array(ids), forKey: "models.enabled.\(provider.rawValue)")
+        PokiStorage.defaults.set(Array(ids), forKey: "models.enabled.\(provider.rawValue)")
         // The chat's model is always one that is switched on.
         if ModelKeys.selectedProvider == provider, !ids.contains(ModelKeys.selectedModel), let first = available(provider).first {
             ModelKeys.selectedModel = first.id
@@ -53,12 +53,12 @@ enum ModelCatalog {
                 ChatModelChoice(id: CustomProviders.choiceID(custom.id, $0), name: CustomProviders.choiceName(custom, $0, among: providers.count))
             } }
         }
-        return (UserDefaults.standard.stringArray(forKey: "models.listed.\(provider.rawValue)") ?? []).map { ChatModelChoice(id: $0, name: $0) }
+        return (PokiStorage.defaults.stringArray(forKey: "models.listed.\(provider.rawValue)") ?? []).map { ChatModelChoice(id: $0, name: $0) }
     }
 
     /// The model ids one custom provider's list returned.
     static func listedCustom(_ id: UUID) -> [String] {
-        UserDefaults.standard.stringArray(forKey: "models.listed.custom.\(id.uuidString)") ?? []
+        PokiStorage.defaults.stringArray(forKey: "models.listed.custom.\(id.uuidString)") ?? []
     }
 
     /// One custom provider's models: its own model and its list's, as the chat names them.
@@ -68,7 +68,7 @@ enum ModelCatalog {
 
     static func supportsReasoning(_ id: String, for provider: ModelProvider) -> Bool {
         guard provider == .openrouter else { return false }
-        return (UserDefaults.standard.stringArray(forKey: "models.reasoning.openrouter") ?? []).contains(id)
+        return (PokiStorage.defaults.stringArray(forKey: "models.reasoning.openrouter") ?? []).contains(id)
     }
 
     /// No-thinking, fast models first: Terra, Haiku, Flash.
@@ -102,7 +102,7 @@ enum ModelCatalog {
             .filter { usable($0, provider) }
         if provider == .openai {
             let voice = items.compactMap { $0["id"] as? String }.filter { $0.contains("realtime") && !$0.contains("transcribe") }.sorted()
-            UserDefaults.standard.set(voice, forKey: "models.listed.voice")
+            PokiStorage.defaults.set(voice, forKey: "models.listed.voice")
         }
         if provider == .openrouter {
             let reasoning = items.compactMap { item -> String? in
@@ -111,10 +111,10 @@ enum ModelCatalog {
                       parameters.contains("reasoning") || parameters.contains("reasoning_effort") else { return nil }
                 return id
             }
-            UserDefaults.standard.set(Array(Set(reasoning)).sorted(), forKey: "models.reasoning.openrouter")
+            PokiStorage.defaults.set(Array(Set(reasoning)).sorted(), forKey: "models.reasoning.openrouter")
         }
         ids = Array(Set(ids)).sorted { fast($0) == fast($1) ? $0 < $1 : fast($0) }
-        UserDefaults.standard.set(ids, forKey: "models.listed.\(provider.rawValue)")
+        PokiStorage.defaults.set(ids, forKey: "models.listed.\(provider.rawValue)")
         ModelKeys.saved += 1
         return ids.count
     }
@@ -125,7 +125,7 @@ enum ModelCatalog {
     static func refresh(custom id: UUID) async throws -> Int {
         guard let provider = CustomProviders.provider(id) else { return 0 }
         let key = CustomProviders.key(id)
-        let revision = UserDefaults.standard.string(forKey: "models.revision.custom.\(id.uuidString)")
+        let revision = PokiStorage.defaults.string(forKey: "models.revision.custom.\(id.uuidString)")
         let addresses = provider.endpoints.map(\.normalized).filter { !$0.isEmpty }
         var raw: [String]?
         var failure: Error = DiscoveryError.invalidAddress
@@ -139,12 +139,12 @@ enum ModelCatalog {
         try Task.checkCancellation()
         guard let now = CustomProviders.provider(id), now.endpoints.map(\.normalized).filter({ !$0.isEmpty }) == addresses,
               key == CustomProviders.key(id),
-              revision == UserDefaults.standard.string(forKey: "models.revision.custom.\(id.uuidString)") else {
+              revision == PokiStorage.defaults.string(forKey: "models.revision.custom.\(id.uuidString)") else {
             throw CancellationError()
         }
         let ids = chatIDs(raw)
-        UserDefaults.standard.set(ids, forKey: "models.listed.custom.\(id.uuidString)")
-        UserDefaults.standard.set(voiceIDs(raw), forKey: "models.listed.voice.custom.\(id.uuidString)")
+        PokiStorage.defaults.set(ids, forKey: "models.listed.custom.\(id.uuidString)")
+        PokiStorage.defaults.set(voiceIDs(raw), forKey: "models.listed.voice.custom.\(id.uuidString)")
         ModelKeys.saved += 1
         return ids.count
     }
@@ -280,8 +280,8 @@ enum ModelCatalog {
     /// Forgets one custom provider's model list. Also invalidates in-flight refreshes, including an
     /// address changed away and back again.
     static func invalidateCustom(_ id: UUID) {
-        UserDefaults.standard.removeObject(forKey: "models.listed.custom.\(id.uuidString)")
-        UserDefaults.standard.set(UUID().uuidString, forKey: "models.revision.custom.\(id.uuidString)")
+        PokiStorage.defaults.removeObject(forKey: "models.listed.custom.\(id.uuidString)")
+        PokiStorage.defaults.set(UUID().uuidString, forKey: "models.revision.custom.\(id.uuidString)")
     }
 
     /// Every custom provider's.
@@ -300,17 +300,17 @@ enum ModelCatalog {
     static func voiceChoices(for account: VoiceAccount) -> [ChatModelChoice] {
         switch account {
         case .openai:
-            let listed = (UserDefaults.standard.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault && $0 != voiceRealtime }
+            let listed = (PokiStorage.defaults.stringArray(forKey: "models.listed.voice") ?? []).filter { $0 != voiceDefault && $0 != voiceRealtime }
             return [ChatModelChoice(id: voiceDefault, name: "GPT-Live 1.1"), ChatModelChoice(id: voiceRealtime, name: "GPT Realtime 2.1")]
                 + listed.map { ChatModelChoice(id: $0, name: $0) }
         case .custom(let id):
-            let listed = UserDefaults.standard.stringArray(forKey: "models.listed.voice.custom.\(id.uuidString)") ?? []
+            let listed = PokiStorage.defaults.stringArray(forKey: "models.listed.voice.custom.\(id.uuidString)") ?? []
             return (listed.isEmpty ? [voiceRealtime] : listed).map { ChatModelChoice(id: $0, name: $0) }
         }
     }
 
     static func voiceOn(for account: VoiceAccount) -> Set<String> {
-        if let saved = UserDefaults.standard.stringArray(forKey: "models.enabled.voice" + account.storeSuffix) { return Set(saved) }
+        if let saved = PokiStorage.defaults.stringArray(forKey: "models.enabled.voice" + account.storeSuffix) { return Set(saved) }
         switch account {
         case .openai: return [voiceDefault]
         case .custom: return Set(voiceChoices(for: account).prefix(1).map(\.id))
@@ -320,7 +320,7 @@ enum ModelCatalog {
     static func setVoice(_ id: String, on: Bool, for account: VoiceAccount = VoiceDirect.settingsAccount) {
         var ids = voiceOn(for: account)
         if on { ids.insert(id) } else { ids.remove(id) }
-        UserDefaults.standard.set(Array(ids), forKey: "models.enabled.voice" + account.storeSuffix)
+        PokiStorage.defaults.set(Array(ids), forKey: "models.enabled.voice" + account.storeSuffix)
         if !ids.contains(voiceModelID(for: account)) {
             setVoiceModelID(voiceModelID(for: account), for: account)
         }
@@ -335,12 +335,12 @@ enum ModelCatalog {
     /// An account's live voice model.
     static func voiceModelID(for account: VoiceAccount) -> String {
         let fallback = voiceOffered(for: account).first?.id ?? voiceChoices(for: account).first?.id ?? voiceDefault
-        let saved = UserDefaults.standard.string(forKey: "voice.model" + account.storeSuffix) ?? fallback
+        let saved = PokiStorage.defaults.string(forKey: "voice.model" + account.storeSuffix) ?? fallback
         return voiceOn(for: account).contains(saved) ? saved : fallback
     }
 
     static func setVoiceModelID(_ id: String, for account: VoiceAccount) {
-        UserDefaults.standard.set(id, forKey: "voice.model" + account.storeSuffix)
+        PokiStorage.defaults.set(id, forKey: "voice.model" + account.storeSuffix)
         ModelKeys.saved += 1
     }
 

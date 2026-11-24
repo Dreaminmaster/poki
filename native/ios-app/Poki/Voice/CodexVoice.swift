@@ -366,16 +366,21 @@ final class CodexVoice: SubscriptionVoice {
         case "item/tool/call":
             let id = message["id"]
             let name = params["tool"] as? String ?? "unknown"
-            AppLog.shared.add("voice", "Codex tool requested: \(name)")
+            let allowed = VoiceDirect.localTools.contains(name)
             func reject(_ reason: String, text: String = "This voice session has ended or cannot run that tool.") {
-                AppLog.shared.add("voice", "Codex tool rejected: \(name) (\(reason))")
+                if allowed {
+                    AppLog.shared.add("voice", "Codex tool rejected: \(name) (\(reason))")
+                } else {
+                    AppLog.shared.add("voice", "Codex tool rejected: disallowed (\(reason))")
+                }
                 if let id {
                     _ = send(["id": id, "result": ["success": false, "contentItems": [["type": "inputText", "text": text]]]])
                 }
             }
+            guard allowed else { reject("disallowed tool"); return }
+            AppLog.shared.add("voice", "Codex tool requested: \(name)")
             guard let id else { reject("missing request id"); return }
             guard let active, let onTool else { reject("session inactive"); return }
-            guard VoiceDirect.localTools.contains(name) else { reject("disallowed tool"); return }
             let argumentsText: String
             switch params["arguments"] {
             case nil, is NSNull:

@@ -15,14 +15,14 @@ final class AppModel {
     private(set) var relayAddress = RelayAddress.saved
     /// The relay on or off (Agents > MCP Relay). On by default, and turned on when an address is set;
     /// off, Poki makes no relay connection and only its own chat agent can use the phone.
-    private(set) var relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
+    private(set) var relayEnabled = PokiStorage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
     /// The relay Poki connects to: the address, while the relay is on.
     var activeRelay: RelayAddress? { relayEnabled ? relayAddress : nil }
 
     func setRelayEnabled(_ on: Bool) {
         guard on != relayEnabled, relayAddress != nil || !on else { return }
         relayEnabled = on
-        UserDefaults.standard.set(on, forKey: "relayEnabled")
+        PokiStorage.defaults.set(on, forKey: "relayEnabled")
         log.add("relay", on ? "turned on" : "turned off")
         if !on { relayStatus = .off }
         guard sessionOn else { return }
@@ -83,10 +83,10 @@ final class AppModel {
             withMutation(keyPath: \.approvalMode) {
                 // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
                 // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
-                if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                    UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+                if ApprovalClassifier.Mode(rawValue: PokiStorage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                    PokiStorage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
                 }
-                UserDefaults.standard.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
+                PokiStorage.defaults.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
             }
             log.add("approval", "ask before sensitive steps: \(newValue.rawValue)")
             for observer in approvalModeObservers { observer() }
@@ -101,16 +101,16 @@ final class AppModel {
     func addStopAskingObserver(_ observer: @escaping () -> Void) { stopAskingObservers.append(observer) }
     var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
         didSet {
-            UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
+            PokiStorage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
             // Likewise the way of asking Rules shows, so the sensitivity counts as chosen here.
-            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
+            if ApprovalClassifier.Mode(rawValue: PokiStorage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                PokiStorage.defaults.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
             }
         }
     }
     /// Lists ask_poki for outside agents. Testing only, off.
-    var askPokiTool: Bool = UserDefaults.standard.bool(forKey: AskPoki.onKey) {
-        didSet { UserDefaults.standard.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
+    var askPokiTool: Bool = PokiStorage.defaults.bool(forKey: AskPoki.onKey) {
+        didSet { PokiStorage.defaults.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
     }
     var idleStopSeconds: Int = UserDefaults.standard.object(forKey: "idleStopSeconds.v4") as? Int ?? 60 {
         didSet { UserDefaults.standard.set(idleStopSeconds, forKey: "idleStopSeconds.v4"); log.add("runner", "idle stop set to \(idleStopSeconds) s") }
@@ -118,8 +118,8 @@ final class AppModel {
     /// Poki was on when it last ran; it turns itself on again at launch. Poki Setup's install turns it
     /// on the first time (see `init`).
     private(set) var wantsOn: Bool {
-        get { UserDefaults.standard.bool(forKey: "wantsOn") }
-        set { UserDefaults.standard.set(newValue, forKey: "wantsOn") }
+        get { PokiStorage.defaults.bool(forKey: "wantsOn") }
+        set { PokiStorage.defaults.set(newValue, forKey: "wantsOn") }
     }
     /// The setup step the Live Activity is guiding, if any.
     private(set) var guiding: SetupStep?
@@ -161,7 +161,7 @@ final class AppModel {
     private(set) var passcodeHint = false
     /// Turning on now will probably bring up iOS's passcode screen (no automation has started since
     /// this iPhone last restarted, or ever): the owner is told first (`passcodeHeadsUp`).
-    var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
+    var passcodeExpected: Bool { PokiStorage.defaults.double(forKey: Self.automationBootKey) != BootClock.current }
     var passcodeHeadsUp = false
     private(set) var passcodeConfirmationPending = false
     static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Setup and tap Continue."
@@ -174,8 +174,8 @@ final class AppModel {
     private func automationStarted() {
         InProcessWDA.gate.withLock { $0.startedThisBoot = true }
         AutomationAllowance(boot: BootClock.current, at: Date()).save()
-        guard UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current else { return }
-        UserDefaults.standard.set(BootClock.current, forKey: Self.automationBootKey)
+        guard PokiStorage.defaults.double(forKey: Self.automationBootKey) != BootClock.current else { return }
+        PokiStorage.defaults.set(BootClock.current, forKey: Self.automationBootKey)
     }
     /// Continue on the note: Poki turns on, and iOS's passcode screen comes next.
     func continueAfterPasscodeHeadsUp() {
@@ -492,7 +492,7 @@ final class AppModel {
         }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
-        if UserDefaults.standard.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
+        if PokiStorage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
             wantsOn = true
             log.add("session", "installed by Poki Setup: Poki turns on by itself")
         }
@@ -504,7 +504,7 @@ final class AppModel {
         SessionStore.shared.connectorAgent = { [identity] hash in
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
-        if UserDefaults.standard.string(forKey: "pokiSample") != nil { loadSample() }
+        if PokiStorage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
         NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
@@ -929,7 +929,7 @@ final class AppModel {
     /// session at work, C like one standing by (the loopback check stays live, so a simulator shows it
     /// off). A sample relay address (not saved) and, on a simulator, two agents are added when there are none.
     private func loadSample() {
-        let scene = UserDefaults.standard.string(forKey: "pokiSample")?.uppercased() ?? "B"
+        let scene = PokiStorage.defaults.string(forKey: "pokiSample")?.uppercased() ?? "B"
         // PIN: setup's pairing page with a sample code, as if Settings had asked for one.
         if scene == "PIN" { pairing = .pin("482913"); return }
         let now = Date()
@@ -2906,7 +2906,7 @@ final class AppModel {
         log.add("relay", "address set to \(address.origin.host() ?? "?")")
         if problem == Self.noRelay { problem = nil }
         // A relay just set is on.
-        if first || !relayEnabled { relayEnabled = true; UserDefaults.standard.set(true, forKey: "relayEnabled") }
+        if first || !relayEnabled { relayEnabled = true; PokiStorage.defaults.set(true, forKey: "relayEnabled") }
         if sessionOn {
             core.stop()
             core.start(relay: address)
@@ -2992,9 +2992,9 @@ struct AutomationAllowance: Equatable {
     }
 
     static var saved: AutomationAllowance? {
-        guard let pair = UserDefaults.standard.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
+        guard let pair = PokiStorage.defaults.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
         return AutomationAllowance(boot: pair[0], at: Date(timeIntervalSince1970: pair[1]))
     }
 
-    func save() { UserDefaults.standard.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
+    func save() { PokiStorage.defaults.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
 }

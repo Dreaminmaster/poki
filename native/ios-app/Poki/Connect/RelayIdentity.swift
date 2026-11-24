@@ -124,10 +124,70 @@ final class RelayIdentity {
     }
 }
 
-enum Keychain {
-    private static let service = "nz.zheha.poki"
+enum PokiStorage {
+    struct Scope {
+        var defaults: UserDefaults
+        var keychainService: String
+        var codexService: String
+        var codexHome: URL
+    }
 
-    static func read(_ account: String, service name: String = service) throws -> Data? {
+    struct Token {
+        fileprivate let previous: Scope?
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var overrideScope: Scope?
+
+    static var defaults: UserDefaults {
+        lock.withLock { overrideScope?.defaults } ?? .standard
+    }
+
+    static var keychainService: String {
+        lock.withLock { overrideScope?.keychainService } ?? Keychain.defaultServiceName
+    }
+
+    static var codexService: String {
+        lock.withLock { overrideScope?.codexService } ?? CodexAccount.defaultServiceName
+    }
+
+    static var codexHome: URL? {
+        lock.withLock { overrideScope?.codexHome }
+    }
+
+    static func pushScope(_ scope: Scope) -> Token {
+        let previous = lock.withLock {
+            let old = overrideScope
+            overrideScope = scope
+            return old
+        }
+        return Token(previous: previous)
+    }
+
+    static func popScope(_ token: Token) {
+        lock.withLock {
+            overrideScope = token.previous
+        }
+    }
+
+    static func withScope<T>(_ scope: Scope, _ body: () throws -> T) rethrows -> T {
+        let token = pushScope(scope)
+        defer { popScope(token) }
+        return try body()
+    }
+
+    static func withScope<T>(_ scope: Scope, _ body: () async throws -> T) async rethrows -> T {
+        let token = pushScope(scope)
+        defer { popScope(token) }
+        return try await body()
+    }
+}
+
+enum Keychain {
+    static let defaultServiceName = "nz.zheha.poki"
+    static var defaultService: String { PokiStorage.keychainService }
+
+    static func read(_ account: String, service name: String = defaultService) throws -> Data? {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account, kSecReturnData as String: true]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -138,7 +198,7 @@ enum Keychain {
 
     static func readWithAttributes(
         _ account: String,
-        service name: String = service
+        service name: String = defaultService
     ) throws -> (data: Data, modified: Date?, accessible: String?)? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -187,7 +247,7 @@ enum Keychain {
         }
     }
 
-    static func write(_ data: Data, account: String, service name: String = service) throws {
+    static func write(_ data: Data, account: String, service name: String = defaultService) throws {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
@@ -202,7 +262,7 @@ enum Keychain {
 
     static func updateAccessibility(
         _ account: String,
-        service name: String = service,
+        service name: String = defaultService,
         accessible: CFString
     ) throws {
         let query: [String: Any] = [
@@ -219,11 +279,11 @@ enum Keychain {
         }
     }
 
-    static func delete(_ account: String) {
-        try? remove(account)
+    static func delete(_ account: String, service name: String = defaultService) {
+        try? remove(account, service: name)
     }
 
-    static func remove(_ account: String, service name: String = service) throws {
+    static func remove(_ account: String, service name: String = defaultService) throws {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account]
         let status = SecItemDelete(base as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -235,8 +295,8 @@ enum Keychain {
 extension RelayAddress {
     /// The relay the person entered in Connect, kept across launches. Poki has no default relay.
     static var saved: RelayAddress? {
-        get { UserDefaults.standard.string(forKey: "relayAddress").flatMap { RelayAddress($0) } }
-        set { UserDefaults.standard.set(newValue?.origin.absoluteString, forKey: "relayAddress") }
+        get { PokiStorage.defaults.string(forKey: "relayAddress").flatMap { RelayAddress($0) } }
+        set { PokiStorage.defaults.set(newValue?.origin.absoluteString, forKey: "relayAddress") }
     }
 }
 

@@ -269,7 +269,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Hi, I’m Poki. Tell me what to do on this iPhone.")))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? AppLocalization.text(LocalizedStringResource("I’ll ask before anything you can’t undo."))
-                         : AppLocalization.text(LocalizedStringResource("Payments, deletions, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
+                         : AppLocalization.text(LocalizedStringResource("Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
     }
 
     private var greetingIDs: [UUID] = []
