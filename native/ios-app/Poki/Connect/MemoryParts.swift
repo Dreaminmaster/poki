@@ -44,24 +44,20 @@ struct MemoryItemRow: View {
     private var isOpen: Bool { page.open == item.id }
 
     var body: some View {
-        if page.editing == item.id {
-            MemoryEditor(page: page, picksApp: item.kind == .memory, onSave: { library.edit(item.id, text: page.draft, app: page.draftApp); close() }, onCancel: close)
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                summary
-                    .contentShape(.rect)
-                    .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = isOpen ? nil : item.id } }
-                    // Keep the row's identifier on its tappable summary only.
-                    // An identifier on the enclosing VStack is inherited by
-                    // descendant SwiftUI buttons and masks Memory Source.
-                    .accessibilityIdentifier("memory.item.\(item.id)")
-                if isOpen {
-                    MemoryItemDetail(item: item, page: page)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
+        // Edits open in the editor's sheet (memoryEditorSheet), not in the row.
+        VStack(alignment: .leading, spacing: 10) {
+            summary
+                .contentShape(.rect)
+                .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = isOpen ? nil : item.id } }
+                // Keep the row's identifier on its tappable summary only.
+                // An identifier on the enclosing VStack is inherited by
+                // descendant SwiftUI buttons and masks Memory Source.
+                .accessibilityIdentifier("memory.item.\(item.id)")
+            if isOpen {
+                MemoryItemDetail(item: item, page: page)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .accessibilityIdentifier("memory.item.\(item.id)")
     }
 
     private var summary: some View {

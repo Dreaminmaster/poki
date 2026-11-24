@@ -304,7 +304,7 @@ enum DetailsRoute: Hashable {
     case security, screenHistorySettings, lockSettings
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
-    case voiceKey, lockSettings
+    case voiceKey
 }
 
 /// Settings > Archived Conversations: the archived conversations, each one line as in the drawer, to open, bring
