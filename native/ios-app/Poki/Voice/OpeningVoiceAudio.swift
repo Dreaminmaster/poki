@@ -65,6 +65,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
 
     typealias CoreAudioInputRenderer = @Sendable (
         AudioComponentInstance,
+        UInt64,
         UnsafeMutablePointer<AudioUnitRenderActionFlags>,
         UnsafePointer<AudioTimeStamp>,
         UInt32,
@@ -112,11 +113,13 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private let isInBackground: @MainActor () -> Bool
     private let queryAudioUnitRunState: @MainActor (AudioComponentInstance) -> AudioUnitRunState
     private let renderAudioUnitInput: CoreAudioInputRenderer
+    private let onLifecycleHandled: (@MainActor (OpeningAudioRecoveryPolicy.RestartTrigger) -> Void)?
     private let lock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
     private let session: Int
-    private var callbackAudioUnit: AudioComponentInstance?
+    @MainActor private var nextAudioUnitGeneration: UInt64 = 0
+    private var callbackAudioUnit: (unit: AudioComponentInstance, generation: UInt64)?
     private var recoveryPolicy: OpeningAudioRecoveryPolicy
     private var observedLiveInput = false
 
@@ -191,6 +194,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     var hasObservedNonZeroInput: Bool {
         lock.withLock { observedLiveInput || recoveryPolicy.hasObservedNonZeroInput }
     }
+    var activeAudioUnitGeneration: UInt64? {
+        lock.withLock { callbackAudioUnit?.generation }
+    }
 
     init(
         session: Int,
@@ -202,7 +208,10 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         isInputMuted: @escaping @MainActor () -> Bool = { AVAudioApplication.shared.isInputMuted },
         isInBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background },
         queryAudioUnitRunState: @escaping @MainActor (AudioComponentInstance) -> AudioUnitRunState = OpeningVoiceAudio.queryCoreAudioRunState,
-        renderAudioUnitInput: @escaping CoreAudioInputRenderer = OpeningVoiceAudio.renderCoreAudioInput
+        renderAudioUnitInput: @escaping CoreAudioInputRenderer = { unit, _, flags, timestamp, bus, frames, bufferList in
+            OpeningVoiceAudio.renderCoreAudioInput(unit, flags, timestamp, bus, frames, bufferList)
+        },
+        onLifecycleHandled: (@MainActor (OpeningAudioRecoveryPolicy.RestartTrigger) -> Void)? = nil
     ) {
         self.session = session
         #if targetEnvironment(simulator)
@@ -218,13 +227,14 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         self.isInBackground = isInBackground
         self.queryAudioUnitRunState = queryAudioUnitRunState
         self.renderAudioUnitInput = renderAudioUnitInput
+        self.onLifecycleHandled = onLifecycleHandled
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
         super.init()
     }
 
     deinit {
         let (unit, waiters): (AudioComponentInstance?, [AsyncStream<LiveInputWaitResult>.Continuation]) = lock.withLock {
-            let current = callbackAudioUnit
+            let current = callbackAudioUnit?.unit
             callbackAudioUnit = nil
             let pending = Array(liveInputWaiters.values)
             liveInputWaiters.removeAll()
@@ -278,8 +288,8 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         case .running:
             return RTCAudioSession.sharedInstance().isActive
         case .stopped:
-            restartAudioUnit(trigger: .ensureRunning)
-            guard let currentUnit = audioUnit else { return false }
+            guard restartAudioUnit(trigger: .ensureRunning),
+                  let currentUnit = audioUnit else { return false }
             return queryAudioUnitRunState(currentUnit) == .running && RTCAudioSession.sharedInstance().isActive
         case .unknown(let status):
             Self.logVoice("opening audio ensureRunning could not query VPIO state (OSStatus \(status)); keeping existing unit")
@@ -308,7 +318,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         }
         do {
             try setupAudioUnit(unit)
-            lock.withLock { callbackAudioUnit = unit }
+            nextAudioUnitGeneration += 1
+            let generation = nextAudioUnitGeneration
+            lock.withLock { callbackAudioUnit = (unit, generation) }
             let startStatus = AudioOutputUnitStart(unit)
             guard startStatus == noErr else {
                 lock.withLock { callbackAudioUnit = nil }
@@ -318,7 +330,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             }
             audioUnit = unit
             let session = AVAudioSession.sharedInstance()
-            Self.logVoice("opening audio unit started: 48000 Hz 1 ch Int16 VPIO, sessionRate=\(Int(session.sampleRate)), inputCh=\(session.inputNumberOfChannels), muted=\(AVAudioApplication.shared.isInputMuted)")
+            Self.logVoice("opening audio unit started: gen=\(generation), 48000 Hz 1 ch Int16 VPIO, sessionRate=\(Int(session.sampleRate)), inputCh=\(session.inputNumberOfChannels), muted=\(AVAudioApplication.shared.isInputMuted)")
         } catch {
             lock.withLock { callbackAudioUnit = nil }
             AudioUnitUninitialize(unit)
@@ -382,21 +394,25 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         ) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-            MainActor.assumeIsolated { self?.restartAudioUnit(trigger: .interruptionEnded) }
+            Task { @MainActor [weak self] in
+                self?.handleLifecycleRestart(trigger: .interruptionEnded)
+            }
         }
         resetObserver = notificationCenter.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.restartAudioUnit(trigger: .mediaServicesReset) }
+            Task { @MainActor [weak self] in
+                self?.handleLifecycleRestart(trigger: .mediaServicesReset)
+            }
         }
         spatialObserver = notificationCenter.addObserver(
             forName: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.recoverFromZeroInput(trigger: .spatialCapabilitiesChanged)
             }
         }
@@ -405,7 +421,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.handleAppBecameActive()
             }
         }
@@ -414,12 +430,17 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 let muted = self.isInputMuted()
                 self.lock.withLock { self.recoveryPolicy.setInputMuted(muted) }
             }
         }
+    }
+
+    @MainActor private func handleLifecycleRestart(trigger: OpeningAudioRecoveryPolicy.RestartTrigger) {
+        _ = restartAudioUnit(trigger: trigger)
+        onLifecycleHandled?(trigger)
     }
 
     @MainActor private func handleAppBecameActive() {
@@ -539,21 +560,23 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         switch evaluated.decision {
         case .restart(let attempt, let clearZeroBuffer):
             Self.logVoice("opening audio restarting VPIO for \(trigger.logDescription) (attempt \(attempt), taps=\(evaluated.taps), zeroFrames=\(evaluated.zeroFrames))")
-            restartAudioUnit(trigger: trigger, alreadyAuthorized: true, clearZeroBuffer: clearZeroBuffer)
+            _ = restartAudioUnit(trigger: trigger, alreadyAuthorized: true, clearZeroBuffer: clearZeroBuffer)
         case .restartLifecycle:
-            restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
+            _ = restartAudioUnit(trigger: trigger, alreadyAuthorized: true)
         case .skip(.backgroundGrantExpired):
             Self.logVoice("opening audio skipped VPIO restart for \(trigger.logDescription): background recording grant expired; keeping existing unit")
         case .skip:
             break
         }
+        onLifecycleHandled?(trigger)
     }
 
+    @discardableResult
     @MainActor private func restartAudioUnit(
         trigger: OpeningAudioRecoveryPolicy.RestartTrigger,
         alreadyAuthorized: Bool = false,
         clearZeroBuffer: Bool = false
-    ) {
+    ) -> Bool {
         let inBackground = isInBackground()
         let now = uptime()
         let allowed: OpeningAudioRecoveryPolicy.RestartDecision = lock.withLock {
@@ -592,9 +615,9 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
             break
         case .skip(.backgroundGrantExpired):
             Self.logVoice("opening audio skipped VPIO restart for \(trigger.logDescription): background recording grant expired; keeping existing unit")
-            return
+            return false
         case .skip:
-            return
+            return false
         }
         stopAudioUnit()
         do {
@@ -607,8 +630,10 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 currentDelegate?.notifyAudioInputInterrupted()
                 currentDelegate?.notifyAudioOutputInterrupted()
             }
+            return true
         } catch {
             Self.logVoice("opening audio unit restart failed after \(trigger.logDescription): \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -757,7 +782,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         inBusNumber: UInt32,
         inNumberFrames: UInt32
     ) -> OSStatus {
-        guard let unit = lock.withLock({ callbackAudioUnit }) else { return noErr }
+        guard let active = lock.withLock({ callbackAudioUnit }) else { return noErr }
         let count = Int(inNumberFrames)
         guard count > 0 else { return noErr }
         return withUnsafeTemporaryAllocation(of: Int16.self, capacity: count) { storage in
@@ -769,7 +794,7 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                     mData: storage.baseAddress
                 )
             )
-            let status = renderAudioUnitInput(unit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
+            let status = renderAudioUnitInput(active.unit, active.generation, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
             guard status == noErr else {
                 let errCount = lock.withLock { () -> Int in
                     renderErrors += 1

@@ -5,7 +5,7 @@ import Foundation
 // phase, and takes the Live Activity with it when it ends only if nothing else is on it.
 
 /// Result of attempting to start Talk Here in the background.
-enum TalkHereOutcome: Equatable {
+enum TalkHereOutcome: Equatable, Sendable {
     case started
     case liveActivityUnavailable
     case microphoneUnavailable
@@ -97,23 +97,18 @@ final class TalkActivity {
     func startHere(
         presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }
     ) async -> TalkHereOutcome {
+        guard !Task.isCancelled else { return .ended }
         let intentToken = UUID()
         let grant = voice.makeBackgroundRecordingGrant(token: intentToken)
-        if activeIntentToken == nil && !voice.isOn {
-            show(.connecting, fromIntent: true)
-            guard activity.isRunning else {
-                if activeIntentToken == nil && !voice.isOn {
-                    show(nil)
-                }
-                return .liveActivityUnavailable
-            }
-        }
         var claimedSession: Int?
         var activityUnavailableAtClaim = false
         defer {
             voice.endBackgroundRecordingGrant(token: intentToken)
             if activeIntentToken == intentToken {
                 activeIntentToken = nil
+                if claimedSession != nil {
+                    show(Self.state(of: voice))
+                }
             }
         }
         let startResult = await voice.start(
@@ -130,6 +125,7 @@ final class TalkActivity {
                         self.activeIntentToken = nil
                         self.show(nil)
                     }
+                    claimedSession = nil
                     return false
                 }
                 return true
@@ -140,16 +136,26 @@ final class TalkActivity {
         }
         guard let startedSession = startResult else {
             if let claimedSession, activeIntentToken == intentToken {
+                if Task.isCancelled, voice.ownsSession(claimedSession) {
+                    voice.stop(ifOwningSession: claimedSession)
+                }
                 show(Self.state(of: voice))
                 if let why = voice.lostReason(forSession: claimedSession) {
                     return .lost(why)
                 }
                 return .ended
             }
-            return .superseded
+            return Task.isCancelled ? .ended : .superseded
         }
         guard activeIntentToken == intentToken else {
             return .superseded
+        }
+        if Task.isCancelled {
+            if voice.ownsSession(startedSession) {
+                voice.stop(ifOwningSession: startedSession)
+                show(Self.state(of: voice))
+            }
+            return .ended
         }
         if let why = voice.lostReason(forSession: startedSession) {
             show(Self.state(of: voice))

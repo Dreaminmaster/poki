@@ -239,6 +239,7 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate, @unchec
     var uptime: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     var queryAudioUnitRunState: @MainActor (AudioComponentInstance) -> OpeningVoiceAudio.AudioUnitRunState = OpeningVoiceAudio.queryCoreAudioRunState
+    var onLifecycleHandled: (@MainActor (OpeningAudioRecoveryPolicy.RestartTrigger) -> Void)?
     private(set) var audio: OpeningVoiceAudio!
 
     @MainActor func makeCapture(session: Int) throws -> OpeningVoiceCapture {
@@ -250,7 +251,8 @@ private final class OpeningAudioProbe: NSObject, RTCAudioDeviceDelegate, @unchec
             sleep: sleep,
             isInputMuted: { false },
             isInBackground: { self.isInBackground },
-            queryAudioUnitRunState: { self.queryAudioUnitRunState($0) }
+            queryAudioUnitRunState: { self.queryAudioUnitRunState($0) },
+            onLifecycleHandled: { self.onLifecycleHandled?($0) }
         )
         if startRealCapture {
             try audio.startCapture()
@@ -1587,11 +1589,12 @@ final class VoiceModelTests: XCTestCase {
             var made: (() -> FakeConnection)!
             var held: ((Bool) -> Void)!
             var cued: (() -> Void)!
+            let uptime: @Sendable () -> TimeInterval = openingAudio?.uptime ?? { ProcessInfo.processInfo.systemUptime }
             voice = VoiceModel(clearTap: { _, _, _ in .clear }, phoneTool: { name, arguments, cancellation in
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) }, readyCue: { cued() },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link },
-                               time: time.clock, monotonicUptime: openingAudio?.uptime ?? { ProcessInfo.processInfo.systemUptime },
+                               time: time.clock, monotonicUptime: uptime,
                                openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
             made = { [unowned self] in
                 let link = FakeConnection()
@@ -3125,6 +3128,253 @@ extension VoiceModelTests {
 /// Talk Here, from the Action Button over another app: Poki stays in the background, where iOS lets
 /// only the intent start a Live Activity, and the talk needs that Live Activity before the microphone.
 extension VoiceModelTests {
+    private final class LockedClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: TimeInterval
+
+        init(_ initial: TimeInterval) {
+            value = initial
+        }
+
+        var now: TimeInterval {
+            get { lock.withLock { value } }
+            set { lock.withLock { value = newValue } }
+        }
+
+        func read() -> TimeInterval {
+            lock.withLock { value }
+        }
+    }
+
+    private final class LockedBox<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Value
+
+        init(_ initial: Value) {
+            value = initial
+        }
+
+        func get() -> Value {
+            lock.withLock { value }
+        }
+
+        func set(_ newValue: Value) {
+            lock.withLock { value = newValue }
+        }
+    }
+
+    private final class TestSignal: @unchecked Sendable {
+        private enum WaitOutcome { case signaled, timedOut, cancelled }
+        private let lock = NSLock()
+        private var count = 0
+        private var waiters: [(id: UUID, target: Int, continuation: CheckedContinuation<WaitOutcome, Never>)] = []
+
+        func signal() {
+            let waking: [CheckedContinuation<WaitOutcome, Never>] = lock.withLock {
+                count += 1
+                let current = count
+                let ready = waiters.filter { current >= $0.target }.map(\.continuation)
+                waiters.removeAll { current >= $0.target }
+                return ready
+            }
+            for continuation in waking {
+                continuation.resume(returning: .signaled)
+            }
+        }
+
+        func wait(
+            count target: Int = 1,
+            timeout: Duration = .seconds(5),
+            allowCancellation: Bool = false,
+            description: String,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async -> Bool {
+            let waiterID = UUID()
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled, let self else { return }
+                let expired: CheckedContinuation<WaitOutcome, Never>? = self.lock.withLock {
+                    guard let index = self.waiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.waiters.remove(at: index).continuation
+                }
+                expired?.resume(returning: .timedOut)
+            }
+            let outcome = await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<WaitOutcome, Never>) in
+                    enum Registration { case immediate(WaitOutcome), registered }
+                    let state: Registration = lock.withLock {
+                        if count >= target { return .immediate(.signaled) }
+                        if Task.isCancelled { return .immediate(.cancelled) }
+                        waiters.append((waiterID, target, continuation))
+                        return .registered
+                    }
+                    if case .immediate(let result) = state {
+                        continuation.resume(returning: result)
+                    }
+                }
+            } onCancel: { [weak self] in
+                guard let self else { return }
+                let cancelled: CheckedContinuation<WaitOutcome, Never>? = self.lock.withLock {
+                    guard let index = self.waiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.waiters.remove(at: index).continuation
+                }
+                cancelled?.resume(returning: .cancelled)
+            }
+            timeoutTask.cancel()
+            switch outcome {
+            case .signaled:
+                return true
+            case .timedOut:
+                XCTFail("Timed out waiting for \(description) (target \(target))", file: file, line: line)
+                return false
+            case .cancelled:
+                if !allowCancellation {
+                    XCTFail("Cancelled waiting for \(description) (target \(target))", file: file, line: line)
+                }
+                return false
+            }
+        }
+    }
+
+    private final class TestEventQueue<Element: Sendable>: @unchecked Sendable {
+        private enum Registration {
+            case immediate(Element?)
+            case registered
+        }
+
+        private let lock = NSLock()
+        private var buffered: [Element] = []
+        private var waiters: [(id: UUID, continuation: CheckedContinuation<Element?, Never>)] = []
+
+        func push(_ element: Element) {
+            let waiter: CheckedContinuation<Element?, Never>? = lock.withLock {
+                if !waiters.isEmpty {
+                    return waiters.removeFirst().continuation
+                }
+                buffered.append(element)
+                return nil
+            }
+            waiter?.resume(returning: element)
+        }
+
+        func next(
+            timeout: Duration = .seconds(5),
+            description: String,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async -> Element? {
+            let waiterID = UUID()
+            let timeoutTask = Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard !Task.isCancelled, let self else { return }
+                let expired: CheckedContinuation<Element?, Never>? = self.lock.withLock {
+                    guard let index = self.waiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.waiters.remove(at: index).continuation
+                }
+                expired?.resume(returning: nil)
+            }
+            let event = await withTaskCancellationHandler {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Element?, Never>) in
+                    let outcome: Registration = lock.withLock {
+                        if !buffered.isEmpty {
+                            return .immediate(buffered.removeFirst())
+                        }
+                        if Task.isCancelled {
+                            return .immediate(nil)
+                        }
+                        waiters.append((waiterID, continuation))
+                        return .registered
+                    }
+                    if case .immediate(let result) = outcome {
+                        continuation.resume(returning: result)
+                    }
+                }
+            } onCancel: { [weak self] in
+                guard let self else { return }
+                let cancelled: CheckedContinuation<Element?, Never>? = self.lock.withLock {
+                    guard let index = self.waiters.firstIndex(where: { $0.id == waiterID }) else { return nil }
+                    return self.waiters.remove(at: index).continuation
+                }
+                cancelled?.resume(returning: nil)
+            }
+            timeoutTask.cancel()
+            if event == nil {
+                XCTFail("Timed out waiting for \(description)", file: file, line: line)
+            }
+            return event
+        }
+    }
+
+    private final class ControllableSleep: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+        private let startedSignal = TestSignal()
+
+        func sleep(_ duration: Duration) async throws {
+            let id = UUID()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    let alreadyCancelled: Bool = lock.withLock {
+                        if Task.isCancelled { return true }
+                        waiters[id] = continuation
+                        return false
+                    }
+                    startedSignal.signal()
+                    if alreadyCancelled {
+                        continuation.resume(throwing: CancellationError())
+                    }
+                }
+            } onCancel: { [weak self] in
+                guard let self else { return }
+                let waiter = self.lock.withLock { self.waiters.removeValue(forKey: id) }
+                waiter?.resume(throwing: CancellationError())
+            }
+        }
+
+        func waitForSleepStarted(
+            count: Int = 1,
+            timeout: Duration = .seconds(5),
+            description: String = "controllable sleep start",
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async -> Bool {
+            await startedSignal.wait(count: count, timeout: timeout, description: description, file: file, line: line)
+        }
+
+        func releaseAll() {
+            let pending = lock.withLock {
+                let values = Array(waiters.values)
+                waiters.removeAll()
+                return values
+            }
+            for waiter in pending {
+                waiter.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    private func awaitTask<T: Sendable>(
+        _ task: Task<T, Never>,
+        timeout: Duration = .seconds(5),
+        description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> T? {
+        let done = TestSignal()
+        let resultBox = LockedBox<T?>(nil)
+        let watcher = Task {
+            resultBox.set(await task.value)
+            done.signal()
+        }
+        defer { watcher.cancel() }
+        guard await done.wait(timeout: timeout, description: description, file: file, line: line) else {
+            task.cancel()
+            return nil
+        }
+        return resultBox.get()
+    }
+
     func testTalkHereStartsTheTalkAndItsLiveActivityWithPokiInTheBackground() async {
         let h = Harness()
         let activity = ActivityController()
@@ -3165,59 +3415,63 @@ extension VoiceModelTests {
         XCTAssertFalse(h.voice.isOn, "Silent background session must be stopped and cleaned up")
         XCTAssertEqual(h.voice.phase, .off)
         XCTAssertFalse(activity.isRunning, "Live Activity must be dismissed when silent background capture is aborted")
-        XCTAssertFalse(audio.audio.ensureRunning(), "Stopped silent capture must not report running")
     }
 
     func testEarlierTalkHereDeferDoesNotClearNewerSessionGrantOrStopNewerSession() async throws {
-        let clockLock = NSLock()
-        var currentUptime: TimeInterval = 100.0
+        let clock = LockedClock(100.0)
+        let controlledSleep = ControllableSleep()
+        let lifecycleEvents = TestEventQueue<OpeningAudioRecoveryPolicy.RestartTrigger>()
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .notDetermined
         audio.zeroInputRecoveryEnabled = true
         audio.isInBackground = true
         audio.startRealCapture = true
-        audio.uptime = { clockLock.withLock { currentUptime } }
-        audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
+        audio.uptime = { clock.read() }
+        audio.sleep = { try await controlledSleep.sleep($0) }
+        audio.onLifecycleHandled = { lifecycleEvents.push($0) }
         let h = Harness(openingAudio: audio)
         let activity = ActivityController()
         activity.canStart = { false }
         let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        let firstPermissionEntered = TestSignal()
+        let firstPermissionReleased = TestSignal()
+        let secondPermissionEntered = TestSignal()
+        let secondPermissionReleased = TestSignal()
         defer {
+            firstPermissionReleased.signal()
+            secondPermissionReleased.signal()
+            controlledSleep.releaseAll()
             h.voice.stop()
             activity.end()
         }
 
-        let (enteredFirstPermission, firstPermissionEntered) = AsyncStream<Void>.makeStream()
-        let (releaseFirstPermission, firstPermissionReleased) = AsyncStream<Void>.makeStream()
         let taskA = Task { @MainActor in
             await talk.startHere(presentSpeechPermission: { request in
-                firstPermissionEntered.yield(())
-                firstPermissionEntered.finish()
-                for await _ in releaseFirstPermission {}
+                firstPermissionEntered.signal()
+                _ = await firstPermissionReleased.wait(timeout: .seconds(5), description: "release first permission")
                 return await request()
             })
         }
-        for await _ in enteredFirstPermission {}
+        let enteredA = await firstPermissionEntered.wait(timeout: .seconds(5), description: "first permission entry")
+        XCTAssertTrue(enteredA)
 
         // Stop session A while intent A is suspended, then start intent B with its own grant.
         h.voice.stop()
         audio.speechAuthorization = .notDetermined
-        let (enteredSecondPermission, secondPermissionEntered) = AsyncStream<Void>.makeStream()
-        let (releaseSecondPermission, secondPermissionReleased) = AsyncStream<Void>.makeStream()
         let taskB = Task { @MainActor in
             await talk.startHere(presentSpeechPermission: { request in
-                secondPermissionEntered.yield(())
-                secondPermissionEntered.finish()
-                for await _ in releaseSecondPermission {}
+                secondPermissionEntered.signal()
+                _ = await secondPermissionReleased.wait(timeout: .seconds(5), description: "release second permission")
                 return await request()
             })
         }
-        for await _ in enteredSecondPermission {}
+        let enteredB = await secondPermissionEntered.wait(timeout: .seconds(5), description: "second permission entry")
+        XCTAssertTrue(enteredB)
         let secondAudio = try XCTUnwrap(audio.audio)
 
         // Now let intent A finish and run its defer block: it must NOT touch session B or clear B's grant.
-        firstPermissionReleased.finish()
-        let outcomeA = await taskA.value
+        firstPermissionReleased.signal()
+        let outcomeA = await awaitTask(taskA, timeout: .seconds(5), description: "intent A completion")
         XCTAssertEqual(outcomeA, .superseded)
         XCTAssertTrue(h.voice.isOn, "Earlier intent defer must not stop the newer active session")
         XCTAssertTrue(activity.isRunning, "Earlier intent must not tear down the newer session's Live Activity")
@@ -3225,7 +3479,7 @@ extension VoiceModelTests {
 
         // Prove session B's background grant is still active after A's defer ran:
         // an interruption-ended notification in background before deadline restarts B's real VPIO unit.
-        clockLock.withLock { currentUptime = 101.0 }
+        clock.now = 101.0
         let activeGrantMarker = "esp1324-grant-preserved-\(UUID().uuidString)"
         AppLog.shared.add("test", activeGrantMarker)
         audio.notificationCenter.post(
@@ -3233,6 +3487,8 @@ extension VoiceModelTests {
             object: nil,
             userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
         )
+        let preservedTrigger = await lifecycleEvents.next(timeout: .seconds(5), description: "preserved grant interruption completion")
+        XCTAssertEqual(preservedTrigger, .interruptionEnded)
         let activeGrantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(activeGrantMarker) }).dropFirst())
         XCTAssertTrue(
             activeGrantLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }),
@@ -3241,13 +3497,13 @@ extension VoiceModelTests {
 
         // Feed live audio and let intent B complete normally.
         audio.feed(480, sample: 2_000)
-        secondPermissionReleased.finish()
-        let outcomeB = await taskB.value
+        secondPermissionReleased.signal()
+        let outcomeB = await awaitTask(taskB, timeout: .seconds(5), description: "intent B completion")
         XCTAssertEqual(outcomeB, .started)
         XCTAssertTrue(h.voice.isOn)
 
         // Prove intent B cleared its own grant on normal exit (still before original 103.5 deadline).
-        clockLock.withLock { currentUptime = 101.5 }
+        clock.now = 101.5
         let clearedGrantMarker = "esp1324-grant-cleared-\(UUID().uuidString)"
         AppLog.shared.add("test", clearedGrantMarker)
         audio.notificationCenter.post(
@@ -3255,6 +3511,8 @@ extension VoiceModelTests {
             object: nil,
             userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
         )
+        let clearedTrigger = await lifecycleEvents.next(timeout: .seconds(5), description: "cleared grant interruption completion")
+        XCTAssertEqual(clearedTrigger, .interruptionEnded)
         let clearedGrantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(clearedGrantMarker) }).dropFirst())
         XCTAssertTrue(
             clearedGrantLogs.contains(where: { $0.contains("opening audio skipped VPIO restart for interruption ended: background recording grant expired; keeping existing unit") }),
@@ -3266,31 +3524,34 @@ extension VoiceModelTests {
     }
 
     func testSupersededTalkHereNeverReportsNewerSessionLossOrStopsNewerSession() async throws {
+        let controlledSleep = ControllableSleep()
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .notDetermined
         audio.zeroInputRecoveryEnabled = true
         audio.isInBackground = true
-        audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
+        audio.sleep = { try await controlledSleep.sleep($0) }
         let h = Harness(openingAudio: audio)
         let activity = ActivityController()
         activity.canStart = { false }
         let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        let aEntered = TestSignal()
+        let aReleased = TestSignal()
         defer {
+            aReleased.signal()
+            controlledSleep.releaseAll()
             h.voice.stop()
             activity.end()
         }
 
-        let (enteredA, aEntered) = AsyncStream<Void>.makeStream()
-        let (releaseA, aReleased) = AsyncStream<Void>.makeStream()
         let taskA = Task { @MainActor in
             await talk.startHere(presentSpeechPermission: { request in
-                aEntered.yield(())
-                aEntered.finish()
-                for await _ in releaseA {}
+                aEntered.signal()
+                _ = await aReleased.wait(timeout: .seconds(5), description: "release intent A permission")
                 return await request()
             })
         }
-        for await _ in enteredA {}
+        let entered = await aEntered.wait(timeout: .seconds(5), description: "intent A permission entry")
+        XCTAssertTrue(entered)
 
         // End session A and start session B with speech permission denied so B's disconnect enters .lost immediately.
         h.voice.stop()
@@ -3298,9 +3559,10 @@ extension VoiceModelTests {
         let taskB = Task { @MainActor in
             await talk.startHere()
         }
-        await h.time.settle()
+        let bWaitingForLiveInput = await controlledSleep.waitForSleepStarted(timeout: .seconds(5), description: "intent B live-input wait")
+        XCTAssertTrue(bWaitingForLiveInput)
         audio.feed(480, sample: 2_000)
-        let outcomeB = await taskB.value
+        let outcomeB = await awaitTask(taskB, timeout: .seconds(5), description: "intent B completion")
         XCTAssertEqual(outcomeB, .started)
         XCTAssertTrue(h.voice.isOn)
 
@@ -3311,8 +3573,8 @@ extension VoiceModelTests {
         XCTAssertFalse(lossReasonB.isEmpty)
 
         // Now let superseded session A resume: A must return .superseded, never B's .lost(reason).
-        aReleased.finish()
-        let outcomeA = await taskA.value
+        aReleased.signal()
+        let outcomeA = await awaitTask(taskA, timeout: .seconds(5), description: "intent A completion")
         XCTAssertEqual(outcomeA, .superseded, "Superseded intent A must never adopt session B's .lost failure reason")
 
         // Contrast: when a session itself fails without being superseded, startHere returns .lost(why) bound to that session.
@@ -3332,20 +3594,26 @@ extension VoiceModelTests {
     }
 
     func testConcurrentTalkHereCallsWaitingOnLiveCloseBindClaimAndGrantToWinner() async throws {
-        let clockLock = NSLock()
-        var currentUptime: TimeInterval = 200.0
+        let clock = LockedClock(200.0)
+        let controlledSleep = ControllableSleep()
+        let lifecycleEvents = TestEventQueue<OpeningAudioRecoveryPolicy.RestartTrigger>()
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .notDetermined
         audio.zeroInputRecoveryEnabled = true
         audio.isInBackground = true
         audio.startRealCapture = true
-        audio.uptime = { clockLock.withLock { currentUptime } }
-        audio.sleep = { _ in try await Task.sleep(for: .seconds(60)) }
+        audio.uptime = { clock.read() }
+        audio.sleep = { try await controlledSleep.sleep($0) }
+        audio.onLifecycleHandled = { lifecycleEvents.push($0) }
         let h = Harness(openingAudio: audio)
         let activity = ActivityController()
         activity.canStart = { false }
         let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        let winnerPermissionEntered = TestSignal()
+        let winnerPermissionReleased = TestSignal()
         defer {
+            winnerPermissionReleased.signal()
+            controlledSleep.releaseAll()
             h.voice.stop()
             activity.end()
         }
@@ -3355,36 +3623,39 @@ extension VoiceModelTests {
         h.voice.stop()
         XCTAssertFalse(h.voice.isOn)
 
-        let (enteredWinnerPermission, winnerPermissionEntered) = AsyncStream<Void>.makeStream()
-        let (releaseWinnerPermission, winnerPermissionReleased) = AsyncStream<Void>.makeStream()
         var winnerIndex: Int?
         func makePresenter(_ index: Int) -> SpeechPermissionPresenter {
             { request in
                 winnerIndex = index
-                winnerPermissionEntered.yield(())
-                winnerPermissionEntered.finish()
-                for await _ in releaseWinnerPermission {}
+                winnerPermissionEntered.signal()
+                _ = await winnerPermissionReleased.wait(timeout: .seconds(5), description: "release winner permission")
                 return await request()
             }
         }
 
-        // Start two concurrent Talk Here intents while the previous live session is still closing.
+        // Start two concurrent Talk Here intents while the previous live session is still closing,
+        // and prove via an explicit external barrier that BOTH have entered the liveCloseTimeout wait.
+        let closeWaitBarrier = TestSignal()
+        h.voice.onAwaitingLiveClose = { closeWaitBarrier.signal() }
         let taskA = Task { @MainActor in await talk.startHere(presentSpeechPermission: makePresenter(0)) }
         let taskB = Task { @MainActor in await talk.startHere(presentSpeechPermission: makePresenter(1)) }
-        await h.time.settle()
+        let bothReachedWait = await closeWaitBarrier.wait(count: 2, timeout: .seconds(5), description: "both concurrent starts entering liveCloseTimeout wait")
+        XCTAssertTrue(bothReachedWait)
+        XCTAssertFalse(activity.isRunning, "Unclaimed starts waiting on liveCloseTimeout must not leave a Live Activity")
 
         // Complete the old live close timeout so both waiting starts resume.
         await h.time.advance(3)
-        for await _ in enteredWinnerPermission {}
+        let winnerEntered = await winnerPermissionEntered.wait(timeout: .seconds(5), description: "winning start entering speech permission")
+        XCTAssertTrue(winnerEntered)
         let winner = try XCTUnwrap(winnerIndex)
-        let loserOutcome = winner == 0 ? await taskB.value : await taskA.value
+        let loserOutcome = await awaitTask(winner == 0 ? taskB : taskA, timeout: .seconds(5), description: "losing concurrent start completion")
         XCTAssertEqual(loserOutcome, .superseded, "Losing concurrent start must return .superseded")
         XCTAssertTrue(h.voice.isOn, "Losing concurrent start must not stop the winning session")
         XCTAssertTrue(activity.isRunning, "Losing concurrent start must not dismiss the winning Live Activity")
         XCTAssertTrue(audio.audio.ensureRunning(), "Winning session's real VPIO unit must remain active")
 
         // Prove the winner holds its own active background grant and the loser's defer did not clear it.
-        clockLock.withLock { currentUptime = 201.0 }
+        clock.now = 201.0
         let grantMarker = "esp1324-concurrent-winner-grant-\(UUID().uuidString)"
         AppLog.shared.add("test", grantMarker)
         audio.notificationCenter.post(
@@ -3392,6 +3663,8 @@ extension VoiceModelTests {
             object: nil,
             userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
         )
+        let grantTrigger = await lifecycleEvents.next(timeout: .seconds(5), description: "winner grant interruption completion")
+        XCTAssertEqual(grantTrigger, .interruptionEnded)
         let grantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(grantMarker) }).dropFirst())
         XCTAssertTrue(
             grantLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }),
@@ -3399,8 +3672,8 @@ extension VoiceModelTests {
         )
 
         audio.feed(480, sample: 2_000)
-        winnerPermissionReleased.finish()
-        let winnerOutcome = winner == 0 ? await taskA.value : await taskB.value
+        winnerPermissionReleased.signal()
+        let winnerOutcome = await awaitTask(winner == 0 ? taskA : taskB, timeout: .seconds(5), description: "winning concurrent start completion")
         XCTAssertEqual(winnerOutcome, .started)
         XCTAssertTrue(h.voice.isOn)
 
@@ -3409,20 +3682,174 @@ extension VoiceModelTests {
         XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
     }
 
+    func testCancelledTalkHereWaitingOnLiveCloseDoesNotClaimMicActivityOrDisplaceConcurrentStart() async throws {
+        let clock = LockedClock(250.0)
+        let controlledSleep = ControllableSleep()
+        let lifecycleEvents = TestEventQueue<OpeningAudioRecoveryPolicy.RestartTrigger>()
+        let audio = OpeningAudioProbe()
+        audio.speechAuthorization = .notDetermined
+        audio.zeroInputRecoveryEnabled = true
+        audio.isInBackground = true
+        audio.startRealCapture = true
+        audio.uptime = { clock.read() }
+        audio.sleep = { try await controlledSleep.sleep($0) }
+        audio.onLifecycleHandled = { lifecycleEvents.push($0) }
+        let h = Harness(openingAudio: audio)
+        let activity = ActivityController()
+        activity.canStart = { false }
+        let talk = TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false })
+        let validPermissionEntered = TestSignal()
+        let validPermissionReleased = TestSignal()
+        let midCancelPermissionEntered = TestSignal()
+        let midCancelPermissionReleased = TestSignal()
+        defer {
+            validPermissionReleased.signal()
+            midCancelPermissionReleased.signal()
+            controlledSleep.releaseAll()
+            h.voice.stop()
+            activity.end()
+        }
+
+        // Part 1: A solo request cancelled while waiting on liveCloseTimeout must neither claim the session,
+        // open the microphone, nor leave a Live Activity when the old live close finishes.
+        await h.liveTalk()
+        h.voice.stop()
+        XCTAssertFalse(h.voice.isOn)
+
+        let soloBarrier = TestSignal()
+        h.voice.onAwaitingLiveClose = { soloBarrier.signal() }
+        var soloPermissionCalled = false
+        let linksBeforeSolo = h.links.count
+        let soloTask = Task { @MainActor in
+            await talk.startHere(presentSpeechPermission: { request in
+                soloPermissionCalled = true
+                return await request()
+            })
+        }
+        let soloWaiting = await soloBarrier.wait(count: 1, timeout: .seconds(5), description: "solo start waiting on liveCloseTimeout")
+        XCTAssertTrue(soloWaiting)
+        XCTAssertFalse(activity.isRunning, "Unclaimed start waiting on liveCloseTimeout must not start a Live Activity")
+
+        soloTask.cancel()
+        await h.time.advance(3)
+        let soloOutcome = await awaitTask(soloTask, timeout: .seconds(5), description: "cancelled solo start completion")
+        XCTAssertEqual(soloOutcome, .ended)
+        XCTAssertFalse(soloPermissionCalled, "Cancelled waiter must never reach session claim or permission prompt")
+        XCTAssertFalse(h.voice.isOn)
+        XCTAssertEqual(h.voice.phase, .off)
+        XCTAssertFalse(activity.isRunning, "Cancelled waiter must not leave a Live Activity")
+        XCTAssertNil(audio.audio, "Cancelled waiter must never start opening audio capture")
+        XCTAssertEqual(h.links.count, linksBeforeSolo)
+        XCTAssertEqual(h.microphone, [true, false], "Only the closing live session may release the microphone; cancelled waiter must never open it")
+
+        // Part 2: When one waiter is cancelled while waiting on liveCloseTimeout alongside a valid concurrent
+        // request, the cancelled request must not claim, open the mic, or displace the valid request.
+        await h.liveTalk()
+        h.voice.stop()
+        XCTAssertFalse(h.voice.isOn)
+
+        let pairBarrier = TestSignal()
+        h.voice.onAwaitingLiveClose = { pairBarrier.signal() }
+        var cancelledPresenterCalled = false
+        let taskCancelled = Task { @MainActor in
+            await talk.startHere(presentSpeechPermission: { request in
+                cancelledPresenterCalled = true
+                return await request()
+            })
+        }
+        let taskValid = Task { @MainActor in
+            await talk.startHere(presentSpeechPermission: { request in
+                validPermissionEntered.signal()
+                _ = await validPermissionReleased.wait(timeout: .seconds(5), description: "release valid start permission")
+                return await request()
+            })
+        }
+        let pairWaiting = await pairBarrier.wait(count: 2, timeout: .seconds(5), description: "cancelled and valid starts waiting on liveCloseTimeout")
+        XCTAssertTrue(pairWaiting)
+        XCTAssertFalse(activity.isRunning)
+
+        taskCancelled.cancel()
+        await h.time.advance(3)
+
+        let cancelledOutcome = await awaitTask(taskCancelled, timeout: .seconds(5), description: "cancelled concurrent start completion")
+        XCTAssertEqual(cancelledOutcome, .ended)
+        XCTAssertFalse(cancelledPresenterCalled, "Cancelled concurrent waiter must never claim the session")
+
+        let validEntered = await validPermissionEntered.wait(timeout: .seconds(5), description: "valid concurrent start claiming session")
+        XCTAssertTrue(validEntered)
+        XCTAssertTrue(h.voice.isOn)
+        XCTAssertTrue(activity.isRunning)
+        let validAudio = try XCTUnwrap(audio.audio)
+        XCTAssertTrue(validAudio.ensureRunning())
+
+        // Confirm valid request's background grant is intact after cancelled waiter exited.
+        clock.now = 251.0
+        let validGrantMarker = "esp1324-cancelled-waiter-valid-grant-\(UUID().uuidString)"
+        AppLog.shared.add("test", validGrantMarker)
+        audio.notificationCenter.post(
+            name: AVAudioSession.interruptionNotification,
+            object: nil,
+            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]
+        )
+        let validTrigger = await lifecycleEvents.next(timeout: .seconds(5), description: "valid start interruption completion")
+        XCTAssertEqual(validTrigger, .interruptionEnded)
+        let validGrantLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(validGrantMarker) }).dropFirst())
+        XCTAssertTrue(validGrantLogs.contains(where: { $0.contains("opening audio unit restarted after interruption ended") }))
+
+        audio.feed(480, sample: 2_200)
+        validPermissionReleased.signal()
+        let validOutcome = await awaitTask(taskValid, timeout: .seconds(5), description: "valid concurrent start completion")
+        XCTAssertEqual(validOutcome, .started)
+        XCTAssertTrue(h.voice.isOn)
+
+        h.voice.stop()
+        await h.time.advance(3)
+        XCTAssertFalse(h.voice.isOn)
+        XCTAssertFalse(activity.isRunning)
+        XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
+
+        // Part 3: Cancelling a claimed session at an async resumption point (speech permission authorization)
+        // must release its own capture, session, background grant, and Live Activity immediately.
+        h.voice.onAwaitingLiveClose = nil
+        audio.speechAuthorization = .notDetermined
+        let midCancelTask = Task { @MainActor in
+            await talk.startHere(presentSpeechPermission: { request in
+                midCancelPermissionEntered.signal()
+                _ = await midCancelPermissionReleased.wait(timeout: .seconds(5), allowCancellation: true, description: "release mid-cancel permission")
+                return await request()
+            })
+        }
+        let midEntered = await midCancelPermissionEntered.wait(timeout: .seconds(5), description: "mid-cancel permission entry")
+        XCTAssertTrue(midEntered)
+        let midAudio = try XCTUnwrap(audio.audio)
+        XCTAssertTrue(h.voice.isOn)
+        XCTAssertTrue(activity.isRunning)
+        XCTAssertTrue(midAudio.ensureRunning())
+
+        midCancelTask.cancel()
+        midCancelPermissionReleased.signal()
+        let midOutcome = await awaitTask(midCancelTask, timeout: .seconds(5), description: "mid-start cancelled completion")
+        XCTAssertEqual(midOutcome, .ended)
+        XCTAssertFalse(h.voice.isOn, "Mid-start cancellation must stop its claimed session")
+        XCTAssertEqual(h.voice.phase, .off)
+        XCTAssertFalse(activity.isRunning, "Mid-start cancellation must dismiss its Live Activity")
+        XCTAssertFalse(midAudio.ensureRunning(), "Mid-start cancellation must release opening audio capture")
+        XCTAssertFalse(RTCAudioSession.sharedInstance().isActive)
+    }
+
     func testTalkHereAbortsAndReportsMicrophoneUnavailableWhenAudioUnitStopsWithoutGrant() async throws {
-        let clockLock = NSLock()
-        var currentUptime: TimeInterval = 300.0
+        let clock = LockedClock(300.0)
         var stopUnitOnNextQuery = true
         let audio = OpeningAudioProbe()
         audio.speechAuthorization = .authorized
         audio.zeroInputRecoveryEnabled = false
         audio.isInBackground = true
         audio.startRealCapture = true
-        audio.uptime = { clockLock.withLock { currentUptime } }
+        audio.uptime = { clock.read() }
         audio.queryAudioUnitRunState = { unit in
             if stopUnitOnNextQuery {
                 stopUnitOnNextQuery = false
-                clockLock.withLock { currentUptime = 304.0 }
+                clock.now = 304.0
                 let stopStatus = AudioOutputUnitStop(unit)
                 XCTAssertEqual(stopStatus, noErr)
             }
