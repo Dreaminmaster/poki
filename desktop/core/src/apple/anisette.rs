@@ -15,9 +15,12 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 pub const DEFAULT_REMOTE: &str = "https://new.ani.sidestore.io";
-/// Servers tried in turn when Apple refuses one (ec -80045) or one does not answer. Checked Nov 7 2026: these hand out
-/// data that matches their client info; the old ani.sidestore.io does not (Mac info, Android data).
-pub const FALLBACK_REMOTES: &[&str] = &["https://new.ani.sidestore.io", "https://mac-ani.jkcoxson.com", "https://ani2.stikstore.app"];
+/// Servers tried in turn when Apple refuses one (ec -80045, or -22411 at the password step) or one
+/// does not answer. All of them hand out Mac data. The list follows iloader 2.4.2 (Nov 2026), which
+/// added ani.iloader.app and moved StikStore to ani3: ani2.stikstore.app and ani.jkcoxson.com serve
+/// Windows data that Apple accepts only about half the time and never with SMS codes.
+pub const FALLBACK_REMOTES: &[&str] =
+    &["https://new.ani.sidestore.io", "https://mac-ani.jkcoxson.com", "https://ani.iloader.app", "https://ani3.stikstore.app"];
 /// Retired: Apple has refused it since October 2026.
 const RETIRED_REMOTES: &[&str] = &["https://ani.sidestore.io"];
 pub const ROUTING_INFO: &str = "17106176";

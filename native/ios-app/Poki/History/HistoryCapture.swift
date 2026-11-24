@@ -357,11 +357,10 @@ final class HistoryCapture: ObservableObject {
     }
 
     /// One read from the launcher. Only a screen whose text changed carries text.
-    private func took(_ data: Data, run me: Int, model: AppModel) {
-        guard me == run, isRunning, !lockedOrDark,
-              let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+    private func took(_ line: HistoryBridge.Read, run me: Int, model: AppModel) {
+        guard me == run, isRunning, !lockedOrDark else { return }
         if let reason = unavailable(model) { pause(reason); return }
-        guard line["ok"] as? Bool == true else { set(.paused); return }
+        guard line.ok else { set(.paused); return }
         set(.reading)
         keep(line)
     }
@@ -369,17 +368,21 @@ final class HistoryCapture: ObservableObject {
     /// Keeps a read of the launcher's when the app lists allow it. Returns whether it was kept.
     @discardableResult
     func keep(_ line: [String: Any]) -> Bool {
-        guard line["ok"] as? Bool == true, let read = line["text"] as? [String], !read.isEmpty else { return false }
-        let app = line["app"] as? String ?? ""
+        keep(HistoryBridge.Read(line))
+    }
+
+    @discardableResult
+    private func keep(_ line: HistoryBridge.Read) -> Bool {
+        guard let text = line.text else { return false }
+        let app = line.app
         // The Home Screen is left out with its notification banners: a banner names the sending app
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
         // no trace, not even a line in the observing record.
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
         if Self.overlays.contains(where: { $0.caseInsensitiveCompare(app) == .orderedSame }) { return false }
         guard keeps(app) else { return false }
-        let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()
-        HistoryStore.shared.add(at: now, app: app, title: line["title"] as? String ?? "", text: read.joined(separator: "\n"), tree: tree)
+        HistoryStore.shared.add(at: now, app: app, title: line.title, text: text, tree: line.tree)
         lastKept = now
         changes += 1
         return true

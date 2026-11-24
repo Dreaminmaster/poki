@@ -301,7 +301,9 @@ private struct LoopbackPage: View {
 
     var body: some View {
         let monitor = model.loopback
-        let localReady = (model.hasOpenInProcessSession || model.mountedImageStandsIn) && !monitor.isWorking
+        let localTrouble = monitor.isWorking ? nil : model.localSessionTrouble
+        let localReady = !monitor.isWorking && localTrouble == nil
+            && (model.hasOpenInProcessSession || model.runner.code == "local_ddi" || model.mountedImageStandsIn)
         let chosen = LoopbackChoice.chosen(model.setup.proxyApp)
 
         Section {
@@ -379,6 +381,8 @@ private struct LoopbackPage: View {
                     Text("The loopback is on, but this iPhone does not answer through it yet. Turn \(chosen?.name ?? "your app") off and on again, then pair again.")
                 } else if monitor.isWorking {
                     Text("It works. You are done with this step.")
+                } else if let localTrouble {
+                    Text(verbatim: localTrouble.text)
                 } else if localReady {
                     Text("The network loopback is unavailable.")
                 } else if monitor.proxyAnswers {

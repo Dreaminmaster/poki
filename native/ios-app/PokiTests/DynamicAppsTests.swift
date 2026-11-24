@@ -20,6 +20,40 @@ final class DynamicAppsTests: XCTestCase {
         CapsuleText.segments(plain).compactMap { if case .app(let app, _) = $0 { app.id } else { nil } }
     }
 
+    func testConcurrentLookupsShareTheInFlightInventory() async {
+        let apps = InstalledApps()
+        apps.phone = { [:] }
+        let requested = expectation(description: "Inventory request started")
+        let lookupStarted = expectation(description: "Concurrent lookup started")
+        let answer = Data(#"{"v":{"apps":[{"id":"com.example.first","name":"First"}]}}"#.utf8)
+        let competing = Data(#"{"v":{"apps":[{"id":"com.example.second","name":"Second"}]}}"#.utf8)
+        var response: CheckedContinuation<Data, Never>?
+        var requests = 0
+        apps.call = { _ in
+            requests += 1
+            if requests > 1 { return competing }
+            return await withCheckedContinuation {
+                response = $0
+                requested.fulfill()
+            }
+        }
+
+        let refresh = Task { await apps.list() }
+        await fulfillment(of: [requested], timeout: 2)
+        let lookup = Task {
+            lookupStarted.fulfill()
+            return await apps.list()
+        }
+        await fulfillment(of: [lookupStarted], timeout: 2)
+        response?.resume(returning: answer)
+
+        let first = await refresh.value
+        let second = await lookup.value
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(first?.apps.map(\.id), ["com.example.first"])
+        XCTAssertEqual(second, first)
+    }
+
     func testAnInstalledAppsNameGivesItsBundleIDAndBack() {
         XCTAssertNil(AppIconStore.bundleID("Strava"))
         DynamicApps.set([strava, chagee])

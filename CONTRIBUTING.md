@@ -2,6 +2,8 @@
 
 For details on branches, checks, and how releases work, see [AGENTS.md](AGENTS.md#contribute-code) and [docs/release-channels.md](docs/release-channels.md). Run `npm test` before you submit, and say in the pull request whether you also tested on a Simulator or a physical iPhone.
 
+All participation in this project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## When to open an issue first
 
 To fix a typo, a small bug, or a documentation gap, feel free to open a pull request right away.
