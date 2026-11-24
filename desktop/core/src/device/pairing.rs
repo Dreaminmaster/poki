@@ -6,7 +6,7 @@
 use super::{LABEL, Phone};
 use crate::{Error, Progress, Reporter, Result, paths};
 use idevice::{IdeviceService, lockdown::LockdownClient, pairing_file::PairingFile, usbmuxd::UsbmuxdConnection};
-use std::{path::PathBuf, time::Duration};
+use std::{path::{Path, PathBuf}, time::Duration};
 
 pub const HOST_NAME: &str = "Poki Setup";
 
@@ -16,20 +16,45 @@ pub fn record_path(udid: &str) -> Result<PathBuf> {
 
 /// The record saved on this computer for `udid`, if any.
 pub fn saved(udid: &str) -> Result<Option<PairingFile>> {
-    let path = record_path(udid)?;
+    let Some(bytes) = read_record(&record_path(udid)?)? else { return Ok(None) };
+    Ok(Some(PairingFile::from_bytes(&bytes)?))
+}
+
+/// Writes a record (either kind) readable by this user only from the moment it exists: whoever
+/// holds it can use the iPhone's developer services. The bytes go to a private temporary file in
+/// the records folder (0600 where the platform has modes), which then takes the record's place, so
+/// a record is never open to others or half written. On a failure nothing is left behind.
+fn write_record(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().ok_or_else(|| Error::msg("A pairing record needs a folder."))?;
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
+
+/// Reads a record (either kind), first closing one an earlier version left readable by other users.
+/// A record that cannot be made private is not used.
+fn read_record(path: &Path) -> Result<Option<Vec<u8>>> {
     if !path.exists() {
         return Ok(None);
     }
-    Ok(Some(PairingFile::read_from_file(&path)?))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(path)?.permissions().mode() & 0o077 != 0 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+                Error::msg(format!("The pairing record {} is readable by other users of this computer and could not be made private ({e}). Remove it and pair again.", path.display()))
+            })?;
+        }
+    }
+    Ok(Some(std::fs::read(path)?))
 }
 
 /// The saved record's bytes, as Poki wants them (a lockdown pairing plist, UDID included).
 pub fn saved_bytes(udid: &str) -> Result<Option<Vec<u8>>> {
-    let path = record_path(udid)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    Ok(Some(std::fs::read(path)?))
+    read_record(&record_path(udid)?)
 }
 
 /// Whether the saved record still opens a session with the phone.
@@ -62,7 +87,7 @@ pub async fn pair(phone: &Phone, reporter: &Reporter, wait: Duration) -> Result<
         if lockdown.start_session(&existing).await.is_ok() {
             reporter.note("pair", "This iPhone already trusts this computer.");
             reporter.done("pair", None);
-            return Ok(std::fs::read(record_path(&phone.udid)?)?);
+            return saved_bytes(&phone.udid)?.ok_or_else(|| Error::msg("The pairing record went missing while it was in use."));
         }
         let mut lockdown2 = LockdownClient::connect(&*provider).await?;
         std::mem::swap(&mut lockdown, &mut lockdown2);
@@ -71,7 +96,7 @@ pub async fn pair(phone: &Phone, reporter: &Reporter, wait: Duration) -> Result<
             let mut existing = existing;
             existing.udid = Some(phone.udid.clone());
             let bytes = existing.serialize()?;
-            std::fs::write(record_path(&phone.udid)?, &bytes)?;
+            write_record(&record_path(&phone.udid)?, &bytes)?;
             reporter.note("pair", "Using the trust this computer already has with the iPhone.");
             reporter.done("pair", None);
             return Ok(bytes);
@@ -93,7 +118,7 @@ pub async fn pair(phone: &Phone, reporter: &Reporter, wait: Duration) -> Result<
     check.start_session(&record).await?;
 
     let bytes = record.clone().serialize()?;
-    std::fs::write(record_path(&phone.udid)?, &bytes)?;
+    write_record(&record_path(&phone.udid)?, &bytes)?;
     if let Err(e) = mux.save_pair_record(&phone.udid, bytes.clone()).await {
         tracing::warn!("usbmuxd did not keep the pairing record: {e}");
     }
@@ -154,11 +179,7 @@ pub fn is_remote_record(bytes: &[u8]) -> bool {
 
 /// The saved RPPairing record for `udid`, as Poki wants it.
 pub fn saved_remote_bytes(udid: &str) -> Result<Option<Vec<u8>>> {
-    let path = remote_record_path(udid)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    Ok(Some(std::fs::read(path)?))
+    read_record(&remote_record_path(udid)?)
 }
 
 /// The record to give Poki: the RPPairing record when there is one, else the lockdown record.
@@ -190,7 +211,7 @@ pub async fn pair_remote(phone: &Phone, reporter: &Reporter, wait: Duration) -> 
     let path = remote_record_path(&phone.udid)?;
 
     // A record that still verifies is kept: Poki may already be using it.
-    if let Ok(bytes) = std::fs::read(&path) {
+    if let Some(bytes) = read_record(&path)? {
         if let Ok(mut file) = RpPairingFile::from_bytes(&bytes) {
             let ok = async {
                 let service = RemotePairingLockdownService::connect(&*provider).await?;
@@ -218,7 +239,7 @@ pub async fn pair_remote(phone: &Phone, reporter: &Reporter, wait: Duration) -> 
         .map_err(|_| Error::NeedsPerson("The iPhone did not finish remote pairing in time. Unlock it, stay on the Home Screen and try again.".into()))??;
 
     let bytes = with_sending_host(&file.to_bytes(), HOST_NAME)?;
-    std::fs::write(&path, &bytes)?;
+    write_record(&path, &bytes)?;
     Ok(bytes)
 }
 
@@ -252,5 +273,120 @@ mod remote_tests {
         let d: plist::Dictionary = plist::from_bytes(&b).unwrap();
         assert_eq!(d.get(SENDING_HOST_KEY).and_then(|v| v.as_string()), Some(HOST_NAME));
         assert!(!is_remote_record(b"<plist><dict><key>HostID</key><string>x</string></dict></plist>"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod record_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(p: &Path) -> u32 {
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    fn open_up(p: &Path, mode: u32) {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// Nothing but the record itself in the records folder: no temporary file left over.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn both_kinds_of_record_are_private_from_creation() {
+        let (_lock, _dir) = crate::paths::test_home();
+        for path in [record_path("TEST-UDID").unwrap(), remote_record_path("TEST-UDID").unwrap()] {
+            write_record(&path, b"record").unwrap();
+            assert_eq!(mode(&path), 0o600, "{}", path.display());
+            assert_eq!(mode(path.parent().unwrap()), 0o700);
+            // Writing over a record an earlier version left open replaces it with a private one.
+            open_up(&path, 0o644);
+            write_record(&path, b"again").unwrap();
+            assert_eq!(mode(&path), 0o600, "{}", path.display());
+            assert_eq!(std::fs::read(&path).unwrap(), b"again");
+        }
+        assert_eq!(names_in(&crate::paths::pairings_dir().unwrap()), ["TEST-UDID.plist", "TEST-UDID.rppairing.plist"]);
+    }
+
+    #[test]
+    fn an_open_records_folder_is_closed() {
+        let (_lock, _dir) = crate::paths::test_home();
+        let dir = crate::paths::pairings_dir().unwrap();
+        assert_eq!(mode(&dir), 0o700);
+        open_up(&dir, 0o755);
+        crate::paths::pairings_dir().unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[test]
+    fn every_read_path_closes_a_record_left_open() {
+        let (_lock, _dir) = crate::paths::test_home();
+        let local = record_path("TEST-UDID").unwrap();
+        let remote = remote_record_path("TEST-UDID").unwrap();
+        let reads: [(&str, &Path, fn() -> bool); 4] = [
+            ("saved", &local, || saved("TEST-UDID").is_err()), // not a real record: read, then refused
+            ("saved_bytes", &local, || saved_bytes("TEST-UDID").unwrap().is_some()),
+            ("saved_remote_bytes", &remote, || saved_remote_bytes("TEST-UDID").unwrap().is_some()),
+            ("for_poki", &remote, || for_poki("TEST-UDID").unwrap().is_some()),
+        ];
+        for (name, path, read) in reads {
+            write_record(path, b"record").unwrap();
+            open_up(path, 0o644);
+            assert!(read(), "{name}");
+            assert_eq!(mode(path), 0o600, "{name}");
+        }
+    }
+
+    /// Writing over each kind of record fails (the records folder takes no new file, so the
+    /// temporary file cannot be made): that record still reads, unchanged and private.
+    #[test]
+    fn a_failed_write_leaves_the_record_as_it_was_and_nothing_behind() {
+        let (_lock, _dir) = crate::paths::test_home();
+        let dir = crate::paths::pairings_dir().unwrap();
+        let kinds: [(&str, PathBuf, fn() -> Option<Vec<u8>>); 2] = [
+            ("lockdown", record_path("TEST-UDID").unwrap(), || saved_bytes("TEST-UDID").unwrap()),
+            ("RPPairing", remote_record_path("TEST-UDID").unwrap(), || saved_remote_bytes("TEST-UDID").unwrap()),
+        ];
+        for (kind, path, _) in &kinds {
+            write_record(path, format!("{kind} kept").as_bytes()).unwrap();
+        }
+        open_up(&dir, 0o500);
+        // Root writes into a read-only folder anyway, so there is no failure to see.
+        if std::fs::write(dir.join("probe"), b"").is_ok() {
+            let _ = std::fs::remove_file(dir.join("probe"));
+            open_up(&dir, 0o700);
+            eprintln!("skipped: this user can write into a read-only folder");
+            return;
+        }
+        for (kind, path, read) in &kinds {
+            assert!(write_record(path, b"replacement").is_err(), "{kind}: the write fails");
+            assert_eq!(read().as_deref(), Some(format!("{kind} kept").as_bytes()), "{kind}: the record still reads, unchanged");
+            assert_eq!(mode(path), 0o600, "{kind}");
+        }
+        open_up(&dir, 0o700);
+        assert_eq!(names_in(&dir), ["TEST-UDID.plist", "TEST-UDID.rppairing.plist"], "nothing left behind");
+    }
+
+    /// The owner cannot change the mode of a file with the user immutable flag (macOS `chflags uchg`).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_record_that_cannot_be_made_private_is_not_used() {
+        let (_lock, _dir) = crate::paths::test_home();
+        let path = remote_record_path("TEST-UDID").unwrap();
+        write_record(&path, b"record").unwrap();
+        open_up(&path, 0o644);
+        let flag = |f: &str| assert!(std::process::Command::new("chflags").arg(f).arg(&path).status().unwrap().success());
+        flag("uchg");
+        let read = saved_remote_bytes("TEST-UDID");
+        let fallback = for_poki("TEST-UDID");
+        flag("nouchg");
+        let err = read.expect_err("an open record is refused").to_string();
+        assert!(err.contains("could not be made private"), "{err}");
+        assert!(fallback.is_err(), "nor handed to Poki");
+        assert_eq!(mode(&path), 0o644, "left as it was found");
     }
 }

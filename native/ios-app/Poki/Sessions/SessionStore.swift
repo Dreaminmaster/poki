@@ -212,6 +212,8 @@ final class SessionStore {
     static let limit = 200
     /// Set once the conversations saved before archiving existed have been archived.
     static let archivedEarlierKey = "sessions.archivedEarlier"
+    private static let archivePendingKey = "sessions.archiveMigrationPending"
+    private static let archiveExcludedKey = "sessions.archiveMigrationExcluded"
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
@@ -222,6 +224,7 @@ final class SessionStore {
     /// leaves it (`RootView`), so it no longer stays open in the chat and its next line does not save it back.
     struct Removal: Equatable { let id: String; let serial: Int }
     private(set) var removed: Removal?
+    private let archiveWrite: @Sendable (Data, URL) throws -> Void
     private let folder: URL
     private let defaults: UserDefaults
     private var pendingWrites: Set<String> = []
@@ -232,6 +235,31 @@ final class SessionStore {
     private var initialLoadWaiters: [() -> Void] = []
     private var fullLoadWaiters: [() -> Void] = []
     private let writeQueue = DispatchQueue(label: "nz.zheha.poki.session-writes", qos: .utility)
+    // Accessed only on writeQueue so flush sees failures from earlier queued writes.
+    private let writeFailures = WriteFailures()
+
+    private final class WriteFailures: @unchecked Sendable {
+        private var ids: Set<String> = []
+
+        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = []) {
+            let pending = Set(snapshots.map { $0.1.id })
+            let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
+            if !current.isEmpty {
+                ids.formIntersection(Set(current.map { $0.1.id }))
+            }
+            let encoder = JSONEncoder()
+            for (url, session) in snapshots + retries {
+                do {
+                    try encoder.encode(session).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                    ids.remove(session.id)
+                } catch {
+                    ids.insert(session.id)
+                }
+            }
+        }
+
+        func forget(_ ids: Set<String>) { self.ids.subtract(ids) }
+    }
     /// The outside agent sessions seen since launch: id → client name.
     /// Each MCP session's client name (its clientInfo at initialize), kept across launches: an agent
     /// keeps its session while Poki restarts or the session is closed for being idle, and its next
@@ -262,7 +290,11 @@ final class SessionStore {
     /// The outside agent session whose call is running, if any.
     var activeSessionID: String? { currentSession }
 
-    init(folder: URL, defaults: UserDefaults, samples: Bool = false, deferLoad: Bool = false) {
+    init(folder: URL, defaults: UserDefaults, samples: Bool = false, deferLoad: Bool = false,
+         archiveWrite: @escaping @Sendable (Data, URL) throws -> Void = {
+             try $0.write(to: $1, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+         }) {
+        self.archiveWrite = archiveWrite
         self.folder = folder
         self.defaults = defaults
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -332,15 +364,20 @@ final class SessionStore {
                 return (sorted, true)
             }.value
 
+            guard let self else { return }
             var complete = listing.complete
             let urls = listing.urls
+            if needsArchiveEarlier && listing.complete {
+                let touched = Set(self.touchedIDs.map { self.file($0).lastPathComponent })
+                if self.archiveCohort(urls.filter { !touched.contains($0.lastPathComponent) }) == nil { complete = false }
+            }
             let firstChunkSize = 20
             let nextChunkSize = 50
             var offset = 0
             var stagedForArchive: [SavedSession] = []
 
             while offset < urls.count {
-                guard let self, !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
                 let chunkSize = offset == 0 ? firstChunkSize : nextChunkSize
                 let end = min(offset + chunkSize, urls.count)
                 let slice = Array(urls[offset..<end])
@@ -354,10 +391,12 @@ final class SessionStore {
                     loaded.reserveCapacity(slice.count)
                     for url in slice {
                         guard let data = try? Data(contentsOf: url) else { batchComplete = false; continue }
-                        if var session = try? decoder.decode(SavedSession.self, from: data) {
-                            if session.live { session.live = false; session.outcome = .stopped }
-                            loaded.append(session)
+                        guard var session = try? decoder.decode(SavedSession.self, from: data) else {
+                            batchComplete = false
+                            continue
                         }
+                        if session.live { session.live = false; session.outcome = .stopped }
+                        loaded.append(session)
                     }
                     return (loaded, batchComplete)
                 }.value
@@ -377,7 +416,7 @@ final class SessionStore {
                 await Task.yield()
             }
 
-            guard let self, !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return }
             if needsArchiveEarlier {
                 if complete {
                     await self.archiveEarlierInBackground(staged: stagedForArchive)
@@ -406,8 +445,39 @@ final class SessionStore {
         }
     }
 
+    /// Freeze the upgrade cohort before changing files. Later sessions are not part of the migration.
+    private func archiveCohort(_ candidates: [URL]) -> Set<String>? {
+        if let saved = defaults.stringArray(forKey: Self.archivePendingKey) { return Set(saved) }
+        let excluded = Set(defaults.stringArray(forKey: Self.archiveExcludedKey) ?? [])
+        let ids = Set(candidates.map(\.lastPathComponent)).subtracting(excluded)
+        defaults.set(Array(ids), forKey: Self.archivePendingKey)
+        guard defaults.synchronize() else {
+            defaults.removeObject(forKey: Self.archivePendingKey)
+            return nil
+        }
+        return ids
+    }
+
+    private func forgetArchiveCandidate(_ id: String) {
+        guard var ids = defaults.stringArray(forKey: Self.archivePendingKey), ids.contains(file(id).lastPathComponent) else { return }
+        ids.removeAll { $0 == file(id).lastPathComponent }
+        defaults.set(ids, forKey: Self.archivePendingKey)
+        defaults.synchronize()
+    }
+
+    private func finishArchiveMigration() {
+        defaults.set(true, forKey: Self.archivedEarlierKey)
+        defaults.synchronize()
+        defaults.removeObject(forKey: Self.archivePendingKey)
+        defaults.removeObject(forKey: Self.archiveExcludedKey)
+    }
+
     private func archiveEarlierInBackground(staged: [SavedSession]) async {
         guard !defaults.bool(forKey: Self.archivedEarlierKey) else {
+            mergeLoadedBatch(staged)
+            return
+        }
+        guard let cohort = defaults.stringArray(forKey: Self.archivePendingKey).map(Set.init) else {
             mergeLoadedBatch(staged)
             return
         }
@@ -417,31 +487,22 @@ final class SessionStore {
         var snapshots: [(URL, SavedSession)] = []
         for var session in staged {
             guard !deletedIDs.contains(session.id), !touchedIDs.contains(session.id) else { continue }
-            if session.archived == nil {
+            if session.archived == nil && cohort.contains(file(session.id).lastPathComponent) {
                 session.archived = now
                 snapshots.append((file(session.id), session))
             }
             archivedStaged.append(session)
         }
-        for i in sessions.indices where sessions[i].archived == nil && !touchedIDs.contains(sessions[i].id) {
+        for i in sessions.indices where sessions[i].archived == nil && cohort.contains(file(sessions[i].id).lastPathComponent) && !touchedIDs.contains(sessions[i].id) {
             sessions[i].archived = now
             snapshots.append((file(sessions[i].id), sessions[i]))
         }
-        if !snapshots.isEmpty {
-            let queue = self.writeQueue
-            await withCheckedContinuation { continuation in
-                queue.async {
-                    let encoder = JSONEncoder()
-                    encoder.dateEncodingStrategy = .deferredToDate
-                    for (url, session) in snapshots {
-                        guard let data = try? encoder.encode(session) else { continue }
-                        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    }
-                    continuation.resume()
-                }
-            }
+        let write = archiveWrite
+        let batch = snapshots
+        let persisted = await withCheckedContinuation { continuation in
+            writeQueue.async { continuation.resume(returning: Self.persistArchive(batch, write: write)) }
         }
-        defaults.set(true, forKey: Self.archivedEarlierKey)
+        if persisted { finishArchiveMigration() }
         mergeLoadedBatch(archivedStaged)
     }
 
@@ -450,10 +511,12 @@ final class SessionStore {
         let decoder = JSONDecoder()
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)).map { $0.filter { $0.pathExtension == "json" } }
         var complete = files != nil
+        if !defaults.bool(forKey: Self.archivedEarlierKey), let files, archiveCohort(files) == nil { complete = false }
         var loaded: [SavedSession] = []
         for url in files ?? [] {
             guard let data = try? Data(contentsOf: url) else { complete = false; continue }
-            if let session = try? decoder.decode(SavedSession.self, from: data) { loaded.append(session) }
+            guard let session = try? decoder.decode(SavedSession.self, from: data) else { complete = false; continue }
+            loaded.append(session)
         }
         // Nothing is live after a relaunch.
         for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = .stopped }
@@ -467,13 +530,27 @@ final class SessionStore {
     /// It waits for a launch that could read every file, so none is left out.
     private func archiveEarlier() {
         guard !defaults.bool(forKey: Self.archivedEarlierKey) else { return }
+        guard let cohort = defaults.stringArray(forKey: Self.archivePendingKey).map(Set.init) else { return }
         let now = Date()
-        for i in sessions.indices where sessions[i].archived == nil {
+        var snapshots: [(URL, SavedSession)] = []
+        for i in sessions.indices where sessions[i].archived == nil && cohort.contains(file(sessions[i].id).lastPathComponent) {
             sessions[i].archived = now
-            pendingWrites.insert(sessions[i].id)
+            snapshots.append((file(sessions[i].id), sessions[i]))
         }
-        flush()
-        defaults.set(true, forKey: Self.archivedEarlierKey)
+        let write = archiveWrite
+        if writeQueue.sync(execute: { Self.persistArchive(snapshots, write: write) }) {
+            finishArchiveMigration()
+        }
+    }
+
+    nonisolated private static func persistArchive(_ snapshots: [(URL, SavedSession)], write: (Data, URL) throws -> Void) -> Bool {
+        let encoder = JSONEncoder()
+        var complete = true
+        for (url, session) in snapshots {
+            do { try write(encoder.encode(session), url) }
+            catch { complete = false }
+        }
+        return complete
     }
 
     func session(_ id: String) -> SavedSession? { sessions.first { $0.id == id } }
@@ -630,17 +707,23 @@ final class SessionStore {
     /// as new from now.
     func unarchive(_ id: String) {
         guard var session = session(id), session.archived != nil else { return }
+        forgetArchiveCandidate(id)
         session.archived = nil
         session.unarchived = Date()
         put(session)
     }
 
     func delete(_ id: String) {
+        forgetArchiveCandidate(id)
         deletedIDs.insert(id)
         pendingWrites.remove(id)
         sessions.removeAll { $0.id == id }
         let url = file(id)
-        writeQueue.async { try? FileManager.default.removeItem(at: url) }
+        let failures = writeFailures
+        writeQueue.async {
+            failures.forget([id])
+            try? FileManager.default.removeItem(at: url)
+        }
         removed = Removal(id: id, serial: (removed?.serial ?? 0) + 1)
     }
 
@@ -756,9 +839,10 @@ final class SessionStore {
         }
     }
 
-    /// The hand-off's chat takes the id of the outside session's conversation, so the agent's own calls
-    /// and its hand-off stay apart: the hand-off gets its own row.
-    func handoffID(for agentSession: String?) -> String { "\(agentSession.map(conversation(for:)) ?? "agent")-ask-\(UUID().uuidString.prefix(8).lowercased())" }
+    /// A delegated chat owns a fresh saved conversation, independent of the outside
+    /// MCP transport/session ID. The same ID goes to the model and survives retries
+    /// and restoration, while the MCP caller is tracked separately by AskPoki.jobs.
+    func handoffID(for _: String?) -> String { "ask-\(UUID().uuidString.lowercased())" }
 
     func client(of agentSession: String?) -> String {
         if let id = agentSession, let name = clients[id] { return name }
@@ -791,6 +875,13 @@ final class SessionStore {
     // MARK: Files
 
     private func put(_ session: SavedSession) {
+        if !defaults.bool(forKey: Self.archivedEarlierKey), defaults.stringArray(forKey: Self.archivePendingKey) == nil {
+            var excluded = Set(defaults.stringArray(forKey: Self.archiveExcludedKey) ?? [])
+            if excluded.insert(file(session.id).lastPathComponent).inserted {
+                defaults.set(Array(excluded), forKey: Self.archiveExcludedKey)
+                defaults.synchronize()
+            }
+        }
         touchedIDs.insert(session.id)
         deletedIDs.remove(session.id)
         if let i = sessions.firstIndex(where: { $0.id == session.id }) { sessions[i] = session } else { sessions.insert(session, at: 0); trim() }
@@ -798,8 +889,11 @@ final class SessionStore {
         pendingWrites.insert(session.id)
         guard writeTask == nil else { return }
         // Writes are gathered for half a second: a task changes its session many times a second.
+        // A cancelled task must not drain a batch scheduled after flush().
         writeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
             self?.flushInBackground()
         }
     }
@@ -809,30 +903,18 @@ final class SessionStore {
         let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
         pendingWrites = []
         guard !snapshots.isEmpty else { return }
-        writeQueue.async {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .deferredToDate
-            for (url, session) in snapshots {
-                guard let data = try? encoder.encode(session) else { continue }
-                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-        }
+        let failures = writeFailures
+        writeQueue.async { failures.write(snapshots) }
     }
 
-    /// Writes the changed sessions now, rather than after the half-second gathering.
+    /// Writes changed sessions now, including previously failed writes still in memory.
     func flush() {
         writeTask?.cancel()
         writeTask = nil
         let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }
         pendingWrites = []
-        writeQueue.sync {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .deferredToDate
-            for (url, session) in snapshots {
-                guard let data = try? encoder.encode(session) else { continue }
-                try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-        }
+        let current = sessions.map { (file($0.id), $0) }
+        writeQueue.sync { writeFailures.write(snapshots, retryingFrom: current) }
     }
 
     /// Past the limit, the oldest conversations in the list go, one just brought back from the archive
@@ -844,7 +926,9 @@ final class SessionStore {
         let gone = Set(listed.sorted { $0.keptSince > $1.keptSince }[Self.limit...].map(\.id))
         let urls = gone.map { file($0) }
         sessions.removeAll { gone.contains($0.id) }
+        let failures = writeFailures
         writeQueue.async {
+            failures.forget(gone)
             for url in urls { try? FileManager.default.removeItem(at: url) }
         }
     }

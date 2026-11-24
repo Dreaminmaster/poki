@@ -9,6 +9,17 @@ import notify
 /// history is gone, can always be set up again.
 @MainActor
 final class HistoryLockTests: XCTestCase {
+    func testCountdownStopsWhenItsSleepIsCancelled() async {
+        var sleeps = 0
+        var updates = 0
+        await HistoryLockCountdown.run(until: Date().addingTimeInterval(60), sleep: {
+            sleeps += 1
+            throw CancellationError()
+        }, update: { _ in updates += 1 })
+        XCTAssertEqual(sleeps, 1)
+        XCTAssertEqual(updates, 1)
+    }
+
     private let match: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "nz.zheha.poki.history-lock",

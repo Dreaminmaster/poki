@@ -9,7 +9,7 @@ struct BearWardrobeSheet: View {
     @State private var rootDetent = Self.quick
     @State private var navigationTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private static var quick: PresentationDetent { .fraction(0.68) }
+    private static var quick: PresentationDetent { .custom(WardrobeQuickDetent.self) }
 
     var body: some View {
         NavigationStack {
@@ -39,7 +39,7 @@ struct BearWardrobeSheet: View {
                         }
                 }
         }
-        .presentationDetents([Self.quick, .large], selection: $detent)
+        .presentationDetents(mixing ? [.large] : [Self.quick, .large], selection: $detent)
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .onChange(of: mixing) { _, showing in
@@ -118,6 +118,19 @@ struct BearWardrobeSheet: View {
         .padding(.vertical, 10)
         .frame(minHeight: 48)
         .contentShape(.rect)
+    }
+}
+
+private struct WardrobeQuickDetent: CustomPresentationDetent {
+    static func height(in context: Context) -> CGFloat? {
+        let size = context.dynamicTypeSize
+        let fraction: CGFloat
+        if size.isAccessibilitySize { fraction = 1 }
+        else if size >= .xxxLarge { fraction = 0.95 }
+        else if size >= .xxLarge { fraction = 0.88 }
+        else if size >= .xLarge { fraction = 0.78 }
+        else { fraction = 0.68 }
+        return context.maxDetentValue * fraction
     }
 }
 
@@ -208,39 +221,36 @@ private struct BearMixView: View {
 
     private var previewSize: CGFloat {
         if verticalSizeClass == .compact { return 80 }
-        return typeSize.isAccessibilitySize ? 96 : 176
+        return typeSize.isAccessibilitySize ? 144 : 176
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            PokiPortrait(mood: .ready, side: previewSize)
-                .accessibilityHidden(true)
-
-            equippedItems
-                .clipped()
-
-            Picker("Outfit pieces", selection: Binding(
-                get: { slot },
-                set: { newSlot in
-                    if reduceMotion { slot = newSlot }
-                    else { withAnimation { slot = newSlot } }
+        Group {
+            if typeSize.isAccessibilitySize {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        mixHeader
+                        piecesContent(slot)
+                            .padding(.horizontal, 16)
+                    }
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
-            )) {
-                Text(BearOutfitSlot.headwear.name).tag(BearOutfitSlot.headwear)
-                Text(BearOutfitSlot.clothes.name).tag(BearOutfitSlot.clothes)
+                .scrollPosition($clothingScrollPosition)
+                .accessibilityIdentifier("wardrobe.page.\(slot.rawValue)")
+            } else {
+                VStack(spacing: 12) {
+                    mixHeader
+                    TabView(selection: $slot) {
+                        pieces(.headwear).tag(BearOutfitSlot.headwear)
+                        pieces(.clothes).tag(BearOutfitSlot.clothes)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                }
+                .padding(.top, 8)
             }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("wardrobe.pieces")
-            .frame(maxWidth: 520)
-            .padding(.horizontal, 16)
-
-            TabView(selection: $slot) {
-                pieces(.headwear).tag(BearOutfitSlot.headwear)
-                pieces(.clothes).tag(BearOutfitSlot.clothes)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
         }
-        .padding(.top, 8)
+        .softTopEdge()
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: BearWardrobe.shared.selection)
         .background {
             LinearGradient(
@@ -249,6 +259,49 @@ private struct BearMixView: View {
                 startPoint: .top, endPoint: .bottom
             ).ignoresSafeArea()
         }
+    }
+
+    @ViewBuilder private var mixHeader: some View {
+        PokiPortrait(mood: .ready, side: previewSize)
+            .accessibilityHidden(true)
+        if typeSize.isAccessibilitySize {
+            equippedItems
+        } else {
+            // Keep the last capsule's upward exit inside its row, below the portrait.
+            equippedItems.clipped()
+        }
+        categoryPicker
+    }
+
+    private var categoryPicker: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                outfitPiecesPicker
+                    .pickerStyle(.menu)
+                    .font(.body)
+                    .frame(maxWidth: 520, minHeight: 44, alignment: .leading)
+            } else {
+                outfitPiecesPicker
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 520)
+            }
+        }
+        .padding(.horizontal, 16)
+        .accessibilityIdentifier("wardrobe.pieces")
+    }
+
+    private var outfitPiecesPicker: some View {
+        Picker("Outfit pieces", selection: slotSelection) {
+            Text(BearOutfitSlot.headwear.name).tag(BearOutfitSlot.headwear)
+            Text(BearOutfitSlot.clothes.name).tag(BearOutfitSlot.clothes)
+        }
+    }
+
+    private var slotSelection: Binding<BearOutfitSlot> {
+        Binding(get: { slot }, set: { newSlot in
+            if reduceMotion { slot = newSlot }
+            else { withAnimation { slot = newSlot } }
+        })
     }
 
     @ViewBuilder private var equippedItems: some View {
@@ -274,9 +327,22 @@ private struct BearMixView: View {
     }
 
     private func pieces(_ category: BearOutfitSlot) -> some View {
+        ScrollView {
+            piecesContent(category)
+                .padding(.bottom, 16)
+                .frame(maxWidth: .infinity)
+        }
+        .clipShape(.rect(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: BearWardrobe.shared.colors != BearOutfitColors())
+        .scrollPosition(category == .clothes ? $clothingScrollPosition : .constant(ScrollPosition()))
+        .accessibilityIdentifier("wardrobe.page.\(category.rawValue)")
+    }
+
+    private func piecesContent(_ category: BearOutfitSlot) -> some View {
         let wardrobe = BearWardrobe.shared
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 12) {
                 WardrobeGrid(slot: category)
 
                 if category == .clothes, let outfit = wardrobe.selection.clothes {
@@ -292,13 +358,6 @@ private struct BearMixView: View {
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 16))
             .clipShape(.rect(cornerRadius: 16))
             .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: wardrobe.selection.clothes)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
-            .frame(maxWidth: .infinity)
-        }
-        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: BearWardrobe.shared.colors != BearOutfitColors())
-        .scrollPosition(category == .clothes ? $clothingScrollPosition : .constant(ScrollPosition()))
-        .accessibilityIdentifier("wardrobe.page.\(category.rawValue)")
     }
 
     private func equipped(_ outfit: BearOutfit, slot: BearOutfitSlot) -> some View {
