@@ -32,10 +32,12 @@ private struct RenewSignInForm: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let done = !model.signer.needsAppleAccountForRenewal
         Form {
+            // The 7 days are in the form's own footer, so the line does not say them again.
             StartHero(symbol: "person.crop.circle.badge.clock", title: "Keep Poki Opening",
-                      line: "Your free Apple Account signs Poki for 7 days at a time. Sign in here so Poki can renew itself before it stops opening.",
-                      done: !model.signer.needsAppleAccountForRenewal)
+                      line: done ? "Poki renews itself before its signing ends." : "Poki was signed with a free Apple Account. Sign in so Poki can renew itself before it stops opening.",
+                      done: done)
             AccountPage()
         }
         .navigationTitle(Text(verbatim: ""))
@@ -54,8 +56,8 @@ struct StartAppleAccountPage: View {
         let done = !model.signer.needsAppleAccountForRenewal
         RenewSignInForm()
             .bottomBar(softEdge: true) {
-                StartButtons(primary: "Continue", action: goOn, secondary: done ? nil : "Set Up Later", secondaryAction: goOn)
-                    .environment(\.startPrimaryDisabled, !done)
+                // Before the sign-in, the form's Sign In is the action, so the bar offers only to go on without it.
+                StartButtons(primary: done ? "Continue" : "Set Up Later", action: goOn)
             }
             .accessibilityIdentifier("firstRun.appleAccount")
     }
@@ -71,8 +73,7 @@ struct RenewSignInSheet: View {
         NavigationStack {
             RenewSignInForm()
                 .bottomBar(softEdge: true) {
-                    StartButtons(primary: "Continue", action: { dismiss() }, secondary: done ? nil : "Not Now", secondaryAction: { dismiss() })
-                        .environment(\.startPrimaryDisabled, !done)
+                    StartButtons(primary: done ? "Continue" : "Not Now", action: { dismiss() })
                 }
         }
         .environment(\.startDesign, StartDesign.current)

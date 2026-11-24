@@ -81,8 +81,11 @@ struct AccountPage: View {
                 .settingsFooter()
             }
             Section {
-                Button("Sign In") { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } }
-                    .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
+                // Centred and bold, as a form's own action button: plain, it read as an empty field.
+                Button { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } } label: {
+                    Text("Sign In").font(.allo(.body, .semibold)).frame(maxWidth: .infinity)
+                }
+                .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
             }
             // Signing in again is for the same account, so its Apple ID is already there.
             // After Poki Setup, the Apple ID it signed Poki with.
