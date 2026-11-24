@@ -112,7 +112,7 @@ struct LoopbackShortcutSteps: View {
 
         Section {
             NavigationLink {
-                HistoryShortcutGuide().settingsPage().outsideStartFlow()
+                HistoryShortcutGuide().settingsPage().outsideStartFlow().onAppear { reconnect.asked = true }
             } label: {
                 Text("No Automation? Add It by Hand")
             }
