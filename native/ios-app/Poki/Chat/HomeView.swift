@@ -235,7 +235,12 @@ struct PokiHead: View {
                     // The menu is the name pill alone: the system draws its own glass around a menu's
                     // label in a glass group, and a label that held the picture's place too put the
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
-                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
+                    // Anchored as the picture's menu is, so its opening is seen (a SwiftUI menu's tap is
+                    // not, on iOS 27) and opening it here also retires the hint on the home page.
+                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization,
+                             anchor: .below(spacing: 6),
+                             accessibilityLabel: "Poki, " + PokiStatusCopy.word(status),
+                             accessibilityIdentifier: "chat.header.details") {
                         // The chevron says the name opens a menu, as a title menu does in the system's apps.
                         HStack(spacing: 3) {
                             Text(verbatim: "Poki")
@@ -249,8 +254,6 @@ struct PokiHead: View {
                     }
                     .glassSurface(in: Capsule())
                     .glassAppearing()
-                    .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-                    .accessibilityIdentifier("chat.header.details")
                     .accessibilityShowsLargeContentViewer()
                 }
             }
