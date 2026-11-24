@@ -24,8 +24,8 @@ final class HistoryReconnect: ObservableObject {
     static let shared = HistoryReconnect()
 
     static let port: UInt16 = 47684
-    /// The shared shortcut, Poki Loopback, with its Wi-Fi automation. The owner's link (2026-11-20).
-    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/cef403d76ef04d0586d03dd69476b96e")!
+    /// The shared shortcut, Poki Loopback, with its Wi-Fi automation: the verified iCloud link (738cdf29).
+    static let shortcut = URL(string: "https://www.icloud.com/shortcuts/f8ff9cd906194fbf8a58ed51137f6c0a")!
     /// Runs the shared shortcut by the name it arrives with.
     static let run = URL(string: "shortcuts://run-shortcut?name=Poki%20Loopback")!
 

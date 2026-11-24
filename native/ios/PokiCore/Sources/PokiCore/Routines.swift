@@ -1036,9 +1036,11 @@ public final class SkillStore: @unchecked Sendable {
         return TaskBrief(text: (noteLines + skillLines).joined(separator: "\n"), notes: includedNotes)
     }
 
-    func appMemoryBrief(for app: String) -> TaskBrief {
+    func appMemoryBrief(for app: String, excluding: Set<String> = []) -> TaskBrief {
         let notes = withFile { file in
-            Array(file.notes.reversed().lazy.filter { $0.app?.lowercased() == app }.prefix(8))
+            Array(file.notes.reversed().lazy.filter {
+                $0.app?.lowercased() == app && !excluding.contains($0.id)
+            }.prefix(8))
         }
         let lines = notes.map { "- [\($0.id)] \($0.text)" }
         let header = "Saved memories for this app. Apply relevant memories:"
@@ -1344,6 +1346,10 @@ extension Computer {
         /// Fixes to keep in the routine: other forms a step's target took, and what was closed before it.
         var learnedForms: [Int: RoutineTarget] = [:]
         var learnedClears: [Int: [RoutineTarget]] = [:]
+        var sentSteps: [Int] = []
+        var launchedStartingApp = false
+        /// What was closed on the way because the path said it may be.
+        var closed: [String] = []
         let screen = size ?? ScreenSize(width: 10_000, height: 10_000)
         let policy = config.deciderPolicy
         let decider = config.decider()
@@ -1391,9 +1397,17 @@ extension Computer {
         }
         func stop(_ index: Int, _ why: String, _ delivery: Delivery = .notSent) -> ActionFailure {
             finish("stopped at step \(index + 1): \(why)", stop: SkillStop(step: index + 1, why: why, at: Date()))
-            let sent = done == 0 ? "no step was sent" : "steps 1 to \(done) were sent"
+            let sent: String
+            if sentSteps.isEmpty {
+                sent = "no step was sent"
+            } else if sentSteps.last == sentSteps.count {
+                sent = "steps 1 to \(sentSteps.count) were sent"
+            } else {
+                sent = "steps \(sentSteps.map(String.init).joined(separator: ", ")) were sent"
+            }
             let after = saved ? "; when the task is done, skills {action: \"save\", name: \"\(skill.name)\"} saves the path that worked over this one" : ""
-            return ActionFailure(message: "\(title) stopped at step \(index + 1) of \(skill.steps.count): \(why); \(sent)\(fixedNote()). Go on by hand from the screen below\(after)", delivery: delivery)
+            let pathDelivery: Delivery = delivery == .notSent && (!sentSteps.isEmpty || !closed.isEmpty || launchedStartingApp) ? .sent : delivery
+            return ActionFailure(message: "\(title) stopped at step \(index + 1) of \(skill.steps.count): \(why); \(sent)\(fixedNote()). Go on by hand from the screen below\(after)", delivery: pathDelivery)
         }
 
         var front = lastForeground
@@ -1403,9 +1417,14 @@ extension Computer {
                 _ = try await Runner.$afterInput.withValue(nil) {
                     try await perform(["launch": .string(app)], until: until)
                 }
+                launchedStartingApp = true
                 log.append("launched \(app)")
                 front = Foreground(bundleID: app, name: nil)
-            } catch { throw stop(0, "\(app) could not be launched (\(error))") }
+            } catch let failure as ActionFailure {
+                throw stop(0, "\(app) could not be launched (\(failure.message))", failure.delivery)
+            } catch {
+                throw stop(0, "\(app) could not be launched (\(error))", .unknown)
+            }
         }
 
         /// No input goes into Poki, where the approval card and the approval settings are: a step that
@@ -1583,7 +1602,6 @@ extension Computer {
                 if found == nil, step.optional == true {
                     skipped += 1
                     log.append("\(index + 1) left out: \(target.describe) was not there")
-                    done = index + 1
                     continue steps
                 }
                 guard let element = found else { throw stop(index, why + (said.map { "; \($0)" } ?? "") + " (\(reads) reads in \(Int(((now() - readStart) * 1000).rounded())) ms)") }
@@ -1642,7 +1660,7 @@ extension Computer {
             recorded.app = front?.bundleID ?? lastForeground?.bundleID ?? step.app
             recorded.appWasRead = read && front?.bundleID != nil ? true : nil
             if let spec = action["launch"] { front = Foreground(bundleID: spec.string ?? spec["bundle"]?.string, name: nil) }
-            done = index + 1
+            sentSteps.append(index + 1)
             log.append("\(index + 1) \(text.prefix(80)) (\(Int(((now() - began) * 1000).rounded())) ms)")
             recorded.also = nil
             recorded.clears = nil

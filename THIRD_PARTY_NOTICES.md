@@ -55,6 +55,9 @@ The versions a build resolves are the ones in its `Package.resolved`. The [depen
 [native/ios-app/Poki/History/BacktapeModel.swift](native/ios-app/Poki/History/BacktapeModel.swift) holds an adapter, `BacktapeTokenizerLoader` and `BacktapeTokenizer`, that puts swift-transformers' tokenizer behind mlx-swift-lm's `Tokenizer` protocol. It is written out from what mlx-swift-lm's `#huggingFaceTokenizerLoader` macro expands to (the `MLXHuggingFace` target at 3.32.3), so the build needs no macro plugin. The mlx-swift-lm MIT license applies to that code.
 
 The model weights are not part of Poki and are not in this repository or in the app: the owner downloads them from Hugging Face to the iPhone, at a pinned revision, from [mlx-community/Qwen3-1.7B-4bit](https://huggingface.co/mlx-community/Qwen3-1.7B-4bit) or [mlx-community/Qwen3.5-2B-4bit](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit). Both are published under Apache-2.0.
+## ChatGPT voice trust roots
+
+The Poki app's iOS Codex voice build links the Mozilla public CA roots from [webpki-roots 1.0.10](https://crates.io/crates/webpki-roots/1.0.10) through its [0.26.11 compatibility crate](https://crates.io/crates/webpki-roots/0.26.11). Both versions are licensed under [CDLA-Permissive-2.0](https://cdla.dev/permissive-2-0/) and pinned in the generated Codex build lockfile.
 
 ## JavaScript packages
 

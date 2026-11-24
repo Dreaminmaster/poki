@@ -28,6 +28,12 @@ outputs:
   rust-hit:
     description: "'true' when the Rust library came from the cache"
     value: ${{ steps.rust.outputs.cache-hit }}
+  codex-voice-key:
+    description: Cache key of the Codex Voice Rust static library
+    value: ${{ steps.codex-voice-key.outputs.key }}
+  codex-voice-hit:
+    description: "'true' when the Codex Voice Rust static library came from the cache"
+    value: ${{ steps.codex-voice.outputs.cache-hit }}
 
 runs:
   using: composite
@@ -93,6 +99,18 @@ runs:
           native/launcher/target
         key: ${{ steps.rust-key.outputs.key }}
         restore-keys: launcher-
+    # Cache the built Codex Voice static library and its input stamp so xcodebuild skips
+    # recompiling upstream codex-rs when native/codex-voice/ has not changed.
+    - id: codex-voice-key
+      shell: bash
+      run: echo "key=codex-voice-v1-${{ hashFiles('native/codex-voice/build.sh', 'native/codex-voice/Cargo.toml', 'native/codex-voice/src/**', 'native/codex-voice/poki_codex_voice.h') }}" >> "$GITHUB_OUTPUT"
+    - id: codex-voice
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a
+          build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a.sha256
+        key: ${{ steps.codex-voice-key.outputs.key }}
     - id: xcode
       uses: actions/cache/restore@v4
       with:
@@ -113,6 +131,15 @@ runs:
         rustup target add aarch64-apple-ios
         cargo build --release --locked --target aarch64-apple-ios --manifest-path native/launcher/Cargo.toml
         ls -la native/launcher/target/aarch64-apple-ios/release/libpoki_launcher.a
+
+    - name: Codex Voice (Rust static library for the phone)
+      if: steps.codex-voice.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        rustup update stable --no-self-update && rustup default stable
+        native/codex-voice/build.sh build aarch64-apple-ios
+        ls -la build/codex-voice/aarch64-apple-ios/target/aarch64-apple-ios/release/libpoki_codex_voice.a
 
     - name: Assets and project
       shell: bash
@@ -144,7 +171,7 @@ runs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO ARCHS=arm64 \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
             POKI_SIRI_TOOLS_FLAG="$POKI_SIRI_TOOLS_FLAG" \
-            2>&1 | tee "build/app-$edition.log" | grep --line-buffered -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* |^=== BUILD TARGET|^SwiftDriver |^Ld "
+            2>&1 | tee "build/app-$edition.log" | grep --line-buffered -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* |^=== BUILD TARGET|^PhaseScriptExecution |^SwiftDriver |^Ld "
           native/ios-app/scripts/package-app.sh \
             "build/app-$edition/Build/Products/Release-iphoneos/Poki.app" \
             "$edition" "out/$ipa" "$VERSION" "$BUILD"

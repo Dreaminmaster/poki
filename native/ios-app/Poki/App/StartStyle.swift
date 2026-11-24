@@ -296,7 +296,7 @@ struct StartFlowPage: View {
                 WelcomeFeaturesSection(onItsPage: true, openSenses: { path.append(DetailsRoute.screenHistory) })
                 Section {
                     NavigationLink(value: DetailsRoute.agents) {
-                        SettingsRow(title: "Agents", symbol: "chevron.left.forwardslash.chevron.right")
+                        SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
                     }
                     .accessibilityIdentifier("firstRun.agents")
                 } footer: {

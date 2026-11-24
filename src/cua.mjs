@@ -351,24 +351,27 @@ export async function act(ctx, args = {}) {
   let error, last;
   const started = performance.now(), until = started + actionCapMs;
   const size = ctx.size ?? await ctx.screenSize();
-  for (const [index, action] of actions.entries()) {
-    const held = holdReason(memory);
-    if (held) { error = `stopped before action ${index + 1}: ${held}; nothing more was sent`; break; }
-    if (until - performance.now() < 300) { error = `stopped before action ${index + 1}: the ${actionCapMs} ms action time ran out; nothing more was sent`; break; }
-    const began = performance.now();
-    try {
-      const [kind, text] = await perform(ctx, action, size, until);
-      last = kind;
-      done.push(`${text} (sent, ${Math.round(performance.now() - began)} ms)`);
-    } catch (e) {
-      if (stopped(e)) throw e;
-      const delivery = e instanceof NotSent ? 'not_sent' : e.delivery ?? 'unknown';
-      done.push(`${JSON.stringify(action)} (${delivery}, ${Math.round(performance.now() - began)} ms)`);
-      // An action that may have been delivered is never sent again by us, and nothing after it is sent.
-      error = `action ${index + 1} ${delivery === 'unknown' ? 'may have been delivered' : 'was not sent'}: ${e.message}${index + 1 < actions.length ? '; the actions after it were not sent' : ''}`;
-      break;
+  ctx.beginInputGroup?.();
+  try {
+    for (const [index, action] of actions.entries()) {
+      const held = holdReason(memory);
+      if (held) { error = `stopped before action ${index + 1}: ${held}; nothing more was sent`; break; }
+      if (until - performance.now() < 300) { error = `stopped before action ${index + 1}: the ${actionCapMs} ms action time ran out; nothing more was sent`; break; }
+      const began = performance.now();
+      try {
+        const [kind, text] = await perform(ctx, action, size, until);
+        last = kind;
+        done.push(`${text} (sent, ${Math.round(performance.now() - began)} ms)`);
+      } catch (e) {
+        if (stopped(e)) throw e;
+        const delivery = e instanceof NotSent ? 'not_sent' : e.delivery ?? 'unknown';
+        done.push(`${JSON.stringify(action)} (${delivery}, ${Math.round(performance.now() - began)} ms)`);
+        // An action that may have been delivered is never sent again by us, and nothing after it is sent.
+        error = `action ${index + 1} ${delivery === 'unknown' ? 'may have been delivered' : 'was not sent'}: ${e.message}${index + 1 < actions.length ? '; the actions after it were not sent' : ''}`;
+        break;
+      }
     }
-  }
+  } finally { await ctx.endInputGroup?.(); }
   if (last) done.push(`waited ${await quiet(ctx, last, Math.max(0, until - performance.now()))}`);
   return { ...(error ? { isError: true } : {}), ...await readAndReply(ctx, { full: args.full, actions: done, error }) };
 }

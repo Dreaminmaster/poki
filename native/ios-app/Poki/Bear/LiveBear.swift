@@ -432,7 +432,7 @@ struct ModelBear<Flat: View>: View {
                 LiveBear(loaded: loaded, pixels: Int((side * displayScale).rounded()), handle: handle, act: act ?? .ready,
                          live: live && modelled && shown && !covered && scenePhase == .active,
                          outfitMotion: outfitMotion, outfit: outfit,
-                         colorOverride: outfit.selection == wardrobe.selection ? wardrobe.colors : nil) {
+                         colorOverride: outfit.selection == wardrobe.selection ? wardrobe.wornColors : nil) {
                     withAnimation(waited ? .easeOut(duration: 0.3) : nil) { drawn = true }
                 }
                 .aspectRatio(1, contentMode: .fit)
@@ -508,7 +508,7 @@ private struct LiveBear: UIViewRepresentable {
     let live: Bool
     let outfitMotion: BearDressing.Motion
     let outfit: BearOutfitModels
-    let colorOverride: BearOutfitColors?
+    let colorOverride: BearWornColors?
     let drawn: () -> Void
 
     func makeUIView(context: Context) -> BearCanvas {
@@ -612,7 +612,7 @@ private final class BearCanvas: UIView {
         }
     }
 
-    func wear(_ outfit: BearOutfitModels, colors: BearOutfitColors, motion: BearDressing.Motion) {
+    func wear(_ outfit: BearOutfitModels, colors: BearWornColors, motion: BearDressing.Motion) {
         if dressing?.wear(outfit, colors: colors, motion: presented ? motion : .immediate, now: CACurrentMediaTime()) == true, live {
             resume()
         }
