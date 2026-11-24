@@ -17,6 +17,9 @@ struct ComposerAddSheet: View {
     var mention: (MentionMatch) -> Void
     /// Every app on this iPhone with search (AllAppsBrowserSheet), in place of the sheet's own list.
     var moreApps: (() -> Void)? = nil
+    /// Apps the message already names (lowercased ids), marked with a check in the row, as the app
+    /// browser marks them Inserted.
+    var mentionedIDs: Set<String> = []
 
     @State private var connectors = MCPConnectors.shared
     @State private var modelVersion = 0
@@ -82,10 +85,25 @@ struct ComposerAddSheet: View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 4) {
                 ForEach(MentionRecents.apps) { app in
+                    let inserted = mentionedIDs.contains(app.id.lowercased())
                     Button { mention(MentionMatch(capsule: app, insert: app.name)); dismiss() } label: {
-                        AppTile(title: app.name) { MentionIcon(capsule: app, size: 56) }
+                        AppTile(title: app.name) {
+                            MentionIcon(capsule: app, size: 56)
+                                .overlay(alignment: .topTrailing) {
+                                    if inserted {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 20))
+                                            .symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, Tint.blue)
+                                            .background(Circle().fill(Color(.systemBackground)).padding(1))
+                                            .offset(x: 6, y: -6)
+                                            .transition(.scale.combined(with: .opacity))
+                                    }
+                                }
+                        }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityValue(inserted ? Text("Inserted") : Text(verbatim: ""))
                     .accessibilityIdentifier("composer.mention.\(app.id)")
                 }
                 Group {
