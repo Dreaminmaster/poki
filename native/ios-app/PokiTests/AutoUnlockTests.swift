@@ -81,7 +81,8 @@ final class AutoUnlockTests: XCTestCase {
         defer { try? setting.disable() }
 
         XCTAssertFalse(setting.enabled)
-        XCTAssertThrowsError(try setting.save("invalid"))
+        // Alphanumeric passcodes of 4 to 128 characters are accepted; three digits are not.
+        XCTAssertThrowsError(try setting.save("123"))
         XCTAssertFalse(AutoUnlock().enabled)
         XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
 

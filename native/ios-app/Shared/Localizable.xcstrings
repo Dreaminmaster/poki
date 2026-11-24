@@ -1055,6 +1055,28 @@
         }
       }
     },
+    "Apple did not accept this sign-in (error -22411). Sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple did not accept this sign-in (error -22411). Sign in again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 未接受此次登录（错误 -22411）。请重新登录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 未接受此次登入（錯誤 -22411）。請重新登入。"
+          }
+        }
+      }
+    },
     "Apple Sign-In Expired" : {
       "localizations" : {
         "en" : {

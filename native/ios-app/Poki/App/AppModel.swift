@@ -627,13 +627,36 @@ final class AppModel {
     struct InProcessClose { let number: Int; let why: String; let closed: Bool; let seconds: Double }
     private(set) var lastInProcessClose: InProcessClose?
 
+    /// How the last close left the session: kept with Automation Mode off (iOS 18 to 26), or closed.
+    private var lastCloseKeptSession = false
+
+    /// An open that a close overtook answered ready: the session it opened is closed again, unless
+    /// a newer open or phone step wants it now (that one reuses the same session).
+    private func closeLateOpen(_ why: String) {
+        switch inProcessSession {
+        case .idle:
+            log.add("runner", "closing the session that the late open for \(why) left on")
+            closeInProcess("a late open for \(why)", keepingSession: lastCloseKeptSession)
+        case .closing(let reopen):
+            guard !reopen else { return }
+            // The close under way may have run before the open finished: close again after it.
+            afterInProcessClose.append { [weak self] in
+                guard let self, self.inProcessSession == .idle else { return }
+                self.closeLateOpen(why)
+            }
+        default:
+            break
+        }
+    }
+
     func closeInProcess(_ why: String, keepingSession: Bool = false, then: (@MainActor () -> Void)? = nil) {
         guard automationPath == .inProcess else { return }
         if let then { afterInProcessClose.append(then) }
         if case .closing = inProcessSession {
-            if !keepingSession { pendingInProcessClose = why }
+            if !keepingSession { pendingInProcessClose = why; lastCloseKeptSession = false }
             return
         }
+        lastCloseKeptSession = keepingSession
         inProcessSession = .closing(reopen: false)
         inProcessEpoch += 1
         inProcessWarming = false
@@ -760,6 +783,10 @@ final class AppModel {
                 guard let self else { return }
                 guard epoch == self.inProcessEpoch else {
                     self.log.add("runner", "an in-process open for \(why) answered after the session was closed: not taken")
+                    // iOS's close does not wait for an open under way, so an open that answers ready
+                    // after it left a session with Automation Mode on that nothing would ever close
+                    // (the banner stayed until Poki was force-quit). It is closed now, as the close asked.
+                    if (result["ok"] as? Bool) == true { self.closeLateOpen(why) }
                     return
                 }
                 let ok = (result["ok"] as? Bool) == true

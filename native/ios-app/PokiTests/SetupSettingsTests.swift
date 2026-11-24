@@ -33,7 +33,9 @@ final class SetupSettingsTests: XCTestCase {
         let labels = elements.compactMap(\.accessibilityLabel)
         XCTAssertTrue(labels.contains { $0.contains("Required Steps") }, "Required Steps card must stay on Setup; saw \(labels)")
         XCTAssertTrue(labels.contains { $0.contains("Guide Me") }, "Guide Me must stay on Setup; saw \(labels)")
-        for duplicate in ["Accounts", "Screen History", "Memory", "Dictation", "Notifications", "External Connections"] {
+        // Our Setup page (build 72 parity, owner's choice Nov 24 2026) lists the optional features too:
+        // Accounts, Screen History and Memory. Only the system permission rows stay off it.
+        for duplicate in ["Dictation", "Notifications", "External Connections"] {
             XCTAssertFalse(
                 labels.contains { $0.contains(duplicate) },
                 "Settings › Setup must not duplicate Settings home entry '\(duplicate)'; saw \(labels)"
@@ -58,9 +60,11 @@ final class SetupSettingsTests: XCTestCase {
             waitForLabelContaining: "Guide Me"
         )
         let setupLabels = setupElements.compactMap(\.accessibilityLabel)
+        // Our Setup page names the Loopback Shortcut as a row; its step-by-step section stays on the
+        // loopback step page only.
         XCTAssertFalse(
-            setupLabels.contains { $0.contains("Set It Up Step by Step") || $0.contains("How It Is Set Up") || $0.contains("Poki Loopback Shortcut") },
-            "Settings › Setup must not repeat the loopback shortcut section; saw \(setupLabels)"
+            setupLabels.contains { $0.contains("Set It Up Step by Step") || $0.contains("How It Is Set Up") },
+            "Settings › Setup must not repeat the loopback shortcut's steps; saw \(setupLabels)"
         )
 
         let loopbackElements = try await renderElements(
