@@ -16,8 +16,9 @@ struct PokiWidgetsBundle: WidgetBundle {
 /// Poki's Live Activity: what the agent is doing on the phone, or what it needs from you. The pairing
 /// code while pairing, the current setup step while setting up, and Allow/Deny for sensitive actions.
 /// The buttons are for the person; PokiCore sends no input while an approval waits, so the runner never
-/// taps them. A tap anywhere else opens the screen the state is about (`ActivityFace.link`), except on
-/// the expanded island while the agent may be acting, where it does nothing (`TapShield`).
+/// taps them. While the agent is acting, the Lock Screen card and expanded island shield stray taps
+/// (`TapShield`), and an active-task tap that reaches Poki via `poki://activity` keeps automation open
+/// and returns to the target app; otherwise a tap opens the screen the state is about (`ActivityFace.link`).
 struct PokiLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PokiActivityAttributes.self) { context in
@@ -29,6 +30,7 @@ struct PokiLiveActivity: Widget {
                 // colour that goes with the card's gradient, and light or dark handed down to the card.
                 .modifier(CardTint())
                 .activitySystemActionForegroundColor(.white)
+                .modifier(TapShield(on: face.shieldsTaps))
                 .widgetURL(face.link)
         } dynamicIsland: { context in
             let face = context.face

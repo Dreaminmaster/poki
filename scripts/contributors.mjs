@@ -112,7 +112,7 @@ function classify(people, curated, onWall) {
     const auto = signals.length ? 'counted' : 'pending';
     return { ...p, auto, signals, status: entry?.status ?? null, reviewed: Boolean(entry), onWall: onWall.has(p.login), entry };
   });
-  const byFirst = (a, b) => (a.first ?? '').localeCompare(b.first ?? '') || a.login.localeCompare(b.login);
+  const byFirst = (a, b) => (a.first ?? '9999').localeCompare(b.first ?? '9999') || a.login.localeCompare(b.login);
   const counted = rows.filter(r => (r.status ?? r.auto) === 'counted').sort(byFirst);
   return {
     counted,
@@ -196,6 +196,15 @@ if (flag('--help') || flag('-h') || args.some(a => a.startsWith('--') && !['--ou
 try {
   const curated = JSON.parse(readFileSync(curatedPath, 'utf8'));
   const { people } = collect();
+  // Someone can be counted for work that leaves no trace in the repository (for example promotion on social media).
+  // Those entries have no GitHub activity, so add them from their profile.
+  const known = new Set(people.map(p => p.login));
+  for (const [login, entry] of Object.entries(curated)) {
+    if (entry.status !== 'counted' || known.has(login)) continue;
+    const user = JSON.parse(spawnSync('gh', ['api', `users/${login}`], { encoding: 'utf8' }).stdout || 'null');
+    if (!user?.login) throw new Error(`GitHub user not found for curated entry: ${login}`);
+    people.push({ login: user.login, profile: user.html_url, avatar: user.avatar_url, mergedPulls: [], otherPulls: [], issues: [], commits: 0, coAuthored: 0, first: null });
+  }
   const result = classify(people, curated, new Set(wallLogins()));
   const generated = new Date().toISOString().slice(0, 10);
 

@@ -100,36 +100,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ fromJSON(needs.read.outputs.rec).sha }}", fetch-depth: 0, filter: 'tree:0' }
+      - uses: actions/checkout@v4
+        if: env.CHANNEL == 'beta'
+        with:
+          ref: ${{ github.sha }}
+          path: pipeline
+          sparse-checkout: .github/scripts
+          persist-credentials: false
       - name: The promoted build's files
         run: |
           set -euo pipefail
           mkdir -p src dist
           if [ "$CHANNEL" = beta ]; then
-            # The alpha's IPA is the Pre-alpha run's artifact for its commit.
-            run="$(gh run list --workflow prealpha.yml --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
+            # A hotfix can use a commit that main also built with different version inputs.
+            release="" run=""
+            preview="app-$BASE-prealpha.$BUILD"
+            if [ "$(gh release view "$preview" --json isDraft --jq .isDraft 2>/dev/null)" = false ]; then
+              release="$preview"
+            else
+              run="$(gh run list --workflow prealpha.yml --branch main --event push --commit "$SHA" --status success --json databaseId --jq '.[0].databaseId')"
+            fi
             if [ -n "$run" ]; then
               echo "IPA source: Pre-alpha run $run ($SHA)"
               gh run download "$run" --name Poki-unsigned --dir src
               cp src/Poki-external-unsigned.ipa "dist/Poki-external-$BASE-$BUILD.ipa"
             else
-              release="$SOURCE"
-              if ! gh release view "$release" --json tagName >/dev/null; then
-                # Alpha's immutable tag may have its files on the rolling release.
-                release=app-alpha-latest
+              if [ -z "$release" ]; then
+                release="$SOURCE"
+                if [ "$(gh release view "$release" --json isDraft --jq .isDraft 2>/dev/null)" != false ]; then
+                  release=app-alpha-latest
+                fi
               fi
               source_sha="$(gh api "repos/$GH_REPO/commits/$release" --jq .sha)"
-              [ "$source_sha" = "$SHA" ] || { echo "::error::Alpha release $release is not the promoted commit"; exit 1; }
-              echo "IPA source: Alpha release $release ($SOURCE, $SHA)"
+              [ "$source_sha" = "$SHA" ] || { echo "::error::release $release is not the promoted commit"; exit 1; }
+              echo "IPA source: release $release ($SOURCE, $SHA)"
               ipa="Poki-external-$BASE-$BUILD.ipa"
               gh release download "$release" --dir src --pattern "$ipa" --pattern Poki-signing.zip --pattern SHA256SUMS
               awk -v name="$ipa" '$2 == name { print; found=1 } END { exit !found }' src/SHA256SUMS > src/IPA-SHA256SUMS
               (cd src && sha256sum --check IPA-SHA256SUMS)
-              # Older Alpha manifests omit the signing archive; GitHub supplies its digest.
+              # Older release manifests omit the signing archive; GitHub supplies its digest.
               signing_digest="$(gh api "repos/$GH_REPO/releases/tags/$release" --jq '.assets[] | select(.name == "Poki-signing.zip") | .digest')"
               [[ "$signing_digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::missing signing archive SHA-256"; exit 1; }
               (cd src && printf '%s  Poki-signing.zip\n' "${signing_digest#sha256:}" | sha256sum --check -)
               cp "src/$ipa" "dist/$ipa"
             fi
+            python3 pipeline/.github/scripts/verify-ipa-version.py "dist/Poki-external-$BASE-$BUILD.ipa" "$BASE" "$BUILD"
             cp src/Poki-signing.zip dist/
             gh release download app-alpha-latest --dir dist --pattern 'PokiSetup-*' --pattern 'SHA256SUMS-desktop.txt' || echo "::warning::no Poki Setup files on app-alpha-latest"
             # The Gym scorecards from the merged PR's gate, the baseline for the next beta.

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { mkdtemp, cp, mkdir, writeFile, readFile, symlink, rm, watch, utimes } from 'node:fs/promises';
+import { mkdtemp, cp, mkdir, writeFile, readFile, symlink, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
@@ -136,6 +136,14 @@ export async function fixture(t, { approvalMode = 'ask', staleNative = false, to
  t.after(async()=>{await Promise.allSettled(clients.map(c=>c.close()));await Promise.all(daemons.map(d=>d.stop()));await rm(dir,{recursive:true,force:true});});
  const connect=async(profile=toolsProfile)=>{const c=new Client({name:'fixture-client',version:'1'});await c.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'src/stdio.mjs')],env:{...env,POKI_MCP_TOOLS:profile}}));clients.push(c);return c;};
  const a=await connect();
- const until=async predicate=>{ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);try {const changes=watch(dir,{signal:controller.signal});if(predicate(await readFile(log,'utf8')))return;for await(const event of changes)if(event.filename==='commands.jsonl'&&predicate(await readFile(log,'utf8')))return;}finally{clearTimeout(timer);controller.abort();}};
+ // Read the append-only log directly so a write between reads cannot be missed.
+ const until=async predicate=>{
+  const deadline=performance.now()+10000;
+  while(true){
+   if(predicate(await readFile(log,'utf8')))return;
+   if(performance.now()>=deadline)throw new Error('Timed out waiting for a command in the fixture log');
+   await new Promise(resolve=>setTimeout(resolve,25));
+  }
+ };
  return {a,connect,dir,env,until,image,daemon,startDaemon,get stderr(){return stderr;},set:async data=>writeFile(state,JSON.stringify(data)),events:async()=> (await readFile(log,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse),call:(name,args={})=>a.callTool({name,arguments:args})};
 }

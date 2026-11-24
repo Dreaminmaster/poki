@@ -12,8 +12,7 @@
 // stood still while the finger went on, inside the home page's own scroll view. So the touch is the
 // system's here: a `UIScrollView` holds the pills, which gives the stop on touch, the following, the
 // flick and the difference between a tap and a drag as every scroll view has them. Folding the
-// position back while it scrolls, in `layoutSubviews`, is the way Apple's StreetScroller sample makes
-// a scroll view endless (written from memory of it, not copied).
+// position back by whole copies while it scrolls keeps the row endless.
 //
 // What moves the row on its own is a transform on the content, set once a display frame from a
 // `CADisplayLink`: a transform is not rounded to whole pixels, so 18 points a second is an even
@@ -109,6 +108,7 @@ final class MarqueeScrollView: UIScrollView {
     private var stale = true
     private var placed = false
     private var laidWidth: CGFloat = 0
+    private var geometryUpdatePending = false
 
     private var link: CADisplayLink?
     private var last: CFTimeInterval = 0
@@ -188,8 +188,20 @@ final class MarqueeScrollView: UIScrollView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if stale || laidWidth != bounds.width { measure() }
         placeFade()
+        let x = bounds.origin.x
+        let needsWrap = loops && period > 0 && (x < period || x >= 2 * period)
+        guard !geometryUpdatePending, stale || laidWidth != bounds.width || needsWrap else { return }
+
+        // UIKit adjusts the offset while setting the frame. Wait until its layout has returned
+        // before changing the content size or moving the strip to another copy.
+        geometryUpdatePending = true
+        DispatchQueue.main.async { [weak self] in self?.updateScrollGeometry() }
+    }
+
+    private func updateScrollGeometry() {
+        geometryUpdatePending = false
+        if stale || laidWidth != bounds.width { measure() }
         guard loops, period > 0 else { return }
         var x = bounds.origin.x
         while x >= 2 * period { x -= period }

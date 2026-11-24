@@ -789,6 +789,8 @@ struct BacktapeLibrary: View {
     @ObservedObject var lock = HistoryLock.shared
     @State private var notes = BacktapeNotes.shared
     @State private var zoom: BacktapeZoom = .hours
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inward = true
     @State private var point: UnitPoint = .center
     @State private var target: String?
@@ -828,7 +830,12 @@ struct BacktapeLibrary: View {
                     }
                     .onEnded { _ in pinched = false }
             )
-            .onAppear { size = geometry.size }
+            .scaleEffect(appeared || reduceMotion ? 1 : 0.97)
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .onAppear {
+                size = geometry.size
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { appeared = true }
+            }
             .onChange(of: geometry.size) { _, new in size = new }
         }
         .bottomBar(softEdge: true) {

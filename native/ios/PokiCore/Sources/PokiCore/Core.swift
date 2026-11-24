@@ -380,6 +380,7 @@ public final class PokiCore: @unchecked Sendable {
     public let events: AsyncStream<CoreEvent>
     private let gate = Gate()
     private var itemPictureSources = ItemPictureSources()
+    private let taskScreenshots = TaskScreenshotStore()
     private let sessions = LockedBox<Set<String>>([])
     /// Each MCP session's client, by the name it gave at initialize (skills and notes say who saved them).
     let clientNames = LockedBox<[String: String]>([:])
@@ -484,10 +485,11 @@ public final class PokiCore: @unchecked Sendable {
         approvals.withdrawPending()
         let element = Element(type: "Other", label: text, value: nil, identifier: nil, frame: Rect(x: 0, y: 0, width: 0, height: 0), depth: 0)
         // No readable text: the rules cannot tell what it does, so the owner is asked.
+        // Bridged voice taps carry only a label with no accessibility tree, so pass `in: nil`.
         let unreadable = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false) else { return .clear }
+        guard let reason = unreadable && config.sensitive.enabled ? "a tap on something with no readable text" : config.rules.reason(touching: element, typing: false, app: app, secureOnScreen: false, in: nil) else { return .clear }
         // Never Ask would not stop a tap the rules cannot read, nor one they hold back whatever the way of asking.
-        let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false) == nil
+        let stopsWhenOff = !unreadable && config.sensitive.asked(.off).reason(touching: element, typing: false, app: app, secureOnScreen: false, in: nil) == nil
         let approval = approvals.request(app: app.describe, summary: unreadable ? "Tap something with no text" : "Tap “\(text)”", reason: reason, scope: ApprovalScope(actions: "tap:\(UUID().uuidString)"), stopsWhenOff: stopsWhenOff)
         switch await approvals.wait(id: approval.id, seconds: seconds) {
         case .approved?:
@@ -539,8 +541,27 @@ public final class PokiCore: @unchecked Sendable {
     /// The task is over (the app stops an idle runner, or its chat's turn ended): the phone goes back
     /// to the app the task began in. Nothing happens while a tool call runs or when no task is open.
     /// `switching: false` only forgets the task, for a runner the owner stopped: nothing is sent to it.
-    public func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
-        await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace)
+    public func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        await endTask(session: localSession, switching: switching, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
+    }
+
+    public func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
+        if let shouldRun {
+            guard await gate.enter(while: { [computer] in
+                guard !computer.handoffWaiting, computer.approvals.pending == nil else { return false }
+                return await shouldRun()
+            }) else { return nil }
+        } else {
+            guard await gate.enter(waiting: config.busyWait) else { return nil }
+        }
+        defer { gate.leave() }
+        guard !computer.handoffWaiting, computer.approvals.pending == nil else { return nil }
+        if let shouldRun, await !shouldRun() { return nil }
+        return await computer.bringBackTargetApp(why: why, check: shouldRun == nil)
+    }
+
+    public func clearTaskScreenshots(localTask: String) {
+        taskScreenshots.clear(task: localTask)
     }
 
     /// The task of one session is over (its client ended the session): nothing happens when another
@@ -548,11 +569,13 @@ public final class PokiCore: @unchecked Sendable {
     public func finishTask(session: String) async -> String? { await endTask(session: session) }
 
     /// Only the session that began the task ends it; nil ends any.
-    func endTask(session: String?, switching: Bool = true, ifNoLocalWorkspace: Bool = false) async -> String? {
+    func endTask(session: String?, switching: Bool = true, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        if let localTask { taskScreenshots.clear(task: localTask) }
         guard await gate.enter(waiting: config.busyWait) else { return nil }
         defer { gate.leave() }
         if ifNoLocalWorkspace, computer.hasLocalWorkspace { return nil }
         if let session, !computer.ownsTask(session: session) { return nil }
+        if let activeTask = computer.recordingTask { taskScreenshots.clear(task: activeTask) }
         guard switching else {
             if session != nil, computer.hasLocalWorkspace { return await computer.returnToOrigin() }
             computer.forgetTask()
@@ -700,13 +723,15 @@ public final class PokiCore: @unchecked Sendable {
         public let replayedSkills: [String]
         public let numberedScreen: NumberedScreen?
         public let offeredMemories: [MemoryNote]
-        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, replayedSkills: [String] = [], numberedScreen: NumberedScreen? = nil, offeredMemories: [MemoryNote] = []) {
+        public let readApp: String?
+        public init(text: String, jpeg: Data?, isError: Bool, splitView: SplitViewRead? = nil, splitViewNeedsRead: Bool = false, screen: String? = nil, waitingForOwner: Bool = false, automationAuthorizationDeclined: Bool = false, replayedSkills: [String] = [], numberedScreen: NumberedScreen? = nil, offeredMemories: [MemoryNote] = [], readApp: String? = nil) {
             self.text = text; self.jpeg = jpeg; self.isError = isError; self.splitView = splitView
             self.splitViewNeedsRead = splitViewNeedsRead; self.screen = screen; self.waitingForOwner = waitingForOwner
             self.automationAuthorizationDeclined = automationAuthorizationDeclined
             self.replayedSkills = replayedSkills
             self.numberedScreen = numberedScreen
             self.offeredMemories = offeredMemories
+            self.readApp = readApp
         }
     }
 
@@ -715,13 +740,13 @@ public final class PokiCore: @unchecked Sendable {
     /// object the model sent.
     /// `conversation`: the app's saved conversation a `routines` call comes from, kept with a note as
     /// where it was heard.
-    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolAnswer {
+    public func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolAnswer {
         let args = (try? JSON.parse(arguments)) ?? .object([:])
-        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, onActionSucceeded: onActionSucceeded)
+        let output = await call(name, args, session: localSession, local: true, expectedApps: expectedApps, conversation: conversation, localTask: localTask ?? localSession, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded)
         return ToolAnswer(text: output.text, jpeg: output.jpeg, isError: output.isError, splitView: output.splitView,
                           splitViewNeedsRead: output.splitViewNeedsRead, screen: output.screen, waitingForOwner: output.waitingForOwner,
                           automationAuthorizationDeclined: output.automationAuthorizationDeclined, replayedSkills: output.replayedSkills,
-                          numberedScreen: output.numberedScreen, offeredMemories: output.offeredMemories)
+                          numberedScreen: output.numberedScreen, offeredMemories: output.offeredMemories, readApp: output.readApp)
     }
 
     /// Returns the indices of writes that were not saved. A required failure discards the whole batch.
@@ -807,9 +832,22 @@ public final class PokiCore: @unchecked Sendable {
         return String(line.prefix(limit))
     }
 
-    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
+    func call(_ name: String, _ args: JSON, session: String? = nil, answerBy: Double? = nil, local: Bool = false, expectedApps: Set<String>? = nil, conversation: String? = nil, byOwnersVoice: Bool = false, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: ActionSucceeded? = nil) async -> ToolResult {
         if name == "status" { return status() }
         if name == "screen_history" { return await screenHistoryCall(args, answerBy: answerBy) }
+        if name == "get_screenshot", local, !byOwnersVoice {
+            guard let id = args["screenshot_id"]?.string, !id.isEmpty, let localTask else {
+                return ToolResult(text: "Use a screenshot_id from this task.", jpeg: nil, isError: true)
+            }
+            guard await gate.enter(waiting: 2) else {
+                return ToolResult(text: "Poki is busy. Try retrieving the screenshot again.", jpeg: nil, isError: true)
+            }
+            defer { gate.leave() }
+            guard !Task.isCancelled, let jpeg = taskScreenshots.screenshot(id, task: localTask) else {
+                return ToolResult(text: "This screenshot is no longer available in this task.", jpeg: nil, isError: true)
+            }
+            return ToolResult(text: "Earlier screenshot \(id). Use a current screen read for taps.", jpeg: jpeg, isError: false)
+        }
         if let tool = hostTools.value.first(where: { $0.name == name }) {
             // Outside the gate: the app's tool makes its own look and do calls, one at a time as any.
             let answer = await tool.run(args.serialized(), session, answerBy.map { max(0, $0 - now() - 3) })
@@ -880,7 +918,7 @@ public final class PokiCore: @unchecked Sendable {
         if local, session == nil, let localTask, localTask == computer.recordingTask,
            !output.isError, let app = output.readApp?.lowercased(), app != "com.apple.springboard",
            let memory = computer.memory, computer.memoryAppsOffered.insert(app).inserted {
-            let brief = memory.appMemoryBrief(for: app)
+            let brief = memory.appMemoryBrief(for: app, excluding: offeredMemoryIDs)
             if !brief.notes.isEmpty {
                 output.text += "\n" + brief.text
                 output.offeredMemories = brief.notes
@@ -888,6 +926,9 @@ public final class PokiCore: @unchecked Sendable {
         }
         if local, let localTask, let source = output.itemPictureSource {
             let id = itemPictureSources.record(source, task: localTask)
+            if let jpeg = output.jpeg {
+                taskScreenshots.record(jpeg, id: id, task: localTask)
+            }
             output.text += "\nscreenshot_id: \(id)"
         }
         gate.current = nil
@@ -905,7 +946,7 @@ public final class PokiCore: @unchecked Sendable {
             output.text = "earlier, never delivered to you: " + earlier.joined(separator: "\n\n") + "\n\nnow:\n" + output.text
         }
         let line = output.text.split(separator: "\n").first.map(String.init) ?? ""
-        let thumbnail = computer.lastPNG.flatMap { try? host?.jpeg(fromPNG: $0, width: 96, quality: 0.5) }
+        let thumbnail = output.freshPNG.flatMap { try? host?.jpeg(fromPNG: $0, width: 96, quality: 0.5) }
         // The log keeps the error line too: the step's own wording (it names what a field held by case
         // only), or the answer's first `error:` line. What the call typed is taken out of it either way
         // (a runner's error can echo it). A failed action with a read is not an isError answer (the
@@ -918,7 +959,7 @@ public final class PokiCore: @unchecked Sendable {
             }
             errorLine = String(text.prefix(300))
         }
-        emit(.toolFinished(activity, output.isError ? .failed(line) : .done(line), ToolFacts(app: computer.lastForeground?.describe, thumbnail: thumbnail, error: errorLine)))
+        emit(.toolFinished(activity, output.isError ? .failed(line) : .done(line), ToolFacts(app: output.observedApp, thumbnail: thumbnail, error: errorLine)))
         return Self.applyPicture(args["picture"], to: output, png: computer.lastPNG)
     }
 
@@ -970,6 +1011,14 @@ final class Gate: @unchecked Sendable {
             if now() >= until { return false }
             await sleep(seconds: 0.05)
         }
+    }
+    func enter(while stillNeeded: @Sendable () async -> Bool) async -> Bool {
+        while !Task.isCancelled {
+            if await !stillNeeded() { return false }
+            if tryEnter() { return true }
+            await sleep(seconds: 0.05)
+        }
+        return false
     }
     func leave() { lock.lock(); held = false; lock.unlock() }
 }

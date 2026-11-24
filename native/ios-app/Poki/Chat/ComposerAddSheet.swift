@@ -15,6 +15,8 @@ struct ComposerAddSheet: View {
     var takePhoto: () -> Void
     var chooseFiles: () -> Void
     var mention: (MentionMatch) -> Void
+    /// Every app on this iPhone with search (AllAppsBrowserSheet), in place of the sheet's own list.
+    var moreApps: (() -> Void)? = nil
 
     @State private var connectors = MCPConnectors.shared
     @State private var modelVersion = 0
@@ -86,13 +88,11 @@ struct ComposerAddSheet: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("composer.mention.\(app.id)")
                 }
-                NavigationLink(value: AddRoute.apps) {
-                    AppTile(title: AppLocalization.text("More")) {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(Color(.secondaryLabel))
-                            .frame(width: 56, height: 56)
-                            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 56 * 0.225, style: .continuous))
+                Group {
+                    if let moreApps {
+                        Button(action: moreApps) { moreTile }
+                    } else {
+                        NavigationLink(value: AddRoute.apps) { moreTile }
                     }
                 }
                 .buttonStyle(.plain)
@@ -101,6 +101,16 @@ struct ComposerAddSheet: View {
             .padding(.horizontal, 12)
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var moreTile: some View {
+        AppTile(title: AppLocalization.text("More")) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color(.secondaryLabel))
+                .frame(width: 56, height: 56)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 56 * 0.225, style: .continuous))
+        }
     }
 
     private func chips(_ matches: [MentionMatch]) -> some View {

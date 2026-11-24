@@ -14,6 +14,7 @@ use idevice::{
 };
 use std::{
     fmt,
+    io::ErrorKind,
     net::{IpAddr, SocketAddr},
     path::Path,
     sync::atomic::{AtomicBool, AtomicU16, Ordering},
@@ -65,6 +66,8 @@ pub enum Stage {
     /// loopback works, and the remote pairing service does not listen on this port.
     NotListening,
     Handshake,
+    /// The peer closed the stream before the handshake completed.
+    HandshakeDropped,
     PairVerify,
     Listener,
     Tunnel,
@@ -89,7 +92,7 @@ impl fmt::Display for RemoteError {
                 f,
                 "remote pairing connect failed: the loopback reached the phone, and nothing there listens on this port ({detail}). iOS moves its remote pairing service to another port when it starts the service again; Poki looks the port up in Bonjour and tries again by itself."
             ),
-            Stage::Handshake => write!(
+            Stage::Handshake | Stage::HandshakeDropped => write!(
                 f,
                 "remote pairing handshake failed: the phone's remote pairing service did not answer ({detail})."
             ),
@@ -196,7 +199,17 @@ pub async fn connect(
         .attempt_pair_verify()
         .await
         .map_err(|error| RemoteError {
-            stage: Stage::Handshake,
+            stage: match &error {
+                IdeviceError::Socket(io)
+                    if matches!(
+                        io.kind(),
+                        ErrorKind::UnexpectedEof
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::ConnectionAborted
+                            | ErrorKind::BrokenPipe
+                    ) => Stage::HandshakeDropped,
+                _ => Stage::Handshake,
+            },
             // How long the other side held the connection before it ended tells the phone's own
             // refusal (at once) from a proxy app that gave up reaching the phone (its dial timeout).
             detail: format!("{}, after {:.1} s", describe(&error), asked.elapsed().as_secs_f64()),

@@ -24,8 +24,13 @@ struct VoiceView: View {
                 // beside it for dictation). This page only says how it runs and keeps its options.
                 Section {
                     LabeledContent {
-                        Text(voice.canTalkLive ? (VoiceDirect.account == .openai ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
-                            .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
+                        if voice.usesChatGPTSubscription {
+                            Text(CodexAccount.accessToken == nil ? AppLocalization.text("Sign In Again") : "ChatGPT")
+                                .foregroundStyle(Color.secondary)
+                        } else {
+                            Text(voice.canTalkLive ? (VoiceDirect.account == .openai ? AppLocalization.text(LocalizedStringResource("OpenAI key")) : VoiceDirect.account?.name ?? AppLocalization.text(LocalizedStringResource("Voice bridge"))) : AppLocalization.text(LocalizedStringResource("Not Available")))
+                                .foregroundStyle(voice.canTalkLive ? Color.secondary : Color.orange)
+                        }
                     } label: {
                         SettingsLabel("Live Voice", systemImage: "waveform")
                     }
@@ -44,6 +49,11 @@ struct VoiceView: View {
                     }
                     .settingsFooter()
                 }
+                #if canImport(ScreenCaptureKit)
+                if #available(iOS 27, *) {
+                    AppAudioSettings(talkIsOn: voice.isOn)
+                }
+                #endif
                 ActionButtonSection()
             }
             .navigationTitle(AppLocalization.text("Dictation & Mute"))
@@ -72,6 +82,38 @@ struct VoiceView: View {
         }
     }
 }
+
+#if canImport(ScreenCaptureKit)
+@available(iOS 27, *)
+private struct AppAudioSettings: View {
+    private let capture = AppAudioCapture.shared
+    let talkIsOn: Bool
+
+    var body: some View {
+        Section {
+            if capture.buffer != nil {
+                Button(role: .destructive) { capture.stop() } label: {
+                    SettingsLabel("Stop Listening to App Audio", systemImage: "stop.circle")
+                }
+                .accessibilityIdentifier("voice.stopAppAudio")
+            } else {
+                Button { capture.choose() } label: {
+                    SettingsLabel("Listen to App Audio", systemImage: "waveform")
+                }
+                .disabled(capture.isTransitioning || talkIsOn)
+                .accessibilityIdentifier("voice.startAppAudio")
+            }
+        } footer: {
+            if capture.didFail {
+                Text("App audio capture is unavailable.")
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Share your screen to let Poki hear app audio during your next voice conversation. Poki keeps the last minute on this iPhone and sends only the transcript to answer your question. Phone actions are off during that conversation.")
+            }
+        }
+    }
+}
+#endif
 
 /// Voice's rows on Settings › Advanced: how long the last answer took, and the voice bridge on a Mac
 /// (live voice without an OpenAI key on this iPhone). They were Voice's own Advanced.
