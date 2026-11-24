@@ -9,14 +9,25 @@ import SwiftUI
 /// stays where it is through all of it: the conversations on the left, Poki in the middle, a new
 /// conversation on the right. An approval or a hand-over shows as a card above the message field,
 /// where iOS hides the Dynamic Island while Poki is in front.
+/// One-shot, session-scoped search navigation. A fresh id lets the same hit be reopened.
+struct ConversationSearchJump: Equatable {
+    let sessionID: String
+    let entryID: UUID
+    let requestID = UUID()
+}
+
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     var sharedDraft: Binding<String>? = nil
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     var openSetup: () -> Void
     var openSetupStep: (SetupStep) -> Void = { _ in }
     var openModel: () -> Void
+    var searchJump: ConversationSearchJump? = nil
+    var revealedSearchEntryID: UUID? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     /// Opens where the OpenAI key for Talk with Poki goes: the key's form, or Live Voice when it is off.
     var openVoiceKey: () -> Void = {}
     /// Opens the conversations (the drawer on iPhone); nil where the list is always beside the chat.
@@ -33,10 +44,7 @@ struct ChatView: View {
     @State private var pokes = 0
     /// How far Poki's picture rises from the home page into the top bar.
     @State private var flightRise: CGFloat = 0
-    @State private var wardrobeOpen = false
-    @State private var wardrobeMixing = false
-    @State private var wardrobeOpensSettings = false
-    @Environment(\.openPokiSettings) private var openPokiSettings
+    @State private var customizationOpen = false
     @Environment(\.bearCovered) private var bearCovered
 
     private func tapPoki() {
@@ -45,9 +53,8 @@ struct ChatView: View {
         pokes += 1
     }
 
-    private func openWardrobe() {
-        tapPoki()
-        wardrobeOpen = true
+    private func openCustomization() {
+        customizationOpen = true
     }
 
     /// The message field has the keyboard.
@@ -70,6 +77,7 @@ struct ChatView: View {
 
     /// No message of yours yet: the page is the bear and what you could ask, not a transcript.
     private var isGreeting: Bool {
+        if Self.containsSearchEntry(chat.entries, id: searchJump?.entryID ?? revealedSearchEntryID) { return false }
         guard !chat.running, !voice.isOn, voice.lines.isEmpty else { return false }
         return !chat.entries.contains(where: Self.isContent)
     }
@@ -84,8 +92,22 @@ struct ChatView: View {
 
     /// The conversation without the greeting's lines, which the home page said itself.
     private var shown: [ChatEntry] {
-        guard let first = chat.entries.firstIndex(where: Self.isContent) else { return [] }
-        return chat.entries.enumerated().compactMap { i, entry in
+        Self.transcriptEntries(chat.entries, revealed: searchJump?.entryID ?? revealedSearchEntryID)
+    }
+
+    private static func containsSearchEntry(_ entries: [ChatEntry], id: UUID?) -> Bool {
+        guard let id else { return false }
+        return entries.contains { $0.id == id }
+    }
+
+    static func transcriptEntries(_ entries: [ChatEntry], revealed: UUID?) -> [ChatEntry] {
+        guard let first = entries.firstIndex(where: Self.isContent) else {
+            // A greeting-only conversation normally stays on the home page. A
+            // selected saved row may be shown, but no unrelated opening line.
+            return entries.filter { $0.id == revealed }
+        }
+        return entries.enumerated().compactMap { i, entry in
+            if entry.id == revealed { return entry }
             if i < first, case .poki = entry.kind { return nil }
             return entry
         }
@@ -121,23 +143,11 @@ struct ChatView: View {
 
     var body: some View {
         chatContent
-            .environment(\.bearOutfitPreview, wardrobeOpen)
-            .environment(\.bearCovered, bearCovered || wardrobeMixing)
-            .sheet(isPresented: $wardrobeOpen, onDismiss: wardrobeDismissed) {
-                BearWardrobeSheet(mixing: $wardrobeMixing) {
-                    wardrobeOpensSettings = true
-                    wardrobeOpen = false
-                }
-                .environment(\.bearOutfitPreview, true)
+            .environment(\.bearCovered, bearCovered || customizationOpen)
+            .fullScreenCover(isPresented: $customizationOpen) {
+                BearCustomizationView()
+                    .environment(\.bearOutfitPreview, true)
             }
-    }
-
-    private func wardrobeDismissed() {
-        wardrobeMixing = false
-        if wardrobeOpensSettings {
-            wardrobeOpensSettings = false
-            openPokiSettings?()
-        }
     }
 
     @ViewBuilder private var chatContent: some View {
@@ -147,7 +157,8 @@ struct ChatView: View {
         let homeEdges: Edge.Set = home && openThreads != nil && !coveredByDrawer && inDuoSplitView
             ? .leading : []
         ZStack {
-            ChatTranscript(entries: shown, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
+            ChatTranscript(entries: shown, jump: searchJump,
+                           onSearchJumpApplied: onSearchJumpApplied, typing: chat.awaitingModel, canRetry: chat.canRetry, retry: chat.retry, session: chat.sessionID,
                            live: live, waiting: !model.approvals.isEmpty || sampleScene == "approval" || chat.demoAsk != nil || chat.contextAsk != nil,
                            handedOver: model.handoffText != nil || sampleScene == "handoff",
                            plan: chat.planSteps, app: sampleScene == nil ? chat.taskApp : ChatModel.Sample.app(sampleScene),
@@ -156,7 +167,9 @@ struct ChatView: View {
                 if !home, let hint = currentSetupHint {
                     SetupHintLine(hint: hint, openSetupStep: openSetupStep, openSetup: openSetup, openModel: openModel)
                 }
-                LiveVoiceTranscript(voice: voice)
+                if !home {
+                    LiveVoiceTranscript(voice: voice)
+                }
             }
             // The home page stays in the tree while the conversation is in front, neither seen nor
             // touched, so a new conversation brings it back on the same animation.
@@ -179,7 +192,8 @@ struct ChatView: View {
         .topBar {
             if !bare {
                 ChatTopBar(status: status, home: home, busy: busy, openThreads: openThreads,
-                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } }, openDetails: tapPoki, openModel: openModel)
+                           newConversation: { if home { restarts += 1 } else { chat.newConversation() } },
+                           openDetails: tapPoki, openModel: openModel, openCustomization: openCustomization)
                     .logStartupAppearance(.topBar)
             }
         }
@@ -209,12 +223,12 @@ struct ChatView: View {
                         .accessibilityIdentifier("chat.counted-scroll.reply")
                     }
                 }
-                ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts,
+                ComposerInputView(input: draft, focused: $writing, adding: $adding, running: busy, progress: progress, restarts: restarts, conversationID: chat.sessionID,
                                   send: { text, attachments in
                                       let reply = scrollReplyQuestion == chat.countedScrollQuestion ? scrollReplyQuestion : nil
                                       scrollReplyQuestion = nil
                                       chat.send(text, attachments: attachments, replyingTo: reply)
-                                  }, stop: chat.stop, openVoice: openVoice, openVoiceKey: openVoiceKey,
+                                  }, stop: chat.stop, openVoice: openVoice, openChatGPTSignIn: openChatGPTSignIn, openVoiceKey: openVoiceKey,
                                   noticeHeight: max(120, pageHeight * 0.6))
                     .logStartupAppearance(.composer)
             }
@@ -226,9 +240,7 @@ struct ChatView: View {
             GeometryReader { proxy in
                 if !bare {
                     PokiFlight(status: status, home: home, writing: writing, places: anchors.mapValues { proxy[$0] }, pokes: pokes,
-                               tap: tapPoki, openModel: openModel, openOutfits: openWardrobe, travel: { flightRise = $0 })
-                        .offset(y: home && wardrobeOpen ? -46 : 0)
-                        .animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.14), value: wardrobeOpen)
+                               tap: tapPoki, openModel: openModel, openCustomization: openCustomization, travel: { flightRise = $0 })
                 }
             }
         }
@@ -647,6 +659,8 @@ private struct RiseIn: ViewModifier {
 
 struct ChatTranscript<Footer: View>: View {
     var entries: [ChatEntry]
+    var jump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
     var typing = false
     var canRetry = false
     var retry: () -> Void = {}
@@ -680,6 +694,8 @@ struct ChatTranscript<Footer: View>: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
 
+    private var tracksScroll: Bool { !entries.isEmpty || typing || canRetry || live || Footer.self != EmptyView.self }
+
     /// Your newest message: when it changes you have just sent one.
     private var lastSent: UUID? {
         entries.last { if case .you = $0.kind { true } else { false } }?.id
@@ -691,6 +707,7 @@ struct ChatTranscript<Footer: View>: View {
                 Spacer(minLength: 0)
                 ForEach(Array(entries.enumerated()), id: \.element.id) { i, entry in
                     row(entry, at: i).id(entry.id)
+                        .accessibilityIdentifier("chat.entry.\(entry.id)")
                 }
                 if typing {
                     HStack { TypingBubble(); Spacer(minLength: .messageInsetPadding) }
@@ -705,6 +722,7 @@ struct ChatTranscript<Footer: View>: View {
                 }
                 footer()
             }
+            .scrollTargetLayout()
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity)
@@ -724,26 +742,38 @@ struct ChatTranscript<Footer: View>: View {
         // nothing moves under you (ESP-468). The bottom anchor alone did neither: a new conversation,
         // still shorter than the screen, stayed at its top while the keyboard and the approval card
         // covered its task card, and a reader further up was dragged down by every reply.
-        .defaultScrollAnchor(follow == .reading ? nil : .bottom, for: .sizeChanges)
+        .defaultScrollAnchor(tracksScroll && follow != .reading ? .bottom : nil, for: .sizeChanges)
         .onScrollGeometryChange(for: ChatFollow.Frame.self, of: ChatFollow.Frame.init) { old, new in
+            guard tracksScroll else { return }
             let next = follow.after(old, new)
             follow = next.follow
             if next.scroll { position.scrollTo(edge: .bottom) }
         }
         // Your finger stops the chat on its way down to the newest: from there on you are reading.
         .onScrollPhaseChange { _, phase, context in
+            guard tracksScroll else { return }
             if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
+        }
+        .task(id: jump) {
+            // Only read the exact saved entry; never create or send a new action.
+            guard let jump, entries.contains(where: { $0.id == jump.entryID }) else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            follow = .reading
+            position.scrollTo(id: jump.entryID, anchor: .center)
+            onSearchJumpApplied(jump.requestID)
         }
         .onChange(of: lastSent) { _, sent in
             if sent != nil { toNewest(animated: false) }
         }
-        // Under the bars the system's soft scroll edge takes the messages (`softTopEdge`). No mask of
-        // our own here: one made the messages vanish in a short straight ramp above the bar, which
-        // read as a hard edge, and left the system's effect nothing to blur.
-        .overlay(alignment: .bottom) {
+        // Reserve the scroll-to-bottom button's height in the bottom bar while reading back so it
+        // never sits over a result card's action button.
+        .bottomBar(softEdge: true) {
             if follow == .reading {
                 NewestButton { toNewest(animated: true) }
+                    .padding(.top, 4)
                     .padding(.bottom, 10)
+                    .frame(maxWidth: .infinity)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
@@ -925,6 +955,7 @@ enum ChatFollow: Equatable {
     /// back into view unless you are reading; a scroll that leaves the end is yours, unless the chat
     /// itself is on its way down.
     func after(_ old: Frame, _ new: Frame) -> (follow: ChatFollow, scroll: Bool) {
+        if new.visible <= 0 { return (self, false) }
         if new.atEnd { return (.newest, false) }
         let resized = old.content != new.content || old.visible != new.visible
         switch self {
@@ -1088,7 +1119,10 @@ struct MessageListHeader: View {
     var openModel: () -> Void = {}
 
     var body: some View {
-        PokiMenu(openModel: openModel) {
+        PokiMenu(openModel: openModel,
+                 anchor: .below(),
+                 accessibilityLabel: AppLocalization.text("\(title), details"),
+                 accessibilityIdentifier: "chat.header.details") {
             VStack(spacing: 4) {
                 PokiAvatar(size: 56)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -1110,9 +1144,6 @@ struct MessageListHeader: View {
             .frame(maxWidth: .infinity)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text("\(title), details"))
-        .accessibilityIdentifier("chat.header.details")
         .overlay(alignment: .topLeading) {
             if let back, UserDefaults.standard.string(forKey: "pokiChat") == nil, UserDefaults.standard.string(forKey: "pokiVoiceSample") == nil {
                 Button(action: back) {
@@ -1295,6 +1326,29 @@ struct ModeLabels: View {
 // row on one sheet of glass: the plus menu, the
 // message, the microphone when Settings › Voice shows it, and one button that talks, sends or stops;
 // the photos and PDFs picked for the message stand over it.
+@MainActor
+struct ComposerAttachments {
+    private(set) var generation = UUID()
+    var items: [ChatAttachment] = []
+
+    mutating func reset() {
+        generation = UUID()
+        items.removeAll()
+    }
+}
+
+enum ComposerPhotoImport {
+    static func read<Item>(_ items: [Item], stillCurrent: () -> Bool,
+                           load: (Item) async -> Data?, receive: (Data?) -> Void) async {
+        for item in items {
+            guard stillCurrent(), !Task.isCancelled else { return }
+            let data = await load(item)
+            guard stillCurrent(), !Task.isCancelled else { return }
+            receive(data)
+        }
+    }
+}
+
 struct ComposerInputView: View {
     @Environment(AppModel.self) private var model
     /// The message being written; the greeting's suggestions fill it.
@@ -1310,10 +1364,14 @@ struct ComposerInputView: View {
     /// pictures) is cleared and the keyboard goes down, as the page first was; an empty field takes
     /// the keyboard.
     var restarts = 0
+    var conversationID = ""
+    @State private var attachmentDraft = ComposerAttachments()
+    @State private var pickerGeneration = UUID()
     var send: (String, [ChatAttachment]) -> Void
     var stop: () -> Void
     /// Starts the live voice conversation.
     var openVoice: () -> Void
+    var openChatGPTSignIn: () -> Void = {}
     /// Settings, where the OpenAI key that Talk with Poki needs is added (or Live Voice turned on).
     var openVoiceKey: () -> Void = {}
     /// Leave conversation context above a long voice notice; its content remains scrollable.
@@ -1329,7 +1387,10 @@ struct ComposerInputView: View {
     /// Settings › Voice: the microphone for dictation beside the main button. On unless you turn it off.
     @AppStorage(FieldDictation.buttonKey) private var dictationButton = FieldDictation.buttonShown
     /// Photos and PDFs for the next message, and the three ways to add them.
-    @State private var attachments: [ChatAttachment] = []
+    private var attachments: [ChatAttachment] {
+        get { attachmentDraft.items }
+        nonmutating set { attachmentDraft.items = newValue }
+    }
     @State private var choosingPhotos = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var takingPhoto = false
@@ -1348,6 +1409,14 @@ struct ComposerInputView: View {
     /// The field's notices: one at a time, on glass just above it.
     @State private var notices = NoticeQueue()
     @State private var fieldScroll = CapsuleScroll()
+    @State private var editorBridge = CapsuleEditorBridge()
+    @State private var mentionReady = false
+    @State private var mentionCaretX: CGFloat?
+    @State private var composerWidth: CGFloat = 340
+    @State private var showingAllApps = false
+    @State private var allAppsInitialSearch = ""
+    @State private var pendingMentionReplaceLength = 0
+    @State private var recentAppsVersion = 0
     /// A swipe down that started on a message scrolled away from its first line: it scrolls the message.
     @State private var swipeScrolls: Bool?
     @Environment(\.colorScheme) private var scheme
@@ -1421,7 +1490,11 @@ struct ComposerInputView: View {
                         Group {
                             TalkBar(state: talk, since: talkStarted, muted: voice.muted, toggleMute: { voice.muted.toggle() },
                                     interrupt: voice.stopTalking, end: voice.stop,
-                                    retry: { voice.dismissProblem(); openVoice() }, dismiss: voice.dismissProblem)
+                                    retry: {
+                                        let needsSignIn = voice.needsChatGPTSignIn
+                                        voice.dismissProblem()
+                                        if needsSignIn { openChatGPTSignIn() } else { openVoice() }
+                                    }, dismiss: voice.dismissProblem, signInAgain: voice.needsChatGPTSignIn)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { voiceContentHeight = $0 }
@@ -1434,7 +1507,11 @@ struct ComposerInputView: View {
                         plus
                         // An app's name in the message shows as its capsule (ESP-377); the text itself stays plain.
                         CapsuleField(text: $input, focused: $focused, maxLines: 6, maxHeight: min(200, fieldHeight), scroll: fieldScroll,
-                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } }, onSubmit: submit,
+                                     editorBridge: editorBridge,
+                                     onSwipe: { up in if up { focused = true } else if focused { focused = false } },
+                                     onMentionReady: { mentionReady = $0 },
+                                     onMentionCaretX: { mentionCaretX = $0 },
+                                     onSubmit: submit,
                                      mentions: mentions)
                             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("composer")) } action: { fieldFrame = $0 }
                             .overlay(alignment: .topLeading) {
@@ -1460,6 +1537,7 @@ struct ComposerInputView: View {
             .contentShape(.rect)
             .onTapGesture { if !talking { focused = true } }
             .glassSurface(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), fallback: .bar)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { composerWidth = $0 }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: expanded)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { barFrame = $0 }
             .coordinateSpace(.named("composer"))
@@ -1467,8 +1545,9 @@ struct ComposerInputView: View {
         }
         .preference(key: MentionFloatKey.self, value: mentionFloat)
         .animation(.snappy, value: dictation.on)
-        .animation(.snappy, value: adding)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.26), value: adding)
         .animation(TalkMotion.enter, value: talking)
+        .animation(TalkMotion.enter, value: needsKey)
         .onChange(of: voice.isOn, initial: true) { _, on in talkStarted = on ? Date() : nil }
         // Talk with Poki with no voice key, from the field's button, a link or Poki's profile: what it is
         // missing. The keyboard goes down: the field it belongs to is not on screen.
@@ -1532,18 +1611,42 @@ struct ComposerInputView: View {
             guard !items.isEmpty else { return }
             picked = []
             adding = false
-            Task { await addPhotos(items) }
+            let generation = pickerGeneration
+            Task { await addPhotos(items, generation: generation) }
         }
         // Plus: a sheet that rises from the bottom (it was a menu that appeared at once). The library,
         // Files and the camera open over it, and it goes down once they have added something.
         .sheet(isPresented: $adding) { addSheet }
         .onAppear { _ = MCPConnectors.shared }
         .onChange(of: focused) { _, now in if !now { mentions.update(nil) } }
+        .sheet(isPresented: $showingAllApps, onDismiss: {
+            pendingMentionReplaceLength = 0
+            allAppsInitialSearch = ""
+        }) {
+            AllAppsBrowserSheet(
+                recentIDs: recentAppIDs,
+                mentionedIDs: AppPickerCatalog.mentionedBundleIDs(in: input),
+                initialSearch: allAppsInitialSearch,
+                onPick: { app in
+                    let replaceLength = pendingMentionReplaceLength
+                    pendingMentionReplaceLength = 0
+                    showingAllApps = false
+                    pickApp(app, replacing: replaceLength, keepFocus: true)
+                },
+                onClose: { showingAllApps = false }
+            )
+        }
+        .onChange(of: conversationID) {
+            withAnimation(.snappy) { attachmentDraft.reset() }
+            problem = nil
+        }
         .onChange(of: restarts) {
+            let hadDraft = !input.isEmpty || !attachments.isEmpty
+            withAnimation(.snappy) { attachmentDraft.reset() }
             adding = false
-            if !input.isEmpty || !attachments.isEmpty {
+            if hadDraft {
                 input = ""
-                withAnimation(.snappy) { attachments = [] }
+                withAnimation(.snappy) { attachmentDraft.reset() }
                 photoAssets = [:]
                 focused = false
             } else {
@@ -1575,6 +1678,40 @@ struct ComposerInputView: View {
                 openVoice()
                 try? await Task.sleep(for: .seconds(9))
                 voice.stop()
+            default: break
+            }
+        }
+        .task {
+            guard let scene = UserDefaults.standard.string(forKey: "pokiAppPicker") else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            switch scene {
+            case "plus":
+                focused = false
+                adding = true
+            case "more":
+                adding = false
+                allAppsInitialSearch = ""
+                showingAllApps = true
+            case "more-empty":
+                adding = false
+                allAppsInitialSearch = "xyznotfound"
+                try? await Task.sleep(for: .milliseconds(50))
+                showingAllApps = true
+            case "mention":
+                adding = false
+                input = "帮我用 @m"
+                focused = true
+                mentionReady = true
+            case "mention-empty":
+                adding = false
+                input = "帮我用 @xyz"
+                focused = true
+                mentionReady = true
+            case "filled":
+                adding = false
+                input = "打开 小红书 搜盐田海边\n咖啡并记进 备忘录 "
+                focused = true
+                mentionReady = false
             default: break
             }
         }
@@ -1637,11 +1774,12 @@ struct ComposerInputView: View {
     /// At most this many photos and PDFs go with one message.
     private static let most = 6
 
-    /// Plus: what you add to the message you are writing (board 定稿 04), photos from the library, a
-    /// photo from the camera, or a picture or PDF from Files. Everything else is on Poki's card at the
-    /// top and in Settings.
+    /// Plus: what you add to the message you are writing (Scheme A1), quick apps, photos from the library, a
+    /// photo from the camera, or a picture or PDF from Files. Rotates 45° when expanded.
     private var plus: some View {
-        Button { adding.toggle() } label: {
+        Button {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.26)) { adding.toggle() }
+        } label: {
             Image(systemName: "plus")
                 .font(.alloRounded(.title3, .medium)).dynamicTypeSize(...DynamicTypeSize.xxxLarge).foregroundStyle(Color(.label))
                 .frame(width: buttonDiameter, height: buttonDiameter)
@@ -1654,27 +1792,39 @@ struct ComposerInputView: View {
         .accessibilityAddTraits(adding ? .isSelected : [])
         .accessibilityIdentifier("composer.plus")
         .accessibilityShowsLargeContentViewer {
-            Label("Add Photos or Files", systemImage: "plus")
+            Label("Add Apps, Photos or Files", systemImage: "plus")
         }
+    }
+
+    private var recentAppIDs: [String] {
+        _ = recentAppsVersion
+        return RecentAppsStore.shared.recentIDs
     }
 
     /// Plus's sheet, with the library, Files and the camera opening over it.
     private var addSheet: some View {
         ComposerAddSheet(room: Self.most - attachments.count,
-                         choosePhotos: { choosingPhotos = true },
-                         takePhoto: { takingPhoto = true },
-                         chooseFiles: { choosingFiles = true },
-                         mention: mention)
+                         choosePhotos: { pickerGeneration = attachmentDraft.generation; choosingPhotos = true },
+                         takePhoto: { pickerGeneration = attachmentDraft.generation; takingPhoto = true },
+                         chooseFiles: { pickerGeneration = attachmentDraft.generation; choosingFiles = true },
+                         mention: mention,
+                         moreApps: {
+                             // The full list of this iPhone's apps (AllAppsBrowserSheet), over the conversation.
+                             adding = false
+                             pendingMentionReplaceLength = 0
+                             allAppsInitialSearch = ""
+                             showingAllApps = true
+                         })
             .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: max(1, Self.most - attachments.count), matching: .images)
             .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
-                guard case .success(let urls) = result else { return }
+                guard pickerGeneration == attachmentDraft.generation, case .success(let urls) = result else { return }
                 for url in urls { add { try AttachmentReader.file(url) } }
                 adding = false
             }
             .fullScreenCover(isPresented: $takingPhoto) {
                 CameraPicker { image in
                     takingPhoto = false
-                    if let image {
+                    if pickerGeneration == attachmentDraft.generation, let image {
                         add { try AttachmentReader.photo(image) }
                         adding = false
                     }
@@ -1728,14 +1878,33 @@ struct ComposerInputView: View {
                             reduceMotion: reduceMotion, view: AnyView(view))
     }
 
-    private func addPhotos(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
+    private func pickApp(_ app: AppPickerEntry, replacing length: Int = 0, keepFocus: Bool = false) {
+        let result = AppPickerCatalog.insertApp(
+            app,
+            into: input,
+            cursorUTF16: editorBridge.plainCursorUTF16,
+            replacing: length
+        )
+        editorBridge.scheduleCursor(result.cursorUTF16)
+        input = result.text
+        RecentAppsStore.shared.record(app.id)
+        recentAppsVersion += 1
+        adding = false
+        if keepFocus {
+            DispatchQueue.main.async { focused = true }
+        }
+    }
+
+    private func addPhotos(_ items: [PhotosPickerItem], generation: UUID) async {
+        await ComposerPhotoImport.read(items, stillCurrent: { generation == attachmentDraft.generation }, load: {
+            try? await $0.loadTransferable(type: Data.self)
+        }, receive: { data in
+            guard let data else {
                 problem = AppLocalization.text(LocalizedStringResource("Couldn’t read this file."))
-                continue
+                return
             }
             add { try AttachmentReader.photo(data) }
-        }
+        })
     }
 
     /// One more photo or PDF, up to the limit; a file Poki can't read says so.
@@ -1810,7 +1979,7 @@ struct ComposerInputView: View {
         MentionRecents.sent(text)
         mentions.update(nil)
         adding = false
-        withAnimation(.snappy) { attachments = [] }
+        withAnimation(.snappy) { attachmentDraft.reset() }
         photoAssets = [:]
         sends += 1
         sent = (text, Date())
@@ -1857,17 +2026,22 @@ final class FieldDictation {
     private var engine: Dictation?
     /// Between the tap and the microphone being on (the permission question can sit in between).
     private var starting = false
+    private var generation = UUID()
 
-    func start(_ model: AppModel, after current: String) {
+    func start(_ model: AppModel, after current: String, allowed: @escaping @MainActor () async -> Bool = { await Dictation.allowed() }) {
         guard !on, !starting else { return }
         model.prepareForTask()
         starting = true
+        let currentGeneration = UUID()
+        generation = currentGeneration
         problem = nil
         let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
         base = trimmed.isEmpty ? "" : trimmed + " "
         text = ""
         Task {
-            guard await Dictation.allowed() else {
+            let allowed = await allowed()
+            guard generation == currentGeneration, starting else { return }
+            guard allowed else {
                 starting = false
                 problem = AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition. Allow them in Settings › Poki."))
                 return
@@ -1875,7 +2049,10 @@ final class FieldDictation {
             guard starting else { return }
             starting = false
             let engine = Dictation()
-            engine.onHeard = { [weak self] heard in self?.text = heard }
+            engine.onHeard = { [weak self] heard in
+                guard let self, self.generation == currentGeneration, self.on else { return }
+                self.text = heard
+            }
             model.background.pauseAudio()
             do {
                 try engine.listen()
@@ -1890,16 +2067,19 @@ final class FieldDictation {
 
     /// Send was tapped: dictation ends, also one that was still asking for the microphone.
     func cancel(_ model: AppModel) {
-        starting = false
         stop(model)
     }
 
     func stop(_ model: AppModel) {
+        starting = false
+        generation = UUID()
         guard on, let engine else { return }
         on = false
         self.engine = nil
         engine.cancel()
-        model.background.resumeAudio()
+        if !model.voice.isOn {
+            model.background.resumeAudio()
+        }
     }
 }
 

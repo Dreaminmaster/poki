@@ -43,12 +43,16 @@ struct PillMetrics {
 /// on a faint white one with a white name.
 struct PillView: View {
     let data: PillTextAttachmentData
+    @Environment(\.colorScheme) private var scheme
 
     private var metrics: PillMetrics { PillMetrics(pointSize: data.fontData.pointSize) }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: metrics.iconRadius, style: .continuous)
         let ink = data.onAccent ? Color.white : Color(.label)
+        let fill = data.onAccent
+            ? Color.white.opacity(0.22)
+            : (scheme == .dark ? Color.white.opacity(0.13) : Color(.label).opacity(0.08))
         HStack(spacing: metrics.gap) {
             Group {
                 if let symbol = data.app.symbol {

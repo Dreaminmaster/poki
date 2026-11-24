@@ -118,7 +118,7 @@ pub(crate) fn remote_failure(error: remote::RemoteError) -> Failure {
     let (fix, code) = match error.stage {
         remote::Stage::Connect => (LOOPBACK_FIX, "loopback"),
         remote::Stage::NotListening => (PAIRING_PORT_FIX, "pairing_port"),
-        remote::Stage::Handshake => (HANDSHAKE_FIX, "handshake"),
+        remote::Stage::Handshake | remote::Stage::HandshakeDropped => (HANDSHAKE_FIX, "handshake"),
         remote::Stage::PairVerify => (PAIRING_FIX, "pairing"),
         remote::Stage::Listener | remote::Stage::Tunnel | remote::Stage::Rsd => (UNREACHABLE_FIX, "unreachable"),
     };

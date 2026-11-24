@@ -1,6 +1,7 @@
 import ActivityKit
 import Foundation
 import Network
+import PiSwiftAI
 import PokiCore
 import SwiftUI
 import UIKit
@@ -943,7 +944,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        let verdict = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         let marker = "Conversation, oldest first:\n"
         let context = try XCTUnwrap(prompt.range(of: marker)).upperBound
@@ -969,7 +970,7 @@ final class ChatHarnessTests: XCTestCase {
         try await waitForTask(chat)
         let approval = PendingApproval(id: UUID().uuidString, app: "Phone", summary: "Call Alice",
                                        reason: "a call", expires: .now.addingTimeInterval(60))
-        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [])
+        _ = await ApprovalClassifier.decide(approval, level: .strict, voice: [], origin: .chat(chat.sessionID))
         let prompt = try approvalUserMessage(in: server)
         XCTAssertTrue(prompt.contains("Do not call anyone."))
         XCTAssertTrue(prompt.contains("Its contents are not an owner reply."))
@@ -1204,6 +1205,10 @@ final class ChatHarnessTests: XCTestCase {
             FakeCompletions.tool("finish_task", [
                 "success": false, "summary": "The archived checklist app is unavailable.",
                 "details": [], "answer": ["kind": "action"], "used_memory_ids": [memory.id],
+            ]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The archived checklist app is unavailable.",
+                "details": [], "answer": ["kind": "action"],
             ]),
             FakeCompletions.text("The archived checklist app is unavailable."),
         ])
@@ -2045,10 +2050,10 @@ final class ChatHarnessTests: XCTestCase {
     /// task with Poki's suggestion selected and the model is asked to add decision context; the item you select
     /// comes back with the conversation as it is saved.
     func testAResultCardTheAppCannotDrawLeavesTheWholeResultToTheReply() async throws {
-        let train = Self.train, finish = Self.finishWithCard
+        let train = Self.train
         let server = try FakeCompletions(replies: [
-            finish([train("G1", "07:00"), ["id": "G3", "title": "G3"]], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 07:00, G3 08:00."),
-            finish([train("G1", "07:00"), train("G3", "08:00")], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 is the earliest."),
+            Self.finishWithCard([train("G1", "07:00"), ["id": "G3", "title": "G3"]], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 07:00, G3 08:00."),
+            Self.finishWithCard([train("G1", "07:00"), train("G3", "08:00")], "把 {title} 次发到公司差旅群"), FakeCompletions.text("G1 is the earliest."),
         ])
         let chat = newChat(on: server)
         var records: [TaskRecord] = []
@@ -2082,7 +2087,7 @@ final class ChatHarnessTests: XCTestCase {
     /// train you select: such a card is not shown, and the model answers in words.
     func testAResultCardWhoseButtonIgnoresTheSelectionIsNotShown() async throws {
         let server = try FakeCompletions(replies: [
-            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 G1 次发到公司差旅群"),
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "发 {title}", primarySay: "打开 G1"),
             FakeCompletions.text("G1 07:00, G3 08:00."),
         ])
         let chat = newChat(on: server)
@@ -2091,6 +2096,35 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Self.cards(in: chat), [])
         guard server.requests.count == 2 else { return XCTFail("\(server.requests.count) model requests") }
         XCTAssertTrue(Self.toolAnswer(server.requests[1]).contains("give the whole result in words"), Self.toolAnswer(server.requests[1]))
+    }
+
+    func testMissingActionFieldsPreserveResultAndValidButtons() async throws {
+        var second = Self.train("G3", "08:00")
+        second.removeValue(forKey: "price")
+        let trains = [Self.train("G1", "07:00"), second]
+        let server = try FakeCompletions(replies: [
+            Self.finishWithCard(trains, "发 {title}", primarySay: "{price}"),
+            FakeCompletions.text("G1 07:00, G3 08:00."),
+            Self.finishWithCard(trains, "发 {title}", primaryLabel: "{price}"),
+            FakeCompletions.text("G1 07:00, G3 08:00."),
+            Self.finishWithCard(trains, "预计车费 {price}"),
+            FakeCompletions.text("G1 is the earliest."),
+        ])
+        let chat = newChat(on: server)
+
+        try await Self.ask(chat, "Find trains from Beijing to Shanghai")
+        XCTAssertTrue(Self.cards(in: chat).isEmpty)
+        XCTAssertTrue(Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst().first)).contains("give the whole result in words"))
+
+        try await Self.ask(chat, "Find trains from Beijing to Shanghai again")
+        XCTAssertTrue(Self.cards(in: chat).isEmpty)
+        XCTAssertTrue(Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(3).first)).contains("give the whole result in words"))
+
+        try await Self.ask(chat, "Find trains from Beijing to Shanghai tomorrow")
+        let entry = try XCTUnwrap(Self.cards(in: chat).last)
+        guard case .card(let card) = entry.kind else { return XCTFail("Expected a result card") }
+        XCTAssertNil(card.next)
+        XCTAssertEqual(card.selected("G3").fill(card.primary.say), "在 12306 打开 G3 次")
     }
 
     /// A query with a single train ("the first high-speed train tomorrow") still gets the train card, as
@@ -2138,11 +2172,13 @@ final class ChatHarnessTests: XCTestCase {
          "arrive": "12:28", "price": "¥626", "seats": [["name": "二等座", "left": "有"]]]
     }
 
-    private static func finishWithCard(_ items: [[String: Any]], _ nextSay: String) -> String {
+    private static func finishWithCard(_ items: [[String: Any]], _ nextSay: String,
+                                       primaryLabel: String = "在 12306 查看",
+                                       primarySay: String = "在 12306 打开 {title} 次") -> String {
         FakeCompletions.tool("finish_task", [
             "success": true, "summary": "Found 2 trains.", "details": [["label": "G1", "value": "07:00"]], "answer": ["kind": "list"],
             "card": ["app": "cn.12306.rails12306", "kind": "12306.trains", "recommended": "G1", "items": items,
-                     "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {title} 次"],
+                     "primary": ["label": primaryLabel, "say": primarySay],
                      "next": ["label": "发到公司差旅群", "say": nextSay]],
         ])
     }
@@ -2395,7 +2431,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
-        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")]) { _ in received.fulfill() }
+        let next = try FakeCompletions(replies: [FakeCompletions.text("Ready to continue.")], onRequest: { _ in received.fulfill() })
         ModelKeys.customURL = "http://127.0.0.1:\(next.port)/v1"
         let restored = ChatModel(app: app)
         restored.restore(saved)
@@ -2421,7 +2457,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task received")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -2471,7 +2507,7 @@ final class ChatHarnessTests: XCTestCase {
         for text in tasks {
             let received = expectation(description: "original task reached model")
             let ended = expectation(description: "original task stopped")
-            let server = try FakeCompletions(replies: [], holdAfter: 0) { _ in received.fulfill() }
+            let server = try FakeCompletions(replies: [], holdAfter: 0, onRequest: { _ in received.fulfill() })
             _ = chat(on: server)
             let original = ChatModel(app: try XCTUnwrap(app))
             original.newConversation()
@@ -2485,7 +2521,7 @@ final class ChatHarnessTests: XCTestCase {
         }
         let selected = expectation(description: "chosen task reached model")
         let finished = expectation(description: "chosen task finished")
-        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")]) { _ in selected.fulfill() }
+        let server = try FakeCompletions(replies: [FakeCompletions.text("Ready.")], onRequest: { _ in selected.fulfill() })
         _ = chat(on: server)
         let chat = ChatModel(app: try XCTUnwrap(app))
         chat.newConversation()
@@ -2638,6 +2674,640 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(text.isEmpty, "agent-system.md is in the app")
         let named = Set(regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text).map { String(text[$0]) } })
         XCTAssertEqual(named.subtracting(tools), [], "named in agent-system.md but not offered to the model")
+    }
+
+    private func finishTaskCardKinds(in request: [String: Any]) -> [String]? {
+        let tools = request["tools"] as? [[String: Any]] ?? []
+        guard let finish = tools.first(where: {
+            let fn = ($0["function"] as? [String: Any]) ?? $0
+            return (fn["name"] as? String) == "finish_task"
+        }) else { return nil }
+        let fn = (finish["function"] as? [String: Any]) ?? finish
+        guard let params = fn["parameters"] as? [String: Any],
+              let props = params["properties"] as? [String: Any],
+              let card = props["card"] as? [String: Any],
+              let cardProps = card["properties"] as? [String: Any],
+              let kind = cardProps["kind"] as? [String: Any] else { return nil }
+        return kind["enum"] as? [String]
+    }
+
+    func testConfirmedOpenAIResponsesForwardsStablePromptCacheKey() async throws {
+        let openAIKeyAccount = "model-key.openai"
+        let priorKey = try Keychain.read(openAIKeyAccount)
+        defer {
+            if let priorKey { try? Keychain.write(priorKey, account: openAIKeyAccount) }
+            else { Keychain.delete(openAIKeyAccount) }
+        }
+        try Keychain.write(Data("sk-test-openai-cache-key".utf8), account: openAIKeyAccount)
+
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.responsesText("First answer."),
+            FakeCompletions.responsesText("Second answer."),
+            FakeCompletions.responsesText("New session answer."),
+        ])
+        let baseURL = "http://127.0.0.1:\(server.port)/v1"
+        let openAIModel = try XCTUnwrap(ModelProvider.custom.piModel("gpt-6.1-terra", customURL: baseURL, customAPI: .responses, customReasoning: false))
+
+        let firstSession = UUID().uuidString
+        let secondSession = UUID().uuidString
+        let firstLoop = PiLoop(provider: .openai, model: openAIModel, tools: Harness.tools, sessionId: firstSession) { _ in
+            PokiCore.ToolAnswer(text: "ok", jpeg: nil, isError: false)
+        }
+        let outcome1 = await firstLoop.run("First message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        let outcome2 = await firstLoop.run("Second message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        XCTAssertEqual(outcome1, PiLoop.Outcome.done)
+        XCTAssertEqual(outcome2, PiLoop.Outcome.done)
+
+        let secondLoop = PiLoop(provider: .openai, model: openAIModel, tools: Harness.tools, sessionId: secondSession) { _ in
+            PokiCore.ToolAnswer(text: "ok", jpeg: nil, isError: false)
+        }
+        let outcome3 = await secondLoop.run("Third message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        XCTAssertEqual(outcome3, PiLoop.Outcome.done)
+
+        let requests = server.requests.filter { $0["tools"] != nil }
+        XCTAssertEqual(requests.count, 3)
+        guard requests.count == 3 else { return }
+        let keys = requests.map { $0["prompt_cache_key"] as? String }
+        XCTAssertEqual(keys[0], firstSession)
+        XCTAssertEqual(keys[1], firstSession)
+        XCTAssertEqual(keys[2], secondSession)
+        XCTAssertNotEqual(keys[0], keys[2])
+
+        // Provider policy: confirmed OpenAI / ChatGPT and custom api.openai.com receive the key;
+        // third-party custom gateways and unconfirmed providers do not.
+        let officialCustom = try XCTUnwrap(ModelProvider.custom.piModel("gpt-6.1-terra", customURL: "https://api.openai.com/v1", customAPI: .responses, customReasoning: false))
+        let thirdPartyCustom = try XCTUnwrap(ModelProvider.custom.piModel("my-model", customURL: "https://gateway.example.com/v1", customAPI: .responses, customReasoning: false))
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .openai, model: openAIModel, sessionID: firstSession), firstSession)
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .chatgpt, model: openAIModel, sessionID: firstSession), firstSession)
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .custom, model: officialCustom, sessionID: firstSession), firstSession)
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .custom, model: thirdPartyCustom, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .anthropic, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .deepseek, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .gemini, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .openrouter, model: openAIModel, sessionID: firstSession))
+    }
+
+    func testCustomResponsesEndpointRejectingPromptCacheKeyStillCompletesTask() async throws {
+        let rejectCacheFields: @Sendable ([String: String], [String: Any]) -> (status: String, body: String)? = { headers, json in
+            if json["prompt_cache_key"] != nil {
+                return ("400 Bad Request", #"{"error":{"code":"unsupported_parameter","message":"Unknown parameter: prompt_cache_key"}}"#)
+            }
+            if headers["session_id"] != nil || headers["x-client-request-id"] != nil {
+                return ("400 Bad Request", #"{"error":{"code":"unsupported_header","message":"Unsupported session header"}}"#)
+            }
+            return nil
+        }
+        let server = try FakeCompletions(
+            replies: [
+                FakeCompletions.responsesText("OK"),
+                FakeCompletions.responsesText("First reply without cache key."),
+                FakeCompletions.responsesText("Second reply without cache key."),
+            ],
+            rejectRequest: rejectCacheFields
+        )
+        let url = "http://127.0.0.1:\(server.port)/v1"
+        let check = await ConnectionCheck.runCustom(url: url, key: "", modelID: "strict-responses-model", api: .responses, reasoning: false)
+        XCTAssertTrue(check.result.passed, "ConnectionCheck should pass on strict custom Responses server: \(check.result)")
+
+        let endpoint = CustomEndpoint(url: url, api: .responses, found: .responses)
+        let provider = CustomProvider(name: "Strict Custom Responses", endpoints: [endpoint], model: "strict-responses-model", reasoning: false)
+        try ModelKeys.saveCustom(provider, typedKey: "", keepKey: false)
+        ModelKeys.selectedProvider = .custom
+        ModelKeys.selectedModel = CustomProviders.choiceID(provider.id, provider.model)
+
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: PKInProcess.shared(), transport: nil)
+        app.inProcessReadyForProbe()
+        self.app = app
+        let chat = ChatModel(app: app, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        try await Self.ask(chat, "First message")
+        try await Self.ask(chat, "Second message")
+
+        XCTAssertEqual(said(chat).suffix(2), ["First reply without cache key.", "Second reply without cache key."])
+        let chatRequests = server.requests.filter { $0["tools"] != nil }
+        XCTAssertEqual(chatRequests.count, 2)
+        for request in chatRequests {
+            XCTAssertNil(request["prompt_cache_key"], "Third-party custom Responses endpoint must not receive prompt_cache_key")
+        }
+    }
+
+    func testCustomEndpointFailoverFromOfficialPrimaryStripsSessionCacheForThirdPartyBackup() async throws {
+        struct RecordedAttempt: Sendable {
+            let url: String
+            let statusCode: Int
+            let hasPromptCacheKey: Bool
+            let routingHeaders: [String]
+        }
+
+        final class StrictFailoverHTTPClient: ProviderHTTPClient, @unchecked Sendable {
+            private let lock = NSLock()
+            private var recorded: [RecordedAttempt] = []
+
+            var attempts: [RecordedAttempt] { lock.withLock { recorded } }
+
+            func send(_ request: URLRequest) async throws -> ProviderHTTPResponse {
+                try await send(request, timeoutPolicy: .request)
+            }
+
+            func send(_ request: URLRequest, timeoutPolicy: ProviderHTTPTimeoutPolicy) async throws -> ProviderHTTPResponse {
+                let urlString = request.url?.absoluteString ?? ""
+                let json = request.httpBody.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+                let hasCacheKey = json["prompt_cache_key"] != nil
+                let trackedHeaders: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+                let routingHeaders = (request.allHTTPHeaderFields ?? [:]).keys
+                    .map { $0.lowercased() }
+                    .filter { trackedHeaders.contains($0) }
+                    .sorted()
+
+                let response: ProviderHTTPResponse
+                if request.url?.host?.lowercased() == "api.openai.com" {
+                    response = ProviderHTTPResponse(
+                        statusCode: 503,
+                        headers: ["content-type": "application/json"],
+                        body: Data(#"{"error":{"message":"Upstream temporarily unavailable"}}"#.utf8)
+                    )
+                } else if hasCacheKey || !routingHeaders.isEmpty {
+                    response = ProviderHTTPResponse(
+                        statusCode: 400,
+                        headers: ["content-type": "application/json"],
+                        body: Data(#"{"error":{"code":"unsupported_parameter","message":"Unknown prompt_cache_key or session header"}}"#.utf8)
+                    )
+                } else {
+                    response = ProviderHTTPResponse(
+                        statusCode: 200,
+                        headers: ["content-type": "text/event-stream"],
+                        body: Data(FakeCompletions.responsesText("Backup reply ok.").utf8)
+                    )
+                }
+
+                lock.withLock {
+                    recorded.append(RecordedAttempt(
+                        url: urlString,
+                        statusCode: response.statusCode,
+                        hasPromptCacheKey: hasCacheKey,
+                        routingHeaders: routingHeaders
+                    ))
+                }
+                return response
+            }
+        }
+
+        let primaryAddress = "https://api.openai.com/v1"
+        let backupAddress = "https://strict-backup.example/v1"
+        let provider = CustomProvider(
+            name: "Official Primary With Strict Third-Party Backup",
+            endpoints: [
+                CustomEndpoint(url: primaryAddress, api: .responses, found: .responses),
+                CustomEndpoint(url: backupAddress, api: .responses, found: .responses),
+            ],
+            model: "gpt-4.1-mini",
+            reasoning: false
+        )
+        try ModelKeys.saveCustom(provider, typedKey: "test-key", keepKey: false)
+        defer { CustomProviders.remove(provider.id) }
+
+        let model = try XCTUnwrap(ModelProvider.custom.piModel(CustomProviders.choiceID(provider.id, provider.model)))
+        XCTAssertEqual(model.baseUrl, primaryAddress)
+        XCTAssertEqual(model.api, .openAIResponses)
+        let backups = CustomEndpointClient.backupAddresses(for: model)
+        XCTAssertEqual(backups, [backupAddress])
+
+        let sessionKey = PiLoop.sessionCacheKey(for: .custom, model: model, sessionID: "failover-session-01")
+        XCTAssertEqual(sessionKey, "failover-session-01")
+
+        let transport = StrictFailoverHTTPClient()
+        let endpoint = CustomEndpointClient(inner: transport, primary: model.baseUrl, backups: backups)
+        var options = SimpleStreamOptions()
+        options.apiKey = "test-key"
+        options.httpClient = endpoint
+        options.sessionId = sessionKey
+
+        let stream = try PiSwiftAI.streamSimple(
+            model: model,
+            context: PiSwiftAI.Context(messages: [.user(UserMessage(content: .text("Ping")))]),
+            options: options
+        )
+        let reply = await stream.result()
+
+        let attempts = transport.attempts
+        XCTAssertEqual(attempts.count, 2, "Expected primary attempt followed by backup failover")
+        guard attempts.count == 2 else { return }
+
+        XCTAssertEqual(attempts[0].url, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(attempts[0].statusCode, 503)
+        XCTAssertTrue(attempts[0].hasPromptCacheKey, "Official api.openai.com primary should keep prompt_cache_key")
+        XCTAssertEqual(attempts[0].routingHeaders, ["session_id", "x-client-request-id"])
+
+        XCTAssertEqual(attempts[1].url, "https://strict-backup.example/v1/responses")
+        XCTAssertFalse(attempts[1].hasPromptCacheKey, "Third-party backup must not receive prompt_cache_key")
+        XCTAssertEqual(attempts[1].routingHeaders, [], "Third-party backup must not receive OpenAI session headers")
+        XCTAssertEqual(attempts[1].statusCode, 200, "Strict third-party backup must return HTTP 200 after primary 503")
+
+        XCTAssertEqual(endpoint.seen?.status, 200)
+        XCTAssertEqual(endpoint.seen?.movedFrom, ["https://api.openai.com/v1/responses (HTTP 503)"])
+        XCTAssertNotEqual(reply.stopReason, .error)
+        let replyText = reply.content.compactMap { block -> String? in
+            if case .text(let text) = block { return text.text }
+            return nil
+        }.joined()
+        XCTAssertEqual(replyText, "Backup reply ok.")
+    }
+
+    func testDirectEngineWidensResultCardSchemaWhenSwitchingAppsMidTask() async throws {
+        let openAIKeyAccount = "model-key.openai"
+        let priorKey = try Keychain.read(openAIKeyAccount)
+        let priorEngine = UserDefaults.standard.object(forKey: "chatEngine")
+        let priorOpenAIModel = UserDefaults.standard.object(forKey: "chat.model.openai")
+        defer {
+            URLProtocol.unregisterClass(OpenAIResponsesStub.self)
+            OpenAIResponsesStub.clear()
+            if let priorKey { try? Keychain.write(priorKey, account: openAIKeyAccount) }
+            else { Keychain.delete(openAIKeyAccount) }
+            UserDefaults.standard.set(priorEngine, forKey: "chatEngine")
+            UserDefaults.standard.set(priorOpenAIModel, forKey: "chat.model.openai")
+        }
+        try Keychain.write(Data("sk-test-direct-engine".utf8), account: openAIKeyAccount)
+        UserDefaults.standard.set("direct", forKey: "chatEngine")
+        ModelKeys.selectedProvider = .openai
+        ModelKeys.selectedModel = "gpt-6.1-terra"
+
+        let launchArgs = Self.json(["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]])
+        let finishArgs = Self.json([
+            "success": true,
+            "summary": "Found 2 trains.",
+            "details": [["label": "G1", "value": "07:00"]],
+            "answer": ["kind": "list"],
+            "card": [
+                "app": "cn.12306.rails12306",
+                "kind": "12306.trains",
+                "recommended": "G1",
+                "items": [Self.train("G1", "07:00"), Self.train("G3", "08:00")],
+                "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {title} 次"],
+                "next": ["label": "发到公司差旅群", "say": "把 {title} 次发到公司差旅群"],
+            ],
+        ])
+        let turn1 = Self.json([
+            "id": "resp_direct_1",
+            "status": "completed",
+            "output": [["type": "function_call", "call_id": "call_direct_1", "name": "do", "arguments": launchArgs]],
+        ])
+        let turn2 = Self.json([
+            "id": "resp_direct_2",
+            "status": "completed",
+            "output": [["type": "function_call", "call_id": "call_direct_2", "name": "finish_task", "arguments": finishArgs]],
+        ])
+        let turn3 = Self.json([
+            "id": "resp_direct_3",
+            "status": "completed",
+            "output": [["type": "message", "role": "assistant", "content": [["type": "output_text", "text": "G1 is earliest."]]]],
+        ])
+
+        OpenAIResponsesStub.clear()
+        OpenAIResponsesStub.replies = [
+            (200, "application/json", turn1),
+            (200, "application/json", turn2),
+            (200, "application/json", turn3),
+        ]
+        URLProtocol.registerClass(OpenAIResponsesStub.self)
+
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation,
+                           transport: SessionScreenTransport(session: automation))
+        app.inProcessReadyForProbe()
+        self.app = app
+        let chat = ChatModel(app: app, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        try await Self.ask(chat, "打开设置看看，顺便查一下明天车次")
+
+        let requests = OpenAIResponsesStub.requests.filter { $0.json["tools"] != nil }
+        XCTAssertGreaterThanOrEqual(requests.count, 3)
+        XCTAssertNil(finishTaskCardKinds(in: requests[0].json),
+                     "Direct engine turn 1 in Settings should omit finish_task.card before switching apps")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: requests[1].json))),
+                       ["12306.trains", "12306.transfers", "list"],
+                       "Direct engine turn 2 after launching 12306 must widen finish_task.card to 12306 + list")
+        XCTAssertEqual(Self.cards(in: chat).count, 1, "Direct engine widened task must render the 12306 result card")
+    }
+
+    func testZeroNoteTasksOmitMemoryAttributionAndObsoleteFinishField() async throws {
+        let priorNotes = SkillStore.shared.notes
+        let backup = priorNotes.isEmpty ? nil : try SkillStore.shared.exportData()
+        for note in priorNotes { MemoryLibrary.shared.forget(note.id) }
+        defer {
+            if let backup { _ = try? SkillStore.shared.importData(backup, by: "Poki") }
+        }
+
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = newChat(on: server)
+        defer { SessionStore.shared.delete(chat.sessionID) }
+        try await Self.ask(chat, "打开设置查看通用里的关于本机")
+
+        let first = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(FakeCompletions.system(first).contains("used_memory_ids"),
+                       "memory attribution instructions leaked when no notes exist")
+
+        let tools = first["tools"] as? [[String: Any]] ?? []
+        for tool in tools {
+            guard let fn = tool["function"] as? [String: Any],
+                  let name = fn["name"] as? String,
+                  ["do", "web_open", "web_click", "web_type", "finish_task"].contains(name),
+                  let params = fn["parameters"] as? [String: Any],
+                  let props = params["properties"] as? [String: Any] else { continue }
+            XCTAssertNil(props["used_memory_ids"], "\(name) exposed used_memory_ids when no notes exist")
+        }
+
+        let note = try XCTUnwrap(SkillStore.shared.remember("Prefer concise replies.", by: "Poki"))
+        defer { MemoryLibrary.shared.forget(note.id) }
+
+        let withNotesServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Done."),
+        ])
+        let withNotesChat = newChat(on: withNotesServer)
+        defer { SessionStore.shared.delete(withNotesChat.sessionID) }
+        try await Self.ask(withNotesChat, "打开设置查看通用里的关于本机")
+
+        let withNotesFirst = try XCTUnwrap(withNotesServer.requests.first)
+        XCTAssertTrue(FakeCompletions.system(withNotesFirst).contains("used_memory_ids"),
+                      "memory attribution instructions must return when saved notes exist")
+        let withNotesTools = withNotesFirst["tools"] as? [[String: Any]] ?? []
+        for tool in withNotesTools {
+            guard let fn = tool["function"] as? [String: Any],
+                  let name = fn["name"] as? String,
+                  let params = fn["parameters"] as? [String: Any],
+                  let props = params["properties"] as? [String: Any] else { continue }
+            if ["do", "web_open", "web_click", "web_type"].contains(name) {
+                XCTAssertNotNil(props["used_memory_ids"], "\(name) must keep used_memory_ids when saved notes exist")
+            } else if name == "finish_task" {
+                XCTAssertNil(props["used_memory_ids"], "finish_task must not expose the obsolete used_memory_ids field")
+                XCTAssertEqual(params["additionalProperties"] as? Bool, false,
+                               "finish_task must keep additionalProperties=false")
+            }
+        }
+    }
+
+    func testCountedScrollToolsAndInstructionsAreScopedToActiveCountedScrollTasks() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Checked Settings."),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "No chat open.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Could not scroll."),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled screens.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled two pages."),
+        ])
+        let chat = newChat(on: server)
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        func toolNames(in request: [String: Any]) -> Set<String> {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return Set(tools.compactMap { (($0["function"] as? [String: Any]) ?? $0)["name"] as? String })
+        }
+
+        let screenScrollRule = "For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools."
+
+        try await Self.ask(chat, "打开设置查看通用里的关于本机")
+        let firstTaskReq = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(toolNames(in: firstTaskReq).contains("count_messages"))
+        XCTAssertFalse(toolNames(in: firstTaskReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertFalse(FakeCompletions.system(firstTaskReq).contains("count_messages"))
+        XCTAssertFalse(FakeCompletions.system(firstTaskReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertTrue(FakeCompletions.system(firstTaskReq).contains(screenScrollRule))
+
+        let beforeCounted = server.requests.count
+        try await Self.ask(chat, "往上翻 5 条消息")
+        let countedReq = try XCTUnwrap(server.requests.dropFirst(beforeCounted).first)
+        XCTAssertTrue(toolNames(in: countedReq).contains("count_messages"),
+                      "counted-scroll task in the same session must expose count_messages")
+        XCTAssertTrue(toolNames(in: countedReq).contains(Harness.countedScrollReplyTool),
+                      "counted-scroll task in owner chat must expose wait_for_counted_scroll_reply")
+        XCTAssertTrue(FakeCompletions.system(countedReq).contains("count_messages"))
+        XCTAssertTrue(FakeCompletions.system(countedReq).contains(Harness.countedScrollReplyTool))
+
+        let beforeScreens = server.requests.count
+        try await Self.ask(chat, "往上翻两页消息")
+        let screensReq = try XCTUnwrap(server.requests.dropFirst(beforeScreens).first)
+        XCTAssertFalse(toolNames(in: screensReq).contains("count_messages"),
+                       "screen-unit scroll must omit count_messages")
+        XCTAssertFalse(toolNames(in: screensReq).contains(Harness.countedScrollReplyTool),
+                       "screen-unit scroll must omit wait_for_counted_scroll_reply")
+        XCTAssertFalse(FakeCompletions.system(screensReq).contains("count_messages"))
+        XCTAssertTrue(FakeCompletions.system(screensReq).contains(screenScrollRule),
+                      "screen-unit scroll must keep the page/screen verification rule")
+
+        let delegatedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "Stopped.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Stopped."),
+        ])
+        let delegatedChat = self.chat(on: delegatedServer)
+        defer { SessionStore.shared.delete(delegatedChat.sessionID) }
+        _ = await delegatedChat.runDelegated("Scroll up 10 messages.")
+        let delegatedReq = try XCTUnwrap(delegatedServer.requests.first)
+        XCTAssertTrue(toolNames(in: delegatedReq).contains("count_messages"))
+        XCTAssertFalse(toolNames(in: delegatedReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertTrue(FakeCompletions.system(delegatedReq).contains("count_messages"))
+        XCTAssertFalse(FakeCompletions.system(delegatedReq).contains(Harness.countedScrollReplyTool))
+    }
+
+    func testReplyExamplesLanguageSelectionAndAutomaticUnlockGating() {
+        enum ExpectedExamples { case chinese, english, both }
+        let cases: [(request: String, expected: ExpectedExamples)] = [
+            ("Open Settings and check About. 再告诉我系统版本。", .both),
+            ("Open Settings and reply in 中文", .both),
+            ("Open Settings and reply in Spanish.", .both),
+            ("打开设置查看英文键盘是否开启", .both),
+            ("打开 Safari 看看天气", .chinese),
+            ("Open Settings", .english),
+            ("帮我打开设置看一下关于本机", .chinese),
+            ("打开设置然后用日语回复我", .both),
+            ("打开 https://example.com/ 查看标题和域名", .chinese),
+            ("", .both),
+        ]
+        for (request, expected) in cases {
+            let prompt = Harness.taskInstructions(for: request).text
+            switch expected {
+            case .chinese:
+                XCTAssertTrue(prompt.contains("### 简体中文"), "\(request) must include Chinese examples")
+                XCTAssertFalse(prompt.contains("### English"), "\(request) must omit English examples")
+            case .english:
+                XCTAssertTrue(prompt.contains("### English"), "\(request) must include English examples")
+                XCTAssertFalse(prompt.contains("### 简体中文"), "\(request) must omit Chinese examples")
+            case .both:
+                XCTAssertTrue(prompt.contains("### English"), "\(request) must keep English examples")
+                XCTAssertTrue(prompt.contains("### 简体中文"), "\(request) must keep Chinese examples")
+            }
+        }
+        XCTAssertFalse(Harness.taskInstructions(for: "打开设置查看通用里的关于本机").text.contains("Automatic Unlock"))
+    }
+
+    func testScreenshotIDStrippedForNonCardTasksAndKeptAfterWideningToCardApp() async throws {
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = self.chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+        try await Self.ask(chat, "打开设置看看，顺便查一下明天车次")
+
+        func toolNames(in request: [String: Any]) -> Set<String> {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return Set(tools.compactMap { (($0["function"] as? [String: Any]) ?? $0)["name"] as? String })
+        }
+        XCTAssertGreaterThanOrEqual(server.requests.count, 3)
+        XCTAssertFalse(toolNames(in: server.requests[0]).contains("get_screenshot"),
+                       "Non-card task omitting screenshot_id should omit get_screenshot")
+        let settingsAnswer = Self.toolAnswer(server.requests[1])
+        XCTAssertFalse(settingsAnswer.contains("screenshot_id: "),
+                       "Settings screen read while finish_task.card is omitted should strip screenshot_id: \(settingsAnswer)")
+        XCTAssertTrue(toolNames(in: server.requests[2]).contains("get_screenshot"),
+                      "Widening to a card-capable app must expose get_screenshot alongside screenshot_id")
+        let railAnswer = Self.toolAnswer(server.requests[2])
+        XCTAssertTrue(railAnswer.contains("screenshot_id: "),
+                      "12306 screen read after widening resultCardMode must preserve screenshot_id: \(railAnswer)")
+    }
+
+    func testAppMemoryBriefDoesNotDuplicateNotesAlreadyInTaskBrief() async throws {
+        let fixture = SkillStore(url: nil)
+        let note = try XCTUnwrap(fixture.remember("Check the Wi-Fi row first in Settings.", by: "Poki", app: "com.apple.Preferences"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Checked Settings.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Checked Settings."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer { MemoryLibrary.shared.forget(note.id); SessionStore.shared.delete(chat.sessionID) }
+
+        let result = await chat.runDelegated("打开设置查看无线局域网")
+        XCTAssertEqual(result.success, true, result.text)
+
+        let first = try XCTUnwrap(server.requests.first)
+        let system = FakeCompletions.system(first)
+        XCTAssertTrue(system.contains(note.id), "taskBrief should offer the app note in the system prompt")
+        XCTAssertTrue(system.contains("used_memory_ids"), "memory attribution instructions should be present when notes exist")
+
+        let answers = server.requests.dropFirst().map(Self.toolAnswer)
+        XCTAssertFalse(answers.contains { $0.contains("Saved memories for this app") },
+                       "First read of an already-briefed app must not duplicate its notes: \(answers)")
+        XCTAssertFalse(answers.contains { $0.contains(note.id) },
+                       "Already-offered note ID must not be injected a second time in the tool answer: \(answers)")
+    }
+
+    func testResultCardSchemaIsGatedPerTaskAndWidensForObservedApps() async throws {
+        // 1. Delegated tasks never render cards and must omit finish_task.card even when no app is named.
+        let delegatedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let delegatedChat = chat(on: delegatedServer)
+        defer { SessionStore.shared.delete(delegatedChat.sessionID) }
+        _ = await delegatedChat.runDelegated("Find trains from Beijing to Shanghai")
+        XCTAssertNil(finishTaskCardKinds(in: try XCTUnwrap(delegatedServer.requests.first)),
+                     "Delegated tasks must omit finish_task.card")
+
+        // 2. Non-card utility apps and explicit-URL built-in browser tasks omit finish_task.card.
+        for prompt in [
+            "打开设置查看通用里的关于本机",
+            "Open Photos and check the latest photo",
+            "打开 https://example.com/ 查看标题和域名",
+        ] {
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Done."),
+            ])
+            let chat = newChat(on: server)
+            defer { SessionStore.shared.delete(chat.sessionID) }
+            try await Self.ask(chat, prompt)
+            XCTAssertNil(finishTaskCardKinds(in: try XCTUnwrap(server.requests.first)),
+                         "\(prompt): finish_task.card should be omitted")
+        }
+
+        // 3. Dedicated card app scopes card kinds to that app + generic list and still renders its card.
+        let railServer = try FakeCompletions(replies: [
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 {title} 次发到公司差旅群"),
+            FakeCompletions.text("G1 is earliest."),
+        ])
+        let railChat = newChat(on: railServer)
+        defer { SessionStore.shared.delete(railChat.sessionID) }
+        try await Self.ask(railChat, "打开12306看一下明天上海到北京的高铁")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(railServer.requests.first)))),
+                       ["12306.trains", "12306.transfers", "list"])
+        XCTAssertEqual(Self.cards(in: railChat).count, 1)
+
+        // 4. Multi-app overlapping-field tasks merge shared fields without crashing and expose only those apps + list.
+        let multiAppServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let multiAppChat = newChat(on: multiAppServer)
+        defer { SessionStore.shared.delete(multiAppChat.sessionID) }
+        try await Self.ask(multiAppChat, "打开12306和携程查明天车票和机票")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(multiAppServer.requests.first)))),
+                       ["12306.trains", "12306.transfers", "ctrip.flights", "ctrip.hotels", "ctrip.rooms", "ctrip.fares", "list"])
+
+        // 5. Other named apps receive generic list only; lowercase everyday words keep all card kinds.
+        let meituanServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let meituanChat = newChat(on: meituanServer)
+        defer { SessionStore.shared.delete(meituanChat.sessionID) }
+        try await Self.ask(meituanChat, "打开美团找附近的咖啡店")
+        XCTAssertEqual(finishTaskCardKinds(in: try XCTUnwrap(meituanServer.requests.first)), ["list"])
+
+        let openEndedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let openEndedChat = newChat(on: openEndedServer)
+        defer { SessionStore.shared.delete(openEndedChat.sessionID) }
+        try await Self.ask(openEndedChat, "Find flights home from Tokyo")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(openEndedServer.requests.first)))).count, 10)
+
+        // 6. A task starting in a non-card app widens finish_task.card when it launches a card app mid-task.
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let widenServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]]),
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 {title} 次发到公司差旅群"),
+            FakeCompletions.text("G1 is earliest."),
+        ])
+        let widenChat = chat(on: widenServer, transport: SessionScreenTransport(session: automation), automation: automation, kind: .poki)
+        widenChat.newConversation()
+        defer { SessionStore.shared.delete(widenChat.sessionID) }
+        try await Self.ask(widenChat, "打开设置看看，顺便查一下明天车次")
+
+        XCTAssertGreaterThanOrEqual(widenServer.requests.count, 3)
+        XCTAssertNil(finishTaskCardKinds(in: widenServer.requests[0]),
+                     "Turn 1 in Settings should omit finish_task.card before another app is observed")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: widenServer.requests[1]))),
+                       ["12306.trains", "12306.transfers", "list"],
+                       "Turn 2 after launching 12306 must widen finish_task.card to 12306 + list")
+        XCTAssertEqual(Self.cards(in: widenChat).count, 1, "Widened task must still render the 12306 card")
     }
 
     func testChineseAppTaskOffersMatchingSkillInPromptAndOmitsUnrelatedSkills() async throws {
@@ -2895,6 +3565,54 @@ final class ChatHarnessTests: XCTestCase {
             step-by-step calls: \(calendarCalls.map(\.name).joined(separator: " -> "))
         """)
     }
+
+    func testInAppChatOmitsExternalFinishGuidanceAndSkipsScreenReadOnEmptyFinish() async throws {
+        let prompt = Harness.taskInstructions(for: "打开计算器，计算 123 乘以 45，告诉我结果。").text
+        XCTAssertFalse(prompt.contains("put finish: true on the last do"), "In-app chat must not tell the model to send finish: true on do")
+        XCTAssertTrue(PokiCore.toolInstructions.contains("put finish: true on the last do"), "External MCP instructions must remain unchanged")
+
+        let chatDo = try XCTUnwrap(Harness.tools.first { $0.name == "do" })
+        XCTAssertFalse(chatDo.description.contains("finish: true on the do"), "In-app chat do description must omit external finish: true guidance")
+        let chatProperties = try XCTUnwrap(chatDo.schema["properties"] as? [String: Any])
+        XCTAssertNil(chatProperties["finish"], "In-app chat do schema must not expose finish")
+        XCTAssertTrue(PokiCore.toolCatalogJSON.contains(#""finish""#), "External MCP tool catalog must keep finish")
+
+        final class ReadSnapshots: @unchecked Sendable {
+            private let lock = NSLock()
+            private var values: [Int] = []
+            func append(_ count: Int) { lock.withLock { values.append(count) } }
+            var all: [Int] { lock.withLock { values } }
+        }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation)
+        let snapshots = ReadSnapshots()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Opened Settings.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.tool("do", ["actions": [], "finish": true]),
+            FakeCompletions.text("Opened Settings."),
+        ], onRequest: { _ in
+            snapshots.append(transport.screenReads)
+        })
+        let marker = "empty-finish-check-\(UUID().uuidString)"
+        AppLog.shared.add("test", marker)
+        let chat = chat(on: server, transport: transport, automation: automation, kind: .poki)
+        let done = expectation(description: "Task finished")
+        ChatModel.afterTask = { _ in done.fulfill() }
+        chat.send("Open Settings")
+        await fulfillment(of: [done], timeout: 10)
+
+        let counts = snapshots.all
+        let taskLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }))
+        XCTAssertEqual(counts.count, 5, "Expected 5 scripted turns: \(counts)")
+        XCTAssertGreaterThanOrEqual(counts[3], 1, "Launch must read the screen before empty finish")
+        XCTAssertEqual(counts[4], counts[3], "Empty finish do must not trigger an extra screen read")
+        XCTAssertEqual(transport.screenReads, counts[3], "Empty finish do must not trigger an extra screen read")
+        XCTAssertFalse(taskLogs.contains { $0.contains("[agent] started: Look at the screen") }, "Empty finish do must not log a Look at the screen step: \(taskLogs)")
+        XCTAssertFalse(taskLogs.contains { $0.contains("a tap hit the Live Activity") }, "Returning to Poki on empty finish must not misreport a Live Activity tap: \(taskLogs)")
+    }
 }
 
 /// An OpenAI chat completions endpoint on 127.0.0.1: each request is kept and answered with the next
@@ -2923,26 +3641,38 @@ final class FakeCompletions: @unchecked Sendable {
     private let lock = NSLock()
     private var replies: [String]
     private var bodies: [[String: Any]] = []
+    /// Capture only harmless routing fields; never Authorization, cookies or API keys.
+    private var routingHeaders: [[String: String]] = []
+    private var responseStatuses: [Int]
     private let responseStatus: String
     private let holdFirstReply: (@Sendable () -> Void)?
     private var held: [NWConnection] = []
-    /// Replies held back by `holdAfter`, sent by `release()`.
+    /// Full HTTP replies held back by holdAfter, sent by release().
     private var waiting: [(NWConnection, String)] = []
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
+    private let rejectUnknownCacheField: Bool
+    private let rejectRequest: (@Sendable ([String: String], [String: Any]) -> (status: String, body: String)?)?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
+    var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
     func replaceReplies(_ next: [String]) { lock.withLock { replies = next } }
 
-    init(replies: [String], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
-         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil) throws {
+    init(replies: [String], responseStatuses: [Int] = [], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
+         holdAfter: Int? = nil,
+         rejectUnknownCacheField: Bool = false,
+         onRequest: (@Sendable ([String: Any]) -> Void)? = nil,
+         rejectRequest: (@Sendable ([String: String], [String: Any]) -> (status: String, body: String)?)? = nil) throws {
         self.replies = replies
+        self.responseStatuses = responseStatuses
         self.responseStatus = responseStatus
         self.holdFirstReply = holdFirstReply
         self.holdAfter = holdAfter
         self.onRequest = onRequest
+        self.rejectUnknownCacheField = rejectUnknownCacheField
+        self.rejectRequest = rejectRequest
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -2955,13 +3685,12 @@ final class FakeCompletions: @unchecked Sendable {
 
     deinit { listener.cancel(); held.forEach { $0.cancel() } }
 
-    /// Sends the replies `holdAfter` held back: a model answer that comes in late.
+    /// Sends replies held back by holdAfter (including late answers).
     func release() {
         let due = lock.withLock { () -> [(NWConnection, String)] in defer { waiting = [] }; return waiting }
         queue.async {
-            for (connection, events) in due {
-                let head = "HTTP/1.1 \(self.responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-                connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            for (connection, reply) in due {
+                connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in connection.cancel() })
             }
         }
     }
@@ -2975,47 +3704,100 @@ final class FakeCompletions: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
             guard let self else { return }
             let received = received + (data ?? Data())
-            if let body = Self.body(received) { return self.answer(connection, body) }
+            if let parsed = Self.parseHTTP(received) { return self.answer(connection, parsed.headers, parsed.body) }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
         }
     }
 
-    /// The request's body once all of it is in.
-    private static func body(_ data: Data) -> Data? {
+    /// The request's lower-cased header names (exact values) and full body once all of it is in.
+    private static func parseHTTP(_ data: Data) -> (headers: [String: String], body: Data)? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self).lowercased()
-        let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
-            .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
+        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self)
+        var headers: [String: String] = [:]
+        for line in head.split(separator: "\r\n").dropFirst() {
+            if let colon = line.firstIndex(of: ":") {
+                let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                headers[key] = value
+            }
+        }
+        let length = headers["content-length"].flatMap(Int.init) ?? 0
         let body = data[end.upperBound...]
-        return body.count >= length ? Data(body.prefix(length)) : nil
+        return body.count >= length ? (headers, Data(body.prefix(length))) : nil
     }
 
-    private func answer(_ connection: NWConnection, _ body: Data) {
+    private static let allowedRoutingHeaders: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+
+    private static func filteredRoutingHeaders(_ headers: [String: String]) -> [String: String] {
+        headers.filter { allowedRoutingHeaders.contains($0.key) }
+    }
+
+    private func answer(_ connection: NWConnection, _ headers: [String: String], _ body: Data) {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
-        // The chat's own title request: answered on the side, so it takes no scripted turn.
-        if json["tools"] == nil, Self.system(json).hasPrefix("You name chat conversations") {
-            let response = #"{"choices":[{"message":{"role":"assistant","content":"Test conversation"}}]}"#
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
+        let routing = Self.filteredRoutingHeaders(headers)
+        // Title requests use an independent reply, consuming no scripted chat turn.
+        // They still need their routing header captured for the auxiliary-request test.
+        let responsesInstructions = (json["instructions"] as? String) ?? ""
+        let responsesInputSystem = ((json["input"] as? [[String: Any]]) ?? []).compactMap { item -> String? in
+            guard ["system", "developer"].contains(item["role"] as? String ?? "") else { return nil }
+            return item["content"] as? String
+        }.joined(separator: "\n")
+        if json["tools"] == nil,
+           responsesInstructions.hasPrefix("You name chat conversations")
+            || responsesInputSystem.hasPrefix("You name chat conversations") {
+            lock.withLock { routingHeaders.append(routing) }
+            let events = Self.responsesText("Test conversation")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
+        if Self.system(json).hasPrefix("You name chat conversations") {
+            lock.withLock { routingHeaders.append(routing) }
+            let response = Self.text("Test conversation")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let events = lock.withLock { () -> String in
-            bodies.append(json)
-            return replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
-        }
-        onRequest?(json)
-        if let holdAfter, requests.count > holdAfter {
-            lock.withLock { held.append(connection); waiting.append((connection, events)) }
+        if let rejected = rejectRequest?(headers, json) {
+            lock.withLock {
+                routingHeaders.append(routing)
+                bodies.append(json)
+            }
+            onRequest?(json)
+            let head = "HTTP/1.1 \(rejected.status)\r\nContent-Type: application/json\r\nContent-Length: \(rejected.body.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + rejected.body).utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let head = "HTTP/1.1 \(responseStatus)\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
-        if requests.count == 1, let holdFirstReply {
+        let (payload, status, type, requestNumber) = lock.withLock { () -> (String, String, String, Int) in
+            routingHeaders.append(routing)
+            bodies.append(json)
+            let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
+            let specified = !responseStatuses.isEmpty
+            let code = specified ? responseStatuses.removeFirst() : 200
+            // Simulate strict OpenAI-compatible servers. The real Responses
+            // stream must never require a non-standard cache key to work.
+            let unsupported = rejectUnknownCacheField && json["prompt_cache_key"] != nil
+            let error = unsupported ? #"{"error":{"message":"Unknown field prompt_cache_key"}}"#
+                                    : #"{"error":{"message":"synthetic rejection"}}"#
+            let payload = unsupported || (specified && code != 200) ? error : scripted
+            let status = unsupported ? "400 Bad Request"
+                : (specified ? (code == 200 ? "200 OK" : "\(code) Bad Request") : responseStatus)
+            let errorResponse = unsupported || (specified && code != 200)
+            return (payload, status, errorResponse ? "application/json" : "text/event-stream", bodies.count)
+        }
+        onRequest?(json)
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type)\r\nContent-Length: \(payload.utf8.count)\r\nConnection: close\r\n\r\n"
+        if let holdAfter, requestNumber > holdAfter {
+            lock.withLock { held.append(connection); waiting.append((connection, head + payload)) }
+            return
+        }
+        if requestNumber == 1, let holdFirstReply {
             holdFirstReply()
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
             return
         }
-        connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        connection.send(content: Data((head + payload).utf8), completion: .contentProcessed { _ in connection.cancel() })
     }
 
     private static func event(_ delta: [String: Any], finish: String) -> String {
@@ -3033,6 +3815,25 @@ final class FakeCompletions: @unchecked Sendable {
 
     static func text(_ words: String) -> String { event(["role": "assistant", "content": words], finish: "stop") }
 
+    static func responsesText(_ words: String) -> String {
+        let id = "resp_\(UUID().uuidString.prefix(8))"
+        let msg = "msg_\(UUID().uuidString.prefix(8))"
+        let events: [[String: Any]] = [
+            ["type": "response.created", "response": ["id": id, "status": "in_progress"]],
+            ["type": "response.output_item.added", "output_index": 0,
+             "item": ["type": "message", "id": msg, "status": "in_progress", "role": "assistant", "content": []]],
+            ["type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": words],
+            ["type": "response.output_item.done", "output_index": 0,
+             "item": ["type": "message", "id": msg, "status": "completed", "role": "assistant",
+                      "content": [["type": "output_text", "text": words]]]],
+            ["type": "response.completed", "response": ["id": id, "status": "completed"]],
+        ]
+        return events.map { ev in
+            let data = try! JSONSerialization.data(withJSONObject: ev)
+            return "data: \(String(decoding: data, as: UTF8.self))\n\n"
+        }.joined()
+    }
+
     static func countedScrollQuestion(_ question: String) -> String {
         tool("wait_for_counted_scroll_reply", ["question": question])
     }
@@ -3043,6 +3844,88 @@ final class FakeCompletions: @unchecked Sendable {
         return messages.filter { ["system", "developer"].contains($0["role"] as? String ?? "") }.map { message in
             (message["content"] as? String) ?? ((message["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined(separator: "\n") ?? "")
         }.joined(separator: "\n")
+    }
+}
+
+/// Intercepts requests to `api.openai.com` for in-process Responses API and direct-engine tests.
+private final class OpenAIResponsesStub: URLProtocol {
+    struct Sent {
+        let url: URL?
+        let headers: [String: String]
+        let body: Data
+        var json: [String: Any] {
+            (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        }
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) static var replies: [(status: Int, type: String, body: String)] = []
+    nonisolated(unsafe) private static var recorded: [Sent] = []
+
+    static var requests: [Sent] { lock.withLock { recorded } }
+
+    static func clear() {
+        lock.withLock {
+            replies.removeAll()
+            recorded.removeAll()
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host()?.lowercased() == "api.openai.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let body = Self.bodyData(from: request)
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let instructions = (json["instructions"] as? String) ?? ""
+        let inputSystem = ((json["input"] as? [[String: Any]]) ?? []).compactMap { item -> String? in
+            guard ["system", "developer"].contains(item["role"] as? String ?? "") else { return nil }
+            return item["content"] as? String
+        }.joined(separator: "\n")
+        if json["tools"] == nil,
+           instructions.hasPrefix("You name chat conversations") || inputSystem.hasPrefix("You name chat conversations") {
+            let replyBody = FakeCompletions.responsesText("Test conversation")
+            finish(status: 200, type: "text/event-stream", body: replyBody)
+            return
+        }
+        let headers = Dictionary(uniqueKeysWithValues: (request.allHTTPHeaderFields ?? [:]).map { ($0.key.lowercased(), $0.value) })
+        let next = Self.lock.withLock { () -> (status: Int, type: String, body: String) in
+            Self.recorded.append(Sent(url: request.url, headers: headers, body: body))
+            if Self.replies.isEmpty {
+                return (200, "text/event-stream", FakeCompletions.responsesText("No more scripted turns."))
+            }
+            return Self.replies.removeFirst()
+        }
+        finish(status: next.status, type: next.type, body: next.body)
+    }
+
+    override func stopLoading() {}
+
+    private func finish(status: Int, type: String, body: String) {
+        let data = Data(body.utf8)
+        let response = HTTPURLResponse(url: request.url ?? URL(string: "https://api.openai.com/v1/responses")!,
+                                       statusCode: status, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": type, "Content-Length": "\(data.count)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func bodyData(from request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var out = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count > 0 { out.append(buffer, count: count) } else { break }
+        }
+        return out
     }
 }
 
@@ -3282,8 +4165,10 @@ private actor PasteReceiptTransport: HTTPTransport {
 final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
+    private let beforePathRequest: (@Sendable (String) async -> Void)?
     private let screenLabel: @Sendable () -> String
     private let beforeActivation: (@Sendable (String) async -> Void)?
+    private let activeApp: @Sendable () -> (bundleID: String, name: String)
     private let unavailableApp: String?
     private let onRefusal: (@Sendable (String) -> Void)?
     private let lock = NSLock()
@@ -3293,21 +4178,27 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
     init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
-         beforeActivation: (@Sendable (String) async -> Void)? = nil, unavailableApp: String? = nil,
+         beforePathRequest: (@Sendable (String) async -> Void)? = nil,
+         beforeActivation: (@Sendable (String) async -> Void)? = nil,
+         activeApp: @escaping @Sendable () -> (bundleID: String, name: String) = { ("com.apple.Preferences", "Settings") },
+         unavailableApp: String? = nil,
          onRefusal: (@Sendable (String) -> Void)? = nil,
          screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
+        self.beforePathRequest = beforePathRequest
         self.beforeActivation = beforeActivation
+        self.activeApp = activeApp
         self.unavailableApp = unavailableApp
         self.onRefusal = onRefusal
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        await beforeRequest?()
-        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        await beforeRequest?()
+        await beforePathRequest?(path)
+        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let value: JSON
         switch path {
         case "/wda/apps/activate":
@@ -3325,7 +4216,8 @@ final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
         case "/wda/locked": value = false
         case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
         case "/wda/activeAppInfo":
-            value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
+            let app = activeApp()
+            value = ["bundleId": .string(app.bundleID), "name": .string(app.name)]
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
             lock.withLock {

@@ -56,6 +56,86 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(Set(relaunched.archivedSessions.map(\.id)), ["old-1", "old-2"], "the archive is kept on disk")
     }
 
+    func testArchiveMigrationRetriesAfterWriteFailure() async throws {
+        for deferred in [false, true] {
+            let id = deferred ? "deferred" : "immediate"
+            _ = try saveEarlier(id, lines: ["Keep this conversation"])
+            defaults.removeObject(forKey: SessionStore.archivedEarlierKey)
+            let failed = SessionStore(folder: folder, defaults: defaults, deferLoad: deferred,
+                                      archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+            await failed.waitUntilLoaded()
+            XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+            XCTAssertEqual(launch().archivedSessions.first { $0.id == id }?.entries.count, 1)
+            XCTAssertTrue(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        }
+    }
+
+    func testRetryDoesNotArchiveConversationsCreatedAfterFailedMigration() async throws {
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let failed = SessionStore(folder: folder, defaults: defaults,
+                                  archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        await failed.waitUntilLoaded()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        _ = try saveEarlier("new", lines: ["Created after upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" }, "A later conversation is not part of the upgrade migration")
+    }
+
+    func testExplicitUnarchiveAfterFailedMigrationSurvivesRetry() async throws {
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let failed = SessionStore(folder: folder, defaults: defaults,
+                                  archiveWrite: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        await failed.waitUntilLoaded()
+        failed.unarchive("old")
+        failed.flush()
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "old" })
+        XCTAssertFalse(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
+    func testUnreadableOldFileDoesNotAddLaterConversationToMigration() throws {
+        let oldFile = folder.appendingPathComponent("old.json")
+        try FileManager.default.createDirectory(at: oldFile, withIntermediateDirectories: false)
+        let first = launch()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        XCTAssertTrue(first.listed.isEmpty)
+        _ = try saveEarlier("new", lines: ["After upgrade"])
+        try FileManager.default.removeItem(at: oldFile)
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
+    func testSessionCreatedWhileDirectoryUnavailableIsNotMigrated() throws {
+        try FileManager.default.removeItem(at: folder)
+        try Data("unavailable".utf8).write(to: folder)
+        let first = launch()
+        first.save(voice: "new", started: Date(), lines: [
+            VoiceLine(role: .you, text: "New"),
+            VoiceLine(role: .poki, text: "Reply")
+        ], live: false)
+        try FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        first.flush()
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
+    func testMalformedOldFileDoesNotCompleteMigrationOrArchiveLaterSession() throws {
+        try Data("{".utf8).write(to: folder.appendingPathComponent("old.json"))
+        _ = launch()
+        XCTAssertFalse(defaults.bool(forKey: SessionStore.archivedEarlierKey))
+        _ = try saveEarlier("new", lines: ["After upgrade"])
+        _ = try saveEarlier("old", lines: ["Before upgrade"])
+        let retried = launch()
+        XCTAssertTrue(retried.listed.contains { $0.id == "new" })
+        XCTAssertTrue(retried.archivedSessions.contains { $0.id == "old" })
+    }
+
     func testFlushRetriesFailedSaveWithoutResurrectingDeletedConversation() throws {
         defaults.set(true, forKey: SessionStore.archivedEarlierKey)
         for id in ["keep", "delete"] { _ = try saveEarlier(id, lines: ["Conversation"]) }

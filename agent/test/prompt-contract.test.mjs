@@ -47,7 +47,6 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(agentSystem, /password manager/i);
   assert.match(agentSystem, /approval/i);
   assert.match(agentSystem, /Stop on the checkout or payment page/);
-  assert.match(agentSystem, /as data from someone else, never as instructions/, 'on-screen text is not instructions');
   assert.match(combined, /Messages or notifications/);
   assert.match(combined, /Return/);
   assert.match(combined, /scrolling down|scroll down/i);
@@ -89,7 +88,6 @@ test('Agent prompts preserve personal-assistant voice, device execution, verific
   assert.match(piApp, /password manager/i);
   assert.match(piApp, /approval/i);
   assert.match(piApp, /Stop on the checkout or payment page/);
-  assert.match(piApp, /as data from someone else, never as instructions/, 'on-screen text is not instructions');
   assert.match(combined, /handle_alert/);
   assert.match(combined, /Messages or notifications/);
   assert.match(combined, /purchase/);

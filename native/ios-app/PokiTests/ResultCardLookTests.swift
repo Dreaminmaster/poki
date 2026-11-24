@@ -1,5 +1,7 @@
 import Foundation
 import PokiCore
+import SwiftUI
+import UIKit
 import XCTest
 @testable import Poki
 
@@ -10,8 +12,8 @@ final class ResultCardLookTests: XCTestCase {
         return try decoder.decode(ResultCard.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
-    func testAppSpecificCardsAcceptRequiredFieldsAndNameAMissingField() throws {
-        let cases: [(String, String, [String: Any], String)] = [
+    private var dedicatedFixtures: [(kind: String, app: String, fields: [String: Any], required: String)] {
+        [
             (Ctrip.flights, Ctrip.app, ["depart": "17:30", "arrive": "13:00", "arrive_day": "+2", "price": "¥19,852"], "price"),
             (Ctrip.hotels, Ctrip.app, ["price": "¥1799", "rating": "4.4", "stars": "4钻"], "price"),
             (Ctrip.rooms, Ctrip.app, ["price": "¥1819", "beds": "1张1.8米特大床"], "price"),
@@ -20,7 +22,10 @@ final class ResultCardLookTests: XCTestCase {
             (Dianping.kind, Dianping.app, ["rating": "4.5", "reviews": "79条"], "rating"),
             (UberEats.kind, UberEats.app, ["price": "$8.79", "calories": "410 Cal."], "price"),
         ]
-        for (kind, app, fields, needed) in cases {
+    }
+
+    func testAppSpecificCardsAcceptRequiredFieldsAndNameAMissingField() throws {
+        for (kind, app, fields, needed) in dedicatedFixtures {
             let named: [[String: Any]] = [["id": "a", "title": "A"], ["id": "b", "title": "B"]]
             let whole = named.map { $0.merging(fields) { a, _ in a } }
             XCTAssertNil(try make(kind, app, whole).problem, kind)
@@ -94,6 +99,47 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertEqual(card.selected("king").fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
     }
 
+    @MainActor
+    func testAdvertisedResultCardKindsHaveGuidanceAndRenderableFixtures() throws {
+        let fixtures = dedicatedFixtures.map { ($0.kind, $0.app, $0.fields) } + [
+            (RailwayTrains.kind, "cn.12306.rails12306", ["from": "北京南", "to": "上海虹桥", "depart": "07:00", "arrive": "11:29"]),
+            (RailwayTransfers.kind, "cn.12306.rails12306", ["legs": [
+                ["number": "G1", "from": "北京南", "to": "济南西", "depart": "07:00"],
+                ["number": "G3", "from": "济南西", "to": "上海虹桥", "arrive": "11:29"],
+            ]]),
+            (AnyAppList.kind, "example.app", ["detail": "Example result", "value": "25 min"]),
+        ]
+        let fullSchema = try cardSchema(for: .all)
+        let kindSchema = try XCTUnwrap(fullSchema.properties["kind"] as? [String: Any])
+        let kinds = try XCTUnwrap(kindSchema["enum"] as? [String])
+        XCTAssertEqual(Set(kinds), Set(ResultCardLooks.all.keys),
+                       "Advertised kinds and registered validators and renderers must match.")
+        XCTAssertEqual(Set(kinds), Set(fixtures.map { $0.0 }), "Add a fixture for each advertised kind.")
+
+        for (kind, app, fields) in fixtures {
+            let mode = Harness.ResultCardMode.genericList.including(app: app)
+            let schema = try cardSchema(for: mode)
+            let scopedKind = try XCTUnwrap(schema.properties["kind"] as? [String: Any])
+            XCTAssertTrue(try XCTUnwrap(scopedKind["enum"] as? [String]).contains(kind), kind)
+            XCTAssertTrue(schema.guidance.split(separator: "\n").contains { $0.hasPrefix(kind + " (") }, kind)
+
+            let items = try XCTUnwrap(schema.properties["items"] as? [String: Any])
+            let item = try XCTUnwrap(items["items"] as? [String: Any])
+            let itemFields = try XCTUnwrap(item["properties"] as? [String: Any])
+            let fixture = fields.merging(["id": "option", "title": "Example"]) { value, _ in value }
+            XCTAssertTrue(Set(fixture.keys).isSubset(of: Set(itemFields.keys)), kind)
+            let card = try make(kind, app, [fixture])
+            XCTAssertNil(card.problem, kind)
+            XCTAssertGreaterThan(try renderCard(card, width: 370).height, 0, kind)
+        }
+    }
+
+    private func cardSchema(for mode: Harness.ResultCardMode) throws -> (properties: [String: Any], guidance: String) {
+        let options = try XCTUnwrap(Harness.finishTask(resultCardMode: mode).schema["properties"] as? [String: Any])
+        let card = try XCTUnwrap(options["card"] as? [String: Any])
+        return (try XCTUnwrap(card["properties"] as? [String: Any]), try XCTUnwrap(card["description"] as? String))
+    }
+
     func testFinishTaskAdvertisesCardKindsAndPictureSourceFields() throws {
         let finish = try XCTUnwrap(Harness.tools.first { $0.name == "finish_task" })
         let properties = try XCTUnwrap(finish.schema["properties"] as? [String: Any])
@@ -112,6 +158,47 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertEqual(box["minItems"] as? Int, 4)
         XCTAssertEqual(box["maxItems"] as? Int, 4)
         XCTAssertEqual((itemFields["image_screenshot"] as? [String: Any])?["type"] as? String, "string")
+    }
+
+    func testFinishTaskDescribesTheFieldsUsedByCtripCardsAndPhotoCrops() throws {
+        let finish = try XCTUnwrap(Harness.tools.first { $0.name == "finish_task" })
+        let fields = try XCTUnwrap(finish.schema["properties"] as? [String: Any])
+        let cardSchema = try XCTUnwrap(fields["card"] as? [String: Any])
+        let description = try XCTUnwrap(cardSchema["description"] as? String)
+        let lines = description.split(separator: "\n")
+        let rooms = try XCTUnwrap(lines.first { $0.hasPrefix(Ctrip.rooms + " ") })
+        let fares = try XCTUnwrap(lines.first { $0.hasPrefix(Ctrip.fares + " ") })
+
+        let roomCard = try make(Ctrip.rooms, Ctrip.app, [
+            ["id": "king", "title": "King Room", "hotel": "Harbor Hotel", "dates": "Dec 2–4", "price": "¥700", "was": "¥850"],
+            ["id": "twin", "title": "Twin Room", "dates": "Dec 2–4", "price": "¥800", "was": "¥900"],
+        ])
+        let roomWords = rooms.split { !$0.isLetter && $0 != "_" }
+        for field in ["dates", "was"] {
+            XCTAssertNotNil(roomCard.items.first?.text(field))
+            XCTAssertTrue(roomWords.contains(Substring(field)), "The room instructions must carry \(field).")
+        }
+        let roomAction = try XCTUnwrap(String(rooms).components(separatedBy: " / ").last)
+        let selectedAction = roomCard.selected("twin").fill(roomAction)
+        XCTAssertTrue(selectedAction.contains("Twin Room") && selectedAction.contains("Dec 2–4"), selectedAction)
+
+        let fareCard = try make(Ctrip.fares, Ctrip.app, [
+            ["id": "economy", "title": "Economy", "price": "¥900", "refund": "No refund. Changes cost ¥200."],
+        ])
+        XCTAssertEqual(fareCard.items[0].text("refund"), "No refund. Changes cost ¥200.")
+        XCTAssertTrue(fares.contains("refund (refund and change rules)"), "Both fare rules belong in refund.")
+
+        let cardFields = try XCTUnwrap(cardSchema["properties"] as? [String: Any])
+        let items = try XCTUnwrap(cardFields["items"] as? [String: Any])
+        let item = try XCTUnwrap(items["items"] as? [String: Any])
+        let itemFields = try XCTUnwrap(item["properties"] as? [String: Any])
+        let image = try XCTUnwrap(itemFields["image"] as? [String: Any])
+        let imageDescription = try XCTUnwrap(image["description"] as? String)
+        let pictures = try XCTUnwrap(lines.first { $0.hasPrefix("For pictured items,") })
+        for guidance in [imageDescription, String(pictures)] {
+            XCTAssertTrue(guidance.contains("photo itself"), "Crop coordinates must describe the photo.")
+            XCTAssertTrue(guidance.contains("exclude") && guidance.contains("row"), "Keep the surrounding row out of the crop.")
+        }
     }
 
     func testImageBoxRequiresFourFiniteNumbersWithPositiveDimensions() throws {
@@ -140,5 +227,158 @@ final class ResultCardLookTests: XCTestCase {
         card.pictures = ["a": Data([0xFF, 0xD8, 0xFF])]
         let again = try JSONDecoder().decode(ResultCard.self, from: JSONEncoder().encode(card))
         XCTAssertEqual(again.pictures, card.pictures)
+    }
+
+    @MainActor
+    func testTrainCardLayoutSeparatesFareWrapsSeatsAndAlignsSelection() throws {
+        let singleSeat = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G531", "title": "G531", "date": "11月23日",
+            "from": "北京南", "to": "上海虹桥", "depart": "06:08", "arrive": "12:04",
+            "duration": "5小时56分", "price": "498元起",
+            "seats": [["name": "二等", "left": "有票"]],
+        ]])
+        let fiveSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G547", "title": "G547", "date": "11月23日",
+            "from": "北京南", "to": "上海虹桥", "depart": "06:18", "arrive": "12:11",
+            "duration": "5小时53分", "price": "553元起",
+            "seats": [
+                ["name": "二等", "left": "候补"],
+                ["name": "一等", "left": "有票"],
+                ["name": "优选一等", "left": "候补"],
+                ["name": "商务", "left": "11张"],
+                ["name": "无座", "left": "有票"],
+            ],
+        ]])
+        let narrowShortNoSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G3", "title": "G3", "date": "11月23日",
+            "from": "北京南", "to": "上海", "depart": "06:52", "arrive": "11:33",
+            "duration": "4小时41分", "price": "667元起",
+        ]])
+        let narrowLongNoSeats = try make(RailwayTrains.kind, "cn.12306.rails12306", [[
+            "id": "G2688", "title": "G2688", "date": "11月23日",
+            "from": "乌鲁木齐南站", "to": "北京首都国际机场", "depart": "08:40", "arrive": "16:55",
+            "duration": "12小时15分", "price": "¥1568起",
+        ]])
+
+        // 1. On iPhone 16 Pro card width (370pt), arrival time and fare have clear horizontal spacing,
+        //    and the selected row's blue left bar aligns with the card's 14pt horizontal inset.
+        let rendered = try renderCard(singleSeat, width: 370)
+        let (fareBox, arriveMaxX, accentMinX) = try inspectTrainCardPixels(rendered)
+        XCTAssertGreaterThanOrEqual(
+            Int(fareBox.minX) - arriveMaxX, 8,
+            "Arrival time and fare must be separated (arriveMaxX=\(arriveMaxX), fareMinX=\(Int(fareBox.minX)))"
+        )
+        XCTAssertGreaterThanOrEqual(
+            accentMinX, 12,
+            "Selected row left bar must align with the card's 14pt inner padding (accentMinX=\(accentMinX))"
+        )
+
+        // 2. On narrow iPhone card width (343pt), 5 seats wrap naturally onto multiple lines instead of
+        //    shrinking into a single line.
+        let oneSeatHeight = try cardHeight(singleSeat, width: 343)
+        let fiveSeatsHeight = try cardHeight(fiveSeats, width: 343)
+        XCTAssertGreaterThanOrEqual(
+            fiveSeatsHeight - oneSeatHeight, 10,
+            "Seats that do not fit on one line must wrap naturally (one=\(oneSeatHeight), five=\(fiveSeatsHeight))"
+        )
+
+        // 3. On narrow iPhone card width (343pt), long stations + 4-digit fare move the fare below the
+        //    journey line instead of colliding or truncating times.
+        let shortHeight = try cardHeight(narrowShortNoSeats, width: 343)
+        let longHeight = try cardHeight(narrowLongNoSeats, width: 343)
+        XCTAssertGreaterThanOrEqual(
+            longHeight - shortHeight, 14,
+            "Overflowing fare on narrow widths must drop to the second row (short=\(shortHeight), long=\(longHeight))"
+        )
+    }
+
+    func testTrainCardNormalizesMixedFareStrings() {
+        XCTAssertEqual(RailwayTrains.normalizedFare("498元起"), "498元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥1568起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("￥1,568 起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("1568起"), "1568元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥553", preferStartingSuffix: true), "553元起")
+        XCTAssertEqual(RailwayTrains.normalizedFare("¥553", preferStartingSuffix: false), "553元")
+        XCTAssertEqual(RailwayTrains.normalizedFare("待公布"), "待公布")
+    }
+
+    @MainActor
+    private func cardHeight(_ card: ResultCard, width: CGFloat) throws -> CGFloat {
+        let host = UIHostingController(rootView: ResultCardView(entry: UUID(), card: card, chosen: nil, actions: nil))
+        let size = host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+        return size.height
+    }
+
+    @MainActor
+    private func renderCard(_ card: ResultCard, width: CGFloat) throws -> CGImage {
+        let view = ResultCardView(entry: UUID(), card: card, chosen: nil, actions: nil)
+            .frame(width: width)
+            .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+        return try XCTUnwrap(renderer.cgImage, "ImageRenderer must produce a bitmap for ResultCardView")
+    }
+
+    private func inspectTrainCardPixels(_ cg: CGImage) throws -> (fareBox: CGRect, arriveMaxX: Int, accentMinX: Int) {
+        let w = cg.width
+        let h = cg.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = try XCTUnwrap(CGContext(
+            data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var fareMinX = w, fareMaxX = 0, fareMinY = h, fareMaxY = 0
+        for y in 0..<h {
+            for x in (w / 2)..<w {
+                let i = (y * w + x) * 4
+                let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                if r > 180, g > 60, b < 110, r - b > 90 {
+                    fareMinX = min(fareMinX, x)
+                    fareMaxX = max(fareMaxX, x)
+                    fareMinY = min(fareMinY, y)
+                    fareMaxY = max(fareMaxY, y)
+                }
+            }
+        }
+        guard fareMinX < fareMaxX, fareMinY <= fareMaxY else {
+            XCTFail("Expected orange fare pixels in rendered train card (\(w)x\(h))")
+            return (.zero, 0, 0)
+        }
+
+        var arriveMaxX = 0
+        let scanStartX = w / 2
+        if scanStartX < fareMinX {
+            for y in max(0, fareMinY - 4)...min(h - 1, fareMaxY + 4) {
+                for x in scanStartX..<fareMinX {
+                    let i = (y * w + x) * 4
+                    let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+                    if r < 140, g < 140, b < 140, abs(r - b) < 35 {
+                        arriveMaxX = max(arriveMaxX, x)
+                    }
+                }
+            }
+        }
+        XCTAssertGreaterThan(arriveMaxX, scanStartX, "Expected arrival time pixels left of the fare")
+
+        var accentMinX = w
+        let accentTop = max(0, fareMinY - 12)
+        let accentBottom = min(h - 1, fareMaxY + 36)
+        if accentTop <= accentBottom {
+            for y in accentTop...accentBottom {
+                for x in 0..<min(40, w) {
+                    let i = (y * w + x) * 4
+                    let r = Int(pixels[i]), b = Int(pixels[i + 2])
+                    if b > 170, r < 150, b - r > 50 {
+                        accentMinX = min(accentMinX, x)
+                    }
+                }
+            }
+        }
+        XCTAssertLessThan(accentMinX, 40, "Expected blue selection bar on the leading edge of the selected row")
+        let fareBox = CGRect(x: fareMinX, y: fareMinY, width: fareMaxX - fareMinX, height: fareMaxY - fareMinY)
+        return (fareBox, arriveMaxX, accentMinX)
     }
 }

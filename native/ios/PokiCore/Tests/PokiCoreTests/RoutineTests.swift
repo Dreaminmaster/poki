@@ -723,4 +723,54 @@ final class RoutineTests: XCTestCase {
         XCTAssertTrue(exported.contains("Mom is the contact Mama"))
         XCTAssertFalse(exported.contains("gate code"))
     }
+
+    func testLocalSavedSkillRunsRightAfterAuthorizationWithoutLook() async {
+        let store = RoutineStore(url: nil)
+        let now = Date()
+        let saved = Skill(
+            name: "Calc Multiply",
+            description: "Open Calculator and tap Equals",
+            app: "com.apple.calculator",
+            steps: [
+                SkillStep(action: ["launch": "com.apple.calculator"], target: nil, app: "nz.zheha.poki"),
+                SkillStep(action: ["tap": "@"], target: SkillTarget(type: "Button", label: "=", x: 300, y: 700), app: "com.apple.calculator"),
+            ],
+            params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0, lastStop: nil, lastMs: nil,
+            savedBy: "Poki", created: now, updated: now
+        )
+        XCTAssertTrue(store.save(saved))
+
+        let wda = FakeWDA()
+        let front = LockedBox("nz.zheha.poki")
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": .string(front.value), "name": front.value == "com.apple.calculator" ? "Calculator" : "Poki"]])
+        }
+        wda.set("POST /wda/apps/activate") { body in
+            front.value = body?["bundleId"]?.string ?? front.value
+            return (200, ["value": .null])
+        }
+        wda.set("GET /source") { _ in
+            if front.value == "com.apple.calculator" {
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Calculator", "rect": ["x": 0, "y": 0, "width": 390, "height": 844],
+                                        "children": [["type": "XCUIElementTypeButton", "label": "=", "rect": ["x": 280, "y": 680, "width": 40, "height": 40]]]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Poki", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": []]])
+        }
+        let (core, _, host) = makeCore(wda) {
+            $0.memory = store
+            $0.sensitive.enabled = false
+            $0.resolveInstalledApp = { $0 == "com.apple.calculator" ? $0 : nil }
+        }
+        host.state.value = .automationReady(revision: 1)
+
+        let ran = await core.callTool("do", arguments: #"{"actions":[{"run":"Calc Multiply"}]}"#, localTask: "task-1")
+        XCTAssertFalse(ran.isError, ran.text)
+        XCTAssertFalse(ran.text.contains("Automation is ready. Nothing was sent."), ran.text)
+        XCTAssertEqual(wda.bodies("POST /wda/apps/activate").compactMap { $0["bundleId"]?.string }, ["com.apple.calculator"])
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, ran.text)
+
+        let followUp = await core.callTool("do", arguments: #"{"actions":[{"tap":1}]}"#, localTask: "task-1")
+        XCTAssertFalse(followUp.isError, followUp.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 2, followUp.text)
+    }
 }

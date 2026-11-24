@@ -22,6 +22,19 @@ final class LoopbackMonitor {
     /// The interfaces the system path lists, for Diagnostics: a proxy app's tunnel can change what the path reports.
     private(set) var pathSummary = ""
     private(set) var checkedAt: Date?
+    /// Something answered at 10.7.0.1, and also on ports nothing on this iPhone listens on: a proxy
+    /// app (Karing, for one) accepts the connection itself instead of reflecting it to this iPhone, so
+    /// the connect proves nothing. Shown as no answer, with the proxy's setting to change.
+    private(set) var proxyAnswers = false
+    /// The probe epoch in which an answer was last shown to come from this iPhone.
+    private var provenEpoch: Int?
+    /// A proxy was found answering, and when: the extra ports are tried again only every
+    /// `proxyRecheck` seconds until Wi-Fi or cellular comes or goes, so neither the timer nor a
+    /// proxy's tunnel rebinding opens them every 3 s while the proxy keeps answering, and the page
+    /// still turns green soon after the owner fixes the proxy's setting.
+    private var proxyFound = false
+    private var proxyCheckedAt = Date.distantPast
+    var proxyRecheck: TimeInterval = 30
     /// When the loopback last stopped answering after it had worked; nil while it works.
     private(set) var droppedAt: Date?
     /// Called on every change of state, with the old and the new one.
@@ -39,9 +52,14 @@ final class LoopbackMonitor {
     private var probeEpoch = 0
     typealias Probe = (_ host: String, _ port: UInt16, _ timeout: TimeInterval) async -> ProbeResult
     private let connect: Probe
+    private let browsePorts: () async -> (ports: [UInt16], problem: String?)
 
-    init(probe: @escaping Probe = { host, port, timeout in await Poki.probe(label: "loopback", host: host, port: port, timeout: timeout) }) {
+    init(probe: @escaping Probe = { host, port, timeout in await Poki.probe(label: "loopback", host: host, port: port, timeout: timeout) },
+         browsePorts: @escaping () async -> (ports: [UInt16], problem: String?) = { await RemotePairingBrowser.ports() },
+         observeNetwork: Bool = true) {
         connect = probe
+        self.browsePorts = browsePorts
+        guard observeNetwork else { return }
         // The default path's interface types change while a proxy app's tunnel is up, so "only
         // cellular" is read from two monitors that each watch one physical interface type.
         path.pathUpdateHandler = { [weak self] path in
@@ -82,7 +100,7 @@ final class LoopbackMonitor {
     private func networkChanged(physical: Bool) {
         probeEpoch &+= 1
         onNetworkChange?()
-        if physical { resetPortSearch() }
+        if physical { resetPortSearch(); proxyFound = false }
         if !isWorking { publish(.checking, log: false) }
         check()
     }
@@ -136,16 +154,27 @@ final class LoopbackMonitor {
     /// The remote pairing port does not answer although 10.7.0.1 reaches this iPhone: looks the
     /// port up in Bonjour (three times at most, never on cellular alone; `lookDue`) and, when one
     /// answers, uses it from here on.
-    private func movedPairingPort(from port: UInt16) async -> ProbeResult? {
+    private func movedPairingPort(from port: UInt16, epoch: Int) async -> ProbeResult? {
         guard RemotePairingPort.lookDue(cellularOnly: cellularOnly, looks: portLooks, lastAt: portSearchedAt, now: Date()) else { return nil }
         portLooks += 1
         portSearchedAt = Date()
         RemotePairingPort.setSearching(true)
         var answer: ProbeResult?
-        let search = await RemotePairingPort.search(besides: port, browse: { await RemotePairingBrowser.ports() }) { candidate in
+        let search = await RemotePairingPort.search(besides: port, browse: browsePorts) { candidate in
+            guard epoch == self.probeEpoch else { return false }
             let result = await self.connect("10.7.0.1", candidate, 1.5)
+            guard epoch == self.probeEpoch else { return false }
             if result.outcome == "connected" { answer = result }
             return result.outcome == "connected"
+        }
+        guard epoch == probeEpoch else {
+            // A physical change may already have reset the budget; otherwise refund this
+            // incomplete lookup so an exhausted search can run again on the new path.
+            if portLooks > 0 {
+                portLooks -= 1
+                portSearchedAt = .distantPast
+            }
+            return nil
         }
         // The same finding every 10 s is said once.
         let said = search.said(besides: port)
@@ -187,38 +216,82 @@ final class LoopbackMonitor {
         checkQueued = false
         let epoch = probeEpoch
         Task {
+            defer {
+                running = false
+                if epoch != probeEpoch || checkQueued { check() }
+            }
             let port = RemotePairingPort.current
             var result = await connect("10.7.0.1", port, 1.5)
+            guard epoch == probeEpoch else { return }
             if result.outcome == "connected" {
                 if portLooks > 0 { resetPortSearch() }
             } else {
                 let lockdown = await connect("10.7.0.1", 62078, 1.5)
+                guard epoch == probeEpoch else { return }
                 // 10.7.0.1 reaches this iPhone (lockdown answers, or the phone refused the port), and
                 // the remote pairing service is not on the port Poki uses: iOS may have moved it.
                 // Without this the page says Working while every connection is refused.
                 if lockdown.outcome == "connected" || result.outcome == "refused" {
-                    result = await movedPairingPort(from: port) ?? lockdown
+                    result = await movedPairingPort(from: port, epoch: epoch) ?? lockdown
                 } else {
                     // 10.7.0.1 does not reach this iPhone at all: not a moved port.
                     endPortSearch()
                     result = lockdown
                 }
             }
-            running = false
-            // A network change makes this answer stale: ask again. A timer tick or resume() that came
-            // while the probe was in flight does not: the answer stands, and one more check follows it.
-            if epoch != probeEpoch {
-                check()
-                return
+            guard epoch == probeEpoch else { return }
+            // A connect alone is not an answer from this iPhone: a proxy that takes 10.7.0.1 for
+            // itself accepts any port. Once per network, ports nothing listens on must not connect.
+            var proxied = false
+            if result.outcome == "connected", Self.forced == nil, provenEpoch != epoch {
+                if proxyFound, Date().timeIntervalSince(proxyCheckedAt) < proxyRecheck {
+                    proxied = true
+                } else {
+                    let detected = await acceptsAnyPort()
+                    guard epoch == probeEpoch else { return }
+                    proxied = detected
+                    proxyCheckedAt = Date()
+                    proxyFound = proxied
+                    if !proxied { provenEpoch = epoch }
+                }
             }
-            let probed: State = result.outcome == "connected" ? .working(ms: result.milliseconds) : loopbackInterface() == nil ? .off : .noAnswer
+            guard epoch == probeEpoch else { return }
+            if result.outcome != "connected" { provenEpoch = nil; proxyFound = false }
+            if proxied != proxyAnswers {
+                AppLog.shared.add("loopback", proxied ? "10.7.0.1 accepts ports nothing listens on: a proxy answers, not this iPhone" : "10.7.0.1 refuses ports nothing listens on: this iPhone answers")
+            }
+            proxyAnswers = proxied
+            let probed: State = result.outcome == "connected" && !proxied ? .working(ms: result.milliseconds) : proxied || loopbackInterface() != nil ? .noAnswer : .off
             let next = Self.forcedCellular || Self.forced == "noanswer" ? State.noAnswer : Self.forced == "working" ? State.working(ms: 5) : probed
             // Only a change is published, so the screens are not redrawn every 3 s (a redraw while
             // the person drags a list makes scrolling stutter).
+            checkedAt = Date()
             publish(next, log: true)
-            if checkQueued { check() }
         }
     }
+
+    /// Two ports nothing on this iPhone listens on both connect: whatever answers is not this iPhone.
+    /// The iPhone itself refuses them (or, through a reflection, they time out). One that connects
+    /// may be a port the iPhone picked for a tunnel, so a second is asked before deciding.
+    private func acceptsAnyPort() async -> Bool {
+        for decoy in Self.decoyPair() {
+            let answer = await connect("10.7.0.1", decoy, 1.5)
+            if answer.outcome != "connected" { return false }
+        }
+        return true
+    }
+
+    /// Two different ports in the range iOS does not give its developer services: one port that
+    /// happens to listen, drawn twice, would read as a proxy.
+    nonisolated static func decoyPair() -> [UInt16] {
+        let first = UInt16.random(in: decoyPorts)
+        var second = UInt16.random(in: decoyPorts.lowerBound...(decoyPorts.upperBound - 1))
+        if second >= first { second += 1 }
+        return [first, second]
+    }
+    nonisolated static let decoyPorts: ClosedRange<UInt16> = 50000...59999
+
+    static var proxyHint: String { AppLocalization.text(LocalizedStringResource("Something answers at 10.7.0.1, but it is not this iPhone. A proxy app is taking the address for itself. In Karing, go to Settings, then TUN, and set Loopback Address to 10.7.0.1. In other proxy apps, turn on the loopback or reflect setting for 10.7.0.1.")) }
 
     private func publish(_ next: State, log: Bool) {
         guard !Self.same(next, state) else { return }
@@ -226,17 +299,22 @@ final class LoopbackMonitor {
         state = next
         if next != .checking { checkedAt = Date() }
         if case .working = old, !isWorking { droppedAt = Date() }
-        if isWorking { droppedAt = nil }
+        if isWorking { droppedAt = nil; proxyAnswers = false }
         if log { AppLog.shared.add("loopback", "developer service: \(next)") }
         onChange?(old, next)
     }
 
     #if DEBUG
+    func simulateNetworkChange(physical: Bool = true) { networkChanged(physical: physical) }
+    func simulateSearchBudget(_ looks: Int) { portLooks = looks; portSearchedAt = .distantPast }
+
     /// Tests: set the state as a probe result would, running the change hook.
     func simulate(_ next: State) {
         publish(next, log: false)
     }
     #endif
+
+    static var proxyTitle: String { AppLocalization.text(LocalizedStringResource("A proxy app answers instead of this iPhone")) }
 
     static var cellularHint: String { AppLocalization.text(LocalizedStringResource("This iPhone does not answer at 10.7.0.1 on cellular. With the developer disk image still mounted, new tasks start without the loopback. Renewing, updating and mounting the image need Wi-Fi.")) }
     /// Renewing, updating and the first mount of the disk image go through the loopback (ESP-448).
@@ -255,6 +333,7 @@ final class LoopbackMonitor {
         switch state {
         case .checking: AppLocalization.text(LocalizedStringResource("Looking for this iPhone at 10.7.0.1."))
         case .working(let ms): AppLocalization.text(LocalizedStringResource("This iPhone answers at 10.7.0.1 (\(ms) ms)."))
+        case .noAnswer where proxyAnswers: Self.proxyHint
         case .noAnswer where cellularOnly: Self.cellularHint
         case .noAnswer: AppLocalization.text(LocalizedStringResource("The local interface is present, but this iPhone does not answer at 10.7.0.1. Reconnect the local connection and check Wi-Fi. If it still does not answer, pair again in Setup › Pairing, then check Developer Mode."))
         case .off: AppLocalization.text(LocalizedStringResource("This iPhone does not answer yet. Enable Poki's local connection, or choose an external connection in Setup."))

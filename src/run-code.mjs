@@ -68,6 +68,7 @@ async function drive(ctx, code, input, maxCalls) {
   // returns the screen it produced and the script can decide from it. A batch skips that readback
   // because it reads the screen once at its end; a script has no end-of-run read to fall back on.
   let summary;
+  ctx.beginInputGroup?.();
   try {
     for (;;) {
       let event;
@@ -109,6 +110,7 @@ async function drive(ctx, code, input, maxCalls) {
   } finally {
     box.close();
     await worker.terminate();
+    await ctx.endInputGroup?.();
   }
   const reason = summary.stop_reason ?? (summary.script_error !== undefined ? 'error' : undefined);
   if (reason === undefined) return { content: [json(summary)] };

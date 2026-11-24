@@ -102,17 +102,19 @@ struct ModelSettingsSections: View {
 /// What a model account is and what it can power.
 enum ModelAccounts {
     static func isSetUp(_ provider: ModelProvider) -> Bool {
+        isSetUp(provider, storage: .live)
+    }
+
+    static func isSetUp(_ provider: ModelProvider, storage: PokiStorage) -> Bool {
         switch provider {
-        case .custom: !CustomProviders.all.isEmpty
-        case .chatgpt: ChatGPTAccount.signedIn
-        default: ModelKeys.hasKey(provider)
+        case .custom: !CustomProviders.all(in: storage).isEmpty
+        case .chatgpt: ChatGPTAccount.isSignedIn(storage: storage)
+        default: ModelKeys.hasKey(provider, storage: storage)
         }
     }
 
     static func canChat(_ provider: ModelProvider) -> Bool { provider.wired }
-    /// Live voice is a Realtime API: an OpenAI API key, or a custom provider whose service has one (a
-    /// ChatGPT sign-in can't open it).
-    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .openai || provider == .custom }
+    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .chatgpt || provider == .openai || provider == .custom }
 
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
@@ -186,6 +188,8 @@ private struct AccountDetail: View {
     var provider: ModelProvider
     @State private var editing = false
     @State private var signingIn = false
+    @State private var signOutFailed = false
+    @State private var signingOut = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
@@ -218,13 +222,26 @@ private struct AccountDetail: View {
 
             Section {
                 Button(provider.signsIn ? "Sign Out" : "Delete Provider", role: .destructive) {
-                    ModelKeys.remove(provider)
-                    if QuickFixes.accountModel(provider) != nil { QuickFixes.pickAccount(provider, model: nil) }
-                    if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
-                        ModelKeys.selectedProvider = other
+                    if provider.signsIn {
+                        signingOut = true
+                        Task {
+                            defer { signingOut = false }
+                            do {
+                                try await ChatGPTAccount.signOutIncludingVoice()
+                                accountRemoved()
+                            } catch {
+                                signOutFailed = true
+                            }
+                        }
+                        return
+                    } else if provider == .custom, let current = CustomProviders.current {
+                        CustomProviders.remove(current.id)
+                    } else {
+                        ModelKeys.remove(provider)
                     }
-                    dismiss()
+                    accountRemoved()
                 }
+                .disabled(signingOut)
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -236,6 +253,18 @@ private struct AccountDetail: View {
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { KeyEntry(provider: provider).outsideStartFlow() }
         .sheet(isPresented: $signingIn, onDismiss: { version = ModelKeys.saved }) { ChatGPTSignIn().outsideStartFlow() }
+        .alert("Could not sign out of ChatGPT. Try again.", isPresented: $signOutFailed) {
+            Button("OK", role: .cancel) {}
+        }
+    }
+
+    private func accountRemoved() {
+        if QuickFixes.accountModel(provider) != nil { QuickFixes.pickAccount(provider, model: nil) }
+        if ModelKeys.selectedProvider == provider,
+           let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
+            ModelKeys.selectedProvider = other
+        }
+        dismiss()
     }
 }
 
@@ -270,7 +299,7 @@ struct AddAccount: View {
                     }
                 } footer: {
                     Group {
-                        Text("Chat and decisions work with every provider. Voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like. Local is always there.")
+                        Text("Chat and decisions work with every provider. Voice needs ChatGPT, an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like. Local is always there.")
                     }
                     .settingsFooter()
                 }
@@ -307,6 +336,7 @@ struct KeyEntry: View {
     @State private var discovery = CustomModelDiscovery()
     @State private var failed = false
     @State private var testing = false
+    @State private var connectionTest: Task<Void, Never>?
     @State private var result: ConnectionCheck.Result?
     @State private var saved = false
 
@@ -399,7 +429,12 @@ struct KeyEntry: View {
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: url) { _, _ in discovery.reset() }
             .onChange(of: key) { _, _ in discovery.reset() }
-            .onDisappear { discovery.cancel() }
+            .onDisappear {
+                discovery.cancel()
+                connectionTest?.cancel()
+                connectionTest = nil
+                testing = false
+            }
             .sheet(isPresented: $discovery.presenting) {
                 CustomModelPicker(models: discovery.models, selection: $modelID)
             }
@@ -435,16 +470,22 @@ struct KeyEntry: View {
     }
 
     private func check(_ key: String, closeIfPassed: Bool) {
+        connectionTest?.cancel()
         testing = true
         result = nil
         let url = provider == .custom ? ModelCatalog.normalizedAddress(url) : url
         let modelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
+        connectionTest = Task {
+            defer { if !Task.isCancelled { connectionTest = nil } }
+            guard !Task.isCancelled else { return }
             let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
+            guard !Task.isCancelled else { return }
             result = outcome
             testing = false
             if closeIfPassed, outcome.passed {
-                try? await Task.sleep(for: .milliseconds(900))
+                do { try await Task.sleep(for: .milliseconds(900)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 dismiss()
             }
         }

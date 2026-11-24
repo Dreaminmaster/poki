@@ -13,10 +13,14 @@ struct CapsuleField: UIViewRepresentable {
     /// Whether the message is scrolled away from its first line, for a swipe down on the field: that
     /// swipe scrolls the message back, it does not put the keyboard away.
     var scroll: CapsuleScroll? = nil
+    /// Tracks caret offset and horizontal mention anchor without recreating the text view.
+    var editorBridge: CapsuleEditorBridge? = nil
     /// An upright swipe on the field itself, true for up. The text view's own drag wins over a SwiftUI
     /// gesture around it while it has the keyboard, so the field reads the swipe itself as well.
     var onSwipe: ((Bool) -> Void)? = nil
     /// Return: the keyboard's Send key, as on the current field.
+    var onMentionReady: ((Bool) -> Void)? = nil
+    var onMentionCaretX: ((CGFloat?) -> Void)? = nil
     var onSubmit: () -> Void
     /// What is being written at the caret that may name an app or a connector, for the list that
     /// follows the caret; and the way to put a picked name in.
@@ -56,12 +60,19 @@ struct CapsuleField: UIViewRepresentable {
         mentions?.view = view
         view.updateFont(for: UIContentSizeCategory(typeSize))
         view.accessibilityLabel = AppLocalization.text(LocalizedStringResource("Message Poki"))
-        // A write from outside (a recommendation, dictation, Send emptying the field): render it whole,
-        // caret at the end. Never while the keyboard is composing: an update that came with the binding
-        // a keystroke behind (the mention list appearing, say) rewrote the field and committed the
-        // pending Pinyin as Latin letters ("tai" became "ttaiai"). Outside writes do not happen mid-
-        // composition, and the binding catches up on the next change.
-        if view.markedTextRange == nil, view.plainText != text { view.setPlain(text) }
+        // A write from outside (a recommendation, dictation, app insertion, Send emptying the field):
+        // render it whole, keeping an explicit cursor target when provided. Never while the keyboard is
+        // composing: an update that came with the binding a keystroke behind (the mention list appearing,
+        // say) rewrote the field and committed the pending Pinyin as Latin letters ("tai" became
+        // "ttaiai"). Outside writes do not happen mid-composition, and the binding catches up on the
+        // next change.
+        if view.markedTextRange == nil, view.plainText != text {
+            if let target = editorBridge?.consumePendingCursor() {
+                view.setPlain(text, cursorUTF16: target)
+            } else {
+                view.setPlain(text)
+            }
+        }
         if focused, !view.isFirstResponder {
             DispatchQueue.main.async { view.becomeFirstResponder() }
         } else if !focused, view.isFirstResponder {
@@ -101,14 +112,41 @@ struct CapsuleField: UIViewRepresentable {
             view.reconcile()
             if parent.text != view.plainText { parent.text = view.plainText }
             parent.mentions?.update(view.mentionQuery())
+            mentionReadiness(view)
         }
 
         /// Also when SwiftUI writes the text (inside its own update), so the report waits a turn.
         func textViewDidChangeSelection(_ textView: UITextView) {
+            mentionReadiness(textView)
             guard let view = textView as? CapsuleTextView else { return }
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let view else { return }
                 self.parent.mentions?.update(view.mentionQuery())
+            }
+        }
+
+        private var lastMentionReady: Bool?
+        private var lastMentionCaretX: CGFloat?
+
+        private func mentionReadiness(_ view: UITextView) {
+            let selection = view.selectedRange
+            if let capsuleView = view as? CapsuleTextView {
+                parent.editorBridge?.plainCursorUTF16 = capsuleView.plainOffset(selection.location)
+            }
+            let ready = view.isFirstResponder && view.markedTextRange == nil &&
+                selection.length == 0 && selection.location == view.textStorage.length
+            let caretX: CGFloat? = if ready, let selected = view.selectedTextRange {
+                view.caretRect(for: selected.start).minX.rounded()
+            } else {
+                nil
+            }
+            if ready != lastMentionReady, parent.onMentionReady != nil {
+                lastMentionReady = ready
+                DispatchQueue.main.async { self.parent.onMentionReady?(ready) }
+            }
+            if caretX != lastMentionCaretX, parent.onMentionCaretX != nil {
+                lastMentionCaretX = caretX
+                DispatchQueue.main.async { self.parent.onMentionCaretX?(caretX) }
             }
         }
 
@@ -181,6 +219,22 @@ final class CapsuleScroll {
     var scrolledDown = false
 }
 
+/// Coordinates cursor-aware app capsule insertions with `CapsuleTextView`.
+final class CapsuleEditorBridge {
+    var plainCursorUTF16: Int?
+    private var pendingCursorUTF16: Int?
+
+    func scheduleCursor(_ utf16Offset: Int) {
+        pendingCursorUTF16 = utf16Offset
+        plainCursorUTF16 = utf16Offset
+    }
+
+    func consumePendingCursor() -> Int? {
+        defer { pendingCursorUTF16 = nil }
+        return pendingCursorUTF16
+    }
+}
+
 final class CapsuleTextView: UITextView {
     /// Allo Text at the body style, as the chat writes; the system font if it did not load.
     static func textFont(compatibleWith traits: UITraitCollection? = nil) -> UIFont {
@@ -249,10 +303,15 @@ final class CapsuleTextView: UITextView {
     /// The field's text with each capsule read back as the words it stands for.
     var plainText: String { Self.plain(textStorage, in: NSRange(location: 0, length: textStorage.length)) }
 
-    /// Replaces everything with `plain`, caret at the end.
-    func setPlain(_ plain: String) {
+    /// Replaces everything with `plain`, placing the caret at `cursorUTF16` (or the end when nil).
+    func setPlain(_ plain: String, cursorUTF16: Int? = nil) {
         textStorage.setAttributedString(render(CapsuleText.segments(plain)))
-        selectedRange = NSRange(location: textStorage.length, length: 0)
+        if let cursorUTF16 {
+            let clamped = max(0, min(cursorUTF16, plain.utf16.count))
+            selectedRange = NSRange(location: storageOffset(clamped), length: 0)
+        } else {
+            selectedRange = NSRange(location: textStorage.length, length: 0)
+        }
         typingAttributes = baseAttributes
     }
 
@@ -332,7 +391,7 @@ final class CapsuleTextView: UITextView {
     }
 
     /// Where a position in the field falls in the plain text.
-    private func plainOffset(_ location: Int) -> Int {
+    func plainOffset(_ location: Int) -> Int {
         Self.plain(textStorage, in: NSRange(location: 0, length: min(location, textStorage.length))).utf16.count
     }
 

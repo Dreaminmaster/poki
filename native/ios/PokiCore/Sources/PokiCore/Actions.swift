@@ -874,6 +874,7 @@ extension Computer {
         // cannot pass between them however slow the runner is (seen in the gym: row 250 of 300
         // scrolled past unread over seven calls whose reads all came late, then "not found").
         var all = lastAll, swipes = 0, last: String?, still = 0, waited = false
+        var lastSwipeAt: Double?, lastSeen: (elements: [Element], foreground: Foreground)?, lastSeenAt: Double?
         // After a swipe whose read shares nothing with the read before (the list moved more than a
         // screen), the next swipe is a short one back, so nothing is passed unread.
         var corrective = false, corrected = false, overshoots = 0
@@ -887,7 +888,13 @@ extension Computer {
         // An alert over the list takes the drags (gym: "the list stopped moving" under a permission
         // prompt): the answer names it.
         func alertNote() -> String { alertOnScreen().map { "; an alert is over the list (\($0)): answer it first" } ?? "" }
-        func found(_ e: Element) -> String { scrollFound = e; return "\(swipes) swipes, found at \(e.frame.described) (its number is in the list below)\(overshot())" }
+        func found(_ e: Element) -> String {
+            scrollFound = e
+            if swipes > 0, let inputAt = lastSwipeAt, let seen = lastSeen, let seenAt = lastSeenAt {
+                scrollObservation = ScrollTargetObservation(inputAt: inputAt, elements: seen.elements, foreground: seen.foreground, targetTreeAt: seenAt, target: e, swipes: swipes)
+            }
+            return "\(swipes) swipes, found at \(e.frame.described) (its number is in the list below)\(overshot())"
+        }
         func notYet(_ why: String) -> String { "\(swipes) swipes, \(wanted) not seen yet; \(why): call scroll_to again to go on from here\(overshot())\(alertNote())" }
         // A swipe sent while the runner is still serving the read after the last one would only
         // queue behind it and time out, and the whole scroll would come back unknown (seen in
@@ -905,9 +912,16 @@ extension Computer {
             if swipeUnread {
                 guard until - now() > 0.9 else { return notYet("the action's time ran out before the last swipe was read (\(Int(Self.scrollCap)) s); it is read first next time") }
                 guard await runnerFree(margin: 0.9) else { return notYet("the runner is still finishing the read after the last swipe") }
-                guard let seen = try? await runner.tree(timeout: Swift.max(0.3, Swift.min(config.readTimeout, until - now() - 0.5)), format: config.treeFormat) else {
+                let treeBudget = Swift.max(0.3, Swift.min(config.readTimeout, until - now() - 0.5))
+                if config.quickRead(), let inputAt = lastSwipeAt {
+                    prepareCapture(generation: actionGeneration, expectedApp: lastForeground?.bundleID, earliestAllowedAt: inputAt, timeout: treeBudget)
+                }
+                guard let seen = try? await runner.tree(timeout: treeBudget, format: config.treeFormat, appAfterSource: true) else {
+                    cancelPreparedCapture()
                     return notYet("the read after the last swipe did not come; nothing is swiped again until it has")
                 }
+                lastSeen = seen
+                lastSeenAt = now()
                 swipeUnread = false
                 if let what = swipeChangedTheScreen(from: all, to: seen.elements, in: region, now: seen.foreground) {
                     all = seen.elements
@@ -944,11 +958,13 @@ extension Computer {
             // or more (60 % took 6 calls and 64 s for 250 rows in the gym; 84 % left one row of
             // overlap, under the navigation bar, and the drag back fired on every call: 8 calls).
             let path = corrective ? try swipePath(region, ["up": "down", "down": "up", "left": "right", "right": "left"][fingerGoes] ?? "down", "short") : try swipePath(region, fingerGoes, "scroll")
+            cancelPreparedCapture()
             do {
                 try await scrollDrag(path, seconds: 0.4, rest: 0.25, until: until - 0.8)
             } catch let e as RunnerError where e.delivery == .unknown {
                 return notYet("the runner did not confirm the last swipe in time (\(e.message)), so it may still land")
             }
+            lastSwipeAt = now()
             swipes += 1
             corrected = corrective
             await sleep(seconds: 0.1)

@@ -233,11 +233,7 @@ struct BrowserTakeOverSheet: View {
             BrowserWebView(interactive: true)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if case .person(let reason?) = browser.owner, !reason.isEmpty {
-                        Label { Text("Poki asks: \(reason)") } icon: { Image(systemName: "hand.raised.fill") }
-                            .font(.allo(.footnote, .medium))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(.bar)
+                        BrowserInstructionBanner(reason: reason)
                     }
                 }
                 .navigationTitle(browser.host.isEmpty ? AppLocalization.text(LocalizedStringResource("Poki’s Browser")) : browser.host)
@@ -260,6 +256,89 @@ struct BrowserTakeOverSheet: View {
                 }
         }
         .presentationDetents([.medium, .large], selection: $detent)
+    }
+}
+
+private struct BrowserInstructionBanner: View {
+    var reason: String
+    @State private var copied = false
+    @State private var resetTask: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label {
+                    Text("Poki asks")
+                } icon: {
+                    Image(systemName: "hand.raised.fill")
+                }
+                .font(.allo(.caption, .semibold))
+                .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    UIPasteboard.general.string = reason
+                    copied = true
+                    resetTask?.cancel()
+                    resetTask = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { return }
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.allo(.caption, .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("browser.instruction.copy")
+            }
+            SelectableInstructionText(text: reason)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .onChange(of: reason) { _, _ in
+            resetTask?.cancel()
+            copied = false
+        }
+        .onDisappear { resetTask?.cancel() }
+    }
+}
+
+private struct SelectableInstructionText: UIViewRepresentable {
+    var text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.font = .preferredFont(forTextStyle: .footnote)
+        view.adjustsFontForContentSizeCategory = true
+        view.textColor = .label
+        view.dataDetectorTypes = []
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.accessibilityIdentifier = "browser.instruction.text"
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        if view.text != text { view.text = text }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? uiView.bounds.width
+        guard width > 0 else { return nil }
+        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let maxHeight: CGFloat = 140
+        let shouldScroll = fitted.height > maxHeight
+        if uiView.isScrollEnabled != shouldScroll { uiView.isScrollEnabled = shouldScroll }
+        return CGSize(width: width, height: min(ceil(fitted.height), maxHeight))
     }
 }
 

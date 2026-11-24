@@ -206,6 +206,7 @@ fn with_the_image_mounted_a_dropped_handshake_starts_the_local_session() {
     let events = launch_without_the_device(true, true, Loopback::DropsTheHandshake, settled);
     let running = events.iter().find(|v| v["state"] == "running").unwrap_or_else(|| panic!("no running state: {events:?}"));
     assert_eq!(running["code"], "local_ddi", "{running}");
+    assert_eq!(running["loopbackHandshakeDropped"], true, "{running}");
     assert!(running["detail"].as_str().unwrap_or_default().starts_with("remote pairing handshake failed"), "{running}");
     assert!(!events.iter().any(|v| v["state"] == "failed"), "{events:?}");
 }

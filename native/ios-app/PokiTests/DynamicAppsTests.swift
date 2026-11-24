@@ -20,6 +20,40 @@ final class DynamicAppsTests: XCTestCase {
         CapsuleText.segments(plain).compactMap { if case .app(let app, _) = $0 { app.id } else { nil } }
     }
 
+    func testConcurrentLookupsShareTheInFlightInventory() async {
+        let apps = InstalledApps()
+        apps.phone = { [:] }
+        let requested = expectation(description: "Inventory request started")
+        let lookupStarted = expectation(description: "Concurrent lookup started")
+        let answer = Data(#"{"v":{"apps":[{"id":"com.example.first","name":"First"}]}}"#.utf8)
+        let competing = Data(#"{"v":{"apps":[{"id":"com.example.second","name":"Second"}]}}"#.utf8)
+        var response: CheckedContinuation<Data, Never>?
+        var requests = 0
+        apps.call = { _ in
+            requests += 1
+            if requests > 1 { return competing }
+            return await withCheckedContinuation {
+                response = $0
+                requested.fulfill()
+            }
+        }
+
+        let refresh = Task { await apps.list() }
+        await fulfillment(of: [requested], timeout: 2)
+        let lookup = Task {
+            lookupStarted.fulfill()
+            return await apps.list()
+        }
+        await fulfillment(of: [lookupStarted], timeout: 2)
+        response?.resume(returning: answer)
+
+        let first = await refresh.value
+        let second = await lookup.value
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(first?.apps.map(\.id), ["com.example.first"])
+        XCTAssertEqual(second, first)
+    }
+
     func testAnInstalledAppsNameGivesItsBundleIDAndBack() {
         XCTAssertNil(AppIconStore.bundleID("Strava"))
         DynamicApps.set([strava, chagee])
@@ -181,5 +215,28 @@ final class DynamicAppsTests: XCTestCase {
         _ = InstalledApps()
         XCTAssertNil(AppIconStore.bundleID("Strava"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testInstalledLaunchIDResolvesDynamicAppsWithoutApplicationProxy() async throws {
+        let answer = Data(#"{"v":{"apps":[{"id":"com.apple.calculator","name":"计算器","type":"System"},{"id":"cn.12306.rails12306","name":"铁路12306","type":"User"},{"id":"com.strava.stravaride","name":"Strava","type":"User"}]}}"#.utf8)
+        let apps = InstalledApps()
+        apps.phone = { ["device_address": "10.7.0.1"] }
+        apps.call = { _ in answer }
+        defer { try? FileManager.default.removeItem(at: InstalledApps.cacheFile) }
+        _ = await apps.list()
+
+        XCTAssertEqual(KnownApps.installedLaunchID("com.apple.calculator"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("cn.12306.rails12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("计算器"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("铁路12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("Strava"), "com.strava.stravaride")
+        XCTAssertNil(KnownApps.installedLaunchID("tutti.ch"))
+        XCTAssertNil(KnownApps.installedLaunchID("com.example.notinstalled"))
+
+        // Reloading only the disk cache (without a live phone refresh) must not bypass launch preflight.
+        DynamicApps.set([])
+        _ = InstalledApps()
+        XCTAssertNil(KnownApps.installedLaunchID("com.apple.calculator"))
+        XCTAssertNil(KnownApps.installedLaunchID("Strava"))
     }
 }

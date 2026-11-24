@@ -15,7 +15,7 @@ Install Poki on my iPhone from https://github.com/JosssphZhou/poki
 <!-- badges:start -->
 <p align="center">
   <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.6_Beta-blue" alt="Poki App 0.4.6 Beta"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.5.0_Beta-blue" alt="Poki App 0.5.0 Beta"></a>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
@@ -60,7 +60,7 @@ Poki는 사용자를 대신해 iPhone 전체를 조작하는 오픈소스 iPhone
    Install Poki on my iPhone from https://github.com/JosssphZhou/poki
    ```
 
-   또는 [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8)에서 macOS용(`.dmg`) 또는 Windows용(`.exe`) Poki Setup을 내려받아 안내를 따르세요.
+   또는 [GitHub Releases](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.9)에서 macOS용(`.dmg`) 또는 Windows용(`.exe`) Poki Setup을 내려받아 안내를 따르세요.
 2. **연결과 모델 계정을 설정합니다.** iOS 안내에 따라 신뢰, 개발자 모드, 자동화 모드를 켜고 `10.7.0.1`을 iPhone으로 라우팅하는 외부 연결(예: 무료 LocalDevVPN)을 설정합니다. 이어서 ChatGPT Plus/Pro로 로그인하거나 Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go API 키 또는 OpenAI 호환 서버를 등록하세요.
 3. **첫 작업을 실행합니다.** Poki를 열고 다음 메시지를 보냅니다.
 
