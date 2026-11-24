@@ -248,16 +248,10 @@ struct CustomProviderEditor: View {
             }
             .navigationTitle(Text(verbatim: id == nil ? ModelProvider.custom.name : draft.displayName))
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: draft.endpoints.first?.url) { _, _ in discovery.reset() }
-            .onChange(of: key) { _, _ in discovery.reset() }
             .onDisappear {
-                discovery.cancel()
                 connectionTest?.cancel()
                 connectionTest = nil
                 testing = false
-            }
-            .sheet(isPresented: $discovery.presenting) {
-                CustomModelPicker(models: discovery.models, selection: $draft.model)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }

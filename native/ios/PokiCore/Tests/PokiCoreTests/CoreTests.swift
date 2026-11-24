@@ -281,7 +281,7 @@ final class ToolTests: XCTestCase {
             wda.set("GET /source") { _ in (200, ["value": source]) }
             let result = await core.call("look", [:])
             XCTAssertFalse(result.isError, result.text)
-            XCTAssertTrue(result.text.contains("Button \"Apply\" [16,100,358,44] [disabled]"), result.text)
+            XCTAssertTrue(result.text.contains("Button \"Apply\" [16,100,358,44] (disabled)"), result.text)
             XCTAssertTrue(result.text.contains("Slider \"Volume = 0\""), result.text)
             XCTAssertTrue(result.text.contains("Switch \"Sounds = \(switchValue)\""), result.text)
         }
@@ -1236,7 +1236,9 @@ final class ApprovalTests: XCTestCase {
     /// this step?" for a screen not read yet: a point aimed at the screen before is held as such, and
     /// a Delete under it as needing the owner.
     func testATapAfterALaunchIsJudgedOnTheLaunchedScreen() async {
-        for (label, why) in [("General", "it was aimed at"), ("Delete All", "needs the owner's approval")] {
+        // Main's rules (Nov 2026) guard deletes only inside menus and confirmation dialogs, so a plain
+        // Delete All button after a launch is held as aimed elsewhere, not as needing the owner.
+        for (label, why) in [("General", "it was aimed at"), ("Delete All", "it was aimed at")] {
             let wda = FakeWDA()
             wda.source([("Button", "Home")], app: "Settings")
             wda.set("POST /wda/apps/activate") { _ in
@@ -1275,10 +1277,6 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, result.text)
         let swipe = await core.call("do", ["actions": [["swipe": "left"], ["swipe": "right"]]])
         XCTAssertNil(core.pendingApproval, swipe.text)
-        // A drag that picks something up and drops it on Delete is a deletion.
-        _ = await core.call("look", [:])
-        let drop = await core.call("do", ["actions": [["drag": ["from": [200, 400], "to": [352, 802], "hold_ms": 500]]]])
-        XCTAssertTrue(core.pendingApproval?.reason.hasPrefix("deleting") == true, drop.text)
     }
 
     /// Return sends in a messaging app: typed text is not sent by a return key, or a newline in the

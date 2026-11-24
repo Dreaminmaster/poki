@@ -44,10 +44,11 @@ final class CellularTrick {
         // and a new one only after a read failed.
         Task {
             do {
-                let answer = try await HistoryBridge.call(request) { [weak self] data in
+                let answer = try await HistoryBridge.call(request) { [weak self] read in
+                    let line = read.line
                     Task { @MainActor [weak self] in
                         // A line about the tunnel (opened, lost, a check answered) is not a read.
-                        guard let self, self.run == me, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], line["event"] == nil else { return }
+                        guard let self, self.run == me, line["event"] == nil else { return }
                         self.lastRead = (line["ok"] as? Bool == true, Date(), line["error"] as? String ?? "")
                     }
                 }
