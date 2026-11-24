@@ -18,13 +18,132 @@ enum Harness {
         return text
     }()
 
+    enum ReplyExamplesLanguage: Equatable, Sendable {
+        case english, chinese, both
+    }
+
+    private static let automaticUnlockPromptClause = "Call the phone tool for the owner's task even if the iPhone may be locked. Poki checks the owner's Automatic Unlock setting on the phone. If the tool still reports screen: locked, ask the owner to unlock the iPhone and look again once unlocked."
+    private static let manualUnlockPromptClause = "When look reports screen: locked, ask the owner to unlock the iPhone and call look again once unlocked."
+
+    private static let replyExamplesHeader = "\n\n## Reply examples\n\n"
+    private static let chineseExamplesHeader = "\n\n### 简体中文\n\n"
+
+    private static let urlPattern = try! NSRegularExpression(pattern: #"https?://\S+"#, options: [.caseInsensitive])
+    private static let languageCuePattern = try! NSRegularExpression(
+        pattern: #"\b(chinese|mandarin|cantonese|english|japanese|korean|spanish|french|german|italian|portuguese|russian|arabic|hindi|thai|vietnamese|indonesian|malay|dutch|turkish|polish|swedish|greek|hebrew|ukrainian|bilingual)\b|\b(reply|answer|respond|write|speak|say|translate)\s+in\b|中文|汉语|漢語|普通话|普通話|粤语|粵語|国语|國語|英文|英语|英語|日文|日语|日語|韩文|韩语|韓文|韓語|法文|法语|法語|德文|德语|德語|西语|西班牙语|西班牙語|俄文|俄语|俄語|意语|意大利语|意大利語|葡语|葡萄牙语|葡萄牙語|阿拉伯语|阿拉伯語|泰语|泰語|双语|雙語|(?:用|以).{0,4}(?:语|語|文)(?:回复|回覆|回答|说|說|写|寫)"#,
+        options: [.caseInsensitive]
+    )
+    private static let englishClauseWords: Set<String> = [
+        "the", "and", "or", "to", "in", "on", "for", "of", "with", "is", "are",
+        "please", "open", "check", "reply", "tell", "show", "find", "send", "scroll", "read",
+    ]
+    private static let hanPattern = try! NSRegularExpression(pattern: #"\p{Script=Han}"#)
+    private static let latinWordPattern = try! NSRegularExpression(pattern: #"[A-Za-z]+"#)
+    private static let screenshotIDLinePattern = try! NSRegularExpression(pattern: #"^screenshot_id: [0-9A-Fa-f-]+$"#)
+
+    nonisolated static func replyExamplesLanguage(for task: String) -> ReplyExamplesLanguage {
+        let fullRange = NSRange(task.startIndex..., in: task)
+        let stripped = urlPattern.stringByReplacingMatches(in: task, range: fullRange, withTemplate: " ")
+        let range = NSRange(stripped.startIndex..., in: stripped)
+        if languageCuePattern.firstMatch(in: stripped, range: range) != nil {
+            return .both
+        }
+        var hanCount = 0
+        for scalar in stripped.unicodeScalars where !scalar.isASCII && scalar.properties.isAlphabetic {
+            let s = String(scalar)
+            if hanPattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil {
+                hanCount += 1
+            } else {
+                return .both
+            }
+        }
+        let latinWords = latinWordPattern.matches(in: stripped, range: range).compactMap { match -> String? in
+            Range(match.range, in: stripped).map { String(stripped[$0]).lowercased() }
+        }
+        if hanCount == 0 {
+            return latinWords.isEmpty ? .both : .english
+        }
+        if latinWords.isEmpty {
+            return .chinese
+        }
+        if hanCount >= 4,
+           latinWords.count <= 2,
+           hanCount >= latinWords.count * 2,
+           !latinWords.contains(where: { englishClauseWords.contains($0) }) {
+            return .chinese
+        }
+        return .both
+    }
+
+    nonisolated static func systemPrompt(for task: String,
+                                         includeAutomaticUnlock: Bool = AppModel.automaticUnlockAvailable) -> String {
+        var text = system
+        if !includeAutomaticUnlock {
+            text = text.replacingOccurrences(of: automaticUnlockPromptClause, with: manualUnlockPromptClause)
+        }
+        let language = replyExamplesLanguage(for: task)
+        guard language != .both,
+              let examplesRange = text.range(of: replyExamplesHeader),
+              let chineseRange = text.range(of: chineseExamplesHeader, range: examplesRange.upperBound..<text.endIndex) else {
+            return text
+        }
+        let prefix = text[..<examplesRange.upperBound]
+        switch language {
+        case .english:
+            return String(text[..<chineseRange.lowerBound])
+        case .chinese:
+            let chineseBody = text[chineseRange.upperBound...]
+            return String(prefix) + "### 简体中文\n\n" + String(chineseBody)
+        case .both:
+            return text
+        }
+    }
+
+    nonisolated static func strippingScreenshotID(from answer: PokiCore.ToolAnswer) -> PokiCore.ToolAnswer {
+        guard answer.text.contains("screenshot_id: ") else { return answer }
+        let lines = answer.text.split(separator: "\n", omittingEmptySubsequences: false)
+        var removed = false
+        let kept = lines.filter { line in
+            let s = String(line)
+            let range = NSRange(s.startIndex..., in: s)
+            if screenshotIDLinePattern.firstMatch(in: s, range: range) != nil {
+                removed = true
+                return false
+            }
+            return true
+        }
+        guard removed else { return answer }
+        return PokiCore.ToolAnswer(
+            text: kept.joined(separator: "\n"),
+            jpeg: answer.jpeg,
+            isError: answer.isError,
+            splitView: answer.splitView,
+            splitViewNeedsRead: answer.splitViewNeedsRead,
+            screen: answer.screen,
+            waitingForOwner: answer.waitingForOwner,
+            automationAuthorizationDeclined: answer.automationAuthorizationDeclined,
+            numberedScreen: answer.numberedScreen,
+            offeredMemories: answer.offeredMemories,
+            readApp: answer.readApp
+        )
+    }
+
+    private static let externalFinishInstruction = " When the owner's task is done, put finish: true on the last do (its actions may be empty): the phone then goes back to the app the owner asked from, where they read your reply."
+    private static let externalFinishToolClause = " finish: true on the do that completes the owner's task (actions may be empty): after the actions and the read, the phone goes back to the app the task began in, where the owner asked, so they see your reply there; leave it off while more steps follow."
+    private static let externalFinishAppReleaseClause = " or finish"
+
+    nonisolated static func chatToolInstructions(includeScreenHistory: Bool) -> String {
+        PokiCore.toolInstructions(includeScreenHistory: includeScreenHistory)
+            .replacingOccurrences(of: externalFinishInstruction, with: "")
+    }
+
     static var instructions: String {
         // Screen History reaches Poki's chat through personal_context only (SensesContext): a model on
         // this iPhone answers and checks the answer first. The raw screen_history query, which hands
         // screen text straight to the model, stays for outside agents only.
         // Who Poki is comes first, then the phone's tool rules, then the browser's (#479). The
         // Senses merge (6600edd8) had put the tool rules ahead of the identity.
-        [system, countedScrollInstructions, PokiCore.toolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
+        [system, chatToolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -42,29 +161,141 @@ enum Harness {
         """
     }
 
-    private static let countedScrollInstructions = """
-    For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools. Use count_messages only for requests measured in individual messages.
+    private static let screenScrollInstruction = "For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools."
+
+    private static let countedScrollCoreInstructions = """
+    Use count_messages only for requests measured in individual messages.
     For a request to scroll back an exact number of messages, open the conversation and take a full read before scrolling. Call count_messages with the requested target and one current ref per distinct message bubble, oldest to newest. Use the screenshot to exclude headers, dates, controls, and duplicate labels or OCR lines in the same bubble. Include every distinguishable message in view, including any overlapping messages. Do not skip a message you cannot identify.
     Send one vertical drag at a time with full=true, using two explicit screen points with the same x coordinate. Poki bounds the distance and slows the drag before lifting. After each drag, call count_messages with the same target and the new screen's refs. Keep at least one third of the previous messages in view, including at least three consecutive messages, using the same kind of ref for each overlapping bubble. Shorten the drag near the target or the end of the list. If count_messages asks you to reverse the last drag, reverse it and check the resulting page before trying the shorter forward drag. If that cannot be verified, stop. Use the confirmed total from count_messages. Call finish_task with success=true only after it confirms the target on screen. If you cannot continue, call finish_task with success=false and give the specific reason. Poki reports the confirmed count and last verified message.
-    If you need clarification at any point during a counted scroll in the owner's chat, call wait_for_counted_scroll_reply with your question. That pauses the task. When the owner replies, take a fresh read and recheck the messages before scrolling again.
     """
 
+    private static let countedScrollReplyInstruction = "If you need clarification at any point during a counted scroll in the owner's chat, call wait_for_counted_scroll_reply with your question. That pauses the task. When the owner replies, take a fresh read and recheck the messages before scrolling again."
+
+    private static func countedScrollSection(includeReply: Bool) -> String {
+        includeReply ? countedScrollCoreInstructions + "\n" + countedScrollReplyInstruction : countedScrollCoreInstructions
+    }
+
+    /// Apps with dedicated result card layouts (`ResultCardLooks`).
+    enum DedicatedCardApp: CaseIterable, Hashable, Sendable {
+        case railway12306, ctrip, taobao, dianping, uberEats
+
+        static func matching(bundleID: String) -> DedicatedCardApp? {
+            switch bundleID.lowercased() {
+            case "cn.12306.rails12306": .railway12306
+            case "ctrip.com": .ctrip
+            case "com.taobao.taobao4iphone": .taobao
+            case "com.dianping.dpscope": .dianping
+            case "com.ubercab.ubereats": .uberEats
+            default: nil
+            }
+        }
+    }
+
+    /// Which result card schemas `finish_task` exposes for a task.
+    enum ResultCardMode: Equatable, Hashable, Sendable {
+        /// Omit `finish_task.card` completely (delegated tasks, system utility apps, explicit-URL web tasks).
+        case none
+        /// Expose generic `list` plus the dedicated layouts for `apps`.
+        case scoped(Set<DedicatedCardApp>)
+
+        static let all = ResultCardMode.scoped(Set(DedicatedCardApp.allCases))
+        static let genericList = ResultCardMode.scoped([])
+
+        /// Monotonically widens the mode when a task launches or reads an app during execution.
+        /// Never shrinks mid-task so the provider's prompt-cache prefix stays stable.
+        func including(app bundleID: String) -> ResultCardMode {
+            let normalized = bundleID.lowercased()
+            if normalized.isEmpty || normalized == "com.apple.springboard" || Harness.nonCardAppBundleIDs.contains(normalized) {
+                return self
+            }
+            if let dedicated = DedicatedCardApp.matching(bundleID: normalized) {
+                switch self {
+                case .none: return .scoped([dedicated])
+                case .scoped(var apps):
+                    apps.insert(dedicated)
+                    return .scoped(apps)
+                }
+            }
+            switch self {
+            case .none: return .genericList
+            case .scoped: return self
+            }
+        }
+    }
+
+    /// System utility apps that never produce selectable catalog result cards.
+    static let nonCardAppBundleIDs: Set<String> = [
+        "com.apple.preferences",
+        "com.apple.mobileslideshow",
+        "com.apple.camera",
+        "com.apple.mobiletimer",
+        "com.apple.calculator",
+        "com.apple.weather",
+        "com.apple.mobilephone",
+        "com.apple.mobilesms",
+        "com.apple.facetime",
+        "com.apple.mobileaddressbook",
+        "com.apple.health",
+        "com.apple.fitness",
+        "com.apple.home",
+        "com.apple.voicememos",
+        "com.apple.translate",
+        "com.apple.findmy",
+        "com.apple.passwords",
+        "com.apple.shortcuts",
+        "com.apple.passbook",
+    ]
+
+    /// Chooses the initial result-card schema scope for a task without natural-language intent guessing.
+    /// Delegated tasks never render cards; tasks explicitly naming only system utility apps or an explicit
+    /// http(s) URL without a phone app omit `card` until a card-capable app is observed. Tasks naming a
+    /// card-capable app scope `card` to that app's dedicated kinds plus generic `list`; open-ended tasks
+    /// with no named app keep all card kinds.
+    static func resultCardMode(for task: String, rendersCards: Bool) -> ResultCardMode {
+        guard rendersCards else { return .none }
+        var namedApps: [String] = []
+        for segment in CapsuleText.segments(task) {
+            if case .app(let capsule, _) = segment {
+                let id = capsule.id.lowercased()
+                if !namedApps.contains(id) { namedApps.append(id) }
+            }
+        }
+        if !namedApps.isEmpty {
+            if namedApps.allSatisfy({ nonCardAppBundleIDs.contains($0) }) { return .none }
+            return .scoped(Set(namedApps.compactMap(DedicatedCardApp.matching(bundleID:))))
+        }
+        if task.range(of: #"https?://\S+"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return .none
+        }
+        return .all
+    }
+
     /// The instructions for a task: the above, then the saved notes and the skills that fit it.
-    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false) -> (text: String, notes: [MemoryNote]) {
+    @MainActor static func taskInstructions(for task: String, inSplitView: Bool = false,
+                                            includeMemoryAttribution: Bool? = nil,
+                                            includeCountedScroll: Bool? = nil,
+                                            includeCountedScrollReply: Bool? = nil,
+                                            includeAutomaticUnlock: Bool = AppModel.automaticUnlockAvailable) -> (text: String, notes: [MemoryNote]) {
+        let countedScroll = includeCountedScroll ?? (MessageScrollTarget.parse(task)?.messageCount != nil)
+        let countedScrollReply = includeCountedScrollReply ?? countedScroll
         if inSplitView {
-            var parts = [splitViewInstructions, countedScrollInstructions]
+            var parts = [splitViewInstructions, screenScrollInstruction]
+            if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
             if SensesContext.offered { parts.append(SensesContext.brief) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return (parts.joined(separator: "\n\n"), [])
         }
         let namedBundleIDs = AppIconStore.bundleIDs(namedIn: task)
         let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
-        var parts = [instructions]
+        var parts = [systemPrompt(for: task, includeAutomaticUnlock: includeAutomaticUnlock), screenScrollInstruction]
+        if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
+        parts.append(chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed))
+        parts.append(WebTools.instructions)
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
         // Poki is in front when a task starts, and finish_task brings Poki back when the task ends,
         // so saving a new skill happens in the same reply as finish_task.
-        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the phone either, go home ({button: \"home\"}), swipe down on the Home Screen to search, type the app's name and tap it. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
+        parts.append("Start an app task with do {run: name} when a skill below fits, else do {launch: bundle id}, sending report_plan with that first action and updating currentStep as you progress. When an app's bundle id is not listed below, or a launch answers that no app with that bundle id is installed, call find_app {name} before anything else and launch the id it gives; never launch an id from memory. Say an app is not installed only after find_app says so, and then give the owner the App Store link it found. When find_app says more than one app could be the one, ask the owner which instead of picking. If find_app cannot read the installed apps, send do {button: \"home\"} by itself. Use the returned screen to swipe down on the Home Screen to search, then type the app's name and tap the matching result. Recommend an app the owner does not have only when the task really needs one that no installed app and the built-in browser (web tools) can do: find it with find_app {purpose}, name it, and give its App Store link; never install apps. When you already know the taps a part of the task takes, send them as one do {path: {goal, steps}} with each target named by the text it shows, in place of one call per tap. In a path, put expect: \"text\" on a step whose result you can name, dismiss: [...] for prompts that may be closed on the way, and read: [\"label\"] when the task is to read a value, so the whole task is one call. After a new app task succeeds, call finish_task together with skills {action: \"save\", name, description} named as the owner would ask for it.")
         if AutomationPath.current == .inProcess, let placement = PKInProcess.shared().duoPlacement() {
             if placement == "fullscreen" {
                 parts.append("Poki is full screen on Duo. Use the normal app task flow without selecting a pane.")
@@ -72,7 +303,7 @@ enum Harness {
                 parts.append("Poki is in Duo Split View and the task's side is not confirmed yet. Start with look without a pane argument. Wait for the read to confirm the task's app and pane before sending input. Ask the owner for help if the side stays unconfirmed.")
             } else {
                 let target = placement == "left" ? "right" : "left"
-                parts.append("Poki starts in the \(placement) pane of Duo Split View. This task uses the app in the \(target) pane, even when the owner replaces Poki with another app. Use look with no pane argument for that app, or do {launch: bundle id} to confirm it is already there. If the intended app is missing, ask the owner to open it in the \(target) pane and retry the task. Do not go Home, start a fresh launch, or drag across panes.")
+                parts.append("Poki starts in the \(placement) pane of Duo Split View. Use do {launch: bundle id} to open the requested app. Use look without a pane argument to confirm the app is in the \(target) pane before interacting. If you cannot confirm the app, ask the owner to open it in that pane. The task stays in the \(target) pane even when the owner replaces Poki with another app. Do not go Home, use a fresh launch, or drag across panes.")
             }
         }
         // A model decides approvals from what the owner said. A refused step goes through once the
@@ -81,8 +312,10 @@ enum Harness {
             parts.append(replyApprovals)
         }
         parts.append(recipients)
-        parts.append("When a saved memory changes an action in do, put used_memory_ids on the individual object inside actions, for example {actions: [{launch: \"com.apple.Preferences\", used_memory_ids: [\"ID\"]}]}. For a path, set used_memory_ids on the exact object in path.steps that uses the memory. For a saved skill, use skills show to see its numbered steps; add step_memory_ids inside run, keyed by the 1-based step number, for example {run: {name: \"Search Settings\", with: {text_1: \"Wi-Fi\"}, step_memory_ids: {\"2\": [\"ID\"]}}}. Leave used_memory_ids off the outer path or run action. For web_open, web_click or web_type, put used_memory_ids on the tool call. Report IDs only on the actions that used them.")
-        parts.append("A skill or memory you ask to save is kept only after the task ends with finish_task success=true. Set optional=true on automatic saves the owner did not request. When saving is part of the owner's task, omit optional. Call finish_task even when the task was only to remember something. Leave failed or interrupted attempts out of memory.")
+        if includeMemoryAttribution ?? !SkillStore.shared.notes.isEmpty {
+            parts.append("When a saved memory changes an action in do, add used_memory_ids: [\"ID\"] on that item in actions or path.steps (not outer path/run), or on web_open/web_click/web_type. For a saved skill, check numbered steps via skills show and set run.step_memory_ids (1-based, e.g. {\"2\":[\"ID\"]}). Report only IDs that drove the action.")
+        }
+        parts.append("A skill or memory you ask to save is kept only after finish_task(success=true); call finish_task even for remember-only tasks and skip failed/interrupted attempts. Set optional=true only on unrequested automatic saves; omit it when requested.")
         if SensesContext.offered { parts.append(SensesContext.brief) }
         // The usual app for what this asks, learned from Screen History, when the owner named none.
         if let usual = SensesMemories.shared.usualAppLine(for: task) { parts.append(usual) }
@@ -130,16 +363,26 @@ enum Harness {
 
     /// A Pi loop holds executable implementations, even for tools currently withheld.
     /// The current permission determines which ones are declared for each request.
-    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool) -> [ToolSpec] {
+    static func toolSpecs(inSplitView: Bool, includeScreenHistory: Bool,
+                          includeMemoryAttribution: Bool = true,
+                          includeCountedScroll: Bool = true,
+                          includeCountedScrollReply: Bool = true,
+                          resultCardMode: ResultCardMode = .all) -> [ToolSpec] {
+        let taskTools = Self.taskTools(includeCountedScroll: includeCountedScroll,
+                                       includeCountedScrollReply: includeCountedScrollReply,
+                                       resultCardMode: resultCardMode)
         if !inSplitView {
-            return catalogTools(includeScreenHistory: false) + [findApp] + WebTools.specs.map(withActionMemoryIDs) + [SensesContext.spec] + taskTools
+            let webTools = includeMemoryAttribution ? WebTools.specs.map(withActionMemoryIDs) : WebTools.specs
+            let extra = resultCardMode == .none ? [findApp] : [findApp, getScreenshot]
+            // Screen History reaches Poki's chat through personal_context only (SensesContext).
+            return catalogTools(includeScreenHistory: false, includeMemoryAttribution: includeMemoryAttribution) + extra + webTools + [SensesContext.spec] + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: false).filter { $0.name == "status" } + [SensesContext.spec] + taskTools
+        ] + catalogTools(includeScreenHistory: false, includeMemoryAttribution: includeMemoryAttribution).filter { $0.name == "status" } + [SensesContext.spec] + taskTools
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
@@ -151,8 +394,8 @@ enum Harness {
     }
 
     /// PokiCore's catalog: look, do and status.
-    static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false)
-    static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
+    static let phoneTools: [ToolSpec] = catalogTools(includeScreenHistory: false, includeMemoryAttribution: true)
+    nonisolated static let memoryUsingActions: Set<String> = ["do", "web_open", "web_click", "web_type"]
 
     private static func withActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
         guard memoryUsingActions.contains(tool.name), var properties = tool.schema["properties"] as? [String: Any] else { return tool }
@@ -160,27 +403,66 @@ enum Harness {
         properties["used_memory_ids"] = [
             "type": "array", "items": string, "maxItems": 20,
             "description": tool.name == "do"
-                ? "For a single action except path and run. Put memory IDs on the specific action, path step, or numbered step in run.step_memory_ids."
-                : "IDs of supplied saved memories that changed this action. Omit memories you only read.",
+                ? "Single non-path/run action only; else put on the action, path.steps item, or run.step_memory_ids."
+                : "Memory IDs that drove this action.",
         ] as [String: Any]
         tool.schema["properties"] = properties
         return tool
     }
 
-    private static func catalogTools(includeScreenHistory: Bool) -> [ToolSpec] {
+    nonisolated static func withoutActionMemoryIDs(_ tool: ToolSpec) -> ToolSpec {
+        guard memoryUsingActions.contains(tool.name),
+              var properties = tool.schema["properties"] as? [String: Any],
+              properties.removeValue(forKey: "used_memory_ids") != nil else { return tool }
+        var tool = tool
+        tool.schema["properties"] = properties
+        return tool
+    }
+
+    private nonisolated static func withoutExternalFinish(_ tool: ToolSpec) -> ToolSpec {
+        guard tool.name == "do" else { return tool }
+        var tool = tool
+        tool.description = tool.description
+            .replacingOccurrences(of: externalFinishToolClause, with: "")
+            .replacingOccurrences(of: externalFinishAppReleaseClause, with: "")
+        if var properties = tool.schema["properties"] as? [String: Any],
+           properties.removeValue(forKey: "finish") != nil {
+            tool.schema["properties"] = properties
+        }
+        return tool
+    }
+
+    private static func catalogTools(includeScreenHistory: Bool, includeMemoryAttribution: Bool) -> [ToolSpec] {
         guard let data = PokiCore.toolCatalogJSON(includeScreenHistory: includeScreenHistory).data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return [] }
         return list.compactMap { tool in
             guard let name = tool["name"] as? String, let description = tool["description"] as? String, let schema = tool["inputSchema"] as? [String: Any] else { return nil }
-            return withActionMemoryIDs(ToolSpec(name: name, description: description, schema: schema))
+            let spec = withoutExternalFinish(ToolSpec(name: name, description: description, schema: schema))
+            return includeMemoryAttribution ? withActionMemoryIDs(spec) : spec
         }
     }
 
-    private static func object(_ properties: [String: Any], _ required: [String]) -> [String: Any] {
+    private nonisolated static func object(_ properties: [String: Any], _ required: [String]) -> [String: Any] {
         ["type": "object", "properties": properties, "required": required, "additionalProperties": false]
     }
-    private static let string: [String: Any] = ["type": "string"]
-    private static let taskTools = [reportPlan, countMessages, waitForCountedScrollReply, finishTask]
+    private nonisolated static let string: [String: Any] = ["type": "string"]
+    private static let getScreenshot = ToolSpec(
+        name: "get_screenshot",
+        description: "Retrieve an earlier screenshot from this task by its screenshot_id. Use it to compare with the current screen or find a result card image box. Use a current read for taps.",
+        schema: object(["screenshot_id": string], ["screenshot_id"]))
+    private static func taskTools(includeCountedScroll: Bool,
+                                  includeCountedScrollReply: Bool,
+                                  resultCardMode: ResultCardMode) -> [ToolSpec] {
+        var tools = [reportPlan]
+        if includeCountedScroll {
+            tools.append(countMessages)
+            if includeCountedScrollReply {
+                tools.append(waitForCountedScrollReply)
+            }
+        }
+        tools.append(finishTask(resultCardMode: resultCardMode))
+        return tools
+    }
 
     static let reportPlan = ToolSpec(
         name: "report_plan",
@@ -200,65 +482,107 @@ enum Harness {
         description: "Pause a counted message scroll in the owner's chat and ask for the information you need to continue it. The question is shown to the owner with a reply button.",
         schema: object(["question": string], ["question"]))
 
-    static let finishTask = ToolSpec(
-        name: "finish_task",
-        description: "Finish after the last observation verifies the requested result. If unable to complete, set success=false and explain what was completed, what blocked completion and what was tried. details must contain the requested facts, not only a page title; every value must match a whole current label or value. Declare answer.kind: action for a performed change, field for fixed values, list for requested entries. Read tasks must never use action. For field, items select current refs and label/value; when a field is combined into a label such as \"Capacity,90%\", use prefix \"Capacity,\" and suffix \"%\" to preserve the field identity while reading a new value. For list, items select all requested current rows in order with their names/times; start_ref and end_ref identify unique section labels immediately before and after those rows. Omit section refs if no reliable boundaries exist. Never invent refs or use a heading as a requested value.",
-        schema: object([
+    static let finishTask = finishTask(resultCardMode: .all)
+
+    nonisolated static func finishTask(resultCardMode: ResultCardMode) -> ToolSpec {
+        var properties: [String: Any] = [
             "success": ["type": "boolean"], "summary": string,
             "details": ["type": "array", "items": object(["label": string, "value": string], ["label", "value"])],
-            "used_memory_ids": ["type": "array", "items": string, "maxItems": 20, "description": "Obsolete and ignored. Omit this field."],
             "answer": object([
                 "kind": ["type": "string", "enum": ["action", "field", "list"]],
                 "items": ["type": "array", "items": object(["ref": string, "field": ["type": "string", "enum": ["label", "value"]], "prefix": string, "suffix": string], ["ref", "field"])],
                 "start_ref": string, "end_ref": string,
             ], ["kind"]),
-            "card": resultCard,
-        ], ["success", "summary", "details", "answer"]))
+        ]
+        if case .scoped(let apps) = resultCardMode {
+            properties["card"] = resultCard(for: apps)
+        }
+        return ToolSpec(
+            name: "finish_task",
+            description: "Finish after observing the requested result. On failure set success=false and say what worked, what blocked completion and what you tried. In details give the requested facts as whole current labels or values. Set answer.kind to action only for an executed change, field for fixed values, or list for requested entries. For field, use current refs and label/value. For a label like Capacity,90%, use prefix Capacity, and suffix % to identify the field. For list, include all requested current rows in order with names/times. Use start_ref/end_ref only for unique labels immediately outside the rows. Never invent refs or report a heading as a requested value.",
+            schema: object(properties, ["success", "summary", "details", "answer"]))
+    }
 
-    /// finish_task's card, with each look's fields (`ResultCardLooks`).
-    private static let resultCard: [String: Any] = {
+    /// finish_task's card, scoped to `apps`'s dedicated layouts plus generic `list` (`ResultCardLooks`).
+    private nonisolated static func resultCard(for apps: Set<DedicatedCardApp>) -> [String: Any] {
         let action = object(["label": string, "say": string], ["label", "say"])
         let seat = object(["name": string, "left": string], ["name", "left"])
-        // Every look's fields in one item: each look reads its own (cardDescription names them per kind).
-        let fields = ["date", "from", "to", "depart", "arrive", "duration", "price", "note", "from_city", "to_city", "arrive_day", "stops",
-                      "airline", "cabin", "city", "dates", "subtitle", "stars", "rating", "reviews", "location", "was", "total", "hotel",
-                      "beds", "breakfast", "cancel", "trip", "baggage", "refund", "ticketing", "query", "price_label", "sold", "shop",
-                      "delivery", "category", "area", "distance", "store", "detail", "calories", "heading", "subheading", "value", "value_note"]
-        var properties: [String: Any] = Dictionary(uniqueKeysWithValues: (["id", "title"] + fields).map { ($0, string) })
-        properties["seats"] = ["type": "array", "items": seat]
-        let leg = object(["number": string, "from": string, "to": string, "depart": string, "arrive": string, "arrive_day": string,
-                          "wait": string, "change": string, "seats": ["type": "array", "items": seat]], ["number"])
+        var fields = ["subtitle", "detail", "value", "value_note", "note", "heading", "subheading"]
+        if apps.contains(.railway12306) {
+            fields += ["date", "from", "to", "depart", "arrive", "duration", "price"]
+        }
+        if apps.contains(.ctrip) {
+            fields += ["date", "from", "to", "depart", "arrive", "duration", "price", "from_city", "to_city", "arrive_day", "stops",
+                       "airline", "cabin", "city", "dates", "stars", "rating", "reviews", "location", "was", "total", "hotel",
+                       "beds", "breakfast", "cancel", "trip", "baggage", "refund", "ticketing"]
+        }
+        if apps.contains(.taobao) {
+            fields += ["query", "price", "price_label", "sold", "shop", "delivery"]
+        }
+        if apps.contains(.dianping) {
+            fields += ["query", "rating", "reviews", "price", "category", "area", "distance"]
+        }
+        if apps.contains(.uberEats) {
+            fields += ["store", "price", "calories"]
+        }
+        var properties: [String: Any] = Dictionary((["id", "title"] + fields).map { ($0, string) }, uniquingKeysWith: { first, _ in first })
+        if apps.contains(.railway12306) {
+            properties["seats"] = ["type": "array", "items": seat]
+        }
+        var legProperties: [String: Any] = ["number": string, "from": string, "to": string, "depart": string, "arrive": string,
+                                            "arrive_day": string, "wait": string, "change": string]
+        if apps.contains(.railway12306) {
+            legProperties["seats"] = ["type": "array", "items": seat]
+        }
+        let leg = object(legProperties, ["number"])
         properties["legs"] = ["type": "array", "items": leg, "minItems": 2]
         properties["image"] = ["type": "array", "items": ["type": "number"], "minItems": 4, "maxItems": 4,
-                               "description": "[x, y, width, height] of the item's whole picture in the screenshot named by image_screenshot"]
+                               "description": "[x, y, width, height] of the complete photo itself in the screenshot named by image_screenshot. The bounds exclude the row, text, and controls."]
         properties["image_screenshot"] = ["type": "string", "description": "Copy the screenshot_id from the tool answer whose screenshot supplied this item's image coordinates."]
         let item = object(properties, ["id", "title"])
-        let kinds = [RailwayTrains.kind, RailwayTransfers.kind, Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares, Taobao.kind, Dianping.kind, UberEats.kind, AnyAppList.kind]
+        var kinds: [String] = []
+        if apps.contains(.railway12306) { kinds += [RailwayTrains.kind, RailwayTransfers.kind] }
+        if apps.contains(.ctrip) { kinds += [Ctrip.flights, Ctrip.hotels, Ctrip.rooms, Ctrip.fares] }
+        if apps.contains(.taobao) { kinds.append(Taobao.kind) }
+        if apps.contains(.dianping) { kinds.append(Dianping.kind) }
+        if apps.contains(.uberEats) { kinds.append(UberEats.kind) }
+        kinds.append(AnyAppList.kind)
         var card = object(["app": string, "kind": ["type": "string", "enum": kinds],
                            "items": ["type": "array", "items": item, "minItems": 1], "recommended": string,
                            "primary": action, "next": action], ["app", "kind", "items", "recommended", "primary"])
-        card["description"] = cardDescription
+        card["description"] = cardDescription(for: apps)
         return card
-    }()
+    }
 
-    // The fixed words and the reply's examples are agy's (from its copy record), except the main button,
-    // which says 查看 as the card's rules require, not agy's 预订.
-    private static let cardDescription = """
-        When the result is items of one app that the owner can pick from or act on (trains, flights, products): those items as a card in the app's own look under the task card, which replaces listing them in the reply. A single result is still a card with one item, such as the one earliest train asked for. Leave it out when the result is not a list of such items. Write its words in the owner's language; the examples are for a Chinese conversation.
-        kind 12306.trains, Railway 12306's train list: app "cn.12306.rails12306". Always send it when the owner asked about trains in 12306, for one train or several; never report a train only as details or in the reply. Each item is one train as 12306 shows it: id and title the train number ("G1234"), date ("11月20日 周四"), from and to stations, depart and arrive times ("07:00"), duration ("4小时28分"), price ("¥626"), seats [{name: "二等座", left: "有", "候补", "无" or "5张"}], and note only for a fact that bears on the choice ("15:00 有冲突").
-        recommended is the id of the item that best fits the request; the card selects it until the owner taps another. primary and next are the card's buttons for the selected item: in label and say, {field} becomes that item's field. A tap sends say as the owner's message, so say stands alone with the item's key facts, written as {field}s so they follow the selection. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title} 次（{from} {depart} 开）"}. next is the one obvious next step, or left out. To send the train to someone, name the recipient the long-term notes give: {label: "发到公司差旅群", say: "把这趟车发到公司差旅群：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}; when the notes name none: {label: "发送车次", say: "把这趟车发出去：{date} {title} 次，{from} {depart} 开，{to} {arrive} 到，{price}"}. Never offer paying, booking or choosing seats.
-        kind 12306.transfers, Railway 12306's journeys with a change of train (中转): app "cn.12306.rails12306". Each item one journey: id and title its trains ("G84 → G26"), date, from and to its first and last stations, depart and arrive, duration the whole journey ("全程1小时7分"), price, and legs, one per train in order: [{number: "G84", from, to, depart, arrive, wait before it ("2分"), change what the change takes ("车内换座", "同站换乘"), seats [{name, left}] for that train}]. primary: {label: "在 12306 查看", say: "在 12306 打开 {date} {title}（{from} {depart} 开）"}.
-        kind ctrip.flights, Trip.com's flight list: app "ctrip.com". Each item one flight: id, title its flight numbers ("AA3166 > CX891 > CX356"), depart and arrive ("17:30"), arrive_day when it lands days later ("+2"), from and to airports, from_city and to_city, date, stops ("中转2次"), duration, price as shown ("¥19,852"), airline, cabin, and for a flight with connections the legs as the screen shows them: [{number, from, to, depart, arrive, wait the layover ("5h50m"), change what the connection takes ("不同航站楼转机")}]. primary: {label: "在携程查看", say: "在携程打开 {date} {title}（{depart} 起飞，{price}）"}.
-        kind ctrip.hotels, Trip.com's hotel list: app "ctrip.com". Each item one hotel: title, subtitle its other name, stars ("4钻"), rating ("4.4"), reviews ("102点评"), location, price per night, was (the struck price), total, city and dates on the first item. primary: {label: "在携程查看", say: "在携程打开 {title}（{price}）"}.
-        kind ctrip.rooms, one hotel's room types on Trip.com: app "ctrip.com". Each item one room: title, beds ("1张1.8米特大床 25-32㎡"), breakfast, cancel, price, was, total, hotel and dates on the first item. The hotel name applies to all room types. primary: {label: "在携程查看", say: "在携程打开 {hotel} 的{title}（{price}）"}.
-        kind ctrip.fares, one flight's fares on Trip.com: app "ctrip.com". Each item one fare: title the fare's name ("经济舱"), price, cabin, baggage, refund (the refund and change rule), ticketing, trip and dates on the first item. primary: {label: "在携程查看", say: "在携程打开 {title} {price} 这个票价"}.
-        kind taobao.products, Taobao's search results: app "com.taobao.taobao4iphone". Each item one product: title as listed, price ("¥27.8"), price_label (补贴价, 优惠后), sold ("3000+人付款"), shop, delivery ("后日达 包邮"), query on the first item (what was searched). primary: {label: "在淘宝查看", say: "在淘宝打开 {shop} 的 {title}（{price}）"}.
-        kind dianping.places, Dianping's places: app "com.dianping.dpscope". Each item one place: title, subtitle its other name, rating ("4.5"), reviews ("79条"), price ("¥167/人"), category, area, distance, query on the first item. primary: {label: "在大众点评查看", say: "在大众点评打开 {title}"}.
-        kind ubereats.items, a store's menu items on Uber Eats: app "com.ubercab.UberEats". Each item one menu item: title, price, detail (what comes with it), calories, store on the first item. primary: {label: "View in Uber Eats", say: "Open {title} ({price}) in Uber Eats"}.
-        kind list, for any other app (Meituan, Fliggy, Amazon, a store, a booking site): app its bundle id. Each item: title, subtitle, detail, value the fact that decides the choice on the right ("¥58", "18:30", "4.8"), value_note under it, note, legs for a journey with changes, and heading and subheading on the first item (the search, the date). primary: {label: "在<app>查看", say: "在<app>打开 {title}"}. Use an app's own kind when it has one.
-        For a look whose app shows a picture per item (products, hotels, rooms, places, menu items), give image and image_screenshot together. Use the coordinates of the whole picture and copy screenshot_id from the tool answer that shows those coordinates. Items can use different screenshots. Omit both fields when that answer has no screenshot_id. Never guess either field.
-        Values are copied from the screen as shown; leave out a field the screen does not show.
-        """
+    private nonisolated static func cardDescription(for apps: Set<DedicatedCardApp>) -> String {
+        var kindLines: [String] = []
+        if apps.contains(.railway12306) {
+            kindLines.append("12306.trains (cn.12306.rails12306): Always use this card for direct train results in 12306. id and title are the train number, date is the displayed date, from/to are stations, depart/arrive are times. Include duration, price and seats [{name, left}]. primary: 在 12306 查看 / 在 12306 打开 {date} {title} 次（{from} {depart} 开）. For sending a train, put the recipient from long-term notes in label and say, using {date} and {title} in say. If no note names a recipient, use label 发送车次 and leave the recipient for the owner. Never offer paying, booking or choosing seats for 12306.")
+            kindLines.append("12306.transfers (cn.12306.rails12306): title is the trains joined by →. Include date, from/to, depart/arrive, total duration, price and ordered legs [{number, from, to, depart, arrive, wait, change, seats: [{name, left}]}]. wait is the layover, change describes the transfer shown. primary: 在 12306 查看 / 在 12306 打开 {date} {title}（{from} {depart} 开）.")
+        }
+        if apps.contains(.ctrip) {
+            kindLines.append("ctrip.flights (ctrip.com): title is the flight numbers joined by >. Include depart, arrive, arrive_day (arrival day offset), from/to airports, from_city/to_city, date, duration, stops, airline, cabin, price and, for connections, ordered legs [{number, from, to, depart, arrive, wait, change}]. primary: 在携程查看 / 在携程打开 {date} {title}（{depart} 起飞，{price}）.")
+            kindLines.append("ctrip.hotels (ctrip.com): title is the hotel name. Include subtitle (other name), stars, rating, reviews, location, price (per night), was (original price) and total (stay total). Put city and dates on the first item. primary: 在携程查看 / 在携程打开 {title}（{price}）.")
+            kindLines.append("ctrip.rooms (ctrip.com): title is the room type. Include beds, breakfast, cancel, price (per night), was (original price) and total (stay total). Put the shared hotel on the first item and dates (stay dates) on every room for the heading and selected button. primary: 在携程查看 / 在携程打开 {hotel} 的 {title}（{dates}，{price}）.")
+            kindLines.append("ctrip.fares (ctrip.com): title is the fare name. Include price, cabin, baggage, refund (refund and change rules) and ticketing. Put trip and dates on the first item. primary: 在携程查看 / 在携程打开 {title} {price} 这个票价.")
+        }
+        if apps.contains(.taobao) {
+            kindLines.append("taobao.products (com.taobao.taobao4iphone): Include title, price, price_label (e.g. 补贴价), sold, shop and delivery. Put query on the first item. primary: 在淘宝查看 / 在淘宝打开 {shop} 的 {title}（{price}）.")
+        }
+        if apps.contains(.dianping) {
+            kindLines.append("dianping.places (com.dianping.dpscope): Include title, subtitle, rating, reviews, price, category, area and distance. Put query on the first item. primary: 在大众点评查看 / 在大众点评打开 {title}.")
+        }
+        if apps.contains(.uberEats) {
+            kindLines.append("ubereats.items (com.ubercab.UberEats): Include title, price, detail (what comes with it) and calories. Put store on the first item. primary: View in Uber Eats / Open {title} ({price}) in Uber Eats.")
+        }
+        kindLines.append("list (any other app, with its own bundle ID): Include title, subtitle, detail, value (the deciding price, time or rating) and value_note. For a journey with connections, use ordered legs as in flights. Put heading and subheading on the first item. Use a dedicated kind where one exists. primary: 在<app>查看 / 在<app>打开 {title}.")
+        return [
+            "Use a result card for one or more selectable items from one app, even if the owner asks for only one. The card replaces the reply's list. Omit it for other results. Use the owner's language. Copy values as shown and omit fields the screen does not show. Use note for a fact that affects the choice.",
+            "Fields below are per item unless stated. Use the kind and app ID listed. Select the best item with recommended (its id). primary and optional next have label (shown on the button) and say (sent as the owner's next message). The card fills {field} from the selected item. Use fields available to that item so the message stands alone with its key facts. Omit next when no clear follow-up exists.",
+            kindLines.joined(separator: "\n"),
+            "For pictured items, send image (bounds of the complete photo itself) and image_screenshot (screenshot_id from the same observation) together. The bounds exclude the row, text, and controls. Items may use different screenshots. Omit both fields if the full photo is clipped or there is no screenshot_id. Never guess.",
+        ].joined(separator: "\n\n")
+    }
 
     /// task-runner.mjs's answers to its harness tools.
     static let planPublished = "Plan published. Continue."

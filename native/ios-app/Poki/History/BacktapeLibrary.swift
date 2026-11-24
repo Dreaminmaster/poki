@@ -795,6 +795,8 @@ struct BacktapeLibrary: View {
     @State private var zoom: BacktapeZoom = .hours
     /// Whether the owner has zoomed yet: until then a list arriving is the page opening.
     @State private var zoomed = false
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inward = true
     @State private var point: UnitPoint = .center
     @State private var target: String?
@@ -834,7 +836,12 @@ struct BacktapeLibrary: View {
                     }
                     .onEnded { _ in pinched = false }
             )
-            .onAppear { size = geometry.size }
+            .scaleEffect(appeared || reduceMotion ? 1 : 0.97)
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .onAppear {
+                size = geometry.size
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { appeared = true }
+            }
             .onChange(of: geometry.size) { _, new in size = new }
         }
         .bottomBar(softEdge: true) {

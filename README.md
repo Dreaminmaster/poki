@@ -13,7 +13,7 @@ Install Poki on my iPhone from https://github.com/JosssphZhou/poki
 <!-- badges:start -->
 <p align="center">
   <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.6_Beta-blue" alt="Poki App 0.4.6 Beta"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.5.0_Beta-blue" alt="Poki App 0.5.0 Beta"></a>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
@@ -58,7 +58,7 @@ Poki is an open-source iPhone agent that operates your entire iPhone for you. Th
    Install Poki on my iPhone from https://github.com/JosssphZhou/poki
    ```
 
-   Or download [Poki Setup](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) for macOS (`.dmg`) or Windows (`.exe`) and follow the window.
+   Or download [Poki Setup](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.9) for macOS (`.dmg`) or Windows (`.exe`) and follow the window.
 2. **Connect and add your model account.** Accept **Trust**, turn on Developer Mode and Automation Mode when iOS asks, set up an external connection routing `10.7.0.1` back to your iPhone (such as free LocalDevVPN), and sign in with ChatGPT Plus or Pro or paste an API key (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go, or an OpenAI-compatible server).
 3. **Run your first task.** Open Poki and send:
 
@@ -83,7 +83,7 @@ To build and sign the iPhone app with Xcode, use the [source install prompt for 
 
 - Agent installer skill and Poki Setup: [install-poki skill](skills/install-poki/SKILL.md) and [Poki Setup](desktop/README.md)
 - Verification, limits, and release channels: [Verification](docs/verification.md) and [Release channels](docs/release-channels.md)
-- Earlier computer-driven tools (no longer updated): [Poki MCP and Poki Agent](docs/poki-mcp.md)
+- Earlier computer-driven tools (security maintenance only): [Poki MCP and Poki Agent](docs/poki-mcp.md)
 
 </details>
 
@@ -95,6 +95,7 @@ To build and sign the iPhone app with Xcode, use the [source install prompt for 
 - **Questions and ideas:** Join [GitHub Discussions](https://github.com/JosssphZhou/poki/discussions).
 - **Bugs and requests:** Open an issue in [GitHub Issues](https://github.com/JosssphZhou/poki/issues).
 - **Contribute code:** Read [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Code of conduct:** Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 See all contributors in [CONTRIBUTING.md](CONTRIBUTING.md#contributors).
 

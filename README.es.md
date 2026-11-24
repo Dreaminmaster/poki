@@ -15,7 +15,7 @@ Install Poki on my iPhone from https://github.com/JosssphZhou/poki
 <!-- badges:start -->
 <p align="center">
   <a href="https://github.com/JosssphZhou/poki/stargazers"><img src="https://img.shields.io/github/stars/JosssphZhou/poki" alt="GitHub stars"></a>
-  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.4.6_Beta-blue" alt="Poki App 0.4.6 Beta"></a>
+  <a href="https://github.com/JosssphZhou/poki/releases"><img src="https://img.shields.io/badge/Poki_App-0.5.0_Beta-blue" alt="Poki App 0.5.0 Beta"></a>
   <img src="https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform: iOS, macOS and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License: AGPL-3.0-only"></a>
 </p>
@@ -60,7 +60,7 @@ Poki es un agente de código abierto para iPhone que opera todo tu iPhone por ti
    Install Poki on my iPhone from https://github.com/JosssphZhou/poki
    ```
 
-   También puedes descargar [Poki Setup](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.8) para macOS (`.dmg`) o Windows (`.exe`) y seguir la ventana.
+   También puedes descargar [Poki Setup](https://github.com/JosssphZhou/poki/releases/tag/desktop-v0.2.9) para macOS (`.dmg`) o Windows (`.exe`) y seguir la ventana.
 2. **Conecta y añade tu cuenta de modelo.** Acepta **Confiar**, activa el Modo desarrollador y el Modo de automatización cuando iOS lo pida, configura una conexión externa que enrute `10.7.0.1` al propio iPhone (como LocalDevVPN, gratuita) e inicia sesión con ChatGPT Plus o Pro, o pega una clave API (Anthropic, OpenAI, Gemini, DeepSeek, OpenRouter, OpenCode Go o un servidor compatible con OpenAI).
 3. **Ejecuta tu primera tarea.** Abre Poki y envía:
 

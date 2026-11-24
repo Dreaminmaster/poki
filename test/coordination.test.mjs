@@ -360,7 +360,8 @@ test('a verified launch continues its batch when screenshots are unavailable, bu
 
 test('launch reconnects a stalled foreground observation without relaunching the app',async t=>{
  const f=await fixture(t);await f.set({axHangs:1});
- const result=await f.a.callTool({name:'launch_app',arguments:{bundle_id:'com.apple.Preferences'}},{timeout:6500});
+ // Keep the test client alive past the 8 s foreground budget and the subsequent screen read.
+ const result=await f.call('launch_app',{bundle_id:'com.apple.Preferences'});
  assert.notEqual(result.isError,true,result.content[0].text);
  assert.equal(value(result).foreground_verified,true);
  const events=await f.events();assert.equal(events.filter(e=>e.op==='launch_app').length,1);
@@ -1006,7 +1007,7 @@ test('verify:false omits action verification and batches observe once after all 
  assert.equal(summary.verified,false);
  assert.ok(summary.screen.text.includes('Button: First'));
  const operations=(await f.events()).slice(before).filter(event=>event.op).map(event=>event.op);
- assert.deepEqual(operations,['tap','tap','ax_tree']);
+ assert.deepEqual(operations,['tap','tap','release_input','ax_tree']);
  await f.set({inputError:true});
  const failedBefore=(await f.events()).length;
  const failed=await f.call('batch_commands',{verify:false,stop_on_error:false,commands:[

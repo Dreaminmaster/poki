@@ -13,7 +13,7 @@ final class LiveCore: CoreSession {
     private let continuation: AsyncStream<ShellEvent>.Continuation
     private var pump: Task<Void, Never>?
 
-    init(host: AppCoreHost, transport: HTTPTransport) {
+    init(host: AppCoreHost, transport: HTTPTransport, storage: PokiStorage = .live) {
         self.host = host
         var config = CoreConfig()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
@@ -23,8 +23,8 @@ final class LiveCore: CoreSession {
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
-        config.approvalMode = { ApprovalClassifier.mode }
-        // External Connections › Computers: a computer the owner turned off, or has not answered yet, is refused.
+        config.approvalMode = { ApprovalClassifier.mode(in: storage) }
+        // Agents › Computers: a computer the owner turned off, or has not answered yet, is refused.
         config.computerAccess = { ComputerAccess.decision($0.id) }
         // Read at each run, from Settings › Models › Fast Decisions: nil until a model is picked, and
         // a routine then stops where the screen differs, as it always did.
@@ -32,7 +32,7 @@ final class LiveCore: CoreSession {
         // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
         // their Testing Options switch.
         config.resolveApp = { KnownApps.launchID($0) }
-        config.resolveInstalledApp = { KnownApps.installedLaunchID($0) }
+        config.resolveInstalledApp = { KnownApps.installedLaunchID($0, isInstalled: Self.isInstalledOnPhone) }
         config.appNames = { SpeedOptions.appNames }
         config.quickRead = { SpeedOptions.quickRead }
         config.screenHistory = HistoryStore.agentSource
@@ -52,6 +52,16 @@ final class LiveCore: CoreSession {
 
     /// 0.3.1's Ask Before Sensitive Steps switch, which `ApprovalChoice.resolve` still reads.
     static let askKey = "approvals.ask"
+
+    private static func isInstalledOnPhone(_ id: String) -> Bool {
+        if KnownApps.isInstalledOnPhone(id) { return true }
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated { AppIconStore.installedOnPhone(id) == true }
+        }
+        return DispatchQueue.main.sync {
+            MainActor.assumeIsolated { AppIconStore.installedOnPhone(id) == true }
+        }
+    }
 
     deinit { pump?.cancel() }
 
@@ -80,8 +90,8 @@ final class LiveCore: CoreSession {
     func tool(_ name: String, arguments: String) async -> ToolResult { await core.tool(name, arguments: arguments) }
     /// `look`, `do` or `status` for the chat's model loop inside the app.
     /// `conversation`: the chat a `skills` call comes from, kept with a note as where it was heard.
-    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
-        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation, localTask: localTask, onActionSucceeded: onActionSucceeded)
+    func callTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
+        await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, conversation: conversation, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded)
     }
     func settle(timeout: Double) async -> Bool { await core.settle(timeout: timeout) }
     func itemPictures(_ requests: [String: ItemPictureRequest], localTask: String) async -> [ItemPictures] {
@@ -98,8 +108,14 @@ final class LiveCore: CoreSession {
     }
     /// Ends the task: the phone goes back to the app it began in (or, `switching: false`, stays). The
     /// line says what happened.
-    func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false) async -> String? {
-        await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace)
+    func finishTask(switching: Bool = true, localSession: String? = nil, ifNoLocalWorkspace: Bool = false, localTask: String? = nil) async -> String? {
+        await core.finishTask(switching: switching, localSession: localSession, ifNoLocalWorkspace: ifNoLocalWorkspace, localTask: localTask)
+    }
+    func bringBackTargetApp(why: String, shouldRun: (@Sendable () async -> Bool)? = nil) async -> String? {
+        await core.bringBackTargetApp(why: why, shouldRun: shouldRun)
+    }
+    func clearTaskScreenshots(localTask: String) {
+        core.clearTaskScreenshots(localTask: localTask)
     }
     func finishTask(session: String) async -> String? { await core.finishTask(session: session) }
 
@@ -115,7 +131,7 @@ final class LiveCore: CoreSession {
             return .toolFinished(summary: activity.summary, delivery: delivery, app: facts.app, thumbnail: facts.thumbnail, error: facts.error, session: activity.session)
         case .approvalRequested(let approval):
             return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires, stopsWhenOff: approval.stopsWhenOff,
-                                                      session: approval.session, intent: approval.intent))
+                                                      session: approval.session, intent: approval.intent, sourceSession: approval.sourceSession))
         case .approvalEnded(let id, let approved): return .approvalEnded(id: id, approved: approved)
         case .handoffRequested(let id, let kind, let text, let app): return .handoffRequested(id: id, kind: kind, text: text, app: app)
         case .handoffEnded(let id, let how): return .handoffEnded(id: id, how: how)

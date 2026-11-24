@@ -53,6 +53,72 @@ final class AppNamesTests: XCTestCase {
         XCTAssertEqual(launched(wda), ["com.example.shop"])
     }
 
+    func testALaunchFailureReportsWhichBatchActionsWereSent() async {
+        let (core, wda) = core()
+        _ = await core.call("look", [:])
+        wda.set("POST /wda/apps/activate") { _ in
+            (400, ["value": ["error": "unknown error", "message": "app not installed"]])
+        }
+
+        let result = await core.call("do", ["actions": [
+            ["button": "volume_up"], ["launch": ["bundle": "com.example.missing"]], ["button": "volume_down"],
+        ]])
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("button volume_up (sent"), result.text)
+        XCTAssertTrue(result.text.contains("action 2 was refused"), result.text)
+        XCTAssertTrue(result.text.contains("the actions after it were not sent"), result.text)
+        XCTAssertTrue(result.text.contains("Do not repeat the actions marked sent"), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressButton").compactMap { $0["name"]?.string }, ["volumeUp"])
+
+        let pathResult = await core.call("do", ["actions": [["path": ["steps": [
+            ["button": "volume_up"], ["launch": ["bundle": "com.example.missing"]], ["button": "volume_down"],
+        ]]]]])
+        XCTAssertTrue(pathResult.isError, pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("action 1 stopped after sending input: path stopped at step 2"), pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("steps 1 to 1 were sent"), pathResult.text)
+        XCTAssertTrue(pathResult.text.contains("Do not repeat the actions marked sent"), pathResult.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressButton").compactMap { $0["name"]?.string }, ["volumeUp", "volumeUp"])
+    }
+
+    func testASkillThatLaunchedItsStartingAppReportsInputSentWhenStepOneFails() async {
+        let store = SkillStore(url: nil)
+        let now = Date()
+        let skill = Skill(
+            name: "check-clock",
+            description: "open clock and tap missing button",
+            app: "com.apple.mobiletimer",
+            steps: [SkillStep(action: ["tap": "Missing"], target: SkillTarget(type: SkillTarget.anyType, label: "Missing"), app: "com.apple.mobiletimer")],
+            params: [:],
+            expect: [],
+            read: [],
+            runs: 0,
+            ok: 0,
+            failuresInARow: 0,
+            lastStop: nil,
+            lastMs: nil,
+            savedBy: "test",
+            created: now,
+            updated: now
+        )
+        store.save(skill)
+        let wda = FakeWDA()
+        wda.tree([Node("Button", "General", [16, 100, 358, 44])], app: "Settings")
+        let (core, _, _) = makeCore(wda) {
+            $0.memory = store
+            $0.actionCap = 0.4
+            $0.resolveInstalledApp = { Self.installedApps[$0.lowercased()] }
+        }
+        _ = await core.call("look", [:])
+
+        let result = await core.call("do", ["actions": [["run": "check-clock"]]])
+
+        XCTAssertTrue(result.isError, result.text)
+        XCTAssertEqual(launched(wda), ["com.apple.mobiletimer"])
+        XCTAssertTrue(result.text.contains("action 1 stopped after sending input: run \"check-clock\" stopped at step 1"), result.text)
+        XCTAssertTrue(result.text.contains("Do not repeat the actions marked sent"), result.text)
+    }
+
     func testWithNamesOffALaunchIsSentAsGiven() async {
         let (core, wda) = core(names: false)
         _ = await core.call("look", [:])
@@ -185,20 +251,27 @@ final class AppNamesTests: XCTestCase {
         let (core, wda) = core()
         _ = await core.call("look", [:])
         wda.set("POST /wda/apps/activate") { [wda] _ in
+            wda.set("GET /wda/activeAppInfo") { _ in (200, ["value": ["bundleId": "com.apple.mobiletimer", "name": "Clock"]]) }
             wda.tree([Node("Button", "World Clock", [16, 100, 358, 44]), Node("Button", "Alarms", [16, 144, 358, 44])], app: "Clock")
             return (200, ["value": .null])
         }
+        let started = Date()
         let result = await core.call("do", ["actions": [["launch": "Clock"]]])
+        let elapsed = Date().timeIntervalSince(started)
         XCTAssertFalse(result.isError, result.text)
-        XCTAssertTrue(result.text.contains("the screen had changed and held still"), result.text)
+        XCTAssertTrue(result.text.contains("World Clock"), result.text)
         XCTAssertFalse(result.text.contains("paused 900 ms"), result.text)
+        XCTAssertLessThan(elapsed, 0.85, "Changed launch screen should settle before the 900 ms fixed pause (\(elapsed) s): \(result.text)")
     }
 
     func testAScreenThatDidNotChangeGetsTheWholePause() async {
         let (core, _) = core()
         _ = await core.call("look", [:])
+        let started = Date()
         let result = await core.call("do", ["actions": [["launch": "Clock"]]])
-        XCTAssertTrue(result.text.contains("paused 9"), result.text)
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertGreaterThanOrEqual(elapsed, 0.85, "Unchanged launch screen should get the whole 900 ms pause (\(elapsed) s): \(result.text)")
+        XCTAssertTrue(result.text.contains("paused "), result.text)
     }
 
     /// Clock in front from its launch on: its screen is drawn `after` seconds later.
@@ -240,9 +313,12 @@ final class AppNamesTests: XCTestCase {
 
         XCTAssertFalse(result.isError, result.text)
         XCTAssertTrue(result.text.contains("World Clock"), result.text)
-        let waited = try XCTUnwrap(["paused ", "read after "].lazy.compactMap { key in result.text.range(of: key).flatMap { Int(result.text[$0.upperBound...].prefix(while: \.isNumber)) } }.first, result.text)
-        // The launch's fixed pause is 900 ms; a read let run past it made it 1.4 s.
-        XCTAssertLessThanOrEqual(waited, 1200, result.text)
+        // The launch's fixed pause is 900 ms; when reads already run past it, no extra fixed pause is added.
+        if let waited = ["paused ", "read after "].lazy.compactMap({ key in result.text.range(of: key).flatMap { Int(result.text[$0.upperBound...].prefix(while: \.isNumber)) } }).first {
+            XCTAssertLessThanOrEqual(waited, 1200, result.text)
+        } else {
+            XCTAssertFalse(result.text.contains("paused "), result.text)
+        }
     }
 
     func testWithTheQuickReadOffThePauseIsTheFixedOne() async {

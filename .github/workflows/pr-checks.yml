@@ -72,5 +72,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Signed release publication contract
-        run: node --test test/publish-r2.test.mjs
+      - name: Release publication contracts
+        run: node --test test/publish-r2.test.mjs test/publish-compat.test.mjs test/hotfix-release.test.mjs test/codex-voice-build.test.mjs

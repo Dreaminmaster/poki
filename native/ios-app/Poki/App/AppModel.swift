@@ -3,27 +3,30 @@ import PokiCore
 import SwiftUI
 import UIKit
 import UserNotifications
+import notify
 
 /// The app's state and the glue between PokiCore, PokiLauncher, the loopback, the Live Activity and
 /// approvals. One instance, owned by PokiApp.
 @MainActor
 @Observable
 final class AppModel {
-    var setup = SetupState.load() { didSet { setup.save() } }
-    let identity = RelayIdentity()
+    let storage: PokiStorage
+    var setup: SetupState { didSet { setup.save(storage: storage) } }
+    let identity: RelayIdentity
     /// The person's own relay (Connect). Poki has no default relay and sends nothing until one is set.
-    private(set) var relayAddress = RelayAddress.saved
+    private(set) var relayAddress: RelayAddress?
     /// The relay on or off (Agents > MCP Relay). On by default, and turned on when an address is set;
     /// off, Poki makes no relay connection and only its own chat agent can use the phone.
-    private(set) var relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
+    private(set) var relayEnabled: Bool
     /// The relay Poki connects to: the address, while the relay is on.
     var activeRelay: RelayAddress? { relayEnabled ? relayAddress : nil }
 
     func setRelayEnabled(_ on: Bool) {
         guard on != relayEnabled, relayAddress != nil || !on else { return }
         relayEnabled = on
-        UserDefaults.standard.set(on, forKey: "relayEnabled")
+        storage.defaults.set(on, forKey: "relayEnabled")
         log.add("relay", on ? "turned on" : "turned off")
+        if !on { relayStatus = .off }
         guard sessionOn else { return }
         if on, let relayAddress { core.start(relay: relayAddress) } else { core.stop() }
     }
@@ -76,16 +79,16 @@ final class AppModel {
     var approvalMode: ApprovalClassifier.Mode {
         get {
             access(keyPath: \.approvalMode)
-            return ApprovalClassifier.mode
+            return ApprovalClassifier.mode(in: storage)
         }
         set {
             withMutation(keyPath: \.approvalMode) {
                 // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
                 // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
-                if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                    UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+                if ApprovalClassifier.Mode(rawValue: storage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                    storage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
                 }
-                UserDefaults.standard.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
+                storage.defaults.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
             }
             log.add("approval", "ask before sensitive steps: \(newValue.rawValue)")
             for observer in approvalModeObservers { observer() }
@@ -98,27 +101,28 @@ final class AppModel {
     private var stopAskingObservers: [() -> Void] = []
     /// Called when Don’t Ask Again turned approvals off, for the chat to say so.
     func addStopAskingObserver(_ observer: @escaping () -> Void) { stopAskingObservers.append(observer) }
-    var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
+    var classifierLevel: ApprovalClassifier.Level {
         didSet {
-            UserDefaults.standard.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
+            storage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
             // Likewise the way of asking Rules shows, so the sensitivity counts as chosen here.
-            if ApprovalClassifier.Mode(rawValue: UserDefaults.standard.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                UserDefaults.standard.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
+            if ApprovalClassifier.Mode(rawValue: storage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                storage.defaults.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
             }
         }
     }
     /// Lists ask_poki for outside agents. Testing only, off.
-    var askPokiTool: Bool = UserDefaults.standard.bool(forKey: AskPoki.onKey) {
-        didSet { UserDefaults.standard.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
+    var askPokiTool: Bool {
+        didSet { storage.defaults.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
     }
-    var idleStopSeconds: Int = UserDefaults.standard.object(forKey: "idleStopSeconds.v4") as? Int ?? 60 {
-        didSet { UserDefaults.standard.set(idleStopSeconds, forKey: "idleStopSeconds.v4"); log.add("runner", "idle stop set to \(idleStopSeconds) s") }
+    private static let idleStopDefaultsName = "idleStopSeconds.v4"
+    var idleStopSeconds: Int {
+        didSet { storage.defaults.set(idleStopSeconds, forKey: Self.idleStopDefaultsName); log.add("runner", "idle stop set to \(idleStopSeconds) s") }
     }
     /// Poki was on when it last ran; it turns itself on again at launch. Poki Setup's install turns it
     /// on the first time (see `init`).
     private(set) var wantsOn: Bool {
-        get { UserDefaults.standard.bool(forKey: "wantsOn") }
-        set { UserDefaults.standard.set(newValue, forKey: "wantsOn") }
+        get { storage.defaults.bool(forKey: "wantsOn") }
+        set { storage.defaults.set(newValue, forKey: "wantsOn") }
     }
     /// The setup step the Live Activity is guiding, if any.
     private(set) var guiding: SetupStep?
@@ -126,24 +130,24 @@ final class AppModel {
     /// when Poki is installed again, and a stored path then points at nothing.
     var pairingPath: String? {
         _ = pairingFileSeen
-        if FileManager.default.fileExists(atPath: AppFiles.phonePairingFile.path) { return AppFiles.phonePairingFile.path }
-        return FileManager.default.fileExists(atPath: AppFiles.pairingFile.path) ? AppFiles.pairingFile.path : nil
+        if FileManager.default.fileExists(atPath: storage.phonePairingFileURL.path) { return storage.phonePairingFileURL.path }
+        return FileManager.default.fileExists(atPath: storage.pairingFileURL.path) ? storage.pairingFileURL.path : nil
     }
     /// Whether the pairing file was there at the last look. Poki Setup on a computer writes it into
     /// Poki's container after an install, while Poki may be running: setting this redraws what depends
     /// on `pairingPath` (the file itself is not observed).
-    private var pairingFileSeen = FileManager.default.fileExists(atPath: AppFiles.pairingFile.path)
+    private var pairingFileSeen: Bool
     /// Looks for a pairing file Poki Setup put in the container (at launch, on coming to the front,
     /// and every few seconds on the pairing step).
     func lookForHandedPairing() {
-        let there = FileManager.default.fileExists(atPath: AppFiles.pairingFile.path)
+        let there = FileManager.default.fileExists(atPath: storage.pairingFileURL.path)
         guard there != pairingFileSeen else { return }
         pairingFileSeen = there
         // A pairing made here writes the same file just before it reports `paired`, which handles it.
         guard there, !pairingUnderWay else { return }
-        try? (AppFiles.pairingFile as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
-        setup.pairingFile = AppFiles.pairingFile.path
-        SetupVault.mirrorPairingFromContainer()
+        try? (storage.pairingFileURL as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
+        setup.pairingFile = storage.pairingFileURL.path
+        SetupVault.mirrorPairingFromContainer(storage: storage)
         pairingTrouble = nil; pairingVerifiedAt = nil
         log.add("pairing", "pairing file from Poki Setup found")
     }
@@ -160,10 +164,10 @@ final class AppModel {
     private(set) var passcodeHint = false
     /// Turning on now will probably bring up iOS's passcode screen (no automation has started since
     /// this iPhone last restarted, or ever): the owner is told first (`passcodeHeadsUp`).
-    var passcodeExpected: Bool { UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current }
+    var passcodeExpected: Bool { storage.defaults.double(forKey: Self.automationBootKey) != BootClock.current }
     var passcodeHeadsUp = false
     private(set) var passcodeConfirmationPending = false
-    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Connection and tap Continue."
+    static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Setup and tap Continue."
     /// The note's text (PokiApp's alert). Its translations are looked up by this exact English key.
     static let passcodeHeadsUpMessage: LocalizedStringResource = "This is the first time Poki starts automation since your iPhone restarted, so iOS will ask for your passcode. It may ask only when Poki first operates the phone. That screen belongs to iOS. Poki can’t see or read what you enter, and it asks only once until the next restart."
     private var passcodeHeadsUpReconnect = true
@@ -172,9 +176,9 @@ final class AppModel {
     /// Automation started in this boot: iOS will not ask again until the next restart.
     private func automationStarted() {
         InProcessWDA.gate.withLock { $0.startedThisBoot = true }
-        AutomationAllowance(boot: BootClock.current, at: Date()).save()
-        guard UserDefaults.standard.double(forKey: Self.automationBootKey) != BootClock.current else { return }
-        UserDefaults.standard.set(BootClock.current, forKey: Self.automationBootKey)
+        AutomationAllowance(boot: BootClock.current, at: Date()).save(in: storage)
+        guard storage.defaults.double(forKey: Self.automationBootKey) != BootClock.current else { return }
+        storage.defaults.set(BootClock.current, forKey: Self.automationBootKey)
     }
     /// Continue on the note: Poki turns on, and iOS's passcode screen comes next.
     func continueAfterPasscodeHeadsUp() {
@@ -221,7 +225,9 @@ final class AppModel {
 
     let host = AppCoreHost()
     let autoUnlock = AutoUnlock()
-    var supportsAutoUnlock: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+    // The 0.4.7 candidate keeps Automatic Unlock off, including existing opt-ins.
+    nonisolated static let automaticUnlockAvailable = false
+    var supportsAutoUnlock: Bool { Self.automaticUnlockAvailable && UIDevice.current.userInterfaceIdiom == .phone }
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
@@ -242,14 +248,14 @@ final class AppModel {
     /// The Live Activity during a talk with Poki: what the talk is doing, and End.
     private var talkActivity: TalkActivity?
 
-    /// Talk Here (TalkHereIntent): starts the talk with Poki in the background. false: the Live
-    /// Activity iOS asks for did not start, so neither did the talk.
-    func talkHere() async -> Bool {
-        await talkActivity?.startHere() ?? false
+    /// Talk Here (TalkHereIntent): starts the talk with Poki in the background.
+    func talkHere(presentSpeechPermission: SpeechPermissionPresenter) async -> TalkHereOutcome {
+        await talkActivity?.startHere(presentSpeechPermission: presentSpeechPermission) ?? .liveActivityUnavailable
     }
     let log = AppLog.shared
     private var eventsTask: Task<Void, Never>?
     private var handoffTimer: Timer?
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     private var sessionStartTask: Task<Void, Never>?
     private(set) var sessionStarting = false
     private var pendingPrepareForTask = false
@@ -301,7 +307,12 @@ final class AppModel {
     /// look, do or status run here as a relay call would be (the Debug probe's end-to-end check).
     /// The probe opened the in-process session itself (on the simulator there is no launcher), so
     /// PokiCore may act now.
-    func inProcessReadyForProbe() { inProcessSession = .open; host.update(runner: .running); probeDriven = true }
+    func inProcessReadyForProbe() {
+        inProcessSession = .open
+        clearLoopbackProblemIfNeeded()
+        host.update(runner: .running)
+        probeDriven = true
+    }
 
     func phoneTool(_ name: String, arguments: String) async -> (text: String, isError: Bool) {
         if let message = signer.installMessage { return (message, true) }
@@ -345,28 +356,49 @@ final class AppModel {
         return ChatModel.delegatedBusy
     }
 
+    private let localVPNAvailableOverride: Bool?
+    private var isLocalVPNAvailable: Bool { localVPNAvailableOverride ?? tunnel.available }
+    private var builtInShouldYieldToExternal: Bool {
+        setup.loopback == .builtIn && (!isLocalVPNAvailable || (loopback.isWorking && !tunnel.connected && !tunnel.busy))
+    }
+
     init(launcher: RunnerLauncher = RustLauncher(), pairer: DevicePairing = RustPairing(),
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
          systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
-         requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) {
+         requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted },
+         localVPNAvailable: Bool? = nil, codex: (any SubscriptionVoice)? = nil, storage: PokiStorage? = nil) {
+        let resolvedStorage = storage ?? .live
+        self.storage = resolvedStorage
+        self.setup = SetupState.load(storage: resolvedStorage)
+        self.identity = RelayIdentity(storage: resolvedStorage)
+        self.relayAddress = RelayAddress.saved(in: resolvedStorage)
+        self.relayEnabled = resolvedStorage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
+        self.classifierLevel = ApprovalClassifier.Level.saved(in: resolvedStorage)
+        self.askPokiTool = resolvedStorage.defaults.bool(forKey: AskPoki.onKey)
+        self.idleStopSeconds = resolvedStorage.defaults.object(forKey: Self.idleStopDefaultsName) as? Int ?? 60
+        self.pairingFileSeen = FileManager.default.fileExists(atPath: resolvedStorage.pairingFileURL.path)
         ActivityController.endAll()
+        self.localVPNAvailableOverride = localVPNAvailable
         self.imageMounted = imageMounted
         self.activity = ActivityController()
         self.automation = automation
         self.idleSessionPolicy = .forSystem(systemVersion)
         // iOS 27 lets a relaunched Poki open automation without the passcode while the boot's allowance
         // lasts, so a phone step from the background (Poki Anytime, an agent) does not wait for Poki in front.
-        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved?.covers(boot: BootClock.current, at: Date()) == true {
+        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved(in: resolvedStorage)?.covers(boot: BootClock.current, at: Date()) == true {
             InProcessWDA.gate.withLock { $0.startedThisBoot = true }
         }
         self.requiresDiskImageCheck = requiresDiskImageCheck ?? !Self.onSimulator
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
-        if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
-        else { SetupVault.mirrorPairingFromContainer() }
-        let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()))
+        if SetupVault.restorePairingIfMissing(storage: resolvedStorage) { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
+        else { SetupVault.mirrorPairingFromContainer(storage: resolvedStorage) }
+        let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()), storage: resolvedStorage)
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
+        // Production instances (`storage == nil`) bind the live singleton CodexVoice bridge; isolated storage
+        // instances must inject an explicit SubscriptionVoice bridge instead of falling back to `.shared`.
+        let subscriptionBridge: (any SubscriptionVoice)? = codex ?? (storage == nil ? CodexVoice.shared : nil)
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
                            phoneTool: { name, arguments, cancellation in
                                #if DEBUG && targetEnvironment(simulator)
@@ -385,7 +417,9 @@ final class AppModel {
                                }
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
-                           connection: VoiceModel.connection)
+                           connection: VoiceModel.connection,
+                           codex: subscriptionBridge,
+                           storage: resolvedStorage)
         self.launcher = launcher
         self.pairer = pairer
         // inFront starts true before the first scene callback, including a background launch.
@@ -447,7 +481,7 @@ final class AppModel {
         // Allow and Deny on the Live Activity run in this process and come straight here.
         ApprovalIntentBridge.install { [weak self] decision in
             guard let self else { return false }
-            self.decide(decision)
+            await self.decide(decision)
             return true
         }
         // The same answers from the approval notification's own buttons.
@@ -473,8 +507,14 @@ final class AppModel {
         // When Poki detects the owner's own VPN it stops: the tunnel says so here, and the problem clears when it is back.
         tunnel.onAttention = { [weak self] text in
             guard let self else { return }
-            if let text { problem = text; tunnelAttention = text }
-            else if problem == tunnelAttention { problem = nil; tunnelAttention = nil }
+            if let text {
+                guard !self.loopback.isWorking, !self.hasOpenInProcessSession, !self.canStartTasks else { return }
+                self.problem = text
+                self.tunnelAttention = text
+            } else if self.problem == self.tunnelAttention {
+                self.problem = nil
+                self.tunnelAttention = nil
+            }
         }
         Task { [weak self] in
             guard let self else { return }
@@ -483,7 +523,7 @@ final class AppModel {
         }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
-        if UserDefaults.standard.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
+        if resolvedStorage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
             wantsOn = true
             log.add("session", "installed by Poki Setup: Poki turns on by itself")
         }
@@ -495,18 +535,24 @@ final class AppModel {
         SessionStore.shared.connectorAgent = { [identity] hash in
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
-        if UserDefaults.standard.string(forKey: "pokiSample") != nil { loadSample() }
-        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+        if resolvedStorage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
+        terminationObserver = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
         // Installed over the local-VPN build (both use one bundle ID): this build has only external
         // connections, so a saved built-in choice becomes the external one. Otherwise Setup showed the
         // step done while Turn on said this build has no local VPN.
-        if setup.loopback == .builtIn, !tunnel.available {
+        if setup.loopback == .builtIn, !isLocalVPNAvailable {
             setup.loopback = .proxy
-            setup.save()
+            setup.save(storage: resolvedStorage)
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    isolated deinit {
+        idleTimer?.invalidate()
+        handoffTimer?.invalidate()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     private var canAutoUnlock: Bool {
@@ -738,6 +784,7 @@ final class AppModel {
                 self.log.add("runner", ok ? "in-process session ready for \(why) (generation \(result["generation"] ?? 0), \((result["reused"] as? Bool) == true ? "already open" : "opened"), \(seconds) s\(warm))"
                                           : "in-process session not ready for \(why): \(result["code"] ?? "unknown") after \(seconds) s")
                 if ok {
+                    self.clearLoopbackProblemIfNeeded()
                     self.automationRevision += 1
                     self.log.add("session-timing", String(format: "session_ready uptime=%.6f", ProcessInfo.processInfo.systemUptime))
                     self.automationStarted()
@@ -821,13 +868,19 @@ final class AppModel {
         // A pairing file and disk image Poki Setup put in the container while Poki was running (or
         // since it last came to the front) count at once: mirrored to the Keychain, the disk image
         // checked again, and the pairing checked as soon as the loopback answers.
-        SetupVault.mirrorPairingFromContainer()
+        SetupVault.mirrorPairingFromContainer(storage: storage)
         lookForHandedPairing()
         handoffTick()
         diskImage.notice()
         warmInProcess("Poki came to the front")
         openWhileInFront("Poki came to the front")
         closeBecausePokiOpened()
+        if let requestedAt = pendingLiveActivityReturnAt {
+            pendingLiveActivityReturnAt = nil
+            if Date().timeIntervalSince(requestedAt) < 5 {
+                returnToTargetAppFromLiveActivity()
+            }
+        }
         loopback.resume()
         // Swiped away, ended by iOS, or Poki turned on from the background (where iOS starts none):
         // the Live Activity comes back while Poki is on, so the next thing that needs the owner pops up.
@@ -875,6 +928,7 @@ final class AppModel {
         }
         switch app.install {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
+        case .appStore: return "Install LocalDevVPN from the App Store and tap Connect in it."
         case .toggle(let setting): return "In \(app.name), set \(setting), and keep \(app.name) connected."
         case .snippet: return "In Poki, open Setup > Connect to this iPhone > \(app.name) and add the lines it shows to \(app.name)."
         case .appStore: return "In \(app.name), tap Connect, and keep \(app.name) connected."
@@ -884,6 +938,7 @@ final class AppModel {
     /// The agent runner and Screen History need to hear when the local connection changes.
     func wentToBackground() {
         inFront = false
+        cancelLiveActivityReturn()
         InProcessWDA.gate.withLock { $0.inFront = false }
         // The idle time counts from here: Poki in front was not idle (it stands by only away from it).
         if sessionOn { lastAgentActivity = max(lastAgentActivity, Date()) }
@@ -912,7 +967,7 @@ final class AppModel {
     /// session at work, C like one standing by (the loopback check stays live, so a simulator shows it
     /// off). A sample relay address (not saved) and, on a simulator, two agents are added when there are none.
     private func loadSample() {
-        let scene = UserDefaults.standard.string(forKey: "pokiSample")?.uppercased() ?? "B"
+        let scene = storage.defaults.string(forKey: "pokiSample")?.uppercased() ?? "B"
         // PIN: setup's pairing page with a sample code, as if Settings had asked for one.
         if scene == "PIN" { pairing = .pin("482913"); return }
         let now = Date()
@@ -957,6 +1012,7 @@ final class AppModel {
         if method == .proxy { tunnel.disconnect() }
         setup.loopback = method
         setup.proxyApp = nil
+        clearLoopbackProblemIfNeeded()
         loopback.check()
     }
 
@@ -1081,10 +1137,17 @@ final class AppModel {
             return
         }
         if setup.loopback == .none {
-            problem = "Choose and enable a local connection first (Setup)."
-            return
+            if loopback.isWorking {
+                setup.loopback = .proxy
+            } else {
+                problem = "Choose and enable a local connection first (Setup)."
+                return
+            }
         }
-        if setup.loopback == .builtIn, !tunnel.connected {
+        if builtInShouldYieldToExternal {
+            setup.loopback = .proxy
+        }
+        if setup.loopback == .builtIn, !tunnel.connected, !loopback.isWorking {
             guard reconnectLocal else {
                 problem = "The local connection is off. Turn Poki on to reconnect, or choose an external connection in Setup."
                 return
@@ -1141,7 +1204,7 @@ final class AppModel {
         #endif
         // The chat's own model loop needs no relay; agents on a computer do.
         let relay = activeRelay
-        guard relay != nil || ModelKeys.hasUsableKey else { problem = Self.noRelay; return nil }
+        guard relay != nil || ModelKeys.hasUsableKey(in: storage) else { problem = Self.noRelay; return nil }
         return (pairing, relay)
     }
 
@@ -1293,6 +1356,7 @@ final class AppModel {
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
+        for approval in approvals { ApprovalNotice.clear(approval.id) }
         core.stop()
         localListener?.stop()
         launcher.stop()
@@ -1309,6 +1373,7 @@ final class AppModel {
         sessionOn = false
         if awaitingAuthorization { host.update(runner: .failed("Poki was turned off", fix: nil)) }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         stepUnderWay = nil
         runner = .idle
         relayStatus = .off
@@ -1372,6 +1437,7 @@ final class AppModel {
             return
         }
         log.add("session", "\(reason): the talk and the task stop")
+        endLiveActivityTaskGeneration()
         if let chat, chat.running { chat.stop() }
         else { activity.stopRun() }
         for approval in approvals { resolve(approval, approved: false) }
@@ -1478,6 +1544,7 @@ final class AppModel {
     private func standBy(reason: String?, keepingDone: Bool = false) {
         preparingCellularImage = false
         runnerPaused = true
+        endLiveActivityTaskGeneration()
         runner = RunnerStatus(state: "standby", detail: reason.map { "\($0). It starts again when an agent asks." } ?? "It starts when an agent asks.")
         host.update(runner: .starting(automationPath == .inProcess ? "opening the automation session" : "starting the runner"))
         host.setPaused(true)
@@ -1503,9 +1570,55 @@ final class AppModel {
     /// Task endings whose return to the app the task began in is still under way: that return needs
     /// the session, so Poki coming forward because of it does not close the session under it.
     private var endingTasks = 0
+    private var pendingLiveActivityReturnAt: Date?
+    private(set) var liveActivityReturnTask: Task<Void, Never>?
+    private var liveActivityReturnID: UUID?
+    private var liveActivityTaskGeneration = 0
+
+    private var canReturnFromLiveActivity: Bool {
+        sessionOn && !runnerPaused
+            && (automationPath != .inProcess || inProcessSession == .open)
+            && (chatTaskActive || !outsideAgentsAtWork.isEmpty)
+            && approvals.isEmpty && handoffText == nil
+            && !drivesDuoCompanion && activitySplitViewSession == nil
+    }
+
+    private func cancelLiveActivityReturn() {
+        pendingLiveActivityReturnAt = nil
+        liveActivityReturnID = nil
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = nil
+    }
+
+    private func endLiveActivityTaskGeneration() {
+        liveActivityTaskGeneration &+= 1
+        cancelLiveActivityReturn()
+    }
+
+    private func returnToTargetAppFromLiveActivity() {
+        guard canReturnFromLiveActivity else { return }
+        let generation = liveActivityTaskGeneration
+        let id = UUID()
+        liveActivityReturnID = id
+        liveActivityReturnTask?.cancel()
+        liveActivityReturnTask = Task { [weak self, core, log] in
+            defer {
+                if let self, self.liveActivityReturnID == id {
+                    self.liveActivityReturnID = nil
+                    self.liveActivityReturnTask = nil
+                }
+            }
+            let line = await core.bringBackTargetApp(why: "from the Live Activity", shouldRun: { @MainActor [weak self] in
+                guard let self else { return false }
+                return self.liveActivityTaskGeneration == generation && self.inFront && self.canReturnFromLiveActivity
+            })
+            if let line { log.add("app", line) }
+        }
+    }
 
     private func closeBecausePokiOpened() {
         guard automationPath == .inProcess, sessionOn, !runnerPaused, inProcessSession == .open, !inProcessWarming,
+              !chatTaskActive, outsideAgentsAtWork.isEmpty, !voice.isOn,
               stepUnderWay == nil, approvals.isEmpty, !probeDriven, endingTasks == 0 else { return }
         log.add("runner", "Poki is in front: closing the automation session at once; the banner goes with it")
         closeInProcess("Poki in front", keepingSession: idleSessionPolicy == .pauseAutomation)
@@ -1522,6 +1635,7 @@ final class AppModel {
     private func tellOwnerAgentsWereHere() {
         let agents = Set(outsideAgentsAtWork.values).sorted()
         outsideAgentsAtWork.removeAll()
+        endLiveActivityTaskGeneration()
         for agent in agents { tellOwner(agentWasHere: agent) }
     }
 
@@ -1647,6 +1761,28 @@ final class AppModel {
         if starts { launcher.restart() }
     }
 
+    static func isLoopbackProblem(_ text: String) -> Bool {
+        text.contains("local connection") || text.contains("local VPN")
+    }
+
+    func suppressesLoopbackProblem(_ text: String) -> Bool {
+        let isLoopbackOrTunnel = text == tunnelAttention || Self.isLoopbackProblem(text)
+        guard isLoopbackOrTunnel else { return false }
+        return loopback.isWorking || hasOpenInProcessSession || canStartTasks || mountedImageStandsIn
+    }
+
+    private func clearLoopbackProblemIfNeeded() {
+        if let tunnelAttention, problem == tunnelAttention {
+            problem = nil
+            self.tunnelAttention = nil
+            return
+        }
+        tunnelAttention = nil
+        if let problem, Self.isLoopbackProblem(problem) {
+            self.problem = nil
+        }
+    }
+
     private var hasStaleLoopbackFailure: Bool {
         if runner.state == "waiting_network" {
             return runner.code != "network" && runner.code != "ddi_timeout"
@@ -1663,9 +1799,12 @@ final class AppModel {
         // up before, or by Poki Setup) provides it. The external connection is the recorded choice, so
         // Setup's loopback step is done and Turn on does not ask to choose one (0.2.8 build 91: the step
         // never let the owner continue although the loopback was on).
-        if loopback.isWorking, setup.loopback == .none {
-            setup.loopback = .proxy
-            log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
+        if loopback.isWorking {
+            if setup.loopback == .none || builtInShouldYieldToExternal {
+                setup.loopback = .proxy
+                log.add("loopback", "10.7.0.1 answers already: the external connection is the recorded choice")
+            }
+            clearLoopbackProblemIfNeeded()
         }
         if !loopback.isWorking, new != .checking {
             loopbackDropped = true
@@ -1746,6 +1885,7 @@ final class AppModel {
         switch status.state {
         case "running" where status.code == "local_ddi":
             servicesSilent = false
+            clearLoopbackProblemIfNeeded()
             // Only the mounted image was found: nothing reached the phone, so the pairing and the
             // setup steps stay as they were until the session opens (warmInProcess).
             log.add("runner", "the loopback did not answer; using the mounted developer disk image")
@@ -1754,6 +1894,7 @@ final class AppModel {
             if pairingTrouble != nil { log.add("pairing", "accepted again") }
             pairingTrouble = nil
             servicesSilent = false
+            clearLoopbackProblemIfNeeded()
             pairingVerifiedAt = Date()
             // The disk image mounted and the runner is starting, so Developer Mode is on; a running
             // runner means UI Automation is on too. Setup's confirm steps tick themselves (a pairing
@@ -1827,6 +1968,7 @@ final class AppModel {
         switch event {
         case .session(let signal):
             lastShot = nil
+            activity.clearThumbnail()
             if case .ended(let id) = signal {
                 // Only that session's own task ends: the core returns the phone to where it began
                 // (nothing happens when another session holds the task), and the automation session
@@ -1842,8 +1984,9 @@ final class AppModel {
                 }
             }
         case .relay(let status):
-            if status != relayStatus { log.add("relay", "\(status)") }
-            relayStatus = status
+            let effective: RelayStatus = relayEnabled ? status : .off
+            if effective != relayStatus { log.add("relay", "\(effective)") }
+            relayStatus = effective
         case .toolStarted(_, let summary, let session):
             // A step of an outside agent's own session (not the chat's): the owner is told when it is through.
             if let session, let client = SessionStore.shared.outsideClient(ofMCPSession: session) { outsideAgentsAtWork[session] = client }
@@ -1891,10 +2034,11 @@ final class AppModel {
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }
             activity.setThumbnail(thumbnail)
-            if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
+            lastShot = thumbnail.flatMap(UIImage.init(data:))
             closeAfterTalk()
         case .approvalRequested(let approval):
-            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
+            let origin = ApprovalClassifier.origin(voiceOn: voice.isOn, outsideSession: approval.sourceSession)
+            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn, origin: origin, storage: storage) {
             case .allow:
                 // The rules were on when Poki started and asking has been turned off since.
                 checking.append(approval)
@@ -1904,8 +2048,10 @@ final class AppModel {
                 // The chat model checks it first: no Live Activity card, no notification, no tap. The chat shows it.
                 checking.append(approval)
                 log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
+                let storage = self.storage
                 Task { [weak self] in
-                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
+                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved(in: storage),
+                                                                  voice: self?.voice.lines ?? [], origin: origin, storage: storage)
                     guard let self, self.checking.contains(where: { $0.id == approval.id }) else { return }
                     self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
                     if verdict.allowed || reply {
@@ -1940,6 +2086,7 @@ final class AppModel {
             lastAgentActivity = Date(); lastStepAt = Date()
             let shown = PokiActivityAttributes.Handoff.Kind(rawValue: kind) ?? .other
             handoffText = text ?? Self.handoffWording(shown)
+            cancelLiveActivityReturn()
             log.add("handoff", "the agent handed over \(id) (\(kind))\(app.map { " in \($0)" } ?? ""): \(handoffText ?? "")")
             activity.update { state in
                 state.phase = .handoff
@@ -1969,19 +2116,24 @@ final class AppModel {
 
     // MARK: The chat's tools
 
+    func finishEmptyDo(localSession: String? = nil) async -> String? {
+        await core.finishTask(switching: duoCompanionTask == nil, localSession: localSession)
+    }
+
     /// A tool call from the chat's model loop. Poki turns on first when it is off (the runner then starts
     /// on this call, like for an agent's first request); when it cannot, the answer says why.
     /// The chat's turn ended: the phone goes back to the app the task began in, and the log says how.
-    func finishTask(switching: Bool = true, then: (@MainActor () -> Void)? = nil) {
+    func finishTask(switching: Bool = true, localTask: String? = nil, then: (@MainActor () -> Void)? = nil) {
         chatReleasesRun()
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
         lastShot = nil
         let companion = duoCompanionTask
         // The phone goes back to where the task began first: that still needs the session.
         endingTasks += 1
         Task { [weak self, core, log] in
-            if let line = await core.finishTask(switching: switching && companion == nil) { log.add("runner", line) }
+            if let line = await core.finishTask(switching: switching && companion == nil, localTask: localTask) { log.add("runner", line) }
             if let companion, self?.duoCompanionTask == companion {
                 PKInProcess.shared().endDuoCompanionTask()
                 self?.duoCompanionTask = nil
@@ -1990,6 +2142,10 @@ final class AppModel {
             self?.closeAfterTask("the task ended")
             then?()
         }
+    }
+
+    func clearTaskScreenshots(localTask: String) {
+        core.clearTaskScreenshots(localTask: localTask)
     }
 
     func finishSplitViewTask(localSession: String, pairConfirmed: Bool = true, authorizationDeclined: Bool = false, cancelled: () -> Bool = { false }) async {
@@ -2001,6 +2157,8 @@ final class AppModel {
         }
         if chatTaskActive { lastAgentActivity = Date() }
         chatTaskActive = false
+        endLiveActivityTaskGeneration()
+        lastShot = nil
         if !authorizationDeclined { closeAfterTask("the Split View task ended") }
         guard activitySplitViewSession == localSession else { return }
         activitySplitViewSession = nil
@@ -2036,7 +2194,11 @@ final class AppModel {
     /// Activity's quiet wait finishes the run, as it does an outside agent's.
     func chatReleasesRun() { activity.setChatOwnsCompletion(false) }
 
-    func chatTaskStopped() { activity.stopRun() }
+    func chatTaskStopped() {
+        endLiveActivityTaskGeneration()
+        lastShot = nil
+        activity.stopRun()
+    }
 
     /// The chat's task began (Poki is in front): the Live Activity is there for it, with no old plan.
     /// The chat says when the task ends (chatTaskEnded), so until then a pause between steps, while the
@@ -2044,6 +2206,7 @@ final class AppModel {
     func chatTaskBegan(splitViewSession: String? = nil) async {
         log.add("session-timing", String(format: "task_submitted uptime=%.6f", ProcessInfo.processInfo.systemUptime))
         chatTaskActive = automationPath == .inProcess
+        endLiveActivityTaskGeneration()
         if chatTaskActive { lastAgentActivity = Date() }
         if automationPath == .inProcess {
             let native = PKInProcess.shared()
@@ -2051,6 +2214,7 @@ final class AppModel {
             duoCompanionTask = splitViewSession == nil && native.beginDuoCompanionTask() ? UUID() : nil
         }
         lastShot = nil
+        activity.clearThumbnail()
         activitySplitViewSession = splitViewSession
         activity.setChatOwnsCompletion(true)
         if drivesDuoCompanion {
@@ -2096,10 +2260,11 @@ final class AppModel {
     }
 
     /// End the task, return to Poki and finish its Live Activity.
-    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil) {
+    func chatTaskEnded(reply: String?, session: String, acted: Bool, inSplitView: Bool = false, result: String? = nil, task: String? = nil, localTask: String? = nil) {
         lastShot = nil
         guard acted else {
-            if !inSplitView { finishTask() }
+            if !inSplitView { finishTask(localTask: localTask) }
+            else if let localTask { clearTaskScreenshots(localTask: localTask) }
             // A turn that never touched the phone: nothing ran, so nothing is left showing as working.
             activity.update { state in
                 state.plan = nil
@@ -2113,7 +2278,7 @@ final class AppModel {
         // On a Dynamic Island the activity's own pop-up says the task is over: no banner on top of it.
         let islandTold = activity.finishNow(alert: true, result: result, task: task)
         if !inSplitView {
-            finishTask { [weak self] in
+            finishTask(localTask: localTask) { [weak self] in
                 guard !islandTold else { return }
                 // A task ends in Poki or with a notice that breaks through: when the phone could not be
                 // brought back to Poki, the owner is told where they are.
@@ -2149,9 +2314,10 @@ final class AppModel {
     }
 
     /// `conversation`: the chat a `skills` call comes from (a note keeps it as where it was heard).
-    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
+    func runTool(_ name: String, arguments: String, localSession: String? = nil, expectedApps: Set<String>? = nil, conversation: String? = nil, localTask: String? = nil, offeredMemoryIDs: Set<String> = [], onActionSucceeded: PokiCore.ActionSucceeded? = nil) async -> PokiCore.ToolAnswer {
         if name == "status" || name == "skills" || name == "routines" || name == "screen_history" { return await core.callTool(name, arguments: arguments, localSession: localSession, conversation: conversation) }
-        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded) }
+        if name == "get_screenshot" { return await core.callTool(name, arguments: arguments, localTask: localTask) }
+        if probeDriven { return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded) }
         if !sessionOn {
             if !sessionStarting { startSession() }
             if let task = sessionStartTask { await task.value }
@@ -2164,7 +2330,7 @@ final class AppModel {
             return PokiCore.ToolAnswer(text: "not_sent: Poki could not turn on: \(why) Nothing was sent. Tell the owner what to fix.", jpeg: nil, isError: true)
         }
         lastAgentActivity = Date(); lastStepAt = Date()
-        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, onActionSucceeded: onActionSucceeded)
+        return await core.callTool(name, arguments: arguments, localSession: localSession, expectedApps: expectedApps, localTask: localTask, offeredMemoryIDs: offeredMemoryIDs, onActionSucceeded: onActionSucceeded)
     }
 
     func itemPictures(for card: ResultCard, localTask: String) async -> [String: Data]? {
@@ -2191,7 +2357,7 @@ final class AppModel {
         let detail: String
         if ApprovalClassifier.modelAnswered(approval.id), let verdict = ApprovalClassifier.verdicts[approval.id] {
             detail = (approved == true ? AppLocalization.text(LocalizedStringResource("Allowed automatically")) : AppLocalization.text(LocalizedStringResource("Not allowed automatically"))) + (verdict.reason.isEmpty ? "" : ": \(verdict.reason)")
-        } else if ApprovalClassifier.mode == .off, !ApprovalClassifier.requiresOwner(approval) {
+        } else if ApprovalClassifier.mode(in: storage) == .off, !ApprovalClassifier.requiresOwner(approval) {
             detail = AppLocalization.text(LocalizedStringResource("Allowed, asking is off"))
 
         } else {
@@ -2207,21 +2373,19 @@ final class AppModel {
                              caller: currentCaller, kind: .approval, detail: detail, why: approval.reason)
     }
 
-    /// Each request is answered by the owner on the Live Activity, or on a notification when there is none.
+    /// The island asks first. The notification is available if nobody answers before iOS folds it.
     private func askOwner(_ approval: PendingApproval) {
         approvals.append(approval)
+        cancelLiveActivityReturn()
         log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); Live Activity \(activity.isRunning ? "running" : "NOT running: \(activity.lastError ?? "no error")")")
         let caller = currentCaller
         activity.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?"; $0.caller = caller }
-        // One surface per approval. With a Live Activity, its alert is the ask (Allow and Don't Allow
-        // on the expanded island and the Lock Screen card): a banner on top of it put two asks over the
-        // top of the screen, and a tap on the banner opens Poki in the middle of the task. The
-        // time-sensitive notification is for when there is no Live Activity to pop up: off in
-        // Settings, dismissed, or Poki turned on from the background, where iOS starts none.
         if activity.isRunning {
-            log.add("approval", "asked on the Live Activity only, no notification")
+            let delay = ActivityController.hasDynamicIsland() ? ApprovalNotice.islandReminderDelay : Self.nonIslandNoticeDelay
+            ApprovalNotice.post(approval, after: delay)
+            log.add("approval", "asked on the Live Activity with fallback notification after \(Int(delay)) s")
         } else {
-            ApprovalNotice.post(approval, caller: caller)
+            ApprovalNotice.post(approval, after: 0)
         }
     }
 
@@ -2233,13 +2397,14 @@ final class AppModel {
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
+        ApprovalNotice.clear(approval.id)
         core.resolveApproval(id: approval.id, approved: approved)
     }
 
     /// Don’t Ask Again on an approval's card: this step goes through and approvals are off from now on.
     func stopAsking(_ approval: PendingApproval) {
         turnApprovalsOff()
-        core.resolveApproval(id: approval.id, approved: true)
+        resolve(approval, approved: true)
     }
 
     private func turnApprovalsOff() {
@@ -2248,24 +2413,34 @@ final class AppModel {
         for observer in stopAskingObservers { observer() }
     }
 
+    @ObservationIgnored private let mailboxNotifications = MailboxNotifications()
+
+    final class MailboxNotifications {
+        private var tokens: [Int32] = []
+
+        func observe(_ name: String, action: @escaping @MainActor @Sendable () -> Void) {
+            var token: Int32 = 0
+            let status = notify_register_dispatch(name, &token, .main) { _ in
+                MainActor.assumeIsolated { action() }
+            }
+            if status == NOTIFY_STATUS_OK { tokens.append(token) }
+        }
+
+        deinit {
+            for token in tokens { notify_cancel(token) }
+        }
+    }
+
     private func listenForApprovals() {
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.drainApprovals() }
-        }, ApprovalMailbox.notification as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.stopFromOutside(AppModel.liveActivityStop) }
-        }, ApprovalMailbox.stopRunner as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.handoffDone() }
-        }, ApprovalMailbox.handoffDone as CFString, nil, .deliverImmediately)
+        mailboxNotifications.observe(ApprovalMailbox.notification) { [weak self] in
+            Task { @MainActor [weak self] in await self?.drainApprovals() }
+        }
+        mailboxNotifications.observe(ApprovalMailbox.stopRunner) { [weak self] in
+            self?.stopFromOutside(AppModel.liveActivityStop)
+        }
+        mailboxNotifications.observe(ApprovalMailbox.handoffDone) { [weak self] in
+            self?.handoffDone()
+        }
     }
 
     /// The person tapped "Continue" on the Live Activity's "Your turn" card.
@@ -2306,34 +2481,40 @@ final class AppModel {
     }
 
     /// Decisions an intent left in the App Group mailbox because it ran outside the app.
-    func drainApprovals() {
-        for decision in ApprovalMailbox.drain() { decide(decision) }
+    func drainApprovals() async {
+        for decision in ApprovalMailbox.drain() { await decide(decision) }
     }
 
-    /// A decision from the Live Activity. The card shows the answer at once (Allowing, Denying).
-    /// Allow is tapped on the expanded Dynamic Island, which takes about a second to collapse; input
-    /// sent at once can land on it (iOS then opens Poki). So the Live Activity's decisions reach
-    /// PokiCore after a short pause, the app's own buttons at once.
-    func decide(_ decision: ApprovalDecision) {
+    /// A decision from the Live Activity or its fallback notification. Restore the progress display
+    /// immediately. On a Dynamic Island phone, let the island fold before PokiCore sends input so the
+    /// approved tap can land in the target app. On iPad and notch phones there is no island to
+    /// collapse, and awaiting resolution before the intent returns prevents RunningBoard from
+    /// suspending Poki before PokiCore receives the decision.
+    func decide(_ decision: ApprovalDecision) async {
         // Don’t Ask Again is the owner's word about all later steps too, so it counts for a card whose
         // approval has already ended.
         if decision.stopAsking { turnApprovalsOff() }
         // A tap on an approval that already ended (answered in the app, or timed out) does nothing.
         guard approvals.contains(where: { $0.id == decision.approvalID }) else { return }
+        guard activity.state.phase != .deciding || activity.state.approval?.id != decision.approvalID else { return }
+        ApprovalNotice.clear(decision.approvalID)
+        lastApprovalAnswered = Date()
         log.add("approval", "\(decision.approved ? "allowed" : "denied") \(decision.approvalID) on the Live Activity\(decision.stopAsking ? ", asking off" : "")")
         activity.update { state in
             guard state.approval?.id == decision.approvalID else { return }
             state.phase = .deciding
             state.decision = decision.approved
         }
-        Task { @MainActor in
+        if decision.waitForIslandCollapse, ActivityController.hasDynamicIsland() {
             try? await Task.sleep(for: .seconds(Self.islandCollapse))
-            core.resolveApproval(id: decision.approvalID, approved: decision.approved)
         }
+        core.resolveApproval(id: decision.approvalID, approved: decision.approved)
     }
 
     /// How long the expanded island takes to fold after a tap on its button.
     static let islandCollapse: TimeInterval = 1.5
+    /// Delay before posting a fallback approval notification after a non-island Live Activity banner dismisses.
+    static let nonIslandNoticeDelay: TimeInterval = 7
 
     /// A launcher failure as the Live Activity's content line, in English (the face words it in the
     /// system's language). The codes the launcher sends (native/launcher/src/device.rs, ddi.rs,
@@ -2377,12 +2558,13 @@ final class AppModel {
     /// A pairing file as bytes: from Files, AirDrop, a `poki://pairing` link or Poki Setup on a computer.
     func importPairingFile(_ data: Data, how: String) throws {
         try Self.checkPairingFileFormat(data)
-        try data.write(to: AppFiles.pairingFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try FileManager.default.createDirectory(at: storage.pairingFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: storage.pairingFileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         // Chosen by hand: it replaces the phone's own pairing as well.
-        try? FileManager.default.removeItem(at: AppFiles.phonePairingFile)
+        try? FileManager.default.removeItem(at: storage.phonePairingFileURL)
         pairingFileSeen = true
-        SetupVault.storePairing(data)
-        setup.pairingFile = AppFiles.pairingFile.path
+        SetupVault.storePairing(data, storage: storage)
+        setup.pairingFile = storage.pairingFileURL.path
         pairingTrouble = nil; pairingVerifiedAt = nil
         pairingNote = AppLocalization.text(LocalizedStringResource("Pairing file received."))
         log.add("pairing", "pairing file \(how)")
@@ -2501,6 +2683,15 @@ final class AppModel {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host() {
+        case "activity":
+            guard canReturnFromLiveActivity else { return .continueRouting }
+            if inFront {
+                pendingLiveActivityReturnAt = nil
+                returnToTargetAppFromLiveActivity()
+            } else {
+                pendingLiveActivityReturnAt = Date()
+            }
+            return .ignored
         case "pairing":
             guard scanned || canAskAboutLink() else { return .ignored }
             if let text = item("data"), let data = Data(base64URL: text) {
@@ -2567,7 +2758,7 @@ final class AppModel {
         do { try pairingKeepAlive.start() }
         catch { log.add("pairing", "keep-alive did not start (\(error.localizedDescription)); iOS may stop the pairing while Settings is open") }
         do {
-            try pairer.start(hostName: "Poki", saveTo: AppFiles.pairingFile) { [weak self] event in
+            try pairer.start(hostName: "Poki", saveTo: storage.pairingFileURL) { [weak self] event in
                 Task { @MainActor in self?.pairingChanged(event) }
             }
         } catch { pairingChanged(.failed("\(error)")) }
@@ -2623,8 +2814,8 @@ final class AppModel {
             try? (url as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
             setup.pairingFile = url.path
             if let data = try? Data(contentsOf: url) {
-                SetupVault.storePairing(data)
-                try? data.write(to: AppFiles.phonePairingFile, options: .completeFileProtectionUntilFirstUserAuthentication)
+                SetupVault.storePairing(data, storage: storage)
+                try? data.write(to: storage.phonePairingFileURL, options: .completeFileProtectionUntilFirstUserAuthentication)
             }
             pairingTrouble = nil; pairingVerifiedAt = nil
             log.add("pairing", "paired on the phone")
@@ -2755,6 +2946,8 @@ final class AppModel {
             return (AppLocalization.text(LocalizedStringResource("iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode.")), false)
         case .failed(let code, _) where loopback.cellularOnly:
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again.")), false)
+        case .failed(let code, _) where runner.loopbackHandshakeDropped == true:
+            return (AppLocalization.text(LocalizedStringResource("The loopback connection closed during the opening handshake, and Poki could not open its own automation session (\(code)). Check the loopback in Setup, then try again.")), true)
         case .failed(let code, _):
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again.")), true)
         }
@@ -2784,13 +2977,13 @@ final class AppModel {
     func setRelay(_ text: String) -> Bool {
         guard let address = RelayAddress(text) else { return false }
         guard address != relayAddress else { return true }
-        RelayAddress.saved = address
+        RelayAddress.setSaved(address, in: storage)
         let first = relayAddress == nil
         relayAddress = address
         log.add("relay", "address set to \(address.origin.host() ?? "?")")
         if problem == Self.noRelay { problem = nil }
         // A relay just set is on.
-        if first || !relayEnabled { relayEnabled = true; UserDefaults.standard.set(true, forKey: "relayEnabled") }
+        if first || !relayEnabled { relayEnabled = true; storage.defaults.set(true, forKey: "relayEnabled") }
         if sessionOn {
             core.stop()
             core.start(relay: address)
@@ -2875,10 +3068,12 @@ struct AutomationAllowance: Equatable {
         boot == current && now >= at && now.timeIntervalSince(at) < Self.lasts
     }
 
-    static var saved: AutomationAllowance? {
-        guard let pair = UserDefaults.standard.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
+    static var saved: AutomationAllowance? { saved(in: .live) }
+
+    static func saved(in storage: PokiStorage = .live) -> AutomationAllowance? {
+        guard let pair = storage.defaults.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
         return AutomationAllowance(boot: pair[0], at: Date(timeIntervalSince1970: pair[1]))
     }
 
-    func save() { UserDefaults.standard.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
+    func save(in storage: PokiStorage = .live) { storage.defaults.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
 }

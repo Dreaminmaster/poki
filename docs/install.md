@@ -1,6 +1,6 @@
 # Install
 
-This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is no longer updated and stays available as it is. To put the Poki app on an iPhone,
+This guide installs Poki MCP from source, which needs full Xcode. Poki MCP is frozen for features and receives only targeted security maintenance. To put the Poki app on an iPhone,
 use the [install-poki skill](../skills/install-poki/SKILL.md) or Poki Setup instead, as the
 [README](../README.md#install-poki-on-your-iphone) describes; that path does not need Xcode.
 
@@ -92,10 +92,10 @@ tool_timeout_sec = 900
 Paste this prompt into your agent:
 
 ```text
-Install https://github.com/JosssphZhou/poki following its root AGENTS.md, including the MCP skill, and stop whenever you need me to act.
+Install https://github.com/JosssphZhou/poki following docs/install-with-an-agent.md, including the MCP skill, and stop whenever you need me to act.
 ```
 
-[AGENTS.md](../AGENTS.md) covers prerequisites, source setup, the background daemon, registration in your own client, skill installation, iPhone pairing, Poki Agent, optional iMessage, and verification. It names each user-only stop, including Xcode setup, Trust This Computer, Developer Mode, UI Automation, and model login.
+[docs/install-with-an-agent.md](install-with-an-agent.md) covers prerequisites, source setup, the background daemon, registration in your own client, skill installation, iPhone pairing, Poki Agent, optional iMessage, and verification. It names each user-only stop, including Xcode setup, Trust This Computer, Developer Mode, UI Automation, and model login.
 
 The default MCP `tools/list` exposes the tools for phone tasks. `poki_mcp_status.total_tools` reports the size of the complete catalog. Set `POKI_MCP_TOOLS=all` in the client's environment and reconnect to discover the complete catalog. Read and report the actual values. Neither count proves that the phone is ready.
 
@@ -140,8 +140,8 @@ To use a physical iPhone, first pair it with your Mac over USB. After that, keep
 - Where iOS asks for the passcode before automation (the XCTest session), it asks when you tap Start,
   while you are there, not in the middle of a task. A session that fails to open is reopened by Poki itself.
 - Before an update installs, Poki ends its Live Activity and background task.
-- Settings is grouped into Connection, Models, Agents, Memory and Appearance. Connection holds
-  Approvals and Signing & Updates, where the app updates itself.
+- Settings is grouped into Setup, Models, Safety and Access (including Approvals and External
+  Connections), Memory Library, Signing & Updates (where the app updates itself), and Appearance.
 - How Poki picks its control method, and what happens without a loopback: see
   [ios-loopback.md](ios-loopback.md#which-method-does-the-work).
 

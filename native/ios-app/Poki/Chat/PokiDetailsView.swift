@@ -17,7 +17,11 @@ struct PokiDetailsView: View {
     @Environment(\.dismiss) private var dismiss
     var openSetup: () -> Void
     /// Opens a run in the chat (from the Activity Log).
-    var openSession: (String) -> Void = { _ in }
+    var openSession: (String, UUID?) -> Void = { _, _ in }
+    var searchJump: ConversationSearchJump? = nil
+    var onSearchJumpApplied: (UUID) -> Void = { _ in }
+    var revealedSearchEntryID: (String) -> UUID? = { _ in nil }
+    var sessionStore: SessionStore = .shared
     @Binding var path: NavigationPath
     @ObservedObject private var capture = HistoryCapture.shared
     @ObservedObject private var lock = HistoryLock.shared
@@ -138,14 +142,8 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Signing & Updates", symbol: "signature", value: updatesValue, warns: updateWaits)
                     }
                     .accessibilityIdentifier("moreSettings.updates")
-                    Button {
-                        if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        SettingsRow(title: "Notifications", symbol: "bell.badge", accessory: .leaves)
-                    }
-                    .accessibilityIdentifier("moreSettings.notifications")
+                    SettingsNotificationsRow()
+                        .accessibilityIdentifier("moreSettings.notifications")
                     NavigationLink(value: DetailsRoute.appearance) {
                         SettingsRow(title: "Appearance", symbol: "circle.lefthalf.filled", value: AppLocalization.text(appearance.title))
                     }
@@ -162,6 +160,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("details.health")
+                    NavigationLink(value: DetailsRoute.about) {
+                        SettingsRow(title: "About", symbol: "info.circle")
+                    }
+                    .accessibilityIdentifier("details.about")
                     .id(Self.lastRow)
                 } header: {
                     Group {
@@ -205,9 +207,9 @@ struct PokiDetailsView: View {
                 case .connectors:
                     ConnectorsView()
                 case .history:
-                    ActionLogView(openSession: { id in dismiss(); openSession(id) })
+                    ActionLogView(openSession: { id in openSession(id, nil) })
                 case .conversations:
-                    ConversationsSettingsView(openSession: { id in dismiss(); openSession(id) })
+                    ConversationsSettingsView(openSession: { id, entryID in openSession(id, entryID) })
                 case .screenHistory:
                     // Senses opens on the history itself; its settings are a button on it.
                     HistoryPage(asSenses: true)
@@ -229,10 +231,20 @@ struct PokiDetailsView: View {
                     HistoryLockSettings()
                 case .appearance:
                     AppearanceView()
+                case .sessionPreview(let id):
+                    SessionView(id: id,
+                                back: { if !path.isEmpty { path.removeLast() } },
+                                searchJump: searchJump?.sessionID == id ? searchJump : nil,
+                                onSearchJumpApplied: onSearchJumpApplied,
+                                sessionStore: sessionStore,
+                                readOnly: true,
+                                revealedSearchEntryID: revealedSearchEntryID(id))
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .language:
                     LanguageSettingsView()
+                case .about:
+                    AboutSettingsView()
                 } }
                 .settingsPage()
             }
@@ -246,10 +258,10 @@ struct PokiDetailsView: View {
         }
     }
 
-    private var hasModel: Bool { isSample || ModelKeys.hasUsableKey }
+    private var hasModel: Bool { isSample || ModelKeys.hasUsableKey(in: model.storage) }
     private var brainValue: String {
         if isSample { return "GPT-6.1 Terra" }
-        return hasModel ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add Model"))
+        return hasModel ? ModelKeys.selectedModelName(in: model.storage) : AppLocalization.text(LocalizedStringResource("Add Model"))
     }
 
     private var connectorsValue: String? {
@@ -298,25 +310,256 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize
-    /// Screen History's settings (the page the Senses gear opens too) and Face ID & Passcode.
-    case screenHistorySettings, lockSettings
+    case model, connectors, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, about
+    case sessionPreview(String)
+    /// Security's own page (its four rows), Screen History's settings (the page the Senses gear opens
+    /// too) and Face ID & Passcode.
+    case security, screenHistorySettings, lockSettings
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
-    case voiceKey
+    case voiceKey, lockSettings
 }
 
 /// Settings > Archived Conversations: the archived conversations, each one line as in the drawer, to open, bring
 /// back or delete; and a search through every conversation, archived or not.
+/// Results are computed only from saved local session records. No message leaves the device.
+struct ConversationSearchHit: Identifiable {
+    let session: SavedSession
+    let entryID: UUID?
+    let detail: String
+    enum Author: Equatable, Sendable {
+        case you, task, poki, browser, agent(String)
+    }
+    let author: Author?
+    let at: Date?
+    var id: String { session.id + ":" + (entryID?.uuidString ?? "title") }
+}
+
+/// Search every saved message body, not just each conversation's name and last line.
+/// The cap bounds the list shown while still searching from the newest conversations first.
+enum ConversationSearchIndex {
+    static let displayLimit = 150
+
+    /// Immutable, Sendable search data: sessions and SwiftUI view state never cross actor boundaries.
+    struct IndexedMessage: Sendable {
+        let id: UUID
+        let text: String
+        let author: ConversationSearchHit.Author?
+        let at: Date
+    }
+
+    struct IndexedSession: Sendable {
+        let sessionID: String
+        let metadata: [String]
+        let lastLine: String
+        let messages: [IndexedMessage]
+    }
+
+    struct Match: Sendable {
+        let sessionID: String
+        let entryID: UUID?
+        let detail: String
+        let author: ConversationSearchHit.Author?
+        let at: Date?
+    }
+
+    /// Build only when session data changes, not on each character or body evaluation.
+    static func snapshot(in sessions: [SavedSession]) -> [IndexedSession] {
+        sessions.map { session in
+            IndexedSession(
+                sessionID: session.id,
+                metadata: [session.name, session.title, session.client ?? "",
+                           session.customName ?? "", session.autoName ?? ""],
+                lastLine: session.lastLine,
+                messages: session.entries.reversed().compactMap { entry in
+                    guard let text = searchableText(entry) else { return nil }
+                    return IndexedMessage(id: entry.id, text: text, author: author(entry), at: entry.at)
+                }
+            )
+        }
+    }
+
+    /// The actual full-text filtering runs from a cancellable detached task in the UI.
+    static func search(_ snapshot: [IndexedSession], query: String,
+                       limit: Int = displayLimit) -> [Match] {
+        guard limit > 0 else { return [] }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if needle.isEmpty {
+            return Array(snapshot.prefix(limit)).map { session in
+                Match(sessionID: session.sessionID, entryID: nil,
+                      detail: session.lastLine, author: nil, at: nil)
+            }
+        }
+
+        var found: [Match] = []
+        for session in snapshot {
+            if Task.isCancelled { return [] }
+            let metadataMatches = session.metadata.contains { $0.localizedStandardContains(needle) }
+            if metadataMatches {
+                found.append(Match(sessionID: session.sessionID, entryID: nil,
+                                   detail: session.lastLine, author: nil, at: nil))
+                if found.count == limit { break }
+            }
+
+            var messageMatches = false
+            for entry in session.messages {
+                if Task.isCancelled { return [] }
+                guard entry.text.localizedStandardContains(needle) else { continue }
+                messageMatches = true
+                found.append(Match(sessionID: session.sessionID, entryID: entry.id,
+                                   detail: excerpt(entry.text, around: needle),
+                                   author: entry.author, at: entry.at))
+                if found.count == limit { break }
+            }
+            if found.count == limit { break }
+
+            // A metadata result already uses the same sessionID:title identity.
+            if !metadataMatches && !messageMatches && session.lastLine.localizedStandardContains(needle) {
+                found.append(Match(sessionID: session.sessionID, entryID: nil,
+                                   detail: session.lastLine, author: nil, at: nil))
+                if found.count == limit { break }
+            }
+        }
+        return found
+    }
+
+    /// Reattach result IDs to current saved records after background search completes.
+    /// Both the live search view and tests use this resolver, so deleted sessions never appear.
+    static func resolve(_ matches: [Match], in sessions: [SavedSession]) -> [ConversationSearchHit] {
+        let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
+        return matches.compactMap { match in
+            guard let session = saved[match.sessionID] else { return nil }
+            return ConversationSearchHit(session: session, entryID: match.entryID,
+                                         detail: match.detail, author: match.author, at: match.at)
+        }
+    }
+
+    static func searchableText(_ entry: ChatEntry) -> String? {
+        switch entry.kind {
+        case .you(let text, _), .poki(let text), .step(let text, _), .request(let text, _):
+            return text
+        case .plan(let steps):
+            return ([entry.title ?? ""] + steps.map(\.text)).joined(separator: " ")
+        case .note(.problem(let text)), .note(.modelApproved(let text)), .note(.modelDeclined(let text)):
+            return text
+        case .note(.approval(let approval)):
+            return [approval.summary, approval.app, approval.why, approval.reason]
+                .filter { !$0.isEmpty }.joined(separator: " ")
+        case .browser(let visit):
+            return [visit.title, visit.host].filter { !$0.isEmpty }.joined(separator: " ")
+        case .card(let card):
+            // Index the user-visible app and item titles, not action templates or opaque fields.
+            return ([card.app] + card.items.map(\.title)).joined(separator: " ")
+        case .time, .note:
+            return nil
+        }
+    }
+
+    private static func author(_ entry: ChatEntry) -> ConversationSearchHit.Author? {
+        switch entry.kind {
+        case .you: return .you
+        case .request(_, let from): return .agent(from)
+        case .poki: return .poki
+        case .plan, .step, .note, .card: return .task
+        case .browser: return .browser
+        case .time: return nil
+        }
+    }
+
+    static func excerpt(_ raw: String, around needle: String) -> String {
+        let text = raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard let match = text.localizedStandardRange(of: needle) else { return String(text.prefix(130)) }
+        let start = text.index(match.lowerBound, offsetBy: -46, limitedBy: text.startIndex) ?? text.startIndex
+        let end = text.index(match.upperBound, offsetBy: 75, limitedBy: text.endIndex) ?? text.endIndex
+        return (start == text.startIndex ? "" : "…") + String(text[start..<end])
+            + (end == text.endIndex ? "" : "…")
+    }
+}
+
 private struct ConversationsSettingsView: View {
-    var openSession: (String) -> Void
+    var openSession: (String, UUID?) -> Void
     @State private var query = ""
+    @Environment(\.locale) private var viewLocale
     private var store: SessionStore { SessionStore.shared }
 
-    private var matches: [SavedSession] {
-        let words = query.trimmingCharacters(in: .whitespaces)
-        return store.ordered.filter { session in
-            [session.name, session.title, session.lastLine, session.client ?? ""].contains { $0.localizedCaseInsensitiveContains(words) }
+    @State private var matches: [ConversationSearchHit] = []
+    @State private var cachedSnapshot: [ConversationSearchIndex.IndexedSession] = []
+    @State private var cachedRevision: Int?
+    @State private var cachedLocale: String?
+    @State private var searching = false
+
+    private struct SearchKey: Equatable {
+        let query: String
+        let revision: Int
+        let locale: String
+    }
+
+    /// Observing just a cheap fingerprint also notices archive/rename/new-message changes.
+    /// Do not read all message bodies every time SwiftUI evaluates the list.
+    private var historyRevision: Int {
+        var hasher = Hasher()
+        for session in store.sessions {
+            hasher.combine(session.id)
+            hasher.combine(session.updated)
+            hasher.combine(session.entries.count)
+            hasher.combine(session.entries.last?.id)
+            hasher.combine(session.name)
+            hasher.combine(session.archived)
+            hasher.combine(session.unarchived)
+        }
+        return hasher.finalize()
+    }
+
+    @MainActor private func refreshMatches() async {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            matches = []
+            searching = false
+            return
+        }
+        searching = true
+        matches = []
+        let revision = historyRevision
+        if cachedRevision != revision || cachedLocale != viewLocale.identifier {
+            // Chunk the one-time main-actor snapshot across run-loop turns.
+            var updated: [ConversationSearchIndex.IndexedSession] = []
+            for (index, session) in store.ordered.enumerated() {
+                if Task.isCancelled { return }
+                updated.append(contentsOf: ConversationSearchIndex.snapshot(in: [session]))
+                if index % 8 == 7 { await Task.yield() }
+            }
+            guard !Task.isCancelled else { return }
+            cachedSnapshot = updated
+            cachedRevision = revision
+            cachedLocale = viewLocale.identifier
+        }
+        let source = cachedSnapshot
+        do { try await Task.sleep(for: .milliseconds(180)) }
+        catch { return }
+        guard !Task.isCancelled else { return }
+
+        let work = Task.detached(priority: .userInitiated) {
+            ConversationSearchIndex.search(source, query: text)
+        }
+        let hits = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        matches = ConversationSearchIndex.resolve(hits, in: store.ordered)
+        searching = false
+    }
+
+    /// A static resource key lets SwiftUI resolve the current environment locale at render time.
+    /// Do not translate an external agent's arbitrary name or resolve speakers at search time.
+    private func authorText(_ author: ConversationSearchHit.Author) -> Text {
+        switch author {
+        case .you: return Text("You", tableName: "ConversationSearch")
+        case .task: return Text("Task", tableName: "ConversationSearch")
+        case .poki: return Text(verbatim: "Poki")
+        case .browser: return Text("Browser", tableName: "ConversationSearch")
+        case .agent(let name): return Text(verbatim: name)
         }
     }
 
@@ -326,7 +569,7 @@ private struct ConversationsSettingsView: View {
                 let archived = store.archivedSessions
                 Section {
                     ForEach(archived) { session in
-                        Button { openSession(session.id) } label: {
+                        Button { openSession(session.id, nil) } label: {
                             ConversationTitle(session: session)
                                 .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                                 .contentShape(.rect)
@@ -349,29 +592,56 @@ private struct ConversationsSettingsView: View {
                         .listRowBackground(Color.clear)
                 }
             } else {
-                ForEach(matches) { session in
-                    Button { openSession(session.id) } label: {
-                        HStack(spacing: 12) {
-                            SessionAvatar(session: session, size: 36)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: session.name).foregroundStyle(Color(.label))
-                                Text(verbatim: session.lastLine).font(.allo(.subheadline))
-                                    .foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+                ForEach(matches) { hit in
+                    Button { openSession(hit.session.id, hit.entryID) } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            SessionAvatar(session: hit.session, size: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(verbatim: hit.session.name).foregroundStyle(Color(.label))
+                                if let author = hit.author, let at = hit.at {
+                                    HStack(spacing: 6) {
+                                        authorText(author)
+                                        Text(at, style: .date)
+                                    }
+                                    .font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
+                                }
+                                if !hit.detail.isEmpty {
+                                    Text(verbatim: hit.detail).font(.allo(.subheadline))
+                                        .foregroundStyle(Color(.secondaryLabel)).lineLimit(3)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            if hit.entryID != nil {
+                                Image(systemName: "arrow.turn.down.right").foregroundStyle(.tertiary)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier(hit.entryID == nil ? "search.session" : "search.message")
                 }
-                if matches.isEmpty {
+                if searching {
+                    ProgressView {
+                        Text("Searching messages…", tableName: "ConversationSearch")
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                } else if matches.isEmpty {
                     ContentUnavailableView.search(text: query)
+                }
+                if !searching && matches.count == ConversationSearchIndex.displayLimit {
+                    Text("Showing the first 150 results. Refine the search to see more.",
+                         tableName: "ConversationSearch")
+                        .font(.allo(.footnote)).foregroundStyle(.secondary)
                 }
             }
         }
         .navigationTitle(AppLocalization.text("Archived Conversations"))
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: Text("Search"))
+        .searchable(text: $query, prompt: Text("Search all messages", tableName: "ConversationSearch"))
+        .task(id: SearchKey(query: query, revision: historyRevision, locale: viewLocale.identifier)) {
+            await refreshMatches()
+        }
     }
 }
 
@@ -427,6 +697,7 @@ struct SetupSettingsPage: View {
     @Environment(AppModel.self) private var model
     @Environment(ChatModel.self) private var chat
     @Binding var path: NavigationPath
+    @State private var showsAutoUnlockPasscode = false
 
     /// Why Poki could not start, as it would have shown under a switch. Poki has none here (the owner,
     /// Nov 21 2026: it starts by itself for a task or an agent's request, and the switch asked for the
@@ -462,6 +733,11 @@ struct SetupSettingsPage: View {
                 .accessibilityIdentifier("connection.problem")
             }
 
+            if model.supportsAutoUnlock {
+                AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                  showsPasscode: $showsAutoUnlockPasscode)
+            }
+
             // The setup list the guide's last page shows, with Guide Me (onboarding). Show Ready is gone
             // (Security, Nov 21 2026: no Show Ready switch).
             SetupSections(path: $path, guideMe: true)
@@ -469,6 +745,9 @@ struct SetupSettingsPage: View {
         .navigationTitle(AppLocalization.text("Setup"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.loopback.resume(); model.diskImage.notice() }
+        .sheet(isPresented: $showsAutoUnlockPasscode) {
+            AutoUnlockPasscodeForm(setting: model.autoUnlock)
+        }
     }
 }
 
@@ -717,6 +996,86 @@ private struct LanguageSettingsView: View {
     }
 }
 
+/// Settings › About: the installed version and the single re-entry point to What's New.
+struct AboutSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var showsWhatsNew = false
+    @ScaledMetric(relativeTo: .body) private var iconSize = SettingsRowMetrics.iconSize
+    @ScaledMetric(relativeTo: .body) private var iconSpacing = SettingsRowMetrics.iconSpacing
+
+    private var compact: Bool { sizeClass != .regular }
+    private var matchingRelease: WhatsNewRelease? {
+        WhatsNewCatalog.release(for: model.signer.installedVersion)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: min(18, iconSpacing)) {
+                    Group {
+                        if let image = PokiMood.cutout(.ready, small: true) {
+                            Image(uiImage: image).resizable().interpolation(.high).scaledToFit().scaleEffect(1.08)
+                        }
+                    }
+                    .frame(
+                        width: min(SettingsRowMetrics.maximumIconSize, iconSize),
+                        height: min(SettingsRowMetrics.maximumIconSize, iconSize)
+                    )
+                    .background(Tint.portrait, in: .circle)
+                    .clipShape(.circle)
+                    .padding(.vertical, SettingsRowMetrics.iconLineInset)
+                    .accessibilityHidden(true)
+
+                    Text("Current Version")
+                        .font(.allo(.body))
+                        .foregroundStyle(Color(.label))
+                    Spacer(minLength: 8)
+                    Text(verbatim: model.signer.installedVersion)
+                        .font(.allo(.subheadline))
+                        .monospacedDigit()
+                        .foregroundStyle(Color(.secondaryLabel))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("about.currentVersion")
+
+                if matchingRelease != nil {
+                    Button { showsWhatsNew = true } label: {
+                        HStack(spacing: 8) {
+                            SettingsRow(title: "What’s New", symbol: "sparkles")
+                            Image(systemName: "chevron.right")
+                                .font(.allo(.footnote, .semibold))
+                                .foregroundStyle(Color(.tertiaryLabel))
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("about.whatsNew")
+                }
+            } footer: {
+                if matchingRelease != nil {
+                    Text("Review what’s new in this version anytime.")
+                }
+            }
+        }
+        .navigationTitle(AppLocalization.text("About"))
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: Binding(get: { showsWhatsNew && compact && matchingRelease != nil }, set: { showsWhatsNew = $0 })) {
+            if let release = matchingRelease {
+                WhatsNewView(release: release) { showsWhatsNew = false }
+            }
+        }
+        .sheet(isPresented: Binding(get: { showsWhatsNew && !compact && matchingRelease != nil }, set: { showsWhatsNew = $0 })) {
+            if let release = matchingRelease {
+                WhatsNewView(release: release) { showsWhatsNew = false }
+                    .presentationSizing(.page)
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+}
+
 /// Approvals (ESP-469 board "03 审批"): what always needs you, how Poki asks before a sensitive step, and
 /// how much your chat model may approve by itself. The way of asking is chosen here and on Poki's card (the
 /// same setting); the chat's Approvals are off line links here to turn them back on. The sensitivity's
@@ -732,7 +1091,7 @@ struct SecurityApprovalSections: View {
             Section {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "lock.fill").foregroundStyle(Tint.amberInk).accessibilityHidden(true)
-                    Text("Payments, deletions and actions in Wallet always need your confirmation.")
+                    Text(ApprovalCopy.alwaysConfirm)
                         .font(.allo(.subheadline, .medium)).foregroundStyle(Tint.amberInk)
                 }
                 .padding(.vertical, 4)
@@ -757,7 +1116,7 @@ struct SecurityApprovalSections: View {
                             if model.approvalMode == .reply {
                                 Text("Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
                             }
-                            Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
+                            Text(ApprovalCopy.sensitiveSteps)
                         } else {
                             Button("Learn More") { withAnimation(.snappy) { more = true } }
                                 .font(.allo(.footnote, .semibold))
@@ -878,12 +1237,7 @@ struct AgentsAndRelayView: View {
     @Environment(AppModel.self) private var model
     @Binding var path: NavigationPath
 
-    private var relayLine: String {
-        if model.relayAddress == nil { return AppLocalization.text(LocalizedStringResource("Set an address first")) }
-        if !model.relayEnabled { return AppLocalization.text(LocalizedStringResource("Off, agents can’t reach this iPhone")) }
-        if !model.sessionOn { return AppLocalization.text(LocalizedStringResource("Waiting for Poki, turn Poki on and agents can connect")) }
-        return Health.relay(model).word
-    }
+    private var relayLine: String { Health.relaySummary(model) }
 
     var body: some View {
         @Bindable var model = model

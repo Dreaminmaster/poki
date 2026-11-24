@@ -82,7 +82,7 @@ targets:
         # While Poki is on, background location (with the blue location pill) keeps the app, and with it
         # the relay connection and the launcher, running; silent audio is the fallback. Poki never reads
         # or sends the location itself.
-        UIBackgroundModes: [location, audio, fetch]
+        UIBackgroundModes: [location, audio, fetch, screen-capture]
         # Background App Refresh wakes Poki now and then so the keeper can start again (BackgroundRefresh).
         # The app reads this name from here at run time. Poki Setup's signer rewrites the
         # nz.zheha.poki prefix to the signed bundle id; a signer that leaves it alone works too.
@@ -99,7 +99,8 @@ targets:
         NSPhotoLibraryUsageDescription: Poki shows your recent photos when you add to a message, so you can send one with a tap.
         NSCameraUsageDescription: Poki uses the camera to take photos you send in a message, and to scan the pairing code Poki Setup shows on your computer.
         NSMicrophoneUsageDescription: Poki listens while you talk to it in Voice, and sends that audio to OpenAI to understand what you ask.
-        NSSpeechRecognitionUsageDescription: Without an OpenAI key, Poki turns what you say in Voice into text on this iPhone and sends the text to your chosen model.
+        NSSpeechRecognitionUsageDescription: Poki uses speech recognition for dictation, to transcribe app audio on this iPhone, and to turn your recording into a text task if live voice can’t connect.
+        NSScreenCaptureUsageDescription: Poki listens to app audio you choose to share so it can answer questions about it.
         # The voice bridge runs on the person's Mac on the local network, over plain HTTP.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -139,6 +140,10 @@ targets:
       # Connectors (remote MCP servers): pi's MCP client, streamable HTTP and OAuth.
       - package: PiSwift
         product: PiSwiftMCP
+    preBuildScripts:
+      - name: Build Codex Voice
+        script: '"$SRCROOT/../codex-voice/build.sh" build "$POKI_CODEX_RUST_TARGET"'
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID)
@@ -154,9 +159,12 @@ targets:
         HEADER_SEARCH_PATHS: $(SRCROOT)/../launcher/include $(SRCROOT)/Poki/Native
         # The XCTest libraries of the mounted developer disk image, loaded at run time (Poki/Native).
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks /System/Developer/usr/lib /System/Developer/Library/PrivateFrameworks /System/Developer/Library/Frameworks
-        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../launcher/target/aarch64-apple-ios/release
-        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": $(SRCROOT)/../launcher/target/aarch64-apple-ios-sim/release
-        OTHER_LDFLAGS: [-lpoki_launcher, -lc++, -framework, Security, -framework, SystemConfiguration]
+        POKI_CODEX_RUST_TARGET: aarch64-apple-ios
+        "POKI_CODEX_RUST_TARGET[sdk=iphonesimulator*]": aarch64-apple-ios-sim
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/../launcher/target/$(POKI_CODEX_RUST_TARGET)/release
+          - $(SRCROOT)/../../build/codex-voice/$(POKI_CODEX_RUST_TARGET)/target/$(POKI_CODEX_RUST_TARGET)/release
+        OTHER_LDFLAGS: [-lpoki_launcher, -lpoki_codex_voice, -lc++, -framework, Security, -framework, SystemConfiguration]
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
   PokiTests:
@@ -166,6 +174,8 @@ targets:
     dependencies:
       - target: Poki
       - package: PokiCore
+      - package: PiSwift
+        product: PiSwiftAI
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID).tests
@@ -173,6 +183,17 @@ targets:
         # @testable import Poki re-reads the app's bridging header, which includes the launcher's C
         # header and Poki/Native's headers.
         HEADER_SEARCH_PATHS: $(SRCROOT)/../launcher/include $(SRCROOT)/Poki/Native
+  PokiUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [PokiUITests]
+    dependencies:
+      - target: Poki
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Poki
   PokiWidgets:
     type: app-extension
     platform: iOS
@@ -206,10 +227,11 @@ schemes:
         Poki: all
         PokiWidgets: all
         PokiTests: [test]
+        PokiUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets: [PokiTests]
+      targets: [PokiTests, PokiUITests]
     archive:
       config: Release

@@ -1,0 +1,27 @@
+PROBE 04:30:40.587 [H1] assertion granted=Optional(1)
+PROBE 04:30:40.815 [H1] before: last=["Dictate", "Search", "Dictate", "Toolbar"]
+PROBE 04:30:41.849 [H1] action 2006 on list ok=true err=none first=["Settings", "Settings", "Cellular"] last=["Dictate", "Search", "Dictate", "Toolbar"] | Settings=3 Notes=4 Calculator=2
+PROBE 04:30:42.889 [H1] action 2007 on list ok=true err=none first=["Settings", "Settings", "Cellular"] last=["Dictate", "Search", "Dictate", "Toolbar"] | Settings=3 Notes=4 Calculator=2
+PROBE 04:30:43.960 [H1] action 2006 on list ok=true err=none first=["Settings", "Settings", "Cellular"] last=["Dictate", "Search", "Dictate", "Toolbar"] | Settings=3 Notes=4 Calculator=2
+PROBE 04:30:45.029 [H1] action 2006 on list ok=true err=none first=["Settings", "Settings", "Cellular"] last=["Dictate", "Search", "Dictate", "Toolbar"] | Settings=3 Notes=4 Calculator=2
+PROBE 04:30:46.223 [H1] scrollToVisible(2003) on '' ok=true err=none last=["Dictate", "Search", "Dictate", "Toolbar"]
+PROBE 04:30:48.716 [H2] assertion granted=Optional(1)
+PROBE 04:30:48.916 [H2] press General ok=true err=none
+PROBE 04:30:51.045 [H2] +2s navbar=General/ back=true aboutCell=true labels=["Settings", "Settings", "General", "General", "General", "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", "About", "About"]
+PROBE 04:30:59.161 [H2] +10s navbar=General/ back=true aboutCell=true labels=["Settings", "Settings", "General", "General", "General", "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", "About", "About"]
+PROBE 04:31:19.371 [H2] +30s navbar=General/ back=true aboutCell=true labels=["Settings", "Settings", "General", "General", "General", "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", "About", "About"]
+PROBE 04:31:19.504 [H2] About element type=9 frame=(16.0, 407.6666666666667, 370.0, 52.0)
+PROBE 04:31:19.505 [H2] press About (fresh) ok=true err=none
+PROBE 04:31:21.613 [H2] after About +2s labels=["Settings", "General", "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", "About", "About", "Software Update", "Software Update", "iPhone Storage", "iPhone Storage", "AppleCare & Warranty"]
+PROBE 04:31:29.760 [H2] after About +10s labels=["Settings", "General", "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.", "About", "About", "Software Update", "Software Update", "iPhone Storage", "iPhone Storage", "AppleCare & Warranty"]
+PROBE 04:31:56.343 [H3] before attach: Settings=2 Notes=4 Calculator=2
+PROBE 04:31:56.343 [H3] calculator pid=33824 state=2
+PROBE 04:31:56.343 [H3] assertion granted=Optional(1)
+PROBE 04:31:58.138 [H3] +1s elements=39 display= press 5 ok=true display_after=5 | Settings=2 Notes=4 Calculator=3
+PROBE 04:32:08.844 [H3] +10s elements=40 display=5 press 5 ok=true display_after=55 | Settings=2 Notes=4 Calculator=3
+PROBE 04:32:33.548 [H4a] in.muditbhargava.LookUp assertion granted=Optional(1)
+PROBE 04:32:36.298 [H4a] background read: elements=72 labels=[redacted: owner content] state=3 settings=4
+PROBE 04:32:36.299 [H4a] tab bar with 0 buttons
+PROBE 04:32:38.303 [H4b] notion.id assertion granted=Optional(1)
+PROBE 04:32:41.034 [H4b] background read: elements=354 labels=[redacted: owner content] state=3 settings=4
+PROBE 04:32:41.034 [H4b] no tab bar

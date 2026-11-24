@@ -792,8 +792,9 @@ final class HistoryCapture: ObservableObject {
     }
 
     /// One read from the launcher. Only a screen whose text changed carries text.
-    private func took(_ data: Data, run me: Int, model: AppModel) {
-        guard me == run, let line = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+    private func took(_ read: HistoryBridge.Read, run me: Int, model: AppModel) {
+        guard me == run else { return }
+        let line = read.line
         if let event = line["event"] as? String {
             tunnelSaid(event, line)
             return
@@ -842,13 +843,17 @@ final class HistoryCapture: ObservableObject {
             say((line["tunnel"] as? Bool == false ? "no tunnel: " : "read failed: ") + Self.brief(error))
             if !model.loopback.cellularRefused { failing() }
         }
-        if keep(line), once { end(me, .finished) }
+        if keep(read), once { end(me, .finished) }
     }
 
     /// Keeps a read of the launcher's when the app lists allow it. Returns whether it was kept.
     @discardableResult
-    func keep(_ line: [String: Any]) -> Bool {
-        guard line["ok"] as? Bool == true else { return false }
+    func keep(_ line: [String: Any]) -> Bool { keep(HistoryBridge.Read(line)) }
+
+    @discardableResult
+    func keep(_ read: HistoryBridge.Read) -> Bool {
+        let line = read.line
+        guard read.ok else { return false }
         var app = line["app"] as? String ?? ""
         let home = app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame
         if app.isEmpty || Self.isWeb(app) {
@@ -862,16 +867,15 @@ final class HistoryCapture: ObservableObject {
         }
         // No app of the owner's: the launcher leaves its screen unread from now on.
         if !app.isEmpty, !home, HistoryAppNames.isProcess(app) { learn(process: app) }
-        guard let read = line["text"] as? [String], !read.isEmpty else { return false }
+        guard let text = read.text else { return false }
         // The Home Screen is left out with its notification banners: a banner names the sending app
         // only by its display name, so the app lists could not leave it out. A left-out app leaves
         // no trace, not even a line in the observing record.
         if app.caseInsensitiveCompare("com.apple.springboard") == .orderedSame { return false }
         if HistoryAppNames.isProcess(app) { return false }
         guard keeps(app) else { return false }
-        let tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         let now = Date()
-        HistoryStore.shared.add(at: now, app: app, title: line["title"] as? String ?? "", text: read.joined(separator: "\n"), tree: tree)
+        HistoryStore.shared.add(at: now, app: app, title: read.title, text: text, tree: read.tree)
         lastKept = now
         changes += 1
         return true
@@ -943,15 +947,13 @@ final class HistoryCapture: ObservableObject {
             if let snapshot, !snapshot.lines.isEmpty, (snapshot.app != lastApp || snapshot.lines != lastLines) {
                 lastApp = snapshot.app
                 lastLines = snapshot.lines
-                if let data = try? JSONSerialization.data(withJSONObject: [
+                self.took(HistoryBridge.Read([
                     "ok": true,
                     "app": snapshot.app,
                     "title": snapshot.title,
                     "text": snapshot.lines,
                     "changed": true,
-                ]) {
-                    self.took(data, run: me, model: model)
-                }
+                ]), run: me, model: model)
             }
             guard self.run == me, self.status == .reading else { return }
             // The simulator has no phone to spare: it reads at the old pace.

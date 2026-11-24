@@ -1,3 +1,5 @@
+import './fixtures/in-process-device-tool.mjs';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runnerFixture } from './fixtures/runner.mjs';

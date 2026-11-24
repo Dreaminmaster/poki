@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class AutoUnlockTests: XCTestCase {
-    func testRunnerLocalUnlockUsesAndClosesTheTemporaryAutomationSession() async throws {
+    func testRunnerLocalUnlockStaysOffWithASavedPasscode() async throws {
         let native = UnlockSession()
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: native)
         try XCTSkipUnless(model.automationPath == .runner, "Launch the test host with -automationPath runner")
@@ -23,12 +23,11 @@ final class AutoUnlockTests: XCTestCase {
         _ = model.setRelay("https://relay.invalid")
         model.startSession()
         XCTAssertTrue(model.sessionOn)
-        XCTAssertTrue(model.supportsAutoUnlock, "The automatic unlock switch must be available on this iPhone")
         try model.autoUnlock.save("046215")
 
         let unlocked = await model.host.unlockForLocalTask(timeout: 8)
-        XCTAssertTrue(unlocked, "A Runner task should return the temporary session's successful unlock result")
-        XCTAssertFalse(native.isOpen, "The unlock-only session must be stopped afterwards")
+        XCTAssertFalse(unlocked, "An existing opt-in must not unlock the phone while Automatic Unlock is unavailable")
+        XCTAssertFalse(native.isOpen, "The disabled feature must not leave an unlock session open")
     }
 
     func testFailedPasscodeDeletionKeepsAutomaticUnlockOnUntilRetrySucceeds() throws {
