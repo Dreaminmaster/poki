@@ -289,7 +289,8 @@ enum Harness {
         let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
         var parts = [systemPrompt(for: task, includeAutomaticUnlock: includeAutomaticUnlock), screenScrollInstruction]
         if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
-        parts.append(chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed))
+        // Screen History reaches the chat through personal_context only (SensesContext).
+        parts.append(chatToolInstructions(includeScreenHistory: false))
         parts.append(WebTools.instructions)
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.

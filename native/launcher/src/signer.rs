@@ -62,7 +62,7 @@ impl From<core::Error> for Failure {
             core::Error::NeedsCode(_) => "needs_code",
             // The Apple session ran out and no kept password opened a new one: the app offers Sign In
             // Again. Only this sentence, since Apple's -20101 also means a wrong password at sign-in.
-            core::Error::NeedsPerson(m) if m == core::apple::gsa::SESSION_EXPIRED => "session_expired",
+            core::Error::NeedsPerson(m) if m == core::apple::gsa::SESSION_EXPIRED || m == core::apple::gsa::SESSION_REJECTED => "session_expired",
             core::Error::NeedsPerson(_) => "needs_person",
             core::Error::Apple { .. } => "apple",
             _ => e.kind(),
@@ -517,6 +517,14 @@ async fn install(request: &Value, reporter: &Reporter) -> Out {
 #[cfg(test)]
 mod installed_tests {
     use super::*;
+
+    #[test]
+    fn a_session_apple_turned_away_offers_sign_in_again() {
+        for m in [core::apple::gsa::SESSION_EXPIRED, core::apple::gsa::SESSION_REJECTED] {
+            assert_eq!(Failure::from(core::Error::NeedsPerson(m.into())).code, "session_expired", "{m}");
+        }
+        assert_eq!(Failure::from(core::Error::NeedsPerson("Something else.".into())).code, "needs_person");
+    }
 
     #[test]
     fn entries_keep_id_and_names_and_skip_ones_without_an_id() {
