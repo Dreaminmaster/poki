@@ -112,7 +112,7 @@ enum ConnectionCheck {
             return (await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: api, customReasoning: reasoning), api)
         case .automatic:
             let responses = await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: .responses, customReasoning: reasoning)
-            guard !responses.passed, lacksResponses(responses) else { return (responses, .responses) }
+            guard !Task.isCancelled, !responses.passed, lacksResponses(responses) else { return (responses, .responses) }
             AppLog.shared.add("model", "Test Connection, no Responses API at \(CustomEndpointClient.shown(URL(string: url))), trying chat completions")
             return (await run(.custom, key: key, customURL: url, modelID: modelID, customAPI: .chatCompletions, customReasoning: reasoning), .chatCompletions)
         }

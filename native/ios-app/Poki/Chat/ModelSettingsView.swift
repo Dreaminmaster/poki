@@ -440,6 +440,7 @@ struct KeyEntry: View {
     @State private var discovery = CustomModelDiscovery()
     @State private var failed = false
     @State private var testing = false
+    @State private var connectionTest: Task<Void, Never>?
     @State private var result: ConnectionCheck.Result?
     @State private var saved = false
 
@@ -515,7 +516,12 @@ struct KeyEntry: View {
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: url) { _, _ in discovery.reset() }
             .onChange(of: key) { _, _ in discovery.reset() }
-            .onDisappear { discovery.cancel() }
+            .onDisappear {
+                discovery.cancel()
+                connectionTest?.cancel()
+                connectionTest = nil
+                testing = false
+            }
             .sheet(isPresented: $discovery.presenting) {
                 CustomModelPicker(models: discovery.models, selection: $modelID)
             }
@@ -551,16 +557,22 @@ struct KeyEntry: View {
     }
 
     private func check(_ key: String, closeIfPassed: Bool) {
+        connectionTest?.cancel()
         testing = true
         result = nil
         let url = provider == .custom ? ModelCatalog.normalizedAddress(url) : url
         let modelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
+        connectionTest = Task {
+            defer { if !Task.isCancelled { connectionTest = nil } }
+            guard !Task.isCancelled else { return }
             let outcome = await ConnectionCheck.run(provider, key: key, customURL: url, modelID: modelID)
+            guard !Task.isCancelled else { return }
             result = outcome
             testing = false
             if closeIfPassed, outcome.passed {
-                try? await Task.sleep(for: .milliseconds(900))
+                do { try await Task.sleep(for: .milliseconds(900)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
                 dismiss()
             }
         }
