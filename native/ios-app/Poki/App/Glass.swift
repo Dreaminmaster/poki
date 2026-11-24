@@ -46,28 +46,24 @@ enum GlassSwitch {
     static let still = UserDefaults.standard.string(forKey: "pokiGlass") == "still"
 }
 
+extension EnvironmentValues {
+    @Entry var pokiGlassDeferred = false
+}
+
 extension View {
     /// A surface of the control layer in `shape`: Liquid Glass, tinted with `tint` to suggest
     /// prominence and reacting to touch when `interactive`; before iOS 26 the `fallback` material.
     /// On a button, put it on the button and not inside its label: interactive glass inside the label
     /// took the touch for itself and the button never fired (seen in the top bar on iOS 27).
-    @ViewBuilder func glassSurface<S: InsettableShape>(in shape: S, tint: Color? = nil, interactive: Bool = false,
-                                                       fallback: GlassFallback = .control) -> some View {
-        if #available(iOS 26.0, *), !GlassSwitch.forcedOff {
-            glassEffect(Glass.regular.tint(tint).interactive(interactive && !GlassSwitch.still), in: shape)
-        } else {
-            modifier(MaterialSurface(shape: shape, tint: tint, kind: fallback))
-        }
+    func glassSurface<S: InsettableShape>(in shape: S, tint: Color? = nil, interactive: Bool = false,
+                                          fallback: GlassFallback = .control) -> some View {
+        modifier(GlassSurface(shape: shape, tint: tint, interactive: interactive, fallback: fallback))
     }
 
     /// Glass shapes that sit near each other, drawn as one group. `spacing` is how near two shapes
     /// must come to merge; keep it smaller than the layout's own spacing so they stay apart at rest.
-    @ViewBuilder func glassGroup(spacing: CGFloat? = nil) -> some View {
-        if #available(iOS 26.0, *), !GlassSwitch.forcedOff {
-            GlassEffectContainer(spacing: spacing) { self }
-        } else {
-            self
-        }
+    func glassGroup(spacing: CGFloat? = nil) -> some View {
+        modifier(GlassGroup(spacing: spacing))
     }
 
     /// `glassGroup` only when `grouped`.
@@ -77,23 +73,69 @@ extension View {
 
     /// For a glass surface that comes and goes inside a `glassGroup`: the system's own materialize
     /// transition, a fade before iOS 26.
-    @ViewBuilder func glassAppearing() -> some View {
-        if #available(iOS 26.0, *), !GlassSwitch.forcedOff {
-            glassEffectTransition(.materialize)
-        } else {
-            transition(.opacity)
-        }
+    func glassAppearing() -> some View {
+        modifier(GlassAppearance())
     }
 
     /// A text button of the control layer that stands on its own (not inside another glass surface):
     /// the system's glass button, or its prominent, tinted one. Before iOS 26, the bordered styles.
-    @ViewBuilder func glassButton(prominent: Bool = false) -> some View {
-        if #available(iOS 26.0, *), !GlassSwitch.forcedOff {
-            if prominent { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
-        } else if prominent {
-            buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+    func glassButton(prominent: Bool = false) -> some View {
+        modifier(GlassButton(prominent: prominent))
+    }
+}
+
+private struct GlassSurface<S: InsettableShape>: ViewModifier {
+    @Environment(\.pokiGlassDeferred) private var deferred
+    let shape: S
+    let tint: Color?
+    let interactive: Bool
+    let fallback: GlassFallback
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !deferred, !GlassSwitch.forcedOff {
+            content.glassEffect(Glass.regular.tint(tint).interactive(interactive && !GlassSwitch.still), in: shape)
         } else {
-            buttonStyle(.bordered).buttonBorderShape(.capsule)
+            content.modifier(MaterialSurface(shape: shape, tint: tint, kind: fallback))
+        }
+    }
+}
+
+private struct GlassGroup: ViewModifier {
+    @Environment(\.pokiGlassDeferred) private var deferred
+    let spacing: CGFloat?
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !deferred, !GlassSwitch.forcedOff {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
+        }
+    }
+}
+
+private struct GlassAppearance: ViewModifier {
+    @Environment(\.pokiGlassDeferred) private var deferred
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !deferred, !GlassSwitch.forcedOff {
+            content.glassEffectTransition(.materialize)
+        } else {
+            content.transition(.opacity)
+        }
+    }
+}
+
+private struct GlassButton: ViewModifier {
+    @Environment(\.pokiGlassDeferred) private var deferred
+    let prominent: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !deferred, !GlassSwitch.forcedOff {
+            if prominent { content.buttonStyle(.glassProminent) } else { content.buttonStyle(.glass) }
+        } else if prominent {
+            content.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+        } else {
+            content.buttonStyle(.bordered).buttonBorderShape(.capsule)
         }
     }
 }

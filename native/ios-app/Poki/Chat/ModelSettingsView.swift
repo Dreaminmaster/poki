@@ -25,37 +25,7 @@ struct ModelSettingsView: View {
 
     var body: some View {
         List {
-            // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
-            Section {
-                InUseCard(add: { adding = true })
-            } header: {
-                Text("In Use").textCase(nil)
-            } footer: {
-                Text("Change the chat model on Poki’s card: tap Poki’s picture at the top of the chat. Dictation in the message field needs no account.")
-            }
-
-            // With no account yet the card above has Add Account, and an empty group would only be a heading.
-            if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
-            Section {
-                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
-                    let usage = ModelAccounts.uses(provider)
-                    NavigationLink { AccountDetail(provider: provider) } label: {
-                        AccountRow(provider: provider, name: provider.name, usage: usage)
-                    }
-                }
-                ForEach(CustomProviders.all) { custom in
-                    let usage = ModelAccounts.uses(custom)
-                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
-                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
-                    }
-                }
-                Button("Add Account", systemImage: "plus") { adding = true }
-            } header: {
-                Text("Accounts").textCase(nil)
-            } footer: {
-                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
-            }
-            }
+            ModelSettingsSections { adding = true }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
         // (a rebuild dropped taps and the sheets it was presenting).
@@ -72,6 +42,45 @@ struct ModelSettingsView: View {
             guard opensVoiceKey, !openedForVoice else { return }
             openedForVoice = true
             if !ModelKeys.hasKey(.openai) { enteringVoiceKey = true } else if VoiceDirect.account == nil { showingLiveVoice = true }
+        }
+    }
+}
+
+/// Shared by Settings and the setup guide. Both use the same installed models and providers.
+struct ModelSettingsSections: View {
+    var add: () -> Void
+
+    var body: some View {
+        // ESP-469 board "02 模型": what runs now, on a card on top, with the way to change the chat's model.
+        Section {
+            InUseCard(add: add)
+        } header: {
+            Text("In Use").textCase(nil)
+        } footer: {
+            Text("Change the chat model in Poki’s menu. Tap the picture on the home page or the name in a conversation. Dictation in the message field needs no account.")
+        }
+
+        // With no account yet the card above has Add Account, and an empty group would only be a heading.
+        if ModelProvider.allCases.contains(where: ModelAccounts.isSetUp) {
+            Section {
+                ForEach(ModelProvider.allCases.filter { $0 != .custom && ModelAccounts.isSetUp($0) }) { provider in
+                    let usage = ModelAccounts.uses(provider)
+                    NavigationLink { AccountDetail(provider: provider) } label: {
+                        AccountRow(provider: provider, name: provider.name, usage: usage)
+                    }
+                }
+                ForEach(CustomProviders.all) { custom in
+                    let usage = ModelAccounts.uses(custom)
+                    NavigationLink { CustomProviderDetail(id: custom.id) } label: {
+                        AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+                    }
+                }
+                Button("Add Account", systemImage: "plus") { add() }
+            } header: {
+                Text("Accounts").textCase(nil)
+            } footer: {
+                Text("Keys and sign-ins stay in this iPhone’s Keychain. Poki sends each one only to its own provider.")
+            }
         }
     }
 }
@@ -133,17 +142,19 @@ private struct InUseCard: View {
 /// What a model account is and what it can power.
 enum ModelAccounts {
     static func isSetUp(_ provider: ModelProvider) -> Bool {
+        isSetUp(provider, storage: .live)
+    }
+
+    static func isSetUp(_ provider: ModelProvider, storage: PokiStorage) -> Bool {
         switch provider {
-        case .custom: !CustomProviders.all.isEmpty
-        case .chatgpt: ChatGPTAccount.signedIn
-        default: ModelKeys.hasKey(provider)
+        case .custom: !CustomProviders.all(in: storage).isEmpty
+        case .chatgpt: ChatGPTAccount.isSignedIn(storage: storage)
+        default: ModelKeys.hasKey(provider, storage: storage)
         }
     }
 
     static func canChat(_ provider: ModelProvider) -> Bool { provider.wired }
-    /// Live voice is a Realtime API: an OpenAI API key, or a custom provider whose service has one (a
-    /// ChatGPT sign-in can't open it).
-    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .openai || provider == .custom }
+    static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .chatgpt || provider == .openai || provider == .custom }
 
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
@@ -158,6 +169,9 @@ enum ModelAccounts {
         var out: [String] = []
         if ModelKeys.selectedProvider == provider, ModelKeys.hasUsableKey { out.append(AppLocalization.text(LocalizedStringResource("Text Chat"))) }
         if provider == .openai, VoiceDirect.account == .openai { out.append(AppLocalization.text(LocalizedStringResource("Live Voice"))) }
+        if provider == .chatgpt, ModelKeys.selectedProvider == .chatgpt, CodexAccount.accessToken != nil {
+            out.append(AppLocalization.text("Live Voice"))
+        }
         return out.isEmpty ? AppLocalization.text(LocalizedStringResource("Not in use")) : out.joined(separator: ", ")
     }
 
@@ -219,6 +233,8 @@ private struct AccountDetail: View {
     var provider: ModelProvider
     @State private var editing = false
     @State private var signingIn = false
+    @State private var signOutFailed = false
+    @State private var signingOut = false
     @State private var version = ModelKeys.saved
 
     var body: some View {
@@ -239,17 +255,25 @@ private struct AccountDetail: View {
                     } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
                 }
                 .disabled(!ModelAccounts.canChat(provider))
-                NavigationLink { LiveVoiceFeature(account: .openai) } label: {
+                if provider == .chatgpt {
                     LabeledContent {
-                        Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
+                        Text(CodexAccount.accessToken == nil ? AppLocalization.text("Sign In Again") : ModelKeys.selectedProvider == .chatgpt ? "ChatGPT" : AppLocalization.text("Off"))
                     } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
+                } else {
+                    NavigationLink { LiveVoiceFeature(account: .openai) } label: {
+                        LabeledContent {
+                            Text(ModelAccounts.canTalkLive(provider) ? (VoiceDirect.isOn(.openai) ? ModelCatalog.voiceModelID(for: .openai) : AppLocalization.text(LocalizedStringResource("Off"))) : AppLocalization.text(LocalizedStringResource("Not Supported")))
+                        } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
+                    }
+                    .disabled(!ModelAccounts.canTalkLive(provider))
                 }
-                .disabled(!ModelAccounts.canTalkLive(provider))
             } header: {
                 Text("Use This Account For")
             } footer: {
                 if !ModelAccounts.canChat(provider) {
                     Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
+                } else if provider == .chatgpt {
+                    Text("Poki uses this ChatGPT sign-in for both text chat and live voice.")
                 } else if !ModelAccounts.canTalkLive(provider) {
                     Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open. Dictation in the message field works with this account.")
                 }
@@ -257,12 +281,26 @@ private struct AccountDetail: View {
 
             Section {
                 Button(provider.signsIn ? "Sign Out" : "Delete Account", role: .destructive) {
-                    if provider == .custom, let current = CustomProviders.current { CustomProviders.remove(current.id) } else { ModelKeys.remove(provider) }
-                    if ModelKeys.selectedProvider == provider, let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
-                        ModelKeys.selectedProvider = other
+                    if provider.signsIn {
+                        signingOut = true
+                        Task {
+                            defer { signingOut = false }
+                            do {
+                                try await ChatGPTAccount.signOutIncludingVoice()
+                                accountRemoved()
+                            } catch {
+                                signOutFailed = true
+                            }
+                        }
+                        return
+                    } else if provider == .custom, let current = CustomProviders.current {
+                        CustomProviders.remove(current.id)
+                    } else {
+                        ModelKeys.remove(provider)
                     }
-                    dismiss()
+                    accountRemoved()
                 }
+                .disabled(signingOut)
             }
         }
         // Reads the version so the page redraws with the new keys and models, without rebuilding it
@@ -274,6 +312,17 @@ private struct AccountDetail: View {
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { KeyEntry(provider: provider) }
         .sheet(isPresented: $signingIn, onDismiss: { version = ModelKeys.saved }) { ChatGPTSignIn() }
+        .alert("Could not sign out of ChatGPT. Try again.", isPresented: $signOutFailed) {
+            Button("OK", role: .cancel) {}
+        }
+    }
+
+    private func accountRemoved() {
+        if ModelKeys.selectedProvider == provider,
+           let other = ModelProvider.allCases.first(where: { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
+            ModelKeys.selectedProvider = other
+        }
+        dismiss()
     }
 }
 
@@ -406,7 +455,7 @@ struct AddAccount: View {
                         }
                     }
                 } footer: {
-                    Text("Text chat works with every account. Live voice needs an OpenAI API key or a custom endpoint with the Realtime API. Add as many custom endpoints as you like.")
+                    Text("Text chat works with every account. Live voice works with ChatGPT, an OpenAI API key, or a custom endpoint with the Realtime API.")
                 }
             }
             .listStyle(.insetGrouped)

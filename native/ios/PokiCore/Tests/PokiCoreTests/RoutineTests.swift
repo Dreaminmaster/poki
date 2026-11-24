@@ -178,6 +178,67 @@ final class RoutineTests: XCTestCase {
         XCTAssertTrue(brief.contains("note 49: "), brief)
     }
 
+    func testTaskBriefKeepsAnAppMemoryAfterTwentyNewerMemoriesForAnotherApp() {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let preference = "Include the build number when reporting the iOS version."
+        let global = "Use concise answers."
+        store.remember(preference, by: SkillStore.owner, app: settings)
+        for i in 1...20 {
+            store.remember("Calculator preference \(i)", by: SkillStore.owner, app: calculator)
+        }
+        store.remember(global, by: SkillStore.owner)
+
+        let brief = store.brief(for: "Find the iOS version in Settings", apps: [settings])
+
+        XCTAssertTrue(brief.contains(preference))
+        XCTAssertTrue(brief.contains(global))
+        XCTAssertFalse(brief.contains("Calculator preference"))
+    }
+
+    func testTaskBriefRecallsAnAppMemoryForARephrasedRequestWithoutTheAppName() {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let preference = "报告系统版本时带上构建号。"
+        let unrelated = "计算结果保留两位小数。"
+        store.remember(preference, by: SkillStore.owner, app: settings)
+        store.remember(unrelated, by: SkillStore.owner, app: calculator)
+
+        let request = "这台手机现在跑的系统版本是多少？"
+        let brief = store.brief(for: request)
+
+        XCTAssertTrue(brief.contains(preference), brief)
+        XCTAssertFalse(brief.contains(unrelated), brief)
+        XCTAssertFalse(store.brief(for: "今天天气怎么样？").contains(preference))
+        XCTAssertFalse(store.brief(for: request, app: calculator).contains(preference))
+
+        let competing = "查询系统版本时把报告发给支持人员。"
+        store.remember(competing, by: SkillStore.owner, app: calculator)
+        let ambiguous = store.brief(for: request)
+        XCTAssertFalse(ambiguous.contains(preference))
+        XCTAssertFalse(ambiguous.contains(competing))
+    }
+
+    func testChatScreenReadOffersMemoryForAnAppOmittedFromTheRequest() async throws {
+        let store = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let preference = try XCTUnwrap(store.remember("Include the build number.", by: SkillStore.owner, app: settings))
+        store.remember("Calculator results use two decimal places.", by: SkillStore.owner, app: "com.apple.calculator")
+        let (core, _, _) = core(store)
+        let brief = store.taskBrief(for: "What iOS version is this phone running?", apps: [])
+        XCTAssertTrue(brief.notes.isEmpty)
+
+        let read = await core.callTool("look", arguments: "{}", localTask: "version-check")
+
+        XCTAssertFalse(read.isError, read.text)
+        XCTAssertTrue(read.text.contains("General"), read.text)
+        XCTAssertTrue(read.text.contains("[\(preference.id)] \(preference.text)"), read.text)
+        XCTAssertEqual(read.offeredMemories.map(\.id), [preference.id])
+        XCTAssertFalse(read.text.contains("Calculator results"))
+    }
+
     func testAStaleRoutineIsNotOfferedAndASaveOverItStartsItsRecordAgain() async {
         let store = RoutineStore(url: nil)
         let (core, _, pages) = core(store)
@@ -187,6 +248,9 @@ final class RoutineTests: XCTestCase {
         for _ in 0..<2 { pages.show(0); _ = await core.call("look", [:]); _ = await core.call("do", ["actions": [["run": "iOS version"]]]) }
         XCTAssertTrue(store.routine(named: "iOS version")!.stale)
         XCTAssertFalse(store.brief(for: "what iOS version is this").contains("iOS version:"))
+        let listed = await core.call("skills", ["action": "list"])
+        XCTAssertFalse(listed.text.contains("iOS version:"), listed.text)
+        XCTAssertTrue(store.routine(named: "iOS version")!.stale)
     }
 
     func testTheFirstLookOfATaskNamesTheRoutinesAndFinishOffersToSave() async {
@@ -658,5 +722,55 @@ final class RoutineTests: XCTestCase {
         let exported = String(decoding: try store.exportData(), as: UTF8.self)
         XCTAssertTrue(exported.contains("Mom is the contact Mama"))
         XCTAssertFalse(exported.contains("gate code"))
+    }
+
+    func testLocalSavedSkillRunsRightAfterAuthorizationWithoutLook() async {
+        let store = RoutineStore(url: nil)
+        let now = Date()
+        let saved = Skill(
+            name: "Calc Multiply",
+            description: "Open Calculator and tap Equals",
+            app: "com.apple.calculator",
+            steps: [
+                SkillStep(action: ["launch": "com.apple.calculator"], target: nil, app: "nz.zheha.poki"),
+                SkillStep(action: ["tap": "@"], target: SkillTarget(type: "Button", label: "=", x: 300, y: 700), app: "com.apple.calculator"),
+            ],
+            params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0, lastStop: nil, lastMs: nil,
+            savedBy: "Poki", created: now, updated: now
+        )
+        XCTAssertTrue(store.save(saved))
+
+        let wda = FakeWDA()
+        let front = LockedBox("nz.zheha.poki")
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": .string(front.value), "name": front.value == "com.apple.calculator" ? "Calculator" : "Poki"]])
+        }
+        wda.set("POST /wda/apps/activate") { body in
+            front.value = body?["bundleId"]?.string ?? front.value
+            return (200, ["value": .null])
+        }
+        wda.set("GET /source") { _ in
+            if front.value == "com.apple.calculator" {
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Calculator", "rect": ["x": 0, "y": 0, "width": 390, "height": 844],
+                                        "children": [["type": "XCUIElementTypeButton", "label": "=", "rect": ["x": 280, "y": 680, "width": 40, "height": 40]]]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Poki", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": []]])
+        }
+        let (core, _, host) = makeCore(wda) {
+            $0.memory = store
+            $0.sensitive.enabled = false
+            $0.resolveInstalledApp = { $0 == "com.apple.calculator" ? $0 : nil }
+        }
+        host.state.value = .automationReady(revision: 1)
+
+        let ran = await core.callTool("do", arguments: #"{"actions":[{"run":"Calc Multiply"}]}"#, localTask: "task-1")
+        XCTAssertFalse(ran.isError, ran.text)
+        XCTAssertFalse(ran.text.contains("Automation is ready. Nothing was sent."), ran.text)
+        XCTAssertEqual(wda.bodies("POST /wda/apps/activate").compactMap { $0["bundleId"]?.string }, ["com.apple.calculator"])
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 1, ran.text)
+
+        let followUp = await core.callTool("do", arguments: #"{"actions":[{"tap":1}]}"#, localTask: "task-1")
+        XCTAssertFalse(followUp.isError, followUp.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 2, followUp.text)
     }
 }

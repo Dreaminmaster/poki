@@ -1,6 +1,7 @@
 import ActivityKit
 import Foundation
 import Network
+import PiSwiftAI
 import PokiCore
 import SwiftUI
 import UIKit
@@ -31,18 +32,611 @@ final class ChatHarnessTests: XCTestCase {
     /// A conversation handed over by an outside agent, on the fake endpoint. The phone's tools answer
     /// without a session (the Debug probe's call), so routines reaches the app's own memory.
     private func chat(on server: FakeCompletions, transport: HTTPTransport? = nil,
-                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff, readyForProbe: Bool = true) -> ChatModel {
+                      automation: InProcessAutomation = PKInProcess.shared(), kind: SavedSession.Kind = .handoff, readyForProbe: Bool = true,
+                      store: SessionStore? = nil) -> ChatModel {
         ModelKeys.customURL = "http://127.0.0.1:\(server.port)/v1"
         ModelKeys.customModel = "fake-model"
         ModelKeys.selectedProvider = .custom
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
         if readyForProbe { app.inProcessReadyForProbe() }
         self.app = app
-        return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil)
+        return ChatModel(app: app, kind: kind, requester: kind == .handoff ? "Test agent" : nil, store: store)
     }
 
-    private static func json(_ object: [String: Any]) -> String {
+    nonisolated private static func json(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
+    func testCountedMessageScrollShowsVerifiedProgressAndStopsAtTheTarget() async throws {
+        for target in [4, 100] {
+            let transport = MessageListTransport(messages: (1...10).map { String(format: "Message %02d", $0) },
+                                                 visibleCount: 6)
+            let screens = [[1, 2, 3, 4, 5, 6], [7, 8, 1, 2, 3, 4], [9, 10, 7, 8, 1, 2]]
+            func scroll() -> String {
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true])
+            }
+            func count(_ refs: [Int]) -> String {
+                FakeCompletions.tool("count_messages", ["target": target, "refs": refs])
+            }
+            var turns = [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]), count(screens[0]),
+                scroll(), count(screens[1]), scroll(), count(screens[2]),
+            ]
+            if target == 100 {
+                turns += [scroll(), count(screens[2]),
+                          FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                              "details": [], "answer": ["kind": "action"]])]
+            }
+            turns += [
+                FakeCompletions.text("I finished scrolling."),
+            ]
+            let server = try FakeCompletions(replies: turns)
+            let chat = chat(on: server, transport: transport)
+            let result = await chat.runDelegated("Scroll up \(target) messages in the open conversation.")
+            let plan = try XCTUnwrap(chat.entries.compactMap { entry -> [PlanStep]? in
+                if case .plan(let steps) = entry.kind { return steps }
+                return nil
+            }.last)
+            XCTAssertEqual(plan.map(\.state), target == 4 ? [.done] : [.failed], result.text)
+            XCTAssertEqual(result.success, target == 4, result.text)
+            let reply = try XCTUnwrap(chat.entries.compactMap { entry -> String? in
+                if case .poki(let text) = entry.kind { return text }
+                return nil
+            }.last)
+            XCTAssertTrue(reply.contains("4 of \(target)") && reply.contains("Message 01"), reply)
+            if target == 100 {
+                XCTAssertTrue(reply.contains("100") && reply.contains("stopped moving"), reply)
+            }
+            XCTAssertEqual(transport.topMessage, 1)
+        }
+    }
+
+    func testCountedMessageScrollDoesNotCountMatchingTextOnDisjointScreens() async throws {
+        let transport = MessageListTransport(messages: ["D", "E", "OK", "OK", "B", "C"], visibleCount: 3, step: 3)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [4, 5, 1]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 2 messages in the open conversation.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The gesture crossed all three starting messages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+        XCTAssertTrue(result.text.contains("couldn't match the messages"), result.text)
+    }
+
+    func testAnsweringAClarifyingQuestionKeepsTheRequestedScrollCount() async throws {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.countedScrollQuestion("Which conversation should I open?"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll through messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 500]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "I finished scrolling.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I finished scrolling."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let clarified = expectation(description: "Poki asks which conversation")
+        ChatModel.afterTask = { _ in clarified.fulfill() }
+        chat.send("Scroll up 100 messages.")
+        await fulfillment(of: [clarified], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("Which conversation should I open?") = $0.kind { true } else { false } })
+
+        let completed = expectation(description: "Poki ends the continued scroll task")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; completed.fulfill() }
+        try await sendCountedScrollComposer("The current group.", replying: true, chat: chat)
+        await fulfillment(of: [completed], timeout: 15)
+
+        XCTAssertEqual(transport.topMessage, 3, "The continued task actually sent one scroll")
+        XCTAssertEqual(result?.success, false, result?.summary ?? "Missing scroll result")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    func testCountedMessageScrollRejectsARepeatedSequenceAfterAFullPageDrag() async throws {
+        let transport = MessageListTransport(messages: ["D", "E", "Got it", "OK", "Got it", "OK", "B", "C"], step: 4)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 620]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [5, 6, 1, 2]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 2 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The actual drag crossed the whole starting page")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+        XCTAssertTrue(result.text.contains("couldn't match the messages"), result.text)
+    }
+
+    func testClarificationKeepsTheScrollTargetButANewOrdinaryScrollDoesNot() async throws {
+        for (prompt, followUp, shouldFinish) in [
+            ("请告诉我群名。", "当前群", false),
+            ("哪个群？", "不用了，往下翻一下", true),
+        ] {
+            let transport = MessageListTransport()
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.countedScrollQuestion(prompt),
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Scrolled the conversation."),
+            ])
+            let chat = chat(on: server, transport: transport, kind: .poki)
+            chat.newConversation()
+            let clarified = expectation(description: prompt)
+            ChatModel.afterTask = { _ in clarified.fulfill() }
+            chat.send("往上翻 100 条消息")
+            await fulfillment(of: [clarified], timeout: 10)
+            XCTAssertTrue(chat.entries.contains { if case .poki(prompt) = $0.kind { true } else { false } })
+
+            let finished = expectation(description: followUp)
+            var result: TaskResult?
+            ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+            try await sendCountedScrollComposer(followUp, replying: !shouldFinish, chat: chat)
+            await fulfillment(of: [finished], timeout: 10)
+
+            XCTAssertEqual(transport.topMessage, 3)
+            XCTAssertEqual(result?.success, shouldFinish, result?.summary ?? "Missing task result")
+            if shouldFinish {
+                XCTAssertEqual(result?.summary, "Scrolled the conversation.")
+            } else {
+                XCTAssertTrue(result?.summary.contains("0 of 100") == true, result?.summary ?? "")
+            }
+        }
+    }
+
+    func testCountedScrollDoesNotUseADragDistanceAsProofOfOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["D", "E", "F", "G", "Got it", "OK", "Got it", "OK", "A", "B", "C", "Z"],
+            visibleCount: 6, step: 6, spacing: 120
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 640]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 2, "refs": [7, 8, 9, 10, 1, 2]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 2 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The list moved six rows, although the finger travelled four")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 2 older messages"), result.text)
+    }
+
+    func testCountedScrollRejectsRepeatedRowsWithDifferentMessageIdentifiers() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Z", "Got it", "OK", "Sure", "Got it", "OK", "Sure", "A", "B", "C"],
+            visibleCount: 6, step: 6, identifiesMessages: true
+        )
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 490]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 3, "refs": [7, 8, 9, 1, 2, 3]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 3 messages.")
+
+        XCTAssertEqual(transport.topMessage, 1, "The two matching sequences are from different pages")
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("0 of 3 older messages"), result.text)
+    }
+
+    func testExplicitScrollClarificationTreatsTheGroupNameAsAnAnswer() async throws {
+        let result = try await sendAfterCountedScrollQuestion("取消订阅讨论群", replying: true)
+        XCTAssertFalse(result.success, result.summary)
+        XCTAssertTrue(result.summary.contains("0 of 100 older messages"), result.summary)
+    }
+
+    func testOrdinaryComposerRequestDoesNotInheritAnUnansweredScrollTarget() async throws {
+        let result = try await sendAfterCountedScrollQuestion("去聊天记录最早的地方", replying: false)
+        XCTAssertTrue(result.success, result.summary)
+        XCTAssertEqual(result.summary, "Scrolled the conversation.")
+    }
+
+    func testCountedScrollCountsTheLastVisibleMessageWhenTheListHitsTheTop() async throws {
+        let messages = (1...7).map { "Message 0\($0)" }
+        let transport = MessageListTransport(messages: messages, visibleCount: 6, step: 3, spacing: 60)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 460]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": [7, 1, 2, 3, 4, 5]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 1)
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Message 01"), result.text)
+    }
+
+    func testCountedScrollRetakesOneShorterStepAfterAmbiguousOverlap() async throws {
+        let transport = MessageListTransport(
+            messages: ["X", "Y", "Got it", "OK", "Got it", "OK", "Got it", "OK", "Got it", "OK", "C", "D"],
+            visibleCount: 6, dragSteps: [6, -6, 1]
+        )
+        func drag(_ from: Int, _ to: Int) -> String {
+            FakeCompletions.tool("do", ["actions": [["drag": [200, from, 200, to]]], "full": true])
+        }
+        func count(_ refs: [Int]) -> String {
+            FakeCompletions.tool("count_messages", ["target": 1, "refs": refs])
+        }
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]), count([1, 2, 3, 4, 5, 6]),
+            drag(160, 360), count([7, 8, 3, 4, 1, 2]),
+            drag(360, 160), count([1, 2, 3, 4, 9, 10]),
+            drag(160, 260), count([2, 1, 4, 3, 11, 9]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+
+        XCTAssertEqual(transport.topMessage, 6, "Only the shorter retry advances the confirmed position")
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("“OK”"), result.text)
+    }
+
+    func testCountedScrollRequiresAtLeastAThirdOfThePreviousPageToOverlap() async throws {
+        let recent = (1...10).map { "Recent \($0)" }
+        for overlap in [3, 4] {
+            let older = (1...(10 - overlap)).map { "Older \($0)" }
+            let transport = MessageListTransport(messages: older + recent, visibleCount: 10,
+                                                 step: older.count, spacing: 60)
+            let next = Array(11..<(11 + older.count)) + Array(1...overlap)
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": Array(1...10)]),
+                FakeCompletions.tool("do", ["actions": [["drag": [200, 160, 200, 520]]], "full": true]),
+                FakeCompletions.tool("count_messages", ["target": 1, "refs": next]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Done."),
+            ])
+            let result = await chat(on: server, transport: transport).runDelegated("Scroll up 1 message.")
+            XCTAssertEqual(transport.topMessage, 1)
+            XCTAssertEqual(result.success, overlap == 4, result.text)
+            if overlap == 3 {
+                XCTAssertTrue(result.text.contains("0 of 1 older messages"), result.text)
+            } else {
+                XCTAssertTrue(result.text.contains("1 of 1 older messages") && result.text.contains("Older 6"), result.text)
+            }
+        }
+    }
+
+    func testExplicitCountWordingRequiresVerification() async throws {
+        enum Expected {
+            case messages(Int), screens(Int), ordinary
+        }
+        let requests: [(String, Expected)] = [
+            ("往上翻一百条消息", .messages(100)),
+            ("往上翻最近的 100 条消息", .messages(100)),
+            ("向上滑两百条", .messages(200)),
+            ("翻前 50 条记录", .messages(50)),
+            ("帮我翻到 30 条消息之前", .messages(30)),
+            ("翻最近二十五条聊天记录", .messages(25)),
+            ("向上滾動兩百條訊息", .messages(200)),
+            ("去 40 条消息前", .messages(40)),
+            ("往上翻100条聊天消息", .messages(100)),
+            ("往上翻100条群聊消息", .messages(100)),
+            ("上述群聊里，九十九条", .messages(99)),
+            ("这次只翻 １５０ 条私聊记录", .messages(150)),
+            ("翻一条消息", .messages(1)),
+            ("向上翻十二条", .messages(12)),
+            ("往上翻一百二十条", .messages(120)),
+            ("往上翻三千零五条", .messages(3005)),
+            ("往上翻一零零条", .messages(100)),
+            ("往上翻一〇〇条消息", .messages(100)),
+            ("往上翻一0〇条", .messages(100)),
+            ("往上翻1百2十条", .messages(120)),
+            ("往上翻3千零5条", .messages(3005)),
+            ("往上翻一百20条", .messages(120)),
+            ("往上翻九千九百九十九条", .messages(9999)),
+            ("往上翻一万条", .messages(10000)),
+            ("Scroll up 100 messages.", .messages(100)),
+            ("Scroll back by 15 older messages.", .messages(15)),
+            ("Go back two hundred messages.", .messages(200)),
+            ("Scroll up through the last 50 messages.", .messages(50)),
+            ("Scroll 30 messages up.", .messages(30)),
+            ("Go to the message 12 messages earlier.", .messages(12)),
+            ("Scroll up 100 chat messages.", .messages(100)),
+            ("Go back 45 msgs.", .messages(45)),
+            ("往上翻两页消息", .screens(2)),
+            ("向上翻３屏聊天记录", .screens(3)),
+            ("請往前翻一頁訊息", .screens(1)),
+            ("Scroll up 2 pages of messages.", .screens(2)),
+            ("Scroll up 2 pages in Messages.", .screens(2)),
+            ("Scroll back three full screens of chat messages.", .screens(3)),
+            ("Scroll up one screen in Messages.", .screens(1)),
+            ("去聊天记录最早的地方", .ordinary),
+            ("Scroll to the chat from 100 days ago.", .ordinary),
+            ("Scroll through the 100 Club chat.", .ordinary),
+        ]
+        for (request, expected) in requests {
+            var replies = [
+                FakeCompletions.tool("report_plan", ["steps": ["Scroll the chat"], "currentStep": 1]),
+                FakeCompletions.tool("look", ["full": true]),
+            ]
+            let transport: MessageListTransport
+            if case .screens(let screens) = expected {
+                let messages = (1...((screens + 1) * 4)).map { "Message \($0)" }
+                transport = MessageListTransport(messages: messages, step: 4)
+                replies += Array(repeating: FakeCompletions.tool("do", [
+                    "actions": [["drag": [200, 172, 200, 703]]], "full": true,
+                ]), count: screens)
+            } else {
+                transport = MessageListTransport()
+            }
+            replies += [
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the chat.",
+                                                    "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Scrolled the chat."),
+            ]
+            let server = try FakeCompletions(replies: replies)
+            let result = await chat(on: server, transport: transport).runDelegated(request)
+            switch expected {
+            case .messages(let target):
+                XCTAssertEqual(result.success, false, "\(request): \(result.text)")
+                let displayedTarget = target.formatted(.number.locale(Locale(identifier: "en_US")))
+                XCTAssertTrue(result.text.contains("0 of \(displayedTarget) older messages"), "\(request): \(result.text)")
+            case .screens:
+                XCTAssertEqual(transport.topMessage, 1, request)
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+                XCTAssertTrue(result.text.contains("result: done: Scrolled the chat."), "\(request): \(result.text)")
+            case .ordinary:
+                XCTAssertEqual(result.success, true, "\(request): \(result.text)")
+            }
+        }
+    }
+
+    func testQuestionsAfterReadingKeepTheCountedScrollReplyOpen() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.countedScrollQuestion("我找到了两个群。你说的是哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group after looking")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(chat.entries.contains { if case .poki("我找到了两个群。你说的是哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The reply continues the counted scroll")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    func testWaitingForACountedScrollReplyDoesNotNeedQuestionPunctuation() async throws {
+        let question = "我找到了两个群，请问你说的是哪个群"
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.countedScrollQuestion(question),
+            FakeCompletions.text(question),
+        ])
+        let transport = MessageListTransport()
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "The counted task waits for the owner's group")
+        var firstResult: TaskResult?
+        ChatModel.afterTask = { firstResult = $0.result; asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertNil(firstResult, firstResult?.summary ?? "")
+        XCTAssertTrue(said(chat).contains(question))
+
+        server.replaceReplies([
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the group"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let finished = expectation(description: "The reply continues the counted task")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer("当前群", replying: true, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        XCTAssertEqual(result?.success, false, result?.summary ?? "")
+        XCTAssertTrue(result?.summary.contains("0 of 100 older messages") == true, result?.summary ?? "")
+    }
+
+    private func sendAfterCountedScrollQuestion(_ text: String, replying: Bool) async throws -> TaskResult {
+        let transport = MessageListTransport()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.countedScrollQuestion("哪个群？"),
+            FakeCompletions.tool("report_plan", ["steps": ["Scroll the conversation"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled the conversation.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled the conversation."),
+        ])
+        let chat = chat(on: server, transport: transport, kind: .poki)
+        chat.newConversation()
+        let asked = expectation(description: "Poki asks for the group")
+        ChatModel.afterTask = { _ in asked.fulfill() }
+        chat.send("往上翻 100 条消息")
+        await fulfillment(of: [asked], timeout: 10)
+        XCTAssertTrue(chat.entries.contains { if case .poki("哪个群？") = $0.kind { true } else { false } })
+
+        let finished = expectation(description: "The composer request ends")
+        var result: TaskResult?
+        ChatModel.afterTask = { result = $0.result; finished.fulfill() }
+        try await sendCountedScrollComposer(text, replying: replying, chat: chat)
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertEqual(transport.topMessage, 3)
+        return try XCTUnwrap(result)
+    }
+
+    private func sendCountedScrollComposer(_ text: String, replying: Bool, chat: ChatModel) async throws {
+        let app = try XCTUnwrap(app)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        window.rootViewController = UIHostingController(rootView: ChatView(
+            sharedDraft: .constant(text), openVoice: {}, openSetup: {}, openModel: {}
+        ).environment(app).environment(chat).environment(\.accessibilityEnabled, true))
+        window.makeKeyAndVisible()
+        defer { window.endEditing(true); window.isHidden = true }
+        await drawCountedScrollComposer(window)
+        if replying {
+            let reply = try XCTUnwrap(composerButton(in: window, id: "chat.counted-scroll.reply"))
+            XCTAssertTrue(reply.accessibilityActivate())
+            await drawCountedScrollComposer(window)
+        }
+        let send = try XCTUnwrap(composerButton(in: window, id: "composer.main"))
+        XCTAssertTrue(send.accessibilityActivate())
+    }
+
+    private func drawCountedScrollComposer(_ window: UIWindow) async {
+        await withCheckedContinuation { done in
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { done.resume() }
+            window.layoutIfNeeded()
+            CATransaction.commit()
+        }
+        await Task.yield()
+    }
+
+    private func composerButton(in root: UIView, id: String) -> NSObject? {
+        var pending: [NSObject] = [root]
+        var visited = Set<ObjectIdentifier>()
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let selector = NSSelectorFromString("accessibilityIdentifier")
+            let identifier = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if identifier == id && item.accessibilityTraits.contains(.button) && !item.accessibilityFrame.isEmpty { return item }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for i in 0..<count {
+                    if let child = item.accessibilityElement(at: i) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
+    }
+
+    func testCountedScrollRetainsTheActionFailureWhenItsScreenCannotBeCounted() async throws {
+        let transport = MessageListTransport(failsDrag: true)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4]]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The scroll action failed.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I stopped."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 100 messages.")
+
+        XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && !$0.ok })
+        XCTAssertEqual(result.success, false)
+        XCTAssertTrue(result.text.contains("0 of 100") && result.text.contains("Message 05"), result.text)
+        XCTAssertTrue(result.text.contains("The scroll action failed."), result.text)
+    }
+
+    func testFailedCountedScrollCardShowsCountPositionAndReason() async throws {
+        let transport = MessageListTransport(messages: (1...8).map { String(format: "Message %02d", $0) },
+                                             visibleCount: 6)
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Count older messages"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [1, 2, 3, 4, 5, 6]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
+            FakeCompletions.tool("do", ["actions": [["drag": [200, 220, 200, 420]]], "full": true]),
+            FakeCompletions.tool("count_messages", ["target": 100, "refs": [7, 8, 1, 2, 3, 4]]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The list stopped moving.",
+                                                "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("I stopped."),
+        ])
+        let chat = chat(on: server, transport: transport)
+        let result = await chat.runDelegated("Scroll up 100 messages.")
+        XCTAssertEqual(result.success, false)
+        XCTAssertTrue(result.text.contains("2 of 100") && result.text.contains("Message 01"), result.text)
+
+        let entries = chat.entries.filter { entry in
+            switch entry.kind { case .request, .plan: true; default: false }
+        }
+        let restored = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(entries))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let covered = scene.windows.filter { !$0.accessibilityElementsHidden }
+        covered.forEach { $0.accessibilityElementsHidden = true }
+        let window = UIWindow(windowScene: scene)
+        defer {
+            window.isHidden = true
+            covered.forEach { $0.accessibilityElementsHidden = false }
+        }
+        window.rootViewController = UIHostingController(rootView: ChatTranscript(entries: restored))
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        CATransaction.flush()
+        let source = await Task.detached {
+            var code: NSString?
+            return PKInProcess.shared().sourceXML(nil, code: &code) ?? ""
+        }.value
+        XCTAssertTrue(source.contains("Count older messages"), source)
+        for detail in ["2 of 100", "Message 01", "The list stopped moving."] {
+            XCTAssertTrue(source.contains(detail), "Task card omitted \(detail)")
+        }
+        let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let png = UIGraphicsImageRenderer(bounds: window.bounds).pngData { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try png.write(to: output.appendingPathComponent("CountedScrollTaskCard.png"))
     }
 
     func testExistingConversationUsesTheNewCustomEndpointForTheSameModel() async throws {
@@ -507,6 +1101,925 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(RoutineStore.shared.note(note)?.heard?.session, chat.sessionID)
     }
 
+    func testFailedTaskDoesNotSaveItsRecordedStepsOrMemory() async throws {
+        let name = "Incomplete skill \(UUID().uuidString)"
+        let note = "Unverified detail \(UUID().uuidString)"
+        defer {
+            SkillStore.shared.forget(name)
+            SkillStore.shared.forgetNote(note)
+        }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+            FakeCompletions.tool("skills", ["action": "save", "name": name]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": note]),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "The requested screen could not be verified.", "details": [], "answer": ["kind": "field"]]),
+            FakeCompletions.text("I could not verify the requested screen."),
+        ])
+        let chat = chat(on: server, transport: transport, automation: automation)
+
+        let result = await chat.runDelegated("Verify a setting and keep the confirmed procedure.")
+        let app = try XCTUnwrap(app)
+        let saved = await app.runTool("skills", arguments: Self.json(["action": "list"]))
+
+        XCTAssertEqual(result.success, false)
+        XCTAssertFalse(saved.text.contains(name))
+        XCTAssertFalse(saved.text.contains(note))
+    }
+
+    func testRejectedSkillSaveIsVisibleInChatAndDelegatedResult() async throws {
+        let name = "Locked workflow \(UUID().uuidString)"
+        let fixture = SkillStore(url: nil)
+        let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
+                             steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                             params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(original))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let replies = [false, true].flatMap { optional in
+            [
+                FakeCompletions.tool("report_plan", ["steps": ["Check Settings"], "currentStep": 1]),
+                FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+                FakeCompletions.tool("skills", ["action": "save", "name": name, "optional": optional]),
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Settings is ready."),
+            ]
+        }
+        let server = try FakeCompletions(replies: replies)
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        library.setLocked(item.id, true)
+        defer { library.setLocked(item.id, false); library.forget(item.id) }
+        let listed = await app.runTool("skills", arguments: #"{"action":"list"}"#)
+        XCTAssertTrue(listed.text.split(separator: "\n").contains { $0.contains(name) && $0.hasSuffix("(locked)") }, listed.text)
+        let show = Self.json(["action": "show", "name": name])
+        let before = await app.runTool("skills", arguments: show)
+        XCTAssertFalse(before.isError)
+
+        for optional in [false, true] {
+            let request = optional ? "Check Settings." : "Check Settings and save the procedure over \(name)."
+            let result = await chat.runDelegated(request)
+            let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } }, result.text)
+            guard case .plan(let steps) = card.kind else { return XCTFail("The task card disappeared") }
+            let state = TaskCardState(steps: steps, live: false, waiting: false, handedOver: false, saveFailed: card.saveFailed == true)
+
+            XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.ok })
+            XCTAssertEqual(steps.map(\.state), [.done])
+            XCTAssertEqual(state, optional ? .done : .failed)
+            let notice = "Couldn’t save the skill “\(name)”."
+            XCTAssertTrue(chat.entries.last.flatMap { if case .poki(let words) = $0.kind { words } else { nil } }?.contains(notice) == true)
+            XCTAssertTrue(result.text.contains(notice), result.text)
+            XCTAssertTrue(result.text.contains(optional ? "result: done: Settings is ready." : "result: not done:"), result.text)
+            XCTAssertEqual(result.success, optional)
+        }
+        let after = await app.runTool("skills", arguments: show)
+        XCTAssertEqual(after.text, before.text)
+    }
+
+    func testTaskCardIncludesMemoryReadFromTheSkillList() async throws {
+        try await assertSkillListMemoryOnTaskCard(plan: ["Open Settings"])
+    }
+
+    func testFailedOperationCannotGainMemoryAtFinish() async throws {
+        let unavailable = "nz.example.archived-checklist"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the archived checklist app for this check.", by: "Poki"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the archived checklist"], "currentStep": 1]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": unavailable], "used_memory_ids": [memory.id]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The archived checklist app is unavailable.",
+                "details": [], "answer": ["kind": "action"], "used_memory_ids": [memory.id],
+            ]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The archived checklist app is unavailable.",
+                "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("The archived checklist app is unavailable."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, unavailableApp: unavailable),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer { MemoryLibrary.shared.forget(memory.id); SessionStore.shared.delete(chat.sessionID) }
+
+        let result = await chat.runDelegated("Open the archived checklist.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        let answers = server.requests.map(Self.toolAnswer)
+        XCTAssertTrue(answers.contains { $0.contains(memory.id) })
+        XCTAssertTrue(answers.contains { $0.contains("no app with that bundle id is installed on this device") })
+        let card = try XCTUnwrap(SessionStore.shared.session(chat.sessionID)?.entries.last {
+            if case .plan = $0.kind { true } else { false }
+        })
+        XCTAssertTrue(card.failed == true)
+        XCTAssertNotNil(card.ended)
+        XCTAssertNil(card.memoryUse, "Finishing a failed operation cannot assign its memory to the card")
+        if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "finish-rejected-memory") }
+    }
+
+    func testBrowserRejectedInputDoesNotLeaveAMemoryOnTheCard() async throws {
+        let text = "Maple-83"
+        let pages = try PageServer(pages: [
+            "/rejected": #"<html><title>Search test</title><input type="search" aria-label="Search query" id="query" oninput="this.value = ''"></html>"#,
+            "/accepted": #"<html><title>Search test</title><input type="search" aria-label="Search query" id="query"></html>"#,
+        ])
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Maple-83 as the web search term.", by: "Poki"))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let browser = PokiBrowser.shared
+        browser.close()
+        defer { browser.close() }
+
+        for accepted in [false, true] {
+            let path = accepted ? "/accepted" : "/rejected"
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Fill the search field"], "currentStep": 1]),
+                FakeCompletions.tool("skills", ["action": "list"]),
+                FakeCompletions.tool("web_open", ["url": "http://127.0.0.1:\(pages.port)\(path)"]),
+                FakeCompletions.tool("web_type", ["ref": "e1", "text": text, "used_memory_ids": [memory.id]]),
+                FakeCompletions.tool("finish_task", [
+                    "success": accepted, "summary": "Search field checked.", "details": [], "answer": ["kind": "field"],
+                ]),
+                FakeCompletions.text("Search field checked."),
+            ])
+            let chat = chat(on: server)
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            defer { MemoryLibrary.shared.forget(memory.id); SessionStore.shared.delete(chat.sessionID) }
+
+            let result = await chat.runDelegated("Fill the saved web search term.")
+
+            XCTAssertEqual(result.success, accepted, result.text)
+            let answers = server.requests.map(Self.toolAnswer)
+            XCTAssertTrue(answers.contains { $0.contains(memory.id) })
+            XCTAssertTrue(answers.contains { $0.contains("[e1]") && $0.contains("Search query") })
+            let value = try await browser.call("return document.querySelector('#query').value") as? String
+            XCTAssertEqual(value, accepted ? text : "")
+            XCTAssertEqual(chat.savedCalls.first { $0.name == "web_type" }?.ok, accepted)
+            let card = try XCTUnwrap(SessionStore.shared.session(chat.sessionID)?.entries.last {
+                if case .plan = $0.kind { true } else { false }
+            })
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id) ?? [], accepted ? [memory.id] : [],
+                           "Only a web field that accepted the input may leave a memory on the card")
+            if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "web-memory-\(accepted)") }
+        }
+    }
+
+    func testFailedTaskCardsKeepTheMemoryAndSkillTheyUsed() async throws {
+        let note = "Start in Settings before looking for recovery checklist \(UUID().uuidString)"
+        let name = "Read the recovery label \(UUID().uuidString)"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember(note, by: "Poki"))
+        let settings = "com.apple.Preferences"
+        let skill = Skill(name: name, description: "", app: settings,
+                          steps: [SkillStep(action: ["launch": .string(settings)])],
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let memoryList = FakeCompletions.tool("skills", ["action": "list"])
+        let endsInFailure = [
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The saved checklist could not be opened.", "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("I could not open the saved checklist."),
+        ]
+        let direct = FakeCompletions.tool("do", ["actions": [["launch": settings, "used_memory_ids": [memory.id]]]])
+        let replay = FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]])
+        let server = try FakeCompletions(replies: [memoryList, direct] + endsInFailure + [
+            FakeCompletions.tool("report_plan", ["steps": ["Read the recovery label", "Open the checklist"], "currentStep": 2]),
+            memoryList, replay,
+        ] + endsInFailure)
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer { library.forget(item.id); library.forget(memory.id) }
+
+        for expectsReplay in [false, true] {
+            let result = await chat.runDelegated(expectsReplay ? "Read the recovery label and open the checklist." : "Open the recovery checklist.")
+            XCTAssertEqual(result.success, false, result.text)
+            let card = chat.entries.last { if case .plan = $0.kind { true } else { false } }
+            XCTAssertNotNil(card?.ended)
+            XCTAssertEqual(card?.memoryUse?.notes.map(\.id), [memory.id])
+            XCTAssertEqual(card?.memoryUse?.skills, expectsReplay ? [name] : [])
+            if expectsReplay {
+                XCTAssertTrue(chat.savedCalls.contains { $0.name == "do" && $0.answer.contains("run \"\(name)\":") && $0.ok },
+                              chat.savedCalls.map(\.answer).joined(separator: "\n"))
+            }
+        }
+    }
+
+    func testFailedTaskCardNamesTheSkillWhenItsEndCheckFails() async throws {
+        let name = "Read the Settings version"
+        let expectedLabel = "Previous version label"
+        let fixture = SkillStore(url: nil)
+        let skill = Skill(name: name, description: "", app: "com.apple.Preferences",
+                          steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                          params: [:], expect: [expectedLabel], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "iOS Version" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings and verify its version"], "currentStep": 1]),
+            FakeCompletions.tool("do", ["actions": [["run": name]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The expected version label did not appear.",
+                "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("I couldn't verify the version."),
+        ])
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer { library.forget(item.id) }
+
+        let result = await chat.runDelegated("Verify the version in Settings.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        let replay = try XCTUnwrap(server.requests.dropFirst(2).first)
+        let replayAnswer = Self.toolAnswer(replay)
+        XCTAssertTrue(replayAnswer.contains("1 steps in"), replayAnswer)
+        XCTAssertTrue(replayAnswer.contains("end check did not pass: \"\(expectedLabel)\" not on screen"), replayAnswer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
+        XCTAssertEqual(TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                     stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true), .failed)
+        XCTAssertEqual(card.memoryUse?.skills, [name])
+    }
+
+    func testTaskCardOmitsSourcesWhenTheSkillCannotSendItsFirstStep() async throws {
+        let name = "Open the saved Settings version panel"
+        let bundle = "com.apple.Preferences"
+        let target = try JSONDecoder().decode(SkillTarget.self, from: Data(
+            #"{"type":"Button","label":"General","x":195,"y":122}"#.utf8
+        ))
+        let fixture = SkillStore(url: nil)
+        XCTAssertTrue(fixture.save(Skill(name: name, description: "", app: bundle,
+                                         steps: [SkillStep(action: ["tap": "@"], target: target)],
+                                         params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                                         lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())))
+        let memory = try XCTUnwrap(fixture.remember("Use the saved Settings version panel for this check.", by: "Poki"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Read the version in Settings"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The saved target was missing.",
+                "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("I couldn't open the version panel."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Privacy" }),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer {
+            library.forget(item.id)
+            library.forget(memory.id)
+            SessionStore.shared.delete(chat.sessionID)
+        }
+
+        let result = await chat.runDelegated("Check the device version with the saved Settings panel.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(memory.id) })
+        let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
+        XCTAssertTrue(answer.contains("Button \"General\" is not on screen"), answer)
+        XCTAssertTrue(answer.contains("no step was sent"), answer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        XCTAssertNotNil(card.ended)
+        XCTAssertEqual(card.failed, true)
+        XCTAssertTrue(card.memoryUse?.skills.isEmpty ?? true, "The card must omit the skill when no step was sent")
+        XCTAssertTrue(card.memoryUse?.notes.isEmpty ?? true, "The card must omit memory for the unsent operation")
+    }
+
+    func testTaskCardKeepsLiveSkillAttributionAcrossTaskEndings() async throws {
+        enum Ending: String, CaseIterable { case completed, declined, stopped, failed }
+        let defaults = UserDefaults.standard
+        let mode = defaults.object(forKey: ApprovalClassifier.modeKey)
+        defaults.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        defer { defaults.set(mode, forKey: ApprovalClassifier.modeKey) }
+        let name = "Open Settings to read the version"
+        let bundle = "com.apple.Preferences"
+        let fixture = SkillStore(url: nil)
+        XCTAssertTrue(fixture.save(Skill(name: name, description: "", app: bundle,
+                                         steps: [SkillStep(action: ["launch": .string(bundle)])],
+                                         params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                                         lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())))
+        let opening = try XCTUnwrap(fixture.remember("Start the version check by opening Settings.", by: "Poki"))
+        let followUp = try XCTUnwrap(fixture.remember("Use the selected follow-up control in Settings.", by: "Poki"))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let library = MemoryLibrary.shared
+        let store = SessionStore.shared
+
+        func lastTaskCard(in entries: [ChatEntry]) -> ChatEntry? {
+            entries.last { if case .plan = $0.kind { true } else { false } }
+        }
+
+        for ending in Ending.allCases {
+            var actions: [[String: Any]] = [["run": ["name": name, "step_memory_ids": ["1": [opening.id]]]]]
+            let needsApproval = ending == .declined || ending == .stopped
+            if needsApproval { actions.append(["tap": 1, "used_memory_ids": [followUp.id]]) }
+            if ending == .failed { actions.append(["wait": -1, "used_memory_ids": [followUp.id]]) }
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Finish the check"], "currentStep": 2]),
+                FakeCompletions.tool("look", ["full": true]),
+                FakeCompletions.tool("skills", ["action": "list"]),
+                FakeCompletions.tool("do", ["actions": actions]),
+                FakeCompletions.tool("finish_task", [
+                    "success": ending == .completed, "summary": "Settings check ended.",
+                    "details": [], "answer": ["kind": "action"],
+                ]),
+                FakeCompletions.text("The Settings check ended."),
+            ])
+            let automation = FakeAutomation()
+            _ = automation.prepare()
+            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Delete" }),
+                            automation: automation)
+            let session = chat.sessionID
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            library.reload()
+            let item = try XCTUnwrap(library.items.first { $0.text == name })
+            defer {
+                library.forget(item.id)
+                library.forget(opening.id)
+                library.forget(followUp.id)
+                store.delete(session)
+            }
+            var approvalRequested = false
+            app.addShellObserver { [weak app, weak chat] event in
+                guard case .approvalRequested(let approval) = event else { return }
+                approvalRequested = true
+                if ending == .stopped {
+                    let savedCard = lastTaskCard(in: store.session(session)?.entries ?? [])
+                    XCTAssertNotNil(savedCard)
+                    XCTAssertNil(savedCard?.ended, "Approval is still pending")
+                    XCTAssertEqual(savedCard?.memoryUse?.skills, [name], "The saved card while awaiting approval")
+                    XCTAssertEqual(savedCard?.memoryUse?.notes.map(\.id), [opening.id])
+                    chat?.stop()
+                } else {
+                    app?.resolve(approval, approved: false)
+                }
+            }
+
+            let result = await chat.runDelegated("Check Settings and ask before the follow-up action.")
+            XCTAssertEqual(approvalRequested, needsApproval, ending.rawValue)
+
+            let card = try XCTUnwrap(lastTaskCard(in: chat.entries))
+            guard case .plan(let steps) = card.kind else { return XCTFail("Missing \(ending) task card") }
+            let state = TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                      stopped: card.stopped == true, saveFailed: card.saveFailed == true || card.failed == true)
+            XCTAssertEqual(state, ending == .completed ? .done : ending == .stopped ? .stopped : .failed, ending.rawValue)
+            XCTAssertEqual(card.memoryUse?.skills, [name], "\(ending) task card")
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id), [opening.id], "Only the sent action's memory for \(ending)")
+            XCTAssertNotNil(card.ended, ending.rawValue)
+            if ending != .stopped {
+                let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
+                XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
+                if ending == .declined {
+                    XCTAssertEqual(result.success, false, result.text)
+                    XCTAssertTrue(answer.contains("not_sent from action 2: the owner declined on the phone"), answer)
+                    XCTAssertTrue(chat.entries.contains {
+                        if case .note(.approval(let note)) = $0.kind { return note.state == .refused && !note.byModel }
+                        return false
+                    })
+                }
+                if ending == .failed { XCTAssertTrue(answer.contains("wait takes nonnegative milliseconds"), answer) }
+            }
+        }
+    }
+
+    func testStoppingDuringSkillReplayKeepsTheSkillOnTheCard() async throws {
+        let name = "Open Settings and Calculator"
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let fixture = SkillStore(url: nil)
+        let skill = Skill(name: name, description: "", app: settings, steps: [
+            SkillStep(action: ["launch": .string(settings)]),
+            SkillStep(action: ["launch": .string(calculator)]),
+        ], params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let cards = try await stopWhenActivating(calculator, fixture: fixture, replies: [
+            FakeCompletions.tool("do", ["actions": [["run": name]]]),
+        ], expectedActivations: [settings, calculator])
+        XCTAssertEqual(cards.active?.memoryUse?.skills, [name], "Active card while a skill is still replaying")
+        XCTAssertEqual(cards.stopped.memoryUse?.skills, [name], "Stopped card after a partial replay")
+    }
+
+    func testPasteRecordsMemoryOnlyWhenTheFieldReceivesTheText() async throws {
+        enum Outcome: CaseIterable { case refused, stopped, pasted, refusedWithoutBaseline }
+        let text = "Maple-83"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Maple-83 in the Settings search field.", by: "Poki"))
+        let backup = String(decoding: try fixture.exportData(), as: UTF8.self)
+        let store = SessionStore.shared
+        let library = MemoryLibrary.shared
+
+        for outcome in Outcome.allCases {
+            let automation = FakeAutomation()
+            _ = automation.prepare()
+            let check = AsyncStream.makeStream(of: Void.self)
+            let gate = ChatTransportGate()
+            let missingBaseline = outcome == .refusedWithoutBaseline
+            let original = missingBaseline ? text + String(repeating: "x", count: 400) : ""
+            let transport = PasteReceiptTransport(session: automation, fillsField: outcome == .pasted,
+                                                  hidesFieldBeforePaste: missingBaseline, initialField: original) {
+                check.continuation.yield(())
+                await gate.holdFirstRequest()
+            }
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("report_plan", ["steps": ["Fill Settings search"], "currentStep": 1]),
+                FakeCompletions.tool("skills", ["action": "list"]),
+                FakeCompletions.tool("do", ["actions": [
+                    ["type": text, "via": "paste", "clear": missingBaseline, "used_memory_ids": [memory.id]],
+                ]]),
+                FakeCompletions.tool("finish_task", [
+                    "success": outcome == .pasted, "summary": "Settings search checked.",
+                    "details": [], "answer": ["kind": "action"],
+                ]),
+                FakeCompletions.text("Settings search checked."),
+            ])
+            let chat = chat(on: server, transport: transport, automation: automation)
+            let app = try XCTUnwrap(app)
+            let imported = await app.runTool("skills", arguments: Self.json(["action": "import", "data": backup]))
+            XCTAssertFalse(imported.isError, imported.text)
+            library.reload()
+            let session = chat.sessionID
+            defer { library.forget(memory.id); store.delete(session) }
+            var waitingCard: ChatEntry?
+            let owner = Task { @MainActor in
+                for await _ in check.stream {
+                    waitingCard = store.session(session)?.entries.last { if case .plan = $0.kind { true } else { false } }
+                    if outcome == .stopped { chat.stop() }
+                    await gate.release()
+                    return
+                }
+            }
+
+            _ = await chat.runDelegated("Fill Settings search with the saved value.")
+            check.continuation.finish()
+            await owner.value
+
+            XCTAssertNotNil(waitingCard, "The menu tap was acknowledged and the field confirmation was still pending")
+            XCTAssertNil(waitingCard?.memoryUse, "An acknowledged menu tap alone must leave no source: \(outcome)")
+            let field = await transport.field
+            XCTAssertEqual(field, outcome == .pasted || missingBaseline ? text : "")
+            let card = try XCTUnwrap(store.session(session)?.entries.last { if case .plan = $0.kind { true } else { false } })
+            XCTAssertNotNil(card.ended)
+            if outcome == .stopped { XCTAssertEqual(card.stopped, true) }
+            if outcome == .refused {
+                XCTAssertTrue(card.failed == true)
+                XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains("the field did not show the text") })
+            }
+            if missingBaseline { XCTAssertEqual(card.failed, true, "The paste was refused after clearing the field") }
+            XCTAssertEqual(card.memoryUse?.notes.map(\.id) ?? [], outcome == .pasted ? [memory.id] : [],
+                           "Only a paste confirmed in the field can leave a memory source: \(outcome)")
+            if UserDefaults.standard.bool(forKey: "markdownEvidence") { try await capture(chat, "paste-memory-\(outcome)") }
+        }
+    }
+
+    func testStoppingAfterAMemoryDrivenActionSucceedsKeepsTheUsedMemoryOnTheCard() async throws {
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Open Settings first when checking the device version.", by: "Poki"))
+        XCTAssertNotNil(fixture.remember("Use 24-hour time on the device.", by: "Poki"))
+        let cards = try await stopWhenActivating(calculator, fixture: fixture, replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [
+                ["launch": ["bundle": settings], "used_memory_ids": [memory.id, "unseen-id"]],
+                ["launch": ["bundle": calculator]],
+            ]]),
+        ], expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertEqual(cards.active?.memoryUse?.notes.map(\.id), [memory.id], "Active card after the memory-driven action succeeded")
+        XCTAssertEqual(cards.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopped card without finish_task")
+    }
+
+    func testPathMemoryAppearsOnlyAfterItsOwnStepSucceeds() async throws {
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let safari = "com.apple.mobilesafari"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Calculator for the second step of the check.", by: "Poki"))
+        let steps: [[String: Any]] = [
+            ["launch": ["bundle": settings]],
+            ["launch": ["bundle": calculator], "used_memory_ids": [memory.id]],
+            ["launch": ["bundle": safari]],
+        ]
+        let replies = [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["path": ["steps": steps], "used_memory_ids": [memory.id]]]]),
+        ]
+
+        let second = try await stopWhenActivating(calculator, fixture: fixture, replies: replies,
+                                                  expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertNil(second.active?.memoryUse, "An unrelated successful step and a pending step have no memory source")
+        XCTAssertNil(second.stopped.memoryUse, "A late successful receipt for the attributed step cannot add memory")
+
+        let third = try await stopWhenActivating(safari, fixture: fixture, replies: replies,
+                                                 expectedActivations: [settings, calculator, safari], offeredMemory: memory.id)
+        XCTAssertEqual(third.active?.memoryUse?.notes.map(\.id), [memory.id], "The attributed path step recorded its successful receipt")
+        XCTAssertEqual(third.stopped.memoryUse?.notes.map(\.id), [memory.id], "Stopping preserves previously confirmed memory")
+    }
+
+    func testSavedSkillRecordsMemoryOnlyAfterTheStepThatUsesItSucceeds() async throws {
+        let name = "Check Settings and Calculator before opening Safari"
+        let settings = "com.apple.Preferences"
+        let calculator = "com.apple.calculator"
+        let safari = "com.apple.mobilesafari"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use Calculator for the calculation step.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: settings, steps: [settings, calculator, safari].map {
+            SkillStep(action: ["launch": .string($0)])
+        }, params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+           lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let replies = [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [[
+                "run": ["name": name, "step_memory_ids": ["2": [memory.id]]],
+                "used_memory_ids": [memory.id],
+            ]]]),
+        ]
+
+        let before = try await stopWhenActivating(calculator, fixture: fixture, replies: replies,
+                                                   expectedActivations: [settings, calculator], offeredMemory: memory.id)
+        XCTAssertEqual(before.active?.memoryUse?.skills, [name], "The first step already succeeded")
+        XCTAssertTrue(before.active?.memoryUse?.notes.isEmpty ?? true, "The first successful skill step must not claim the later step's memory")
+        XCTAssertTrue(before.stopped.memoryUse?.notes.isEmpty ?? true, "Stopping before step two's receipt keeps its memory off the card")
+
+        let after = try await stopWhenActivating(safari, fixture: fixture, replies: replies,
+                                                  expectedActivations: [settings, calculator, safari], offeredMemory: memory.id)
+        XCTAssertEqual(after.active?.memoryUse?.notes.map(\.id), [memory.id])
+        XCTAssertEqual(after.stopped.memoryUse?.notes.map(\.id), [memory.id])
+    }
+
+    func testStoppingBeforeADriverRefusalLeavesNoSourcesOnTheCard() async throws {
+        let unavailable = "nz.example.removed-utility"
+        let name = "Open the removed utility"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the removed utility to check the reading.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: unavailable, steps: [SkillStep(action: ["launch": .string(unavailable)])],
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let cards = try await stopWhenActivating(unavailable, fixture: fixture, replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [[
+                "run": ["name": name, "step_memory_ids": ["1": [memory.id]]],
+                "used_memory_ids": [memory.id],
+            ]]]),
+        ], expectedActivations: [unavailable], offeredMemory: memory.id, unavailableApp: unavailable)
+        XCTAssertNil(cards.stopped.memoryUse, "A late refusal must never leave a skill or memory on the stopped card")
+        XCTAssertNil(cards.active?.memoryUse, "An operation awaiting the driver's receipt has no source")
+    }
+
+    func testDriverRefusedSkillLaunchLeavesNoSourcesOnTheCard() async throws {
+        let unavailable = "nz.example.removed-settings"
+        let name = "Open the archived device utility"
+        let fixture = SkillStore(url: nil)
+        let memory = try XCTUnwrap(fixture.remember("Use the archived device utility for this check.", by: "Poki"))
+        let skill = Skill(name: name, description: "", app: unavailable, steps: [SkillStep(action: ["launch": .string(unavailable)])],
+                          params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                          lastStop: nil, lastMs: nil, savedBy: "Poki", created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(skill))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open the archived utility"], "currentStep": 1]),
+            FakeCompletions.tool("look", ["full": true]),
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["run": ["name": name, "step_memory_ids": ["1": [memory.id]]]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": false, "summary": "The app is no longer installed.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("The app is no longer installed."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation, unavailableApp: unavailable),
+                        automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        defer {
+            library.forget(item.id)
+            library.forget(memory.id)
+            SessionStore.shared.delete(chat.sessionID)
+        }
+
+        let result = await chat.runDelegated("Open the archived device utility.")
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(memory.id) })
+        let answer = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(4).first))
+        XCTAssertTrue(answer.contains("no app with that bundle id is installed on this device"), answer)
+        XCTAssertTrue(answer.contains("no step was sent"), answer)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        XCTAssertNotNil(card.ended)
+        XCTAssertEqual(card.failed, true)
+        XCTAssertTrue(card.memoryUse?.skills.isEmpty ?? true, "A skill refused by the driver must not leave a source")
+        XCTAssertTrue(card.memoryUse?.notes.isEmpty ?? true, "An operation refused by the driver must not leave a memory source")
+    }
+
+    private func stopWhenActivating(_ bundle: String, fixture: SkillStore, replies: [String],
+                                    expectedActivations: [String], offeredMemory: String? = nil,
+                                    unavailableApp: String? = nil) async throws -> (active: ChatEntry?, stopped: ChatEntry) {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Check the device"], "currentStep": 1]),
+        ] + replies)
+        let activations = AsyncStream.makeStream(of: String.self)
+        let gate = ChatTransportGate()
+        let refusals = AsyncStream.makeStream(of: String.self)
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, beforeActivation: {
+            activations.continuation.yield($0)
+            if $0 == bundle { await gate.holdFirstRequest() }
+        }, unavailableApp: unavailableApp, onRefusal: {
+            refusals.continuation.yield($0)
+            refusals.continuation.finish()
+        })
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let skillNames = Set(fixture.usableSkills.map(\.name))
+        let noteIDs = Set(fixture.notes.map(\.id))
+        let cleanup = library.items.filter { skillNames.contains($0.text) || noteIDs.contains($0.id) }.map(\.id)
+        let store = SessionStore.shared
+        let session = chat.sessionID
+        defer {
+            for id in cleanup { library.forget(id) }
+            store.delete(session)
+        }
+        func card(in entries: [ChatEntry]) -> ChatEntry? {
+            entries.last { if case .plan = $0.kind { true } else { false } }
+        }
+        var sent: [String] = []
+        var activeCard: ChatEntry?
+        let owner = Task { @MainActor in
+            for await activated in activations.stream {
+                sent.append(activated)
+                if activated == bundle {
+                    activeCard = card(in: store.session(session)?.entries ?? [])
+                    chat.stop()
+                    await gate.release()
+                    return
+                }
+            }
+        }
+        _ = await chat.runDelegated("Check the device version.")
+        activations.continuation.finish()
+        await owner.value
+        if let unavailableApp, sent.contains(unavailableApp) {
+            var refused = refusals.stream.makeAsyncIterator()
+            let refusal = await refused.next()
+            XCTAssertEqual(refusal, unavailableApp, "The admitted request returned an explicit refusal after Stop")
+        }
+        defer { withExtendedLifetime(server) {} }
+        XCTAssertEqual(sent, expectedActivations)
+        if let offeredMemory { XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(offeredMemory) }) }
+        XCTAssertNotNil(activeCard)
+        XCTAssertNil(activeCard?.ended)
+        let stopped = try XCTUnwrap(card(in: chat.entries))
+        XCTAssertEqual(stopped.id, activeCard?.id)
+        XCTAssertEqual(stopped.stopped, true)
+        return (activeCard, stopped)
+    }
+
+    func testReopeningANoPlanRetryInterruptsTheRetryCardAndLeavesTheEarlierCardAlone() async throws {
+        let fixture = SkillStore(url: nil)
+        let settings = "com.apple.Preferences"
+        let note = try XCTUnwrap(fixture.remember("Use Settings to check the verification nickname.", by: "Poki"))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let suiteName = "ChatHarnessTests.retry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let task = "Recall the verification nickname."
+        let oldRequest = ChatEntry(.you(task, delivered: true))
+        var oldCard = ChatEntry(.plan([]))
+        oldCard.ended = Date()
+        oldCard.failed = true
+        let session = SavedSession(id: UUID().uuidString, kind: .poki, client: nil, title: task,
+                                   started: Date(), updated: Date(), live: false, outcome: .failed,
+                                   entries: [oldRequest, oldCard, ChatEntry(.note(.problem("The model connection ended.")))], calls: [])
+        try JSONEncoder().encode(session).write(to: folder.appendingPathComponent(session.id + ".json"))
+        let store = SessionStore(folder: folder, defaults: defaults)
+        let askedForReply = expectation(description: "The model received finish_task's reply but hasn't answered")
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": settings, "used_memory_ids": [note.id]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Test Device", "details": [], "answer": ["kind": "field"],
+            ]),
+            FakeCompletions.text("Test Device."),
+        ], holdAfter: 3, onRequest: { request in
+            if Self.toolAnswer(request).contains("Result recorded.") { askedForReply.fulfill() }
+        })
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation,
+                        kind: .poki, store: store)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer {
+            chat.stop()
+            server.release()
+            MemoryLibrary.shared.forget(note.id)
+        }
+        chat.restore(try XCTUnwrap(store.session(session.id)))
+        XCTAssertTrue(chat.canRetry)
+        chat.retry()
+        await fulfillment(of: [askedForReply], timeout: 10)
+        XCTAssertTrue(chat.running)
+
+        let reopenedStore = SessionStore(folder: folder, defaults: defaults)
+        let reopened = try XCTUnwrap(reopenedStore.session(session.id))
+        let cards = reopened.entries.filter { if case .plan = $0.kind { true } else { false } }
+        let requests = reopened.entries.filter { if case .you = $0.kind { true } else { false } }
+        XCTAssertEqual(requests.count, 2, "The retry has its own request")
+        XCTAssertEqual(cards.first, oldCard, "The earlier task remains unchanged")
+        let retryCard = try XCTUnwrap(cards.first { $0.id != oldCard.id })
+        XCTAssertEqual(retryCard.memoryUse?.notes.map(\.id), [note.id])
+        XCTAssertNotNil(retryCard.ended, "Only the active retry card was interrupted")
+        guard case .plan(let steps) = retryCard.kind else { return XCTFail("Missing retry task card") }
+        XCTAssertEqual(TaskCardState(steps: steps, live: false, waiting: false, handedOver: false,
+                                     stopped: retryCard.stopped == true, saveFailed: retryCard.failed == true,
+                                     interrupted: retryCard.interrupted == true), .interrupted)
+        XCTAssertEqual(reopened.outcome?.rawValue, "interrupted")
+    }
+
+    func testRejectedRequiredSaveLeavesTheTaskMemoryBatchUnchanged() async throws {
+        let name = "Required locked workflow \(UUID().uuidString)"
+        let newSkill = "New recovery workflow \(UUID().uuidString)"
+        let note = "New recovery preference \(UUID().uuidString)"
+        let optionalNote = "Automatic recovery preference \(UUID().uuidString)"
+        let fixture = SkillStore(url: nil)
+        let original = Skill(name: name, description: "Owner's workflow", app: "com.apple.Preferences",
+                             steps: [SkillStep(action: ["launch": "com.apple.Preferences"])],
+                             params: [:], expect: [], read: [], runs: 0, ok: 0, failuresInARow: 0,
+                             lastStop: nil, lastMs: nil, savedBy: SkillStore.owner, created: Date(), updated: Date())
+        XCTAssertTrue(fixture.save(original))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Settings" })
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["wait": 0]]]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": note]),
+            FakeCompletions.tool("skills", ["action": "save", "name": newSkill]),
+            FakeCompletions.tool("skills", ["action": "save", "name": name]),
+            FakeCompletions.tool("skills", ["action": "remember", "text": optionalNote, "optional": true]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Settings is ready.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Settings is ready."),
+        ])
+        defer { withExtendedLifetime(server) {} }
+        let chat = chat(on: server, transport: transport, automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.items.first { $0.text == name })
+        library.setLocked(item.id, true)
+        let rejected = Set([note, newSkill, optionalNote])
+        defer {
+            library.setLocked(item.id, false)
+            library.forget(item.id)
+            for saved in library.items where rejected.contains(saved.text) { library.forget(saved.id) }
+        }
+        let list = #"{"action":"list"}"#
+        let before = await app.runTool("skills", arguments: list)
+        XCTAssertTrue(before.text.split(separator: "\n").contains { $0.contains(name) && $0.hasSuffix("(locked)") })
+
+        let result = await chat.runDelegated("Check Settings and save the preference and the procedure.")
+        let after = await app.runTool("skills", arguments: list)
+        library.reload()
+
+        XCTAssertEqual(result.success, false, result.text)
+        XCTAssertTrue(result.text.contains("Couldn’t save the skill “\(name)”."))
+        XCTAssertFalse(after.text.contains(note))
+        XCTAssertFalse(after.text.contains(newSkill))
+        XCTAssertFalse(after.text.contains(optionalNote))
+        XCTAssertTrue(library.changes.allSatisfy { !rejected.contains($0.item.text) })
+    }
+
+    func testMemoryLookupWithoutAPlanShowsTheUsedMemoryOnTheTaskCard() async throws {
+        try await assertSkillListMemoryOnTaskCard(plan: [])
+    }
+
+    private func assertSkillListMemoryOnTaskCard(plan: [String]) async throws {
+        let appID = "com.apple.Preferences"
+        let fixture = SkillStore(url: nil)
+        let text = "Use Settings for the test device check \(UUID().uuidString)"
+        let old = try XCTUnwrap(fixture.remember(text, by: SkillStore.owner, app: appID))
+        for number in 1...20 {
+            fixture.remember("Settings test preference \(number) \(UUID().uuidString)", by: SkillStore.owner, app: appID)
+        }
+        let planReplies = plan.isEmpty ? [] : [
+            FakeCompletions.tool("report_plan", ["steps": plan, "currentStep": 1]),
+        ]
+        let server = try FakeCompletions(replies: planReplies + [
+            FakeCompletions.tool("skills", ["action": "list"]),
+            FakeCompletions.tool("do", ["actions": [["launch": appID, "used_memory_ids": [old.id, old.id, "unseen-id"]]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Settings is open.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Settings is open."),
+        ])
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        let library = MemoryLibrary.shared
+        library.reload()
+        let item = try XCTUnwrap(library.item(old.id))
+        defer { for note in fixture.notes { library.forget(note.id) } }
+
+        let result = await chat.runDelegated("Open the app for this test device.")
+
+        let first = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(FakeCompletions.system(first).contains(text))
+        XCTAssertEqual(result.success, true, result.text)
+        XCTAssertTrue(server.requests.map(Self.toolAnswer).contains { $0.contains(text) })
+        XCTAssertEqual(chat.savedCalls.first { $0.name == "do" }?.ok, true)
+        XCTAssertEqual(chat.savedCalls.contains { $0.name == "report_plan" }, !plan.isEmpty)
+        let card = try XCTUnwrap(chat.entries.last { if case .plan = $0.kind { true } else { false } })
+        guard case .plan(let steps) = card.kind else { return XCTFail("Missing task card") }
+        if !plan.isEmpty { XCTAssertEqual(steps.map(\.text), plan) }
+        XCTAssertNotNil(card.ended)
+        XCTAssertEqual(card.memoryUse?.notes, [.init(id: old.id, updatedAtSeconds: Int64(item.updated.timeIntervalSince1970))])
+    }
+
     /// finish_task's requested facts and the kind of answer go back to the agent that handed the task
     /// over, and the task's record keeps the answer with the element it was read from.
     func testTheFinishedTaskAnswersWithTheRequestedFacts() async throws {
@@ -534,7 +2047,7 @@ final class ChatHarnessTests: XCTestCase {
 
     /// A result card the app cannot draw costs only the card: the task's result stays, no card appears
     /// and the model is told to give the whole result in words. A card it can draw appears under the
-    /// task with Poki's suggestion selected and the model adds only a conclusion; the item you select
+    /// task with Poki's suggestion selected and the model is asked to add decision context; the item you select
     /// comes back with the conversation as it is saved.
     func testAResultCardTheAppCannotDrawLeavesTheWholeResultToTheReply() async throws {
         let train = Self.train, finish = Self.finishWithCard
@@ -559,7 +2072,9 @@ final class ChatHarnessTests: XCTestCase {
         guard case .card(let card) = entry.kind, let next = card.next else { return XCTFail("no card") }
         guard server.requests.count == 4 else { return XCTFail("\(server.requests.count) model requests") }
         XCTAssertEqual(card.selected(entry.chosen).fill(next.say), "把 G1 次发到公司差旅群")
-        XCTAssertTrue(Self.toolAnswer(server.requests[3]).contains("one plain sentence"), Self.toolAnswer(server.requests[3]))
+        let cardAnswer = Self.toolAnswer(server.requests[3])
+        XCTAssertTrue(cardAnswer.contains("what matters for the user's decision"), cardAnswer)
+        XCTAssertFalse(cardAnswer.contains("one plain sentence"), cardAnswer)
 
         chat.choose("G3", on: entry.id)
         let saved = try JSONDecoder().decode([ChatEntry].self, from: JSONEncoder().encode(chat.entries))
@@ -649,7 +2164,7 @@ final class ChatHarnessTests: XCTestCase {
     }
 
     /// The tool answer the model was given last in a request.
-    private static func toolAnswer(_ request: [String: Any]) -> String {
+    nonisolated private static func toolAnswer(_ request: [String: Any]) -> String {
         let messages = request["messages"] as? [[String: Any]] ?? []
         guard let tool = messages.last(where: { $0["role"] as? String == "tool" }) else { return "" }
         return (tool["content"] as? String) ?? json(tool)
@@ -715,7 +2230,7 @@ final class ChatHarnessTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(app).environment(chat))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
@@ -848,7 +2363,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
     }
 
-    func testStoppedConversationReachesModelAfterReload() async throws {
+    func testInterruptedConversationReachesModelAfterReload() async throws {
         let waiting = expectation(description: "model received the published plan")
         let ended = expectation(description: "stopped task ended")
         let firstEnded = expectation(description: "earlier task completed")
@@ -879,7 +2394,7 @@ final class ChatHarnessTests: XCTestCase {
         ChatModel.afterTask = nil
         SessionStore.shared.flush()
 
-        XCTAssertEqual(saved.outcome, .stopped, "an interrupted live task must replace the earlier task's done outcome")
+        XCTAssertEqual(saved.outcome, .interrupted, "an interrupted live task must replace the earlier task's done outcome")
         XCTAssertTrue(saved.entries.contains { if case .you(let text, _) = $0.kind { text == request } else { false } })
 
         let received = expectation(description: "continuation reached model")
@@ -1126,6 +2641,640 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertFalse(text.isEmpty, "agent-system.md is in the app")
         let named = Set(regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range, in: text).map { String(text[$0]) } })
         XCTAssertEqual(named.subtracting(tools), [], "named in agent-system.md but not offered to the model")
+    }
+
+    private func finishTaskCardKinds(in request: [String: Any]) -> [String]? {
+        let tools = request["tools"] as? [[String: Any]] ?? []
+        guard let finish = tools.first(where: {
+            let fn = ($0["function"] as? [String: Any]) ?? $0
+            return (fn["name"] as? String) == "finish_task"
+        }) else { return nil }
+        let fn = (finish["function"] as? [String: Any]) ?? finish
+        guard let params = fn["parameters"] as? [String: Any],
+              let props = params["properties"] as? [String: Any],
+              let card = props["card"] as? [String: Any],
+              let cardProps = card["properties"] as? [String: Any],
+              let kind = cardProps["kind"] as? [String: Any] else { return nil }
+        return kind["enum"] as? [String]
+    }
+
+    func testConfirmedOpenAIResponsesForwardsStablePromptCacheKey() async throws {
+        let openAIKeyAccount = "model-key.openai"
+        let priorKey = try Keychain.read(openAIKeyAccount)
+        defer {
+            if let priorKey { try? Keychain.write(priorKey, account: openAIKeyAccount) }
+            else { Keychain.delete(openAIKeyAccount) }
+        }
+        try Keychain.write(Data("sk-test-openai-cache-key".utf8), account: openAIKeyAccount)
+
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.responsesText("First answer."),
+            FakeCompletions.responsesText("Second answer."),
+            FakeCompletions.responsesText("New session answer."),
+        ])
+        let baseURL = "http://127.0.0.1:\(server.port)/v1"
+        let openAIModel = try XCTUnwrap(ModelProvider.custom.piModel("gpt-6.1-terra", customURL: baseURL, customAPI: .responses, customReasoning: false))
+
+        let firstSession = UUID().uuidString
+        let secondSession = UUID().uuidString
+        let firstLoop = PiLoop(provider: .openai, model: openAIModel, tools: Harness.tools, sessionId: firstSession) { _ in
+            PokiCore.ToolAnswer(text: "ok", jpeg: nil, isError: false)
+        }
+        let outcome1 = await firstLoop.run("First message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        let outcome2 = await firstLoop.run("Second message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        XCTAssertEqual(outcome1, PiLoop.Outcome.done)
+        XCTAssertEqual(outcome2, PiLoop.Outcome.done)
+
+        let secondLoop = PiLoop(provider: .openai, model: openAIModel, tools: Harness.tools, sessionId: secondSession) { _ in
+            PokiCore.ToolAnswer(text: "ok", jpeg: nil, isError: false)
+        }
+        let outcome3 = await secondLoop.run("Third message", instructions: "Reply briefly.", maxTurns: 2) { _ in }
+        XCTAssertEqual(outcome3, PiLoop.Outcome.done)
+
+        let requests = server.requests.filter { $0["tools"] != nil }
+        XCTAssertEqual(requests.count, 3)
+        guard requests.count == 3 else { return }
+        let keys = requests.map { $0["prompt_cache_key"] as? String }
+        XCTAssertEqual(keys[0], firstSession)
+        XCTAssertEqual(keys[1], firstSession)
+        XCTAssertEqual(keys[2], secondSession)
+        XCTAssertNotEqual(keys[0], keys[2])
+
+        // Provider policy: confirmed OpenAI / ChatGPT and custom api.openai.com receive the key;
+        // third-party custom gateways and unconfirmed providers do not.
+        let officialCustom = try XCTUnwrap(ModelProvider.custom.piModel("gpt-6.1-terra", customURL: "https://api.openai.com/v1", customAPI: .responses, customReasoning: false))
+        let thirdPartyCustom = try XCTUnwrap(ModelProvider.custom.piModel("my-model", customURL: "https://gateway.example.com/v1", customAPI: .responses, customReasoning: false))
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .openai, model: openAIModel, sessionID: firstSession), firstSession)
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .chatgpt, model: openAIModel, sessionID: firstSession), firstSession)
+        XCTAssertEqual(PiLoop.sessionCacheKey(for: .custom, model: officialCustom, sessionID: firstSession), firstSession)
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .custom, model: thirdPartyCustom, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .anthropic, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .deepseek, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .gemini, model: openAIModel, sessionID: firstSession))
+        XCTAssertNil(PiLoop.sessionCacheKey(for: .openrouter, model: openAIModel, sessionID: firstSession))
+    }
+
+    func testCustomResponsesEndpointRejectingPromptCacheKeyStillCompletesTask() async throws {
+        let rejectCacheFields: @Sendable ([String: String], [String: Any]) -> (status: String, body: String)? = { headers, json in
+            if json["prompt_cache_key"] != nil {
+                return ("400 Bad Request", #"{"error":{"code":"unsupported_parameter","message":"Unknown parameter: prompt_cache_key"}}"#)
+            }
+            if headers["session_id"] != nil || headers["x-client-request-id"] != nil {
+                return ("400 Bad Request", #"{"error":{"code":"unsupported_header","message":"Unsupported session header"}}"#)
+            }
+            return nil
+        }
+        let server = try FakeCompletions(
+            replies: [
+                FakeCompletions.responsesText("OK"),
+                FakeCompletions.responsesText("First reply without cache key."),
+                FakeCompletions.responsesText("Second reply without cache key."),
+            ],
+            rejectRequest: rejectCacheFields
+        )
+        let url = "http://127.0.0.1:\(server.port)/v1"
+        let check = await ConnectionCheck.runCustom(url: url, key: "", modelID: "strict-responses-model", api: .responses, reasoning: false)
+        XCTAssertTrue(check.result.passed, "ConnectionCheck should pass on strict custom Responses server: \(check.result)")
+
+        let endpoint = CustomEndpoint(url: url, api: .responses, found: .responses)
+        let provider = CustomProvider(name: "Strict Custom Responses", endpoints: [endpoint], model: "strict-responses-model", reasoning: false)
+        try ModelKeys.saveCustom(provider, typedKey: "", keepKey: false)
+        ModelKeys.selectedProvider = .custom
+        ModelKeys.selectedModel = CustomProviders.choiceID(provider.id, provider.model)
+
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: PKInProcess.shared(), transport: nil)
+        app.inProcessReadyForProbe()
+        self.app = app
+        let chat = ChatModel(app: app, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        try await Self.ask(chat, "First message")
+        try await Self.ask(chat, "Second message")
+
+        XCTAssertEqual(said(chat).suffix(2), ["First reply without cache key.", "Second reply without cache key."])
+        let chatRequests = server.requests.filter { $0["tools"] != nil }
+        XCTAssertEqual(chatRequests.count, 2)
+        for request in chatRequests {
+            XCTAssertNil(request["prompt_cache_key"], "Third-party custom Responses endpoint must not receive prompt_cache_key")
+        }
+    }
+
+    func testCustomEndpointFailoverFromOfficialPrimaryStripsSessionCacheForThirdPartyBackup() async throws {
+        struct RecordedAttempt: Sendable {
+            let url: String
+            let statusCode: Int
+            let hasPromptCacheKey: Bool
+            let routingHeaders: [String]
+        }
+
+        final class StrictFailoverHTTPClient: ProviderHTTPClient, @unchecked Sendable {
+            private let lock = NSLock()
+            private var recorded: [RecordedAttempt] = []
+
+            var attempts: [RecordedAttempt] { lock.withLock { recorded } }
+
+            func send(_ request: URLRequest) async throws -> ProviderHTTPResponse {
+                try await send(request, timeoutPolicy: .request)
+            }
+
+            func send(_ request: URLRequest, timeoutPolicy: ProviderHTTPTimeoutPolicy) async throws -> ProviderHTTPResponse {
+                let urlString = request.url?.absoluteString ?? ""
+                let json = request.httpBody.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+                let hasCacheKey = json["prompt_cache_key"] != nil
+                let trackedHeaders: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+                let routingHeaders = (request.allHTTPHeaderFields ?? [:]).keys
+                    .map { $0.lowercased() }
+                    .filter { trackedHeaders.contains($0) }
+                    .sorted()
+
+                let response: ProviderHTTPResponse
+                if request.url?.host?.lowercased() == "api.openai.com" {
+                    response = ProviderHTTPResponse(
+                        statusCode: 503,
+                        headers: ["content-type": "application/json"],
+                        body: Data(#"{"error":{"message":"Upstream temporarily unavailable"}}"#.utf8)
+                    )
+                } else if hasCacheKey || !routingHeaders.isEmpty {
+                    response = ProviderHTTPResponse(
+                        statusCode: 400,
+                        headers: ["content-type": "application/json"],
+                        body: Data(#"{"error":{"code":"unsupported_parameter","message":"Unknown prompt_cache_key or session header"}}"#.utf8)
+                    )
+                } else {
+                    response = ProviderHTTPResponse(
+                        statusCode: 200,
+                        headers: ["content-type": "text/event-stream"],
+                        body: Data(FakeCompletions.responsesText("Backup reply ok.").utf8)
+                    )
+                }
+
+                lock.withLock {
+                    recorded.append(RecordedAttempt(
+                        url: urlString,
+                        statusCode: response.statusCode,
+                        hasPromptCacheKey: hasCacheKey,
+                        routingHeaders: routingHeaders
+                    ))
+                }
+                return response
+            }
+        }
+
+        let primaryAddress = "https://api.openai.com/v1"
+        let backupAddress = "https://strict-backup.example/v1"
+        let provider = CustomProvider(
+            name: "Official Primary With Strict Third-Party Backup",
+            endpoints: [
+                CustomEndpoint(url: primaryAddress, api: .responses, found: .responses),
+                CustomEndpoint(url: backupAddress, api: .responses, found: .responses),
+            ],
+            model: "gpt-4.1-mini",
+            reasoning: false
+        )
+        try ModelKeys.saveCustom(provider, typedKey: "test-key", keepKey: false)
+        defer { CustomProviders.remove(provider.id) }
+
+        let model = try XCTUnwrap(ModelProvider.custom.piModel(CustomProviders.choiceID(provider.id, provider.model)))
+        XCTAssertEqual(model.baseUrl, primaryAddress)
+        XCTAssertEqual(model.api, .openAIResponses)
+        let backups = CustomEndpointClient.backupAddresses(for: model)
+        XCTAssertEqual(backups, [backupAddress])
+
+        let sessionKey = PiLoop.sessionCacheKey(for: .custom, model: model, sessionID: "failover-session-01")
+        XCTAssertEqual(sessionKey, "failover-session-01")
+
+        let transport = StrictFailoverHTTPClient()
+        let endpoint = CustomEndpointClient(inner: transport, primary: model.baseUrl, backups: backups)
+        var options = SimpleStreamOptions()
+        options.apiKey = "test-key"
+        options.httpClient = endpoint
+        options.sessionId = sessionKey
+
+        let stream = try PiSwiftAI.streamSimple(
+            model: model,
+            context: PiSwiftAI.Context(messages: [.user(UserMessage(content: .text("Ping")))]),
+            options: options
+        )
+        let reply = await stream.result()
+
+        let attempts = transport.attempts
+        XCTAssertEqual(attempts.count, 2, "Expected primary attempt followed by backup failover")
+        guard attempts.count == 2 else { return }
+
+        XCTAssertEqual(attempts[0].url, "https://api.openai.com/v1/responses")
+        XCTAssertEqual(attempts[0].statusCode, 503)
+        XCTAssertTrue(attempts[0].hasPromptCacheKey, "Official api.openai.com primary should keep prompt_cache_key")
+        XCTAssertEqual(attempts[0].routingHeaders, ["session_id", "x-client-request-id"])
+
+        XCTAssertEqual(attempts[1].url, "https://strict-backup.example/v1/responses")
+        XCTAssertFalse(attempts[1].hasPromptCacheKey, "Third-party backup must not receive prompt_cache_key")
+        XCTAssertEqual(attempts[1].routingHeaders, [], "Third-party backup must not receive OpenAI session headers")
+        XCTAssertEqual(attempts[1].statusCode, 200, "Strict third-party backup must return HTTP 200 after primary 503")
+
+        XCTAssertEqual(endpoint.seen?.status, 200)
+        XCTAssertEqual(endpoint.seen?.movedFrom, ["https://api.openai.com/v1/responses (HTTP 503)"])
+        XCTAssertNotEqual(reply.stopReason, .error)
+        let replyText = reply.content.compactMap { block -> String? in
+            if case .text(let text) = block { return text.text }
+            return nil
+        }.joined()
+        XCTAssertEqual(replyText, "Backup reply ok.")
+    }
+
+    func testDirectEngineWidensResultCardSchemaWhenSwitchingAppsMidTask() async throws {
+        let openAIKeyAccount = "model-key.openai"
+        let priorKey = try Keychain.read(openAIKeyAccount)
+        let priorEngine = UserDefaults.standard.object(forKey: "chatEngine")
+        let priorOpenAIModel = UserDefaults.standard.object(forKey: "chat.model.openai")
+        defer {
+            URLProtocol.unregisterClass(OpenAIResponsesStub.self)
+            OpenAIResponsesStub.clear()
+            if let priorKey { try? Keychain.write(priorKey, account: openAIKeyAccount) }
+            else { Keychain.delete(openAIKeyAccount) }
+            UserDefaults.standard.set(priorEngine, forKey: "chatEngine")
+            UserDefaults.standard.set(priorOpenAIModel, forKey: "chat.model.openai")
+        }
+        try Keychain.write(Data("sk-test-direct-engine".utf8), account: openAIKeyAccount)
+        UserDefaults.standard.set("direct", forKey: "chatEngine")
+        ModelKeys.selectedProvider = .openai
+        ModelKeys.selectedModel = "gpt-6.1-terra"
+
+        let launchArgs = Self.json(["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]])
+        let finishArgs = Self.json([
+            "success": true,
+            "summary": "Found 2 trains.",
+            "details": [["label": "G1", "value": "07:00"]],
+            "answer": ["kind": "list"],
+            "card": [
+                "app": "cn.12306.rails12306",
+                "kind": "12306.trains",
+                "recommended": "G1",
+                "items": [Self.train("G1", "07:00"), Self.train("G3", "08:00")],
+                "primary": ["label": "在 12306 查看", "say": "在 12306 打开 {title} 次"],
+                "next": ["label": "发到公司差旅群", "say": "把 {title} 次发到公司差旅群"],
+            ],
+        ])
+        let turn1 = Self.json([
+            "id": "resp_direct_1",
+            "status": "completed",
+            "output": [["type": "function_call", "call_id": "call_direct_1", "name": "do", "arguments": launchArgs]],
+        ])
+        let turn2 = Self.json([
+            "id": "resp_direct_2",
+            "status": "completed",
+            "output": [["type": "function_call", "call_id": "call_direct_2", "name": "finish_task", "arguments": finishArgs]],
+        ])
+        let turn3 = Self.json([
+            "id": "resp_direct_3",
+            "status": "completed",
+            "output": [["type": "message", "role": "assistant", "content": [["type": "output_text", "text": "G1 is earliest."]]]],
+        ])
+
+        OpenAIResponsesStub.clear()
+        OpenAIResponsesStub.replies = [
+            (200, "application/json", turn1),
+            (200, "application/json", turn2),
+            (200, "application/json", turn3),
+        ]
+        URLProtocol.registerClass(OpenAIResponsesStub.self)
+
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation,
+                           transport: SessionScreenTransport(session: automation))
+        app.inProcessReadyForProbe()
+        self.app = app
+        let chat = ChatModel(app: app, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        try await Self.ask(chat, "打开设置看看，顺便查一下明天车次")
+
+        let requests = OpenAIResponsesStub.requests.filter { $0.json["tools"] != nil }
+        XCTAssertGreaterThanOrEqual(requests.count, 3)
+        XCTAssertNil(finishTaskCardKinds(in: requests[0].json),
+                     "Direct engine turn 1 in Settings should omit finish_task.card before switching apps")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: requests[1].json))),
+                       ["12306.trains", "12306.transfers", "list"],
+                       "Direct engine turn 2 after launching 12306 must widen finish_task.card to 12306 + list")
+        XCTAssertEqual(Self.cards(in: chat).count, 1, "Direct engine widened task must render the 12306 result card")
+    }
+
+    func testZeroNoteTasksOmitMemoryAttributionAndObsoleteFinishField() async throws {
+        let priorNotes = SkillStore.shared.notes
+        let backup = priorNotes.isEmpty ? nil : try SkillStore.shared.exportData()
+        for note in priorNotes { MemoryLibrary.shared.forget(note.id) }
+        defer {
+            if let backup { _ = try? SkillStore.shared.importData(backup, by: "Poki") }
+        }
+
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = newChat(on: server)
+        defer { SessionStore.shared.delete(chat.sessionID) }
+        try await Self.ask(chat, "打开设置查看通用里的关于本机")
+
+        let first = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(FakeCompletions.system(first).contains("used_memory_ids"),
+                       "memory attribution instructions leaked when no notes exist")
+
+        let tools = first["tools"] as? [[String: Any]] ?? []
+        for tool in tools {
+            guard let fn = tool["function"] as? [String: Any],
+                  let name = fn["name"] as? String,
+                  ["do", "web_open", "web_click", "web_type", "finish_task"].contains(name),
+                  let params = fn["parameters"] as? [String: Any],
+                  let props = params["properties"] as? [String: Any] else { continue }
+            XCTAssertNil(props["used_memory_ids"], "\(name) exposed used_memory_ids when no notes exist")
+        }
+
+        let note = try XCTUnwrap(SkillStore.shared.remember("Prefer concise replies.", by: "Poki"))
+        defer { MemoryLibrary.shared.forget(note.id) }
+
+        let withNotesServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Done."),
+        ])
+        let withNotesChat = newChat(on: withNotesServer)
+        defer { SessionStore.shared.delete(withNotesChat.sessionID) }
+        try await Self.ask(withNotesChat, "打开设置查看通用里的关于本机")
+
+        let withNotesFirst = try XCTUnwrap(withNotesServer.requests.first)
+        XCTAssertTrue(FakeCompletions.system(withNotesFirst).contains("used_memory_ids"),
+                      "memory attribution instructions must return when saved notes exist")
+        let withNotesTools = withNotesFirst["tools"] as? [[String: Any]] ?? []
+        for tool in withNotesTools {
+            guard let fn = tool["function"] as? [String: Any],
+                  let name = fn["name"] as? String,
+                  let params = fn["parameters"] as? [String: Any],
+                  let props = params["properties"] as? [String: Any] else { continue }
+            if ["do", "web_open", "web_click", "web_type"].contains(name) {
+                XCTAssertNotNil(props["used_memory_ids"], "\(name) must keep used_memory_ids when saved notes exist")
+            } else if name == "finish_task" {
+                XCTAssertNil(props["used_memory_ids"], "finish_task must not expose the obsolete used_memory_ids field")
+                XCTAssertEqual(params["additionalProperties"] as? Bool, false,
+                               "finish_task must keep additionalProperties=false")
+            }
+        }
+    }
+
+    func testCountedScrollToolsAndInstructionsAreScopedToActiveCountedScrollTasks() async throws {
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Checked Settings."),
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "No chat open.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Could not scroll."),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Scrolled screens.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Scrolled two pages."),
+        ])
+        let chat = newChat(on: server)
+        defer { SessionStore.shared.delete(chat.sessionID) }
+
+        func toolNames(in request: [String: Any]) -> Set<String> {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return Set(tools.compactMap { (($0["function"] as? [String: Any]) ?? $0)["name"] as? String })
+        }
+
+        let screenScrollRule = "For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools."
+
+        try await Self.ask(chat, "打开设置查看通用里的关于本机")
+        let firstTaskReq = try XCTUnwrap(server.requests.first)
+        XCTAssertFalse(toolNames(in: firstTaskReq).contains("count_messages"))
+        XCTAssertFalse(toolNames(in: firstTaskReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertFalse(FakeCompletions.system(firstTaskReq).contains("count_messages"))
+        XCTAssertFalse(FakeCompletions.system(firstTaskReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertTrue(FakeCompletions.system(firstTaskReq).contains(screenScrollRule))
+
+        let beforeCounted = server.requests.count
+        try await Self.ask(chat, "往上翻 5 条消息")
+        let countedReq = try XCTUnwrap(server.requests.dropFirst(beforeCounted).first)
+        XCTAssertTrue(toolNames(in: countedReq).contains("count_messages"),
+                      "counted-scroll task in the same session must expose count_messages")
+        XCTAssertTrue(toolNames(in: countedReq).contains(Harness.countedScrollReplyTool),
+                      "counted-scroll task in owner chat must expose wait_for_counted_scroll_reply")
+        XCTAssertTrue(FakeCompletions.system(countedReq).contains("count_messages"))
+        XCTAssertTrue(FakeCompletions.system(countedReq).contains(Harness.countedScrollReplyTool))
+
+        let beforeScreens = server.requests.count
+        try await Self.ask(chat, "往上翻两页消息")
+        let screensReq = try XCTUnwrap(server.requests.dropFirst(beforeScreens).first)
+        XCTAssertFalse(toolNames(in: screensReq).contains("count_messages"),
+                       "screen-unit scroll must omit count_messages")
+        XCTAssertFalse(toolNames(in: screensReq).contains(Harness.countedScrollReplyTool),
+                       "screen-unit scroll must omit wait_for_counted_scroll_reply")
+        XCTAssertFalse(FakeCompletions.system(screensReq).contains("count_messages"))
+        XCTAssertTrue(FakeCompletions.system(screensReq).contains(screenScrollRule),
+                      "screen-unit scroll must keep the page/screen verification rule")
+
+        let delegatedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": false, "summary": "Stopped.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Stopped."),
+        ])
+        let delegatedChat = self.chat(on: delegatedServer)
+        defer { SessionStore.shared.delete(delegatedChat.sessionID) }
+        _ = await delegatedChat.runDelegated("Scroll up 10 messages.")
+        let delegatedReq = try XCTUnwrap(delegatedServer.requests.first)
+        XCTAssertTrue(toolNames(in: delegatedReq).contains("count_messages"))
+        XCTAssertFalse(toolNames(in: delegatedReq).contains(Harness.countedScrollReplyTool))
+        XCTAssertTrue(FakeCompletions.system(delegatedReq).contains("count_messages"))
+        XCTAssertFalse(FakeCompletions.system(delegatedReq).contains(Harness.countedScrollReplyTool))
+    }
+
+    func testReplyExamplesLanguageSelectionAndAutomaticUnlockGating() {
+        enum ExpectedExamples { case chinese, english, both }
+        let cases: [(request: String, expected: ExpectedExamples)] = [
+            ("Open Settings and check About. 再告诉我系统版本。", .both),
+            ("Open Settings and reply in 中文", .both),
+            ("Open Settings and reply in Spanish.", .both),
+            ("打开设置查看英文键盘是否开启", .both),
+            ("打开 Safari 看看天气", .chinese),
+            ("Open Settings", .english),
+            ("帮我打开设置看一下关于本机", .chinese),
+            ("打开设置然后用日语回复我", .both),
+            ("打开 https://example.com/ 查看标题和域名", .chinese),
+            ("", .both),
+        ]
+        for (request, expected) in cases {
+            let prompt = Harness.taskInstructions(for: request).text
+            switch expected {
+            case .chinese:
+                XCTAssertTrue(prompt.contains("### 简体中文"), "\(request) must include Chinese examples")
+                XCTAssertFalse(prompt.contains("### English"), "\(request) must omit English examples")
+            case .english:
+                XCTAssertTrue(prompt.contains("### English"), "\(request) must include English examples")
+                XCTAssertFalse(prompt.contains("### 简体中文"), "\(request) must omit Chinese examples")
+            case .both:
+                XCTAssertTrue(prompt.contains("### English"), "\(request) must keep English examples")
+                XCTAssertTrue(prompt.contains("### 简体中文"), "\(request) must keep Chinese examples")
+            }
+        }
+        XCTAssertFalse(Harness.taskInstructions(for: "打开设置查看通用里的关于本机").text.contains("Automatic Unlock"))
+    }
+
+    func testScreenshotIDStrippedForNonCardTasksAndKeptAfterWideningToCardApp() async throws {
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let chat = self.chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation, kind: .poki)
+        chat.newConversation()
+        defer { SessionStore.shared.delete(chat.sessionID) }
+        try await Self.ask(chat, "打开设置看看，顺便查一下明天车次")
+
+        func toolNames(in request: [String: Any]) -> Set<String> {
+            let tools = request["tools"] as? [[String: Any]] ?? []
+            return Set(tools.compactMap { (($0["function"] as? [String: Any]) ?? $0)["name"] as? String })
+        }
+        XCTAssertGreaterThanOrEqual(server.requests.count, 3)
+        XCTAssertFalse(toolNames(in: server.requests[0]).contains("get_screenshot"),
+                       "Non-card task omitting screenshot_id should omit get_screenshot")
+        let settingsAnswer = Self.toolAnswer(server.requests[1])
+        XCTAssertFalse(settingsAnswer.contains("screenshot_id: "),
+                       "Settings screen read while finish_task.card is omitted should strip screenshot_id: \(settingsAnswer)")
+        XCTAssertTrue(toolNames(in: server.requests[2]).contains("get_screenshot"),
+                      "Widening to a card-capable app must expose get_screenshot alongside screenshot_id")
+        let railAnswer = Self.toolAnswer(server.requests[2])
+        XCTAssertTrue(railAnswer.contains("screenshot_id: "),
+                      "12306 screen read after widening resultCardMode must preserve screenshot_id: \(railAnswer)")
+    }
+
+    func testAppMemoryBriefDoesNotDuplicateNotesAlreadyInTaskBrief() async throws {
+        let fixture = SkillStore(url: nil)
+        let note = try XCTUnwrap(fixture.remember("Check the Wi-Fi row first in Settings.", by: "Poki", app: "com.apple.Preferences"))
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            FakeCompletions.tool("finish_task", [
+                "success": true, "summary": "Checked Settings.", "details": [], "answer": ["kind": "action"],
+            ]),
+            FakeCompletions.text("Checked Settings."),
+        ])
+        let chat = chat(on: server, transport: SessionScreenTransport(session: automation), automation: automation)
+        let app = try XCTUnwrap(app)
+        let imported = await app.runTool("skills", arguments: Self.json([
+            "action": "import", "data": String(decoding: try fixture.exportData(), as: UTF8.self),
+        ]))
+        XCTAssertFalse(imported.isError, imported.text)
+        defer { MemoryLibrary.shared.forget(note.id); SessionStore.shared.delete(chat.sessionID) }
+
+        let result = await chat.runDelegated("打开设置查看无线局域网")
+        XCTAssertEqual(result.success, true, result.text)
+
+        let first = try XCTUnwrap(server.requests.first)
+        let system = FakeCompletions.system(first)
+        XCTAssertTrue(system.contains(note.id), "taskBrief should offer the app note in the system prompt")
+        XCTAssertTrue(system.contains("used_memory_ids"), "memory attribution instructions should be present when notes exist")
+
+        let answers = server.requests.dropFirst().map(Self.toolAnswer)
+        XCTAssertFalse(answers.contains { $0.contains("Saved memories for this app") },
+                       "First read of an already-briefed app must not duplicate its notes: \(answers)")
+        XCTAssertFalse(answers.contains { $0.contains(note.id) },
+                       "Already-offered note ID must not be injected a second time in the tool answer: \(answers)")
+    }
+
+    func testResultCardSchemaIsGatedPerTaskAndWidensForObservedApps() async throws {
+        // 1. Delegated tasks never render cards and must omit finish_task.card even when no app is named.
+        let delegatedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let delegatedChat = chat(on: delegatedServer)
+        defer { SessionStore.shared.delete(delegatedChat.sessionID) }
+        _ = await delegatedChat.runDelegated("Find trains from Beijing to Shanghai")
+        XCTAssertNil(finishTaskCardKinds(in: try XCTUnwrap(delegatedServer.requests.first)),
+                     "Delegated tasks must omit finish_task.card")
+
+        // 2. Non-card utility apps and explicit-URL built-in browser tasks omit finish_task.card.
+        for prompt in [
+            "打开设置查看通用里的关于本机",
+            "Open Photos and check the latest photo",
+            "打开 https://example.com/ 查看标题和域名",
+        ] {
+            let server = try FakeCompletions(replies: [
+                FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+                FakeCompletions.text("Done."),
+            ])
+            let chat = newChat(on: server)
+            defer { SessionStore.shared.delete(chat.sessionID) }
+            try await Self.ask(chat, prompt)
+            XCTAssertNil(finishTaskCardKinds(in: try XCTUnwrap(server.requests.first)),
+                         "\(prompt): finish_task.card should be omitted")
+        }
+
+        // 3. Dedicated card app scopes card kinds to that app + generic list and still renders its card.
+        let railServer = try FakeCompletions(replies: [
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 {title} 次发到公司差旅群"),
+            FakeCompletions.text("G1 is earliest."),
+        ])
+        let railChat = newChat(on: railServer)
+        defer { SessionStore.shared.delete(railChat.sessionID) }
+        try await Self.ask(railChat, "打开12306看一下明天上海到北京的高铁")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(railServer.requests.first)))),
+                       ["12306.trains", "12306.transfers", "list"])
+        XCTAssertEqual(Self.cards(in: railChat).count, 1)
+
+        // 4. Multi-app overlapping-field tasks merge shared fields without crashing and expose only those apps + list.
+        let multiAppServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let multiAppChat = newChat(on: multiAppServer)
+        defer { SessionStore.shared.delete(multiAppChat.sessionID) }
+        try await Self.ask(multiAppChat, "打开12306和携程查明天车票和机票")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(multiAppServer.requests.first)))),
+                       ["12306.trains", "12306.transfers", "ctrip.flights", "ctrip.hotels", "ctrip.rooms", "ctrip.fares", "list"])
+
+        // 5. Other named apps receive generic list only; lowercase everyday words keep all card kinds.
+        let meituanServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let meituanChat = newChat(on: meituanServer)
+        defer { SessionStore.shared.delete(meituanChat.sessionID) }
+        try await Self.ask(meituanChat, "打开美团找附近的咖啡店")
+        XCTAssertEqual(finishTaskCardKinds(in: try XCTUnwrap(meituanServer.requests.first)), ["list"])
+
+        let openEndedServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Done.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.text("Done."),
+        ])
+        let openEndedChat = newChat(on: openEndedServer)
+        defer { SessionStore.shared.delete(openEndedChat.sessionID) }
+        try await Self.ask(openEndedChat, "Find flights home from Tokyo")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: try XCTUnwrap(openEndedServer.requests.first)))).count, 10)
+
+        // 6. A task starting in a non-card app widens finish_task.card when it launches a card app mid-task.
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let widenServer = try FakeCompletions(replies: [
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "cn.12306.rails12306"]]]]),
+            Self.finishWithCard([Self.train("G1", "07:00"), Self.train("G3", "08:00")], "把 {title} 次发到公司差旅群"),
+            FakeCompletions.text("G1 is earliest."),
+        ])
+        let widenChat = chat(on: widenServer, transport: SessionScreenTransport(session: automation), automation: automation, kind: .poki)
+        widenChat.newConversation()
+        defer { SessionStore.shared.delete(widenChat.sessionID) }
+        try await Self.ask(widenChat, "打开设置看看，顺便查一下明天车次")
+
+        XCTAssertGreaterThanOrEqual(widenServer.requests.count, 3)
+        XCTAssertNil(finishTaskCardKinds(in: widenServer.requests[0]),
+                     "Turn 1 in Settings should omit finish_task.card before another app is observed")
+        XCTAssertEqual(Set(try XCTUnwrap(finishTaskCardKinds(in: widenServer.requests[1]))),
+                       ["12306.trains", "12306.transfers", "list"],
+                       "Turn 2 after launching 12306 must widen finish_task.card to 12306 + list")
+        XCTAssertEqual(Self.cards(in: widenChat).count, 1, "Widened task must still render the 12306 card")
     }
 
     func testChineseAppTaskOffersMatchingSkillInPromptAndOmitsUnrelatedSkills() async throws {
@@ -1383,6 +3532,54 @@ final class ChatHarnessTests: XCTestCase {
             step-by-step calls: \(calendarCalls.map(\.name).joined(separator: " -> "))
         """)
     }
+
+    func testInAppChatOmitsExternalFinishGuidanceAndSkipsScreenReadOnEmptyFinish() async throws {
+        let prompt = Harness.taskInstructions(for: "打开计算器，计算 123 乘以 45，告诉我结果。").text
+        XCTAssertFalse(prompt.contains("put finish: true on the last do"), "In-app chat must not tell the model to send finish: true on do")
+        XCTAssertTrue(PokiCore.toolInstructions.contains("put finish: true on the last do"), "External MCP instructions must remain unchanged")
+
+        let chatDo = try XCTUnwrap(Harness.tools.first { $0.name == "do" })
+        XCTAssertFalse(chatDo.description.contains("finish: true on the do"), "In-app chat do description must omit external finish: true guidance")
+        let chatProperties = try XCTUnwrap(chatDo.schema["properties"] as? [String: Any])
+        XCTAssertNil(chatProperties["finish"], "In-app chat do schema must not expose finish")
+        XCTAssertTrue(PokiCore.toolCatalogJSON.contains(#""finish""#), "External MCP tool catalog must keep finish")
+
+        final class ReadSnapshots: @unchecked Sendable {
+            private let lock = NSLock()
+            private var values: [Int] = []
+            func append(_ count: Int) { lock.withLock { values.append(count) } }
+            var all: [Int] { lock.withLock { values } }
+        }
+        let automation = FakeAutomation()
+        _ = automation.prepare()
+        let transport = SessionScreenTransport(session: automation)
+        let snapshots = ReadSnapshots()
+        let server = try FakeCompletions(replies: [
+            FakeCompletions.tool("report_plan", ["steps": ["Open Settings"], "currentStep": 1]),
+            FakeCompletions.tool("do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]]),
+            FakeCompletions.tool("finish_task", ["success": true, "summary": "Opened Settings.", "details": [], "answer": ["kind": "action"]]),
+            FakeCompletions.tool("do", ["actions": [], "finish": true]),
+            FakeCompletions.text("Opened Settings."),
+        ], onRequest: { _ in
+            snapshots.append(transport.screenReads)
+        })
+        let marker = "empty-finish-check-\(UUID().uuidString)"
+        AppLog.shared.add("test", marker)
+        let chat = chat(on: server, transport: transport, automation: automation, kind: .poki)
+        let done = expectation(description: "Task finished")
+        ChatModel.afterTask = { _ in done.fulfill() }
+        chat.send("Open Settings")
+        await fulfillment(of: [done], timeout: 10)
+
+        let counts = snapshots.all
+        let taskLogs = Array(AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }))
+        XCTAssertEqual(counts.count, 5, "Expected 5 scripted turns: \(counts)")
+        XCTAssertGreaterThanOrEqual(counts[3], 1, "Launch must read the screen before empty finish")
+        XCTAssertEqual(counts[4], counts[3], "Empty finish do must not trigger an extra screen read")
+        XCTAssertEqual(transport.screenReads, counts[3], "Empty finish do must not trigger an extra screen read")
+        XCTAssertFalse(taskLogs.contains { $0.contains("[agent] started: Look at the screen") }, "Empty finish do must not log a Look at the screen step: \(taskLogs)")
+        XCTAssertFalse(taskLogs.contains { $0.contains("a tap hit the Live Activity") }, "Returning to Poki on empty finish must not misreport a Live Activity tap: \(taskLogs)")
+    }
 }
 
 /// An OpenAI chat completions endpoint on 127.0.0.1: each request is kept and answered with the next
@@ -1422,14 +3619,19 @@ final class FakeCompletions: @unchecked Sendable {
     private let holdAfter: Int?
     private let onRequest: (@Sendable ([String: Any]) -> Void)?
     private let rejectUnknownCacheField: Bool
+    private let rejectRequest: (@Sendable ([String: String], [String: Any]) -> (status: String, body: String)?)?
 
     var port: UInt16 { listener.port?.rawValue ?? 0 }
     var requests: [[String: Any]] { lock.withLock { bodies } }
     var requestHeaders: [[String: String]] { lock.withLock { routingHeaders } }
 
+    func replaceReplies(_ next: [String]) { lock.withLock { replies = next } }
+
     init(replies: [String], responseStatuses: [Int] = [], responseStatus: String = "200 OK", holdFirstReply: (@Sendable () -> Void)? = nil,
-         holdAfter: Int? = nil, onRequest: (@Sendable ([String: Any]) -> Void)? = nil,
-         rejectUnknownCacheField: Bool = false) throws {
+         holdAfter: Int? = nil,
+         rejectUnknownCacheField: Bool = false,
+         onRequest: (@Sendable ([String: Any]) -> Void)? = nil,
+         rejectRequest: (@Sendable ([String: String], [String: Any]) -> (status: String, body: String)?)? = nil) throws {
         self.replies = replies
         self.responseStatuses = responseStatuses
         self.responseStatus = responseStatus
@@ -1437,6 +3639,7 @@ final class FakeCompletions: @unchecked Sendable {
         self.holdAfter = holdAfter
         self.onRequest = onRequest
         self.rejectUnknownCacheField = rejectUnknownCacheField
+        self.rejectRequest = rejectRequest
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -1468,46 +3671,73 @@ final class FakeCompletions: @unchecked Sendable {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
             guard let self else { return }
             let received = received + (data ?? Data())
-            if let request = Self.decodedRequest(received) { return self.answer(connection, request.body, headers: request.headers) }
+            if let parsed = Self.parseHTTP(received) { return self.answer(connection, parsed.headers, parsed.body) }
             if done || error != nil { return connection.cancel() }
             self.read(connection, received)
         }
     }
 
-    /// Preserve header values exactly; HTTP header *names* alone are case insensitive.
-    private static func decodedRequest(_ data: Data) -> (body: Data, headers: [String: String])? {
+    /// The request's lower-cased header names (exact values) and full body once all of it is in.
+    private static func parseHTTP(_ data: Data) -> (headers: [String: String], body: Data)? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let rawHead = String(decoding: data[..<end.lowerBound], as: UTF8.self)
-        let head = rawHead.lowercased()
-        let length = head.split(separator: "\r\n").first { $0.hasPrefix("content-length:") }
-            .flatMap { Int($0.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)) } ?? 0
-        let body = data[end.upperBound...]
-        guard body.count >= length else { return nil }
-        let allowed: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+        let head = String(decoding: data[..<end.lowerBound], as: UTF8.self)
         var headers: [String: String] = [:]
-        for line in rawHead.split(separator: "\r\n").dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let name = String(line[..<colon]).lowercased()
-            if allowed.contains(name) {
-                headers[name] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        for line in head.split(separator: "\r\n").dropFirst() {
+            if let colon = line.firstIndex(of: ":") {
+                let key = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                headers[key] = value
             }
         }
-        return (Data(body.prefix(length)), headers)
+        let length = headers["content-length"].flatMap(Int.init) ?? 0
+        let body = data[end.upperBound...]
+        return body.count >= length ? (headers, Data(body.prefix(length))) : nil
     }
 
-    private func answer(_ connection: NWConnection, _ body: Data, headers: [String: String]) {
+    private static let allowedRoutingHeaders: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+
+    private static func filteredRoutingHeaders(_ headers: [String: String]) -> [String: String] {
+        headers.filter { allowedRoutingHeaders.contains($0.key) }
+    }
+
+    private func answer(_ connection: NWConnection, _ headers: [String: String], _ body: Data) {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let routing = Self.filteredRoutingHeaders(headers)
         // Title requests use an independent reply, consuming no scripted chat turn.
         // They still need their routing header captured for the auxiliary-request test.
+        let responsesInstructions = (json["instructions"] as? String) ?? ""
+        let responsesInputSystem = ((json["input"] as? [[String: Any]]) ?? []).compactMap { item -> String? in
+            guard ["system", "developer"].contains(item["role"] as? String ?? "") else { return nil }
+            return item["content"] as? String
+        }.joined(separator: "\n")
+        if json["tools"] == nil,
+           responsesInstructions.hasPrefix("You name chat conversations")
+            || responsesInputSystem.hasPrefix("You name chat conversations") {
+            lock.withLock { routingHeaders.append(routing) }
+            let events = Self.responsesText("Test conversation")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(events.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + events).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
         if Self.system(json).hasPrefix("You name chat conversations") {
-            lock.withLock { routingHeaders.append(headers) }
+            lock.withLock { routingHeaders.append(routing) }
             let response = Self.text("Test conversation")
             let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: \(response.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((head + response).utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
+        if let rejected = rejectRequest?(headers, json) {
+            lock.withLock {
+                routingHeaders.append(routing)
+                bodies.append(json)
+            }
+            onRequest?(json)
+            let head = "HTTP/1.1 \(rejected.status)\r\nContent-Type: application/json\r\nContent-Length: \(rejected.body.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + rejected.body).utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
         let (payload, status, type, requestNumber) = lock.withLock { () -> (String, String, String, Int) in
-            routingHeaders.append(headers)
+            routingHeaders.append(routing)
             bodies.append(json)
             let scripted = replies.isEmpty ? Self.text("No more scripted turns.") : replies.removeFirst()
             let specified = !responseStatuses.isEmpty
@@ -1552,12 +3782,117 @@ final class FakeCompletions: @unchecked Sendable {
 
     static func text(_ words: String) -> String { event(["role": "assistant", "content": words], finish: "stop") }
 
+    static func responsesText(_ words: String) -> String {
+        let id = "resp_\(UUID().uuidString.prefix(8))"
+        let msg = "msg_\(UUID().uuidString.prefix(8))"
+        let events: [[String: Any]] = [
+            ["type": "response.created", "response": ["id": id, "status": "in_progress"]],
+            ["type": "response.output_item.added", "output_index": 0,
+             "item": ["type": "message", "id": msg, "status": "in_progress", "role": "assistant", "content": []]],
+            ["type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": words],
+            ["type": "response.output_item.done", "output_index": 0,
+             "item": ["type": "message", "id": msg, "status": "completed", "role": "assistant",
+                      "content": [["type": "output_text", "text": words]]]],
+            ["type": "response.completed", "response": ["id": id, "status": "completed"]],
+        ]
+        return events.map { ev in
+            let data = try! JSONSerialization.data(withJSONObject: ev)
+            return "data: \(String(decoding: data, as: UTF8.self))\n\n"
+        }.joined()
+    }
+
+    static func countedScrollQuestion(_ question: String) -> String {
+        tool("wait_for_counted_scroll_reply", ["question": question])
+    }
+
     /// A request's system (or developer) messages, as text.
     static func system(_ request: [String: Any]) -> String {
         let messages = request["messages"] as? [[String: Any]] ?? []
         return messages.filter { ["system", "developer"].contains($0["role"] as? String ?? "") }.map { message in
             (message["content"] as? String) ?? ((message["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined(separator: "\n") ?? "")
         }.joined(separator: "\n")
+    }
+}
+
+/// Intercepts requests to `api.openai.com` for in-process Responses API and direct-engine tests.
+private final class OpenAIResponsesStub: URLProtocol {
+    struct Sent {
+        let url: URL?
+        let headers: [String: String]
+        let body: Data
+        var json: [String: Any] {
+            (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        }
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) static var replies: [(status: Int, type: String, body: String)] = []
+    nonisolated(unsafe) private static var recorded: [Sent] = []
+
+    static var requests: [Sent] { lock.withLock { recorded } }
+
+    static func clear() {
+        lock.withLock {
+            replies.removeAll()
+            recorded.removeAll()
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host()?.lowercased() == "api.openai.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let body = Self.bodyData(from: request)
+        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let instructions = (json["instructions"] as? String) ?? ""
+        let inputSystem = ((json["input"] as? [[String: Any]]) ?? []).compactMap { item -> String? in
+            guard ["system", "developer"].contains(item["role"] as? String ?? "") else { return nil }
+            return item["content"] as? String
+        }.joined(separator: "\n")
+        if json["tools"] == nil,
+           instructions.hasPrefix("You name chat conversations") || inputSystem.hasPrefix("You name chat conversations") {
+            let replyBody = FakeCompletions.responsesText("Test conversation")
+            finish(status: 200, type: "text/event-stream", body: replyBody)
+            return
+        }
+        let headers = Dictionary(uniqueKeysWithValues: (request.allHTTPHeaderFields ?? [:]).map { ($0.key.lowercased(), $0.value) })
+        let next = Self.lock.withLock { () -> (status: Int, type: String, body: String) in
+            Self.recorded.append(Sent(url: request.url, headers: headers, body: body))
+            if Self.replies.isEmpty {
+                return (200, "text/event-stream", FakeCompletions.responsesText("No more scripted turns."))
+            }
+            return Self.replies.removeFirst()
+        }
+        finish(status: next.status, type: next.type, body: next.body)
+    }
+
+    override func stopLoading() {}
+
+    private func finish(status: Int, type: String, body: String) {
+        let data = Data(body.utf8)
+        let response = HTTPURLResponse(url: request.url ?? URL(string: "https://api.openai.com/v1/responses")!,
+                                       statusCode: status, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": type, "Content-Length": "\(data.count)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    private static func bodyData(from request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var out = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count > 0 { out.append(buffer, count: count) } else { break }
+        }
+        return out
     }
 }
 
@@ -1676,34 +4011,180 @@ private final class RotatingWorkspace: HTTPTransport, @unchecked Sendable {
     }
 }
 
+private final class MessageListTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private let messages: [String]
+    private let visibleCount: Int
+    private let step: Int
+    private let spacing: Int
+    private let failsDrag: Bool
+    private let identifiesMessages: Bool
+    private var dragSteps: ArraySlice<Int>
+    private var top: Int
+    var topMessage: Int { lock.withLock { top } }
+
+    init(messages: [String] = (1...8).map { String(format: "Message %02d", $0) },
+         visibleCount: Int = 4, step: Int = 2, spacing: Int = 100, failsDrag: Bool = false,
+         identifiesMessages: Bool = false, dragSteps: [Int] = []) {
+        self.messages = messages
+        self.visibleCount = visibleCount
+        self.step = step
+        self.spacing = spacing
+        self.failsDrag = failsDrag
+        self.identifiesMessages = identifiesMessages
+        self.dragSteps = dragSteps[...]
+        top = messages.count - visibleCount + 1
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/session": value = ["sessionId": "message-list"]
+        case "/status": value = ["ready": true]
+        case "/wda/locked": value = false
+        case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
+        case "/wda/activeAppInfo": value = ["bundleId": "local.fixture.messages", "name": "Messages fixture"]
+        case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
+        case "/source":
+            let first = topMessage
+            let rows = (0..<visibleCount).map { line in
+                let index = first + line - 1
+                let name = identifiesMessages ? #" name="message-\#(index)""# : ""
+                return #"<XCUIElementTypeStaticText\#(name) label="\#(messages[index])" x="20" y="\#(140 + line * spacing)" width="250" height="40"/>"#
+            }.joined()
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Messages fixture" x="0" y="0" width="390" height="844">\#(rows)</XCUIElementTypeApplication></AppiumAUT>"#)
+        case "/wda/pressAndDragWithVelocity", "/actions":
+            if failsDrag { throw TransportError.other("Fixture rejected the scroll input") }
+            lock.withLock {
+                let delta = dragSteps.popFirst() ?? step
+                top = min(messages.count - visibleCount + 1, max(1, top - delta))
+            }
+            value = .null
+        default: value = .null
+        }
+        return (200, (["value": value] as JSON).data())
+    }
+}
+
+private actor PasteReceiptTransport: HTTPTransport {
+    private let screen: SessionScreenTransport
+    private let fillsField: Bool
+    private let hidesFieldBeforePaste: Bool
+    private let beforeVerification: @Sendable () async -> Void
+    private var clipboard = Data("Owner clipboard".utf8)
+    private var menu = false
+    private var awaitingVerification = false
+    private(set) var field: String
+
+    init(session: FakeAutomation, fillsField: Bool, hidesFieldBeforePaste: Bool, initialField: String,
+         beforeVerification: @escaping @Sendable () async -> Void) {
+        screen = SessionScreenTransport(session: session)
+        self.fillsField = fillsField
+        self.hidesFieldBeforePaste = hidesFieldBeforePaste
+        field = initialField
+        self.beforeVerification = beforeVerification
+    }
+
+    func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
+        let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        let value: JSON
+        switch path {
+        case "/wda/getPasteboard":
+            value = .string(clipboard.base64EncodedString())
+        case "/wda/setPasteboard":
+            if let body, let content = (try? JSON.parse(body))?["content"]?.string,
+               let data = Data(base64Encoded: content) { clipboard = data }
+            value = .null
+        case "/wda/keys":
+            if let body, let keys = (try? JSON.parse(body))?["value"]?.array {
+                field.removeLast(min(field.count, keys.filter { $0.string == "\u{8}" }.count))
+            }
+            value = .null
+        case "/wda/touchAndHold":
+            menu = true
+            value = .null
+        case "/wda/tap", "/actions":
+            if menu {
+                menu = false
+                awaitingVerification = true
+            } else {
+                menu = true
+            }
+            value = .null
+        case "/source":
+            if awaitingVerification {
+                awaitingVerification = false
+                await beforeVerification()
+                if fillsField { field = String(decoding: clipboard, as: UTF8.self) }
+            }
+            let paste = menu ? #"<XCUIElementTypeMenuItem name="Paste" label="Paste" x="150" y="50" width="80" height="40" />"# : ""
+            let searchField = menu && hidesFieldBeforePaste ? "" :
+                #"<XCUIElementTypeTextField name="Search" label="Search" value="\#(field)" x="16" y="100" width="358" height="44" />"#
+            value = .string(#"<AppiumAUT><XCUIElementTypeApplication name="Settings" label="Settings" x="0" y="0" width="390" height="844">\#(searchField)<XCUIElementTypeKeyboard x="0" y="500" width="390" height="344" />\#(paste)</XCUIElementTypeApplication></AppiumAUT>"#)
+        default:
+            return try await screen.send(method: method, url: url, body: body, timeout: timeout)
+        }
+        return (200, (["value": value] as JSON).data())
+    }
+}
+
 final class SessionScreenTransport: HTTPTransport, @unchecked Sendable {
     private let session: FakeAutomation
     private let beforeRequest: (@Sendable () async -> Void)?
+    private let beforePathRequest: (@Sendable (String) async -> Void)?
     private let screenLabel: @Sendable () -> String
+    private let beforeActivation: (@Sendable (String) async -> Void)?
+    private let activeApp: @Sendable () -> (bundleID: String, name: String)
+    private let unavailableApp: String?
+    private let onRefusal: (@Sendable (String) -> Void)?
     private let lock = NSLock()
     private var reads = 0
     private var firstRead: TimeInterval?
     var firstReadAt: TimeInterval? { lock.withLock { firstRead } }
     var screenReads: Int { lock.withLock { reads } }
     /// `screenLabel` is the one button the fake screen shows, read at each look.
-    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil, screenLabel: @escaping @Sendable () -> String = { "General" }) {
+    init(session: FakeAutomation, beforeRequest: (@Sendable () async -> Void)? = nil,
+         beforePathRequest: (@Sendable (String) async -> Void)? = nil,
+         beforeActivation: (@Sendable (String) async -> Void)? = nil,
+         activeApp: @escaping @Sendable () -> (bundleID: String, name: String) = { ("com.apple.Preferences", "Settings") },
+         unavailableApp: String? = nil,
+         onRefusal: (@Sendable (String) -> Void)? = nil,
+         screenLabel: @escaping @Sendable () -> String = { "General" }) {
         self.session = session
         self.screenLabel = screenLabel
         self.beforeRequest = beforeRequest
+        self.beforePathRequest = beforePathRequest
+        self.beforeActivation = beforeActivation
+        self.activeApp = activeApp
+        self.unavailableApp = unavailableApp
+        self.onRefusal = onRefusal
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        await beforeRequest?()
-        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let path = url.path.replacingOccurrences(of: #"^/session/[^/]+"#, with: "", options: .regularExpression)
+        await beforeRequest?()
+        await beforePathRequest?(path)
+        guard session.isOpen else { throw URLError(.cannotConnectToHost) }
         let value: JSON
         switch path {
+        case "/wda/apps/activate":
+            if let body, let bundle = (try? JSON.parse(body))?["bundleId"]?.string {
+                await beforeActivation?(bundle)
+                if bundle == unavailableApp {
+                    let failure: JSON = ["value": ["error": "unknown error", "message": .string("Application \"\(bundle)\" is unknown to FrontBoard.")]]
+                    onRefusal?(bundle)
+                    return (500, failure.data())
+                }
+            }
+            value = .null
         case "/session": value = ["sessionId": "fixture-session"]
         case "/status": value = ["ready": true]
         case "/wda/locked": value = false
         case "/wda/screen": value = ["screenSize": ["width": 390, "height": 844]]
         case "/wda/activeAppInfo":
-            value = ["bundleId": "com.apple.Preferences", "name": "Settings"]
+            let app = activeApp()
+            value = ["bundleId": .string(app.bundleID), "name": .string(app.name)]
         case "/screenshot": value = .string("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=")
         case "/source":
             lock.withLock {

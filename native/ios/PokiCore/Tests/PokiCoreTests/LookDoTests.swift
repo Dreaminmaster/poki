@@ -220,7 +220,11 @@ final class LookDoTests: XCTestCase {
         wda.set("POST /poki/pane") { _ in
             (200, ["value": ["identity": "left/workspace", "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
         }
-        wda.source([("Button", "Delete test item")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete test item", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         let read = await core.callTool("look", arguments: "{\"pane\":\"left\"}", localSession: "workspace")
         XCTAssertFalse(read.isError, read.text)
         let call = Task {
@@ -277,7 +281,11 @@ final class LookDoTests: XCTestCase {
             side.value = args?["side"]?.string ?? "auto"
             return (200, ["value": ["identity": .string("\(side.value)/workspace"), "bundleId": "com.apple.Preferences", "otherBundleId": "local.b"]])
         }
-        wda.source([("Button", "Delete test item")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete test item", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         func read(_ side: String) async {
             let result = await core.callTool("look", arguments: "{\"pane\":\"\(side)\"}", localSession: "workspace")
             XCTAssertFalse(result.isError, result.text)
@@ -681,6 +689,917 @@ final class LookDoTests: XCTestCase {
         XCTAssertTrue(picture.text.contains("screen_changed: true (only the picture changed"), picture.text)
     }
 
+    #if canImport(CoreGraphics)
+    func testNumberKeyReturnsTheNewDisplayAndPictureEvenWhenTheFirstReadIsOld() async {
+        let (core, wda, _) = makeCore()
+        let taps = LockedBox(0)
+        let sawOldDisplayAfterTap = LockedBox(false)
+        let oldPicture = numberDisplayPicture("0")
+        let newPicture = numberDisplayPicture("7")
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.set("GET /source") { _ in
+            let value: JSON
+            if taps.value == 0 {
+                value = "0"
+            } else {
+                value = sawOldDisplayAfterTap.update { sawOld in
+                    defer { sawOld = true }
+                    return sawOld ? "7" : "0"
+                }
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "children": [
+                ["type": "XCUIElementTypeStaticText", "name": "display", "label": value,
+                 "rect": ["x": 16, "y": 130, "width": 358, "height": 70]],
+                ["type": "XCUIElementTypeButton", "label": "7",
+                 "rect": ["x": 16, "y": 280, "width": 70, "height": 70]],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            let picture = sawOldDisplayAfterTap.value ? newPicture : oldPicture
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(newPicture.count)".utf8))
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyWaitsForThePictureToShowTheNewDigitDuringATransition() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let transition = numberDisplayPicture("0", transitioning: true)
+        let settled = numberDisplayPicture("7")
+        XCTAssertNotEqual(transition.count, settled.count)
+        let taps = LockedBox(0)
+        let picturesAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        let key = Node("Button", "7", [16, 280, 70, 70])
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), key], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            let picture: Data
+            if taps.value == 0 {
+                picture = before
+            } else {
+                picture = picturesAfterTap.update { count in
+                    count += 1
+                    return count <= 3 ? transition : settled
+                }
+            }
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            wda.tree([Node("StaticText", "7", [16, 130, 358, 70]), key], app: "Calculator")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settled.count)".utf8), result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyRetakesPictureWhenConfirmationTreeLagsBehindFirstPicture() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let firstSeven = numberDisplayPicture("7")
+        let transition = numberDisplayPicture("0", transitioning: true)
+        let settledSeven = numberDisplayPicture("7", xOffset: 8)
+        XCTAssertNotEqual(firstSeven.count, settledSeven.count)
+        let taps = LockedBox(0)
+        let sourcesAfterTap = LockedBox(0)
+        let screenshotsAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        let beforeNodes = [Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        let afterNodes = [Node("StaticText", "7", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        @Sendable func treeJSON(_ nodes: [Node]) -> JSON {
+            let children: [JSON] = nodes.map { n in
+                ["type": .string("XCUIElementType\(n.type)"), "label": n.label.map(JSON.string) ?? .null,
+                 "rect": ["x": .number(n.frame[0]), "y": .number(n.frame[1]), "width": .number(n.frame[2]), "height": .number(n.frame[3])],
+                 "children": []]
+            }
+            return ["type": "XCUIElementTypeApplication", "label": "Calculator",
+                    "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]
+        }
+        wda.set("GET /source") { _ in
+            guard taps.value > 0 else { return (200, ["value": treeJSON(beforeNodes)]) }
+            let call = sourcesAfterTap.update { $0 += 1; return $0 }
+            if call == 1 {
+                try await Task.sleep(nanoseconds: 150_000_000)
+            } else if call == 2 {
+                try await Task.sleep(nanoseconds: 550_000_000)
+            }
+            return (200, ["value": treeJSON(afterNodes)])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard taps.value > 0 else { return (200, ["value": .string(before.base64EncodedString())]) }
+            let count = screenshotsAfterTap.update { $0 += 1; return $0 }
+            let picture = count == 1 ? firstSeven : (count <= 3 ? transition : settledSeven)
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertGreaterThanOrEqual(screenshotsAfterTap.value, 2, result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledSeven.count)".utf8), result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyRespectsDisabledQuickReadWhenTapHasNoEffect() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }
+        let before = numberDisplayPicture("0")
+        let taps = LockedBox(0)
+        let screenshotsAfterTap = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            if taps.value > 0 { screenshotsAfterTap.update { $0 += 1 } }
+            return (200, ["value": .string(before.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let started = Date()
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("paused 450 ms before reading"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertEqual(screenshotsAfterTap.value, 1, result.text)
+        XCTAssertLessThan(elapsed, 1.0, result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyOmitsOldPictureAndStopsEarlyWhenScreenDoesNotChange() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let taps = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.tree([Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(before.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let started = Date()
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"0\" [16,130,358,70]"), result.text)
+        XCTAssertTrue(result.text.contains("screen_changed: false"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertFalse(result.text.contains("tap observation:"), result.text)
+        XCTAssertNil(result.jpeg, result.text)
+        XCTAssertLessThan(elapsed, 1.3, result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testNumberKeyWaitsForLateUpdateAfterTapPauseWithoutReturningOldPicture() async {
+        let (core, wda, _) = makeCore()
+        let before = numberDisplayPicture("0")
+        let settled = numberDisplayPicture("7")
+        let taps = LockedBox(0)
+        let tapAt = LockedBox<Date?>(nil)
+        let beforeNodes = [Node("StaticText", "0", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        let afterNodes = [Node("StaticText", "7", [16, 130, 358, 70]), Node("Button", "7", [16, 280, 70, 70])]
+        @Sendable func treeJSON(_ nodes: [Node]) -> JSON {
+            let children: [JSON] = nodes.map { n in
+                ["type": .string("XCUIElementType\(n.type)"), "label": n.label.map(JSON.string) ?? .null,
+                 "rect": ["x": .number(n.frame[0]), "y": .number(n.frame[1]), "width": .number(n.frame[2]), "height": .number(n.frame[3])],
+                 "children": []]
+            }
+            return ["type": "XCUIElementTypeApplication", "label": "Calculator",
+                    "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]
+        }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.set("GET /source") { _ in
+            guard let tapped = tapAt.value else { return (200, ["value": treeJSON(beforeNodes)]) }
+            let updated = Date().timeIntervalSince(tapped) >= 0.65
+            try await Task.sleep(nanoseconds: 200_000_000)
+            return (200, ["value": treeJSON(updated ? afterNodes : beforeNodes)])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard let tapped = tapAt.value else { return (200, ["value": .string(before.base64EncodedString())]) }
+            let updated = Date().timeIntervalSince(tapped) >= 0.65
+            try await Task.sleep(nanoseconds: 200_000_000)
+            let picture = updated ? settled : before
+            return (200, ["value": .string(picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            tapAt.value = Date()
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertFalse(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertFalse(result.text.contains("tap observation:"), result.text)
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,130,358,70]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settled.count)".utf8), result.text)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    private func numberDisplayPicture(_ digit: String, transitioning: Bool = false, xOffset: CGFloat = 0) -> Data {
+        PictureSketchTests.png { context in
+            if transitioning {
+                context.setFillColor(CGColor(gray: 0.8, alpha: 1))
+                context.fill(CGRect(x: 17, y: 674, width: 368, height: 66))
+            }
+            let glyph = NSAttributedString(string: digit, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Helvetica" as CFString, 60, nil),
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1),
+            ])
+            context.textPosition = CGPoint(x: 169 + xOffset, y: 681)
+            CTLineDraw(CTLineCreateWithAttributedString(glyph), context)
+        }
+    }
+
+    func testNumberKeyDoesNotConfirmAChangedValueWithoutANewPicture() async {
+        let (core, wda, _) = makeCore()
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 295, y: 696, width: 24, height: 35)) }
+        let taps = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.calculator", "name": "Calculator"]])
+        }
+        wda.source([("StaticText", "0"), ("Button", "7")], app: "Calculator")
+        wda.set("GET /screenshot") { _ in
+            if taps.value == 0 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            return (500, ["value": ["error": "unable to capture screen", "message": "no new screenshot"]])
+        }
+        wda.set("POST /wda/tap") { _ in
+            taps.update { $0 += 1 }
+            wda.source([("StaticText", "7"), ("Button", "7")], app: "Calculator")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["tap": 2]], "full": true], local: true)
+
+        XCTAssertTrue(result.text.contains("StaticText \"7\" [16,100,358,44]"), result.text)
+        XCTAssertTrue(result.text.contains("touch effect: unconfirmed"), result.text)
+        XCTAssertNil(result.jpeg)
+        XCTAssertEqual(taps.value, 1)
+    }
+
+    func testScrollToDoesNotUseDelayedPreActionScreenshotForNextCoordinateTap() async {
+        let (core, wda, host) = makeCore { $0.readTimeout = 1.0 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 500, width: 350, height: 180)) }
+        let scrolled = LockedBox(false)
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            if scrolled.value {
+                try await Task.sleep(nanoseconds: 120_000_000)
+            }
+            return (200, ["value": .string(oldPicture.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            scrolled.value = true
+            wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "scroll-stale")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+
+        let scroll = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true, localTask: "scroll-stale")
+        XCTAssertFalse(scroll.isError, scroll.text)
+        XCTAssertTrue(scroll.text.contains("found by scroll_to:"), scroll.text)
+        XCTAssertTrue(scroll.text.contains("Cell \"Row 20\""), scroll.text)
+        XCTAssertNil(scroll.jpeg, "delayed pre-action picture must not be delivered after scrolling: \(scroll.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "scroll-stale")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testScrollToRetriesPastDelayedPreActionPictureAndDeliversFreshTargetScreen() async {
+        let (core, wda, _) = makeCore()
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 500, width: 350, height: 180)) }
+        let newPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 120, width: 350, height: 180)) }
+        XCTAssertNotEqual(oldPicture.count, newPicture.count)
+        let scrolled = LockedBox(false)
+        let shotsAfterScroll = LockedBox(0)
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            guard scrolled.value else { return (200, ["value": .string(oldPicture.base64EncodedString())]) }
+            let n = shotsAfterScroll.update { $0 += 1; return $0 }
+            let data = n == 1 ? oldPicture : newPicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            scrolled.value = true
+            wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("found by scroll_to:"), result.text)
+        XCTAssertFalse(result.text.contains("paused 200 ms before reading"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(newPicture.count)".utf8), result.text)
+        XCTAssertEqual(wda.bodies("POST /wda/pressAndDragWithVelocity").count, 1)
+    }
+
+    func testScrollToWaitsForCoastingListToSettleBeforeDeliveringCoordinates() async {
+        let (core, wda, _) = makeCore()
+        let beforePicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 160)) }
+        let coastingPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 340, width: 350, height: 160)) }
+        let settledPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 120, width: 350, height: 160)) }
+        let scrolled = LockedBox(false)
+        let readsAfterScroll = LockedBox(0)
+        @Sendable func listJSON(row20Y: Double) -> JSON {
+            let children: [JSON] = [
+                ["type": "XCUIElementTypeCell", "label": "Row 19", "rect": ["x": 16, "y": .number(row20Y - 44), "width": 358, "height": 44], "children": []],
+                ["type": "XCUIElementTypeCell", "label": "Row 20", "rect": ["x": 16, "y": .number(row20Y), "width": 358, "height": 44], "children": []],
+                ["type": "XCUIElementTypeCell", "label": "Row 21", "rect": ["x": 16, "y": .number(row20Y + 44), "width": 358, "height": 44], "children": []],
+            ]
+            return ["type": "XCUIElementTypeApplication", "label": "Settings",
+                    "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]
+        }
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("POST /wda/pressAndDragWithVelocity") { _ in
+            scrolled.value = true
+            return (200, ["value": .null])
+        }
+        wda.set("GET /source") { _ in
+            guard scrolled.value else {
+                let children: [JSON] = (1...6).map { i in
+                    ["type": "XCUIElementTypeCell", "label": .string("Row \(i)"), "rect": ["x": 16, "y": .number(Double(100 + i * 44)), "width": 358, "height": 44], "children": []]
+                }
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]])
+            }
+            let n = readsAfterScroll.update { $0 += 1; return $0 }
+            let y: Double = n == 1 ? 260 : (n == 2 ? 220 : 180)
+            return (200, ["value": listJSON(row20Y: y)])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard scrolled.value else { return (200, ["value": .string(beforePicture.base64EncodedString())]) }
+            let n = readsAfterScroll.value
+            let data = n <= 2 ? coastingPicture : settledPicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Cell \"Row 20\" [16,180,358,44]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
+    }
+
+    func testScrollToRespectsDisabledQuickRead() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }
+        let beforePicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 160)) }
+        let afterPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 120, width: 350, height: 160)) }
+        let scrolled = LockedBox(false)
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let data = scrolled.value ? afterPicture : beforePicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            scrolled.value = true
+            wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("paused 200 ms before reading"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(afterPicture.count)".utf8), result.text)
+    }
+
+    func testLaunchWaitsPastTransitionFrameBeforeDeliveringPicture() async {
+        let (core, wda, _) = makeCore()
+        let beforePicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let transitionPicture = PictureSketchTests.png { $0.fill(CGRect(x: 110, y: 260, width: 180, height: 320)) }
+        let settledPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 80, width: 360, height: 240)) }
+        let launched = LockedBox(false)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("POST /wda/apps/activate") { _ in
+            launched.value = true
+            return (200, ["value": .null])
+        }
+        let shotsAfterLaunch = LockedBox(0)
+        wda.set("GET /source") { _ in
+            guard launched.value else {
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                    ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+                ]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Photos", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeButton", "label": "Continue", "rect": ["x": 38, "y": 760, "width": 314, "height": 52], "children": []],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            guard launched.value else { return (200, ["value": .string(beforePicture.base64EncodedString())]) }
+            let n = shotsAfterLaunch.update { $0 += 1; return $0 }
+            let data = n == 1 ? transitionPicture : settledPicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.hasPrefix("app: Photos"), result.text)
+        XCTAssertFalse(result.text.contains("paused 900 ms before reading"), result.text)
+        XCTAssertTrue(result.text.contains("Button \"Continue\" [38,760,314,52]"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
+    }
+
+    func testLaunchDoesNotUseDelayedPreActionScreenshotForNextCoordinateTap() async {
+        let (core, wda, host) = makeCore { $0.readTimeout = 1.0 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let launched = LockedBox(false)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("POST /wda/apps/activate") { [wda] _ in
+            launched.value = true
+            wda.source([("Button", "Continue")], app: "Photos")
+            return (200, ["value": .null])
+        }
+        wda.source([("Button", "General")], app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            if launched.value {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return (200, ["value": .string(oldPicture.base64EncodedString())])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "launch-stale")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+
+        let opened = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true, localTask: "launch-stale")
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.hasPrefix("app: Photos"), opened.text)
+        XCTAssertNil(opened.jpeg, "delayed pre-action picture must not be delivered after launch: \(opened.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "launch-stale")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testLaunchRespectsDisabledQuickRead() async {
+        let (core, wda, _) = makeCore { $0.quickRead = { false } }
+        let beforePicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let afterPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 80, width: 360, height: 240)) }
+        let launched = LockedBox(false)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("POST /wda/apps/activate") { [wda] _ in
+            launched.value = true
+            wda.source([("Button", "Continue")], app: "Photos")
+            return (200, ["value": .null])
+        }
+        wda.source([("Button", "General")], app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let data = launched.value ? afterPicture : beforePicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("paused 900 ms before reading"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(afterPicture.count)".utf8), result.text)
+    }
+
+    func testLongPauseReusesSettledTreeWithoutExtraTreeRead() async {
+        let (core, wda, _) = makeCore()
+        let beforePicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let afterPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 120, width: 350, height: 180)) }
+        let swiped = LockedBox(false)
+        let sourcesAfterSwipe = LockedBox(0)
+        wda.set("GET /source") { _ in
+            if swiped.value {
+                sourcesAfterSwipe.update { $0 += 1 }
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                    ["type": "XCUIElementTypeCell", "label": "Row 10", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+                    ["type": "XCUIElementTypeCell", "label": "Row 11", "rect": ["x": 16, "y": 144, "width": 358, "height": 44], "children": []],
+                ]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeCell", "label": "Row 1", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+                ["type": "XCUIElementTypeCell", "label": "Row 2", "rect": ["x": 16, "y": 144, "width": 358, "height": 44], "children": []],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            let data = swiped.value ? afterPicture : beforePicture
+            return (200, ["value": .string(data.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { _ in
+            swiped.value = true
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["swipe": "up"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("read after"), result.text)
+        XCTAssertTrue(result.text.contains("Cell \"Row 10\""), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(afterPicture.count)".utf8), result.text)
+        XCTAssertEqual(sourcesAfterSwipe.value, 2, "settledPause should reuse its confirmed second tree instead of reading a third tree: \(result.text)")
+    }
+
+    func testLaunchFromFreshSessionReusesSettledScreenWithDynamicSize() async {
+        let (core, wda, _) = makeCore(FakeWDA(dynamicSize: true))
+        let settledPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 80, width: 360, height: 240)) }
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("POST /wda/apps/activate") { _ in (200, ["value": .null]) }
+        wda.set("GET /source") { _ in
+            (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(settledPicture.base64EncodedString())])
+        }
+
+        let result = await core.call("do", ["actions": [["launch": "com.apple.Preferences"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.hasPrefix("app: Settings"), result.text)
+        XCTAssertTrue(result.text.contains("390 px wide"), result.text)
+        XCTAssertTrue(result.text.contains("Button \"General\""), result.text)
+        XCTAssertFalse(result.text.contains("paused"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
+    }
+
+    func testLaunchSlowFirstSourceStillReadsForegroundAndSettles() async {
+        let (core, wda, _) = makeCore()
+        let settledPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 80, width: 360, height: 240)) }
+        let sourcesAfterLaunch = LockedBox(0)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("POST /wda/apps/activate") { _ in (200, ["value": .null]) }
+        wda.set("GET /source") { _ in
+            let n = sourcesAfterLaunch.update { $0 += 1; return $0 }
+            if n == 1 {
+                try await Task.sleep(nanoseconds: 950_000_000)
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(settledPicture.base64EncodedString())])
+        }
+
+        let result = await core.call("do", ["actions": [["launch": "com.apple.Preferences"]], "full": true], local: true)
+
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.hasPrefix("app: Settings"), result.text)
+        XCTAssertTrue(result.text.contains("Button \"General\""), result.text)
+        XCTAssertFalse(result.text.contains("paused"), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(settledPicture.count)".utf8), result.text)
+    }
+
+    private final class SignalGate: @unchecked Sendable {
+        private let state = LockedBox<(open: Bool, waiters: [UUID: CheckedContinuation<Bool, Never>])>((false, [:]))
+
+        func open() {
+            let waiters = state.update { s -> [CheckedContinuation<Bool, Never>] in
+                guard !s.open else { return [] }
+                s.open = true
+                let pending = Array(s.waiters.values)
+                s.waiters.removeAll()
+                return pending
+            }
+            for waiter in waiters { waiter.resume(returning: true) }
+        }
+
+        @discardableResult
+        func wait(timeout seconds: Double? = nil) async -> Bool {
+            let id = UUID()
+            let timer: Task<Void, Never>? = seconds.map { seconds in
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                    let waiter = self.state.update { s in s.waiters.removeValue(forKey: id) }
+                    waiter?.resume(returning: false)
+                }
+            }
+            let opened = await withCheckedContinuation { continuation in
+                let immediate = state.update { s -> Bool in
+                    if s.open { return true }
+                    s.waiters[id] = continuation
+                    return false
+                }
+                if immediate { continuation.resume(returning: true) }
+            }
+            timer?.cancel()
+            return opened
+        }
+    }
+
+    func testScrollToDoesNotUseInFlightPreActionScreenshotForNextCoordinateTap() async throws {
+        let (core, wda, host) = makeCore { $0.readTimeout = 0.25 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 500, width: 350, height: 180)) }
+        let shotCalls = LockedBox(0)
+        let preActionShotStartedAt = LockedBox<Double?>(nil)
+        let preActionShotReturnedAt = LockedBox<Double?>(nil)
+        let inputCompletedAt = LockedBox<Double?>(nil)
+        let releasePreActionShot = SignalGate()
+        let preActionShotReturned = SignalGate()
+        let latePayload = LockedBox<Data?>(nil)
+        wda.source((1...6).map { ("Cell", "Row \($0)") }, app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let n = shotCalls.update { $0 += 1; return $0 }
+            if n == 1 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            if n == 2 {
+                preActionShotStartedAt.value = now()
+                await releasePreActionShot.wait()
+                latePayload.value = oldPicture
+                preActionShotReturnedAt.value = now()
+                preActionShotReturned.open()
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            guard inputCompletedAt.value != nil else { throw TransportError.timedOut }
+            releasePreActionShot.open()
+            await preActionShotReturned.wait()
+            return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { [wda] _ in
+            XCTAssertNotNil(preActionShotStartedAt.value, "pre-action screenshot must already be in flight before scroll input")
+            XCTAssertNil(preActionShotReturnedAt.value, "pre-action screenshot must still be in flight during scroll input")
+            wda.source((18...23).map { ("Cell", "Row \($0)") }, app: "Settings")
+            inputCompletedAt.value = now()
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "scroll-inflight")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+        _ = await core.call("look", ["full": true], local: true, localTask: "scroll-inflight")
+
+        let scroll = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true, localTask: "scroll-inflight")
+        let tStart = try XCTUnwrap(preActionShotStartedAt.value)
+        let tInput = try XCTUnwrap(inputCompletedAt.value)
+        let tReturn = try XCTUnwrap(preActionShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tInput)
+        XCTAssertLessThan(tInput, tReturn)
+        XCTAssertFalse(scroll.isError, scroll.text)
+        XCTAssertTrue(scroll.text.contains("found by scroll_to:"), scroll.text)
+        XCTAssertNil(scroll.jpeg, "in-flight pre-action picture returning late must not be delivered after scroll: \(scroll.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "scroll-inflight")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testLaunchDoesNotUseInFlightPreActionScreenshotForNextCoordinateTap() async throws {
+        let (core, wda, host) = makeCore { $0.readTimeout = 0.25 }
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let launched = LockedBox(false)
+        let shotCalls = LockedBox(0)
+        let preActionShotStartedAt = LockedBox<Double?>(nil)
+        let preActionShotReturnedAt = LockedBox<Double?>(nil)
+        let inputCompletedAt = LockedBox<Double?>(nil)
+        let releasePreActionShot = SignalGate()
+        let preActionShotReturned = SignalGate()
+        let latePayload = LockedBox<Data?>(nil)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.mobileslideshow", "name": "Photos"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.source([("Button", "General")], app: "Settings")
+        wda.set("GET /screenshot") { _ in
+            let n = shotCalls.update { $0 += 1; return $0 }
+            if n == 1 {
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            if n == 2 {
+                preActionShotStartedAt.value = now()
+                await releasePreActionShot.wait()
+                latePayload.value = oldPicture
+                preActionShotReturnedAt.value = now()
+                preActionShotReturned.open()
+                return (200, ["value": .string(oldPicture.base64EncodedString())])
+            }
+            guard inputCompletedAt.value != nil else { throw TransportError.timedOut }
+            releasePreActionShot.open()
+            await preActionShotReturned.wait()
+            return (200, ["value": .string((latePayload.value ?? oldPicture).base64EncodedString())])
+        }
+        wda.set("POST /wda/apps/activate") { [wda] _ in
+            XCTAssertNotNil(preActionShotStartedAt.value, "pre-action screenshot must already be in flight before launch input")
+            XCTAssertNil(preActionShotReturnedAt.value, "pre-action screenshot must still be in flight during launch input")
+            launched.value = true
+            wda.source([("Button", "Continue")], app: "Photos")
+            inputCompletedAt.value = now()
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "launch-inflight")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+        _ = await core.call("look", ["full": true], local: true, localTask: "launch-inflight")
+
+        let opened = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true, localTask: "launch-inflight")
+        let tStart = try XCTUnwrap(preActionShotStartedAt.value)
+        let tInput = try XCTUnwrap(inputCompletedAt.value)
+        let tReturn = try XCTUnwrap(preActionShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tInput)
+        XCTAssertLessThan(tInput, tReturn)
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.hasPrefix("app: Photos"), opened.text)
+        XCTAssertNil(opened.jpeg, "in-flight pre-action picture returning late must not be delivered after launch: \(opened.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "launch-inflight")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+
+    func testScrollToDiscardsInFlightPreparedCaptureFromEarlierSwipe() async throws {
+        let (core, wda, _) = makeCore()
+        let page1Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 160)) }
+        let page2Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 320, width: 350, height: 160)) }
+        let page3Picture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 100, width: 350, height: 160)) }
+        XCTAssertNotEqual(page2Picture.count, page3Picture.count)
+        let swipes = LockedBox(0)
+        let swipe1ShotStartedAt = LockedBox<Double?>(nil)
+        let swipe1ShotReturnedAt = LockedBox<Double?>(nil)
+        let swipe2CompletedAt = LockedBox<Double?>(nil)
+        let swipe1ShotStarted = SignalGate()
+        let releaseSwipe1Shot = SignalGate()
+        let swipe1ShotReturned = SignalGate()
+        wda.set("GET /source") { _ in
+            let s = swipes.value
+            if s == 1 {
+                _ = await swipe1ShotStarted.wait(timeout: 0.5)
+            }
+            let range = s == 0 ? (1...6) : (s == 1 ? (10...15) : (18...23))
+            let children: [JSON] = range.enumerated().map { idx, n in
+                ["type": "XCUIElementTypeCell", "label": .string("Row \(n)"), "rect": ["x": 16, "y": .number(Double(100 + idx * 44)), "width": 358, "height": 44], "children": []]
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": .array(children)]])
+        }
+        wda.set("GET /screenshot") { _ in
+            let s = swipes.value
+            if s == 0 {
+                return (200, ["value": .string(page1Picture.base64EncodedString())])
+            }
+            if s == 1 && swipe1ShotStartedAt.value == nil {
+                swipe1ShotStartedAt.value = now()
+                swipe1ShotStarted.open()
+                await releaseSwipe1Shot.wait()
+                swipe1ShotReturnedAt.value = now()
+                swipe1ShotReturned.open()
+                return (200, ["value": .string(page2Picture.base64EncodedString())])
+            }
+            releaseSwipe1Shot.open()
+            await swipe1ShotReturned.wait(timeout: 0.5)
+            return (200, ["value": .string(page3Picture.base64EncodedString())])
+        }
+        wda.set("POST /wda/pressAndDragWithVelocity") { _ in
+            let n = swipes.update { $0 += 1; return $0 }
+            if n == 2 {
+                XCTAssertNotNil(swipe1ShotStartedAt.value, "prepared capture from swipe 1 must already be in flight before swipe 2")
+                XCTAssertNil(swipe1ShotReturnedAt.value, "prepared capture from swipe 1 must still be in flight during swipe 2")
+                swipe2CompletedAt.value = now()
+            }
+            return (200, ["value": .null])
+        }
+
+        _ = await core.call("look", ["full": true], local: true)
+        let result = await core.call("do", ["actions": [["scroll_to": "Row 20"]], "full": true], local: true)
+
+        let tStart = try XCTUnwrap(swipe1ShotStartedAt.value)
+        let tSwipe2 = try XCTUnwrap(swipe2CompletedAt.value)
+        let tReturn = try XCTUnwrap(swipe1ShotReturnedAt.value)
+        XCTAssertLessThan(tStart, tSwipe2)
+        XCTAssertLessThan(tSwipe2, tReturn)
+        XCTAssertFalse(result.isError, result.text)
+        XCTAssertTrue(result.text.contains("Cell \"Row 20\""), result.text)
+        XCTAssertEqual(result.jpeg, Data("jpeg:\(page3Picture.count)".utf8), "stale in-flight capture from earlier swipe must not be delivered: \(result.text)")
+    }
+
+    func testLaunchSystemAlertOmitsStalePreActionScreenshotForNextCoordinateTap() async {
+        let (core, wda, host) = makeCore()
+        host.state.value = .automationReady(revision: 1)
+        let oldPicture = PictureSketchTests.png { $0.fill(CGRect(x: 20, y: 550, width: 350, height: 180)) }
+        let launched = LockedBox(false)
+        wda.set("GET /wda/activeAppInfo") { _ in
+            if launched.value {
+                return (200, ["value": ["bundleId": "com.apple.springboard", "name": "SpringBoard"]])
+            }
+            return (200, ["value": ["bundleId": "com.apple.Preferences", "name": "Settings"]])
+        }
+        wda.set("GET /source") { _ in
+            guard launched.value else {
+                return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "Settings", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                    ["type": "XCUIElementTypeButton", "label": "General", "rect": ["x": 16, "y": 100, "width": 358, "height": 44], "children": []],
+                ]]])
+            }
+            return (200, ["value": ["type": "XCUIElementTypeApplication", "label": "SpringBoard", "rect": ["x": 0, "y": 0, "width": 390, "height": 844], "children": [
+                ["type": "XCUIElementTypeAlert", "label": "Allow Notifications", "rect": ["x": 60, "y": 300, "width": 270, "height": 180], "children": [
+                    ["type": "XCUIElementTypeStaticText", "label": "Photos Would Like to Send You Notifications", "rect": ["x": 76, "y": 320, "width": 238, "height": 60], "children": []],
+                    ["type": "XCUIElementTypeButton", "label": "Allow", "rect": ["x": 195, "y": 420, "width": 135, "height": 44], "children": []],
+                ]],
+            ]]])
+        }
+        wda.set("GET /screenshot") { _ in
+            (200, ["value": .string(oldPicture.base64EncodedString())])
+        }
+        wda.set("POST /wda/apps/activate") { _ in
+            launched.value = true
+            return (200, ["value": .null])
+        }
+
+        let initial = await core.call("look", ["full": true], local: true, localTask: "launch-alert")
+        XCTAssertNotNil(initial.jpeg, initial.text)
+
+        let opened = await core.call("do", ["actions": [["launch": "com.apple.mobileslideshow"]], "full": true], local: true, localTask: "launch-alert")
+        XCTAssertFalse(opened.isError, opened.text)
+        XCTAssertTrue(opened.text.contains("a system alert is in front"), opened.text)
+        XCTAssertNil(opened.jpeg, "stale pre-action picture must not be delivered over a system alert: \(opened.text)")
+
+        let tap = await core.call("do", ["actions": [["tap": [200, 200]]]], local: true, localTask: "launch-alert")
+        XCTAssertTrue(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains("Call look"), tap.text)
+        XCTAssertEqual(wda.bodies("POST /wda/tap").count, 0)
+    }
+    #endif
+
     func testCoordinatePauseExplainsWhyEvenWhenScreenDidNotChange() async {
         let (core, wda, _) = makeCore()
         wda.source([("Button", "Already selected")])
@@ -846,7 +1765,11 @@ final class LookDoTests: XCTestCase {
 
     func testTheActionsGetTheirFullTimeAfterTheOwnerApproves() async {
         let (core, wda, _) = makeCore { $0.approvalWait = 4; $0.toolDeadline = 3; $0.actionCap = 1.5; $0.readTimeout = 1 }
-        wda.source([("Button", "Delete Photo")])
+        wda.tree([
+            Node("Alert", nil, [16, 80, 358, 120], [
+                Node("Button", "Delete Photo", [16, 100, 358, 44]),
+            ]),
+        ], app: "Settings")
         _ = await core.call("look", [:])
         Task {
             try? await Task.sleep(nanoseconds: 2_500_000_000)

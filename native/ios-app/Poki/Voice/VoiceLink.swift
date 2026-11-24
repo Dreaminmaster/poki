@@ -4,24 +4,40 @@ import WebRTC
 
 /// What VoiceModel talks through: a VoiceLink in the app, a recorded conversation in tests.
 protocol VoiceConnection: AnyObject, Sendable {
-    func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws
+    @MainActor func connect(secret: String, base: URL?, microphone: Bool, direct: Bool) async throws
+    @MainActor func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws
+    @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture?
+    @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?)
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool
+    func hasRemoteSpeech() async -> Bool
     @discardableResult func send(_ event: [String: Any]) -> Bool
     func setRemoteVolume(_ value: Double)
-    func diagnose(_ write: @escaping @MainActor (String) -> Void)
-    func close()
+    @MainActor func diagnose(_ write: @escaping @MainActor (String) -> Void)
+    @MainActor func close()
 }
 
-/// One WebRTC connection to the OpenAI Realtime API: the microphone as the audio track, the model's
-/// voice on the speaker, and the `oai-events` data channel for events. Opened with a short-lived client
-/// secret; it never sees an API key. Callbacks arrive on the main actor.
+extension VoiceConnection {
+    func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws { throw VoiceError.noWebRTC }
+    func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? { nil }
+    func useOpeningCapture(_ capture: OpeningVoiceCapture?) {}
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool { capture.audio.ensureRunning() }
+    func hasRemoteSpeech() async -> Bool { false }
+}
+
+/// The microphone and speaker are WebRTC tracks. The `oai-events` data channel carries JSON events.
+/// The SDP exchange is supplied by the selected OpenAI endpoint or the Mac bridge.
 final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTCDataChannelDelegate, @unchecked Sendable {
-    private static let factory: RTCPeerConnectionFactory = {
+    private static let configureWebRTCAudioDefaults: Void = {
         // Voice chat: echo cancellation on, so Poki's own voice from the speaker doesn't interrupt it.
         let audio = RTCAudioSessionConfiguration.webRTC()
         audio.category = AVAudioSession.Category.playAndRecord.rawValue
         audio.mode = AVAudioSession.Mode.voiceChat.rawValue
         audio.categoryOptions = [.defaultToSpeaker, .allowBluetoothHFP]
         RTCAudioSessionConfiguration.setWebRTC(audio)
+    }()
+
+    private static let factory: RTCPeerConnectionFactory = {
+        _ = configureWebRTCAudioDefaults
         return RTCPeerConnectionFactory()
     }()
     /// The second try: the same, but WebRTC leaves VPN interfaces out. A loopback VPN or a proxy app
@@ -45,6 +61,9 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
     private let onClosed: @MainActor (String) -> Void
     private var peer: RTCPeerConnection?
     private var channel: RTCDataChannel?
+    @MainActor private var holdsAudioSession = false
+    @MainActor private var openingCapture: OpeningVoiceCapture?
+    @MainActor private var diagnostics: (@MainActor (String) -> Void)?
     /// WebRTC calls the delegate methods on its own threads and the app calls in from the main actor,
     /// so these three are only touched under `lock`.
     private let lock = NSLock()
@@ -59,16 +78,91 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         self.onClosed = onClosed
     }
 
+    @MainActor
+    static func activateAudioSession(configure: Bool) throws {
+        let session = RTCAudioSession.sharedInstance()
+        session.lockForConfiguration()
+        defer { session.unlockForConfiguration() }
+        if configure {
+            _ = configureWebRTCAudioDefaults
+            do {
+                try session.setConfiguration(RTCAudioSessionConfiguration.webRTC())
+            } catch {
+                AppLog.shared.add("voice", "RTCAudioSession configuration fallback: \(error.localizedDescription)")
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            }
+            try session.setActive(true)
+            try? session.setPreferredInputNumberOfChannels(1)
+            return
+        }
+        try session.setActive(true)
+    }
+
+    @MainActor
+    static func deactivateAudioSession(onFailure: (() -> Void)? = nil) {
+        let session = RTCAudioSession.sharedInstance()
+        session.lockForConfiguration()
+        defer { session.unlockForConfiguration() }
+        do {
+            try session.setActive(false)
+        } catch {
+            onFailure?()
+            AppLog.shared.add("voice", "could not deactivate the realtime audio session: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? {
+        let audio = OpeningVoiceAudio(session: session)
+        try audio.startCapture()
+        let capture = OpeningVoiceCapture(audio: audio)
+        useOpeningCapture(capture)
+        diagnostics?("opening microphone started; \(Self.audioSession())")
+        return capture
+    }
+
+    @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?) {
+        openingCapture = capture
+    }
+
     /// `microphone: false` (test runs) sends no audio track and needs no microphone permission; the
     /// model's voice still comes back.
     /// `direct: true` keeps the connection off VPN interfaces (the retry after a try that never opened).
     /// `base`: the Realtime API's address the secret is for, OpenAI's when nil.
+    @MainActor
     func connect(secret: String, base: URL? = nil, microphone: Bool = true, direct: Bool = false) async throws {
+        try await connectLive(microphone: microphone, direct: direct) { sdp in
+            var request = URLRequest(url: (base ?? URL(string: "https://api.openai.com/v1")!).appending(path: "realtime/calls"), timeoutInterval: 20)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(sdp.utf8)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let answer = String(decoding: data, as: UTF8.self)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                throw VoiceError.realtime(http.statusCode, String(answer.prefix(300)))
+            }
+            return answer
+        }
+    }
+
+    @MainActor
+    func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws {
+        let factory: RTCPeerConnectionFactory
+        if let openingCapture {
+            factory = openingCapture.factory
+            if direct {
+                let options = RTCPeerConnectionFactoryOptions()
+                options.ignoreVPNNetworkAdapter = true
+                options.ignoreLoopbackNetworkAdapter = true
+                factory.setOptions(options)
+            }
+        } else {
         #if DEBUG
-        let factory = !microphone ? Self.silentFactory : direct ? Self.directFactory : Self.factory
+            factory = !microphone ? Self.silentFactory : direct ? Self.directFactory : Self.factory
         #else
-        let factory = direct ? Self.directFactory : Self.factory
+            factory = direct ? Self.directFactory : Self.factory
         #endif
+        }
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         let config = RTCConfiguration()
         config.sdpSemantics = .unifiedPlan
@@ -79,25 +173,12 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         guard let peer = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw VoiceError.noWebRTC }
         self.peer = peer
         if microphone {
-            // Poki's background keep-alive may have left the shared session in .playback, which cannot
-            // record; set voice chat explicitly before the microphone track starts.
-            let session = RTCAudioSession.sharedInstance()
-            session.lockForConfiguration()
-            defer { session.unlockForConfiguration() }
-            do {
-                try session.setConfiguration(RTCAudioSessionConfiguration.webRTC(), active: true)
-            } catch {
-                // After an earlier conversation (or the keep-alive) the shared session can refuse
-                // WebRTC's preferred sample rate, buffer or channel counts (OSStatus -50). Voice chat
-                // needs none of them: set the category and mode, activate, and tell WebRTC.
-                let av = AVAudioSession.sharedInstance()
-                try? av.setActive(false)
-                try av.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-                try av.setActive(true)
-                session.audioSessionDidActivate(av)
-            }
+            let needsConfiguration = openingCapture == nil || !RTCAudioSession.sharedInstance().isActive
+            try Self.activateAudioSession(configure: needsConfiguration)
+            holdsAudioSession = true
             let mic = factory.audioTrack(with: factory.audioSource(with: constraints), trackId: "poki-mic")
             peer.add(mic, streamIds: ["poki-voice"])
+            diagnostics?("microphone track enabled; \(Self.audioSession())")
         } else {
             let receiveOnly = RTCRtpTransceiverInit()
             receiveOnly.direction = .recvOnly
@@ -115,16 +196,7 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             peer.setLocalDescription(offer) { error in if let error { done.resume(throwing: error) } else { done.resume() } }
         }
-        var request = URLRequest(url: (base ?? URL(string: "https://api.openai.com/v1")!).appending(path: "realtime/calls"), timeoutInterval: 20)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(offer.sdp.utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let answer = String(decoding: data, as: UTF8.self)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw VoiceError.realtime(http.statusCode, String(answer.prefix(300)))
-        }
+        let answer = try await exchange(offer.sdp)
         // The largest event the data channel takes (64 KiB when the answer names none): a screenshot must fit.
         let size = answer.range(of: #"a=max-message-size:\d+"#, options: .regularExpression).map { answer[$0].dropFirst(19) } ?? "none named"
         await MainActor.run { AppLog.shared.add("voice", "data channel max-message-size: \(size)") }
@@ -137,6 +209,19 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
             try await Task.sleep(for: .milliseconds(20))
         }
         lock.withLock { opened = true }
+        if microphone { diagnoseCapture() }
+    }
+
+    func hasRemoteSpeech() async -> Bool {
+        guard let peer else { return false }
+        return await withCheckedContinuation { done in
+            peer.statistics { report in
+                done.resume(returning: report.statistics.values.contains { stat in
+                    stat.type == "inbound-rtp" && (stat.values["kind"] as? String) == "audio"
+                        && (stat.values["audioLevel"] as? Double ?? 0) > 0.005
+                })
+            }
+        }
     }
 
     private static func describe(_ state: RTCIceConnectionState) -> String {
@@ -155,14 +240,17 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
     /// The shared audio session: category, mode, routes, and whether WebRTC counts it active.
     static func audioSession() -> String {
         let av = AVAudioSession.sharedInstance()
-        return "audio session \(av.category.rawValue) \(av.mode.rawValue), input available \(av.isInputAvailable), input channels \(av.inputNumberOfChannels), input \(av.currentRoute.inputs.map { "\($0.portType.rawValue) \($0.portName)" }.joined(separator: ", ")), output \(av.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ", ")), webrtc active \(RTCAudioSession.sharedInstance().isActive), record permission \(AVAudioApplication.shared.recordPermission == .granted)"
+        return "audio session \(av.category.rawValue) \(av.mode.rawValue), input available \(av.isInputAvailable), input channels \(av.inputNumberOfChannels), input \(av.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ", ")), output \(av.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ", ")), webrtc active \(RTCAudioSession.sharedInstance().isActive), record permission \(AVAudioApplication.shared.recordPermission == .granted)"
     }
 
-    /// One log line about the audio session now, and one ~3 s later about what the microphone sent:
-    /// media-source totalSamplesDuration stays 0 when nothing is captured, whatever the room sounds like.
+    @MainActor
     func diagnose(_ write: @escaping @MainActor (String) -> Void) {
-        let now = Self.audioSession()
-        Task { @MainActor in write(now) }
+        diagnostics = write
+    }
+
+    /// A source with zero totalSamplesDuration has captured nothing, whatever the room sounds like.
+    @MainActor private func diagnoseCapture() {
+        guard let write = diagnostics else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let peer = self?.peer else { return }
             peer.statistics { report in
@@ -198,18 +286,20 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         }
     }
 
+    @MainActor
     func close() {
         lock.withLock { closing = true }
         channel?.close()
         peer?.close()
         channel = nil
         peer = nil
-        // Hand the audio session back through WebRTC, so its count of activations matches and the
-        // next conversation can set voice chat again.
-        let session = RTCAudioSession.sharedInstance()
-        session.lockForConfiguration()
-        if session.isActive { try? session.setActive(false) }
-        session.unlockForConfiguration()
+        // An interruption can make the session inactive before we give up our activation.
+        guard holdsAudioSession else { return }
+        holdsAudioSession = false
+        diagnostics?("microphone track closed")
+        Self.deactivateAudioSession { [weak self] in
+            self?.diagnostics?("audio session release failed")
+        }
     }
 
     private func lost(_ reason: String) {

@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class LaunchScreenTests: XCTestCase {
     func testLaunchPicturesLoadWithoutTheAssetCatalog() throws {
-        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@3x"] {
+        for name in ["LaunchBackdrop", "LaunchWordmark@3x", "LaunchBear@2x"] {
             let file = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "png"))
             XCTAssertNotNil(UIImage(contentsOfFile: file.path), "\(name) must decode without Assets.car")
         }
@@ -91,6 +91,17 @@ final class LaunchScreenTests: XCTestCase {
             for (actual, expected) in zip([red, green, blue, alpha], [0xF5, 0xF7, 0xFA, 0xFF] as [CGFloat]) {
                 XCTAssertEqual(actual, expected / 255, accuracy: 0.002)
             }
+        }
+    }
+
+    func testLaunchPicturesStaySmall() throws {
+        let (_, view) = try launchView()
+        for part: LaunchCurtain.Part in [.backdrop, .word, .bear] {
+            let imageView = try XCTUnwrap(view.viewWithTag(part.rawValue) as? UIImageView)
+            let picture = try XCTUnwrap(imageView.image?.cgImage)
+            // The launch art uses a 4 MiB budget per decoded RGBA image.
+            XCTAssertLessThanOrEqual(picture.width * picture.height * 4, 4 << 20,
+                                     "\(part) is \(picture.width) by \(picture.height) pixels")
         }
     }
 

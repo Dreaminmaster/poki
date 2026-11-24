@@ -91,7 +91,7 @@ Draft a GitHub issue (`ios_app_bug.yml` or `bug_report.yml`) only after retrying
 
 **Why the Automation switch snaps back to off with no error text**
 
-Before the first automation session after an iPhone restart, and again 8 hours after the previous passcode check, iOS requires the owner to enter the iPhone passcode on screen. Poki logs `no automation since this iPhone restarted: telling the owner iOS will ask for the passcode` and presents the `"Enter Your Passcode Next"` alert before starting the session. On builds where full-screen **Settings** covers that alert on the main view, tapping **Settings > Connection > Automation** flips the switch straight back to off with no red text under the switch.
+Before the first automation session after an iPhone restart, and again 8 hours after the previous passcode check, iOS requires the owner to enter the iPhone passcode on screen. Poki logs `no automation since this iPhone restarted: telling the owner iOS will ask for the passcode` and presents the `"Enter Your Passcode Next"` alert before starting the session. On builds where full-screen **Settings** covers that alert on the main view, tapping **Settings > Setup > Automation** flips the switch straight back to off with no red text under the switch.
 
 **What you fix yourself (and when to ask before restarting)**
 
@@ -124,7 +124,7 @@ Draft an issue (`ios_app_bug.yml`) when **Automation** still snaps back to off w
 **When user action is required**
 
 - **Missing USB attachment.** Ask the user to connect the iPhone directly with a USB data cable, unlock it, tap **Trust This Computer**, and check whether Finder lists the iPhone.
-- **Relay `503` (`"The phone is offline: open Poki on the phone, or check its network."`).** Ask the user to open Poki on the iPhone, check internet access, and confirm **Settings > Connection > Automation** is on.
+- **Relay `503` (`"The phone is offline: open Poki on the phone, or check its network."`).** Ask the user to open Poki on the iPhone, check internet access, and confirm **Settings > Setup > Automation** is on.
 - **Loopback down (`"Loopback Off"`, `"Tunnel On, No Answer"`, or the conflicting-VPN message above).** Ask the user to connect Wi-Fi and enable the `10.7.0.1` loopback route in LocalDevVPN, or in Surge, Loon, Shadowrocket (`Include route 10.7.0.1/32`), or sing-box, or turn off a conflicting VPN and tap **Enable Local Connection** in Poki. Because Surge, Loon, Shadowrocket, and sing-box also filter outbound HTTPS traffic and frequently intercept `gs.apple.com` (causing the false `"Disk Image Outdated"` error in section 2.1), ask the user to keep `gs.apple.com` on `DIRECT` without HTTPS decryption in those tools, or use LocalDevVPN instead.
 - **Local Network permission (`"Finding Pairing Port"` on iOS or `No route to host` on macOS 15+).** On the iPhone, ask the user to allow **Settings > Privacy & Security > Local Network** for Poki on Wi-Fi. On macOS 15+, ask them to grant **System Settings > Privacy & Security > Local Network** to the desktop client or terminal that spawned `poki-mcp`.
 - **Pairing rejected (`"Pairing Refused"` or a computer lockdown pairing file on iOS 27).** Ask the user to connect Wi-Fi, confirm loopback is on, and pair directly on the phone in **Setup > Pair This iPhone**.

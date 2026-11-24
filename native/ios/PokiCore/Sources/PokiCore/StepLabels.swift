@@ -7,6 +7,13 @@ extension Computer {
     func label(_ action: JSON) -> String? {
         if action["wait"] != nil || action["wait_until"] != nil, action.object?.count == 1 { return nil }
         if let spec = action["run"] { return "Run “\(Self.short(spec.string ?? spec["name"]?.string ?? "a routine", 28))”" }
+        if let spec = action["path"] {
+            // A path reads as what it is for, else as its steps, each target the text it names.
+            if let goal = spec["goal"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !goal.isEmpty { return "Run “\(Self.short(goal, 28))”" }
+            let steps = (spec["steps"]?.array ?? spec.array ?? []).compactMap(pathStepLabel)
+            guard let first = steps.first else { return "Act on the screen" }
+            return ([first] + steps.dropFirst().map { $0.prefix(1).lowercased() + $0.dropFirst() }).joined(separator: ", then ")
+        }
         for (key, verb) in [("tap", "Tap"), ("long_press", "Press and hold")] {
             if let spec = action[key] {
                 if let e = target(spec), let name = Self.name(of: e) { return "\(verb) “\(name)”" }
@@ -45,6 +52,19 @@ extension Computer {
         }
         if action["wait"] != nil || action["wait_until"] != nil { return "Wait" }
         return "Act on the screen"
+    }
+
+    /// A path's step: its target is the text it shows ({tap: "General"}), not a number of a read.
+    func pathStepLabel(_ step: JSON) -> String? {
+        // A path can type into a later screen whose field has not been read yet.
+        if step["type"]?.text != nil { return "Type text" }
+        for (key, verb) in [("tap", "Tap"), ("long_press", "Press and hold")] {
+            if let spec = step[key], spec.array == nil, let name = (spec.string ?? spec["label"]?.string ?? spec["text"]?.string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty, Double(name) == nil {
+                return "\(verb) “\(Self.short(name, 28))”"
+            }
+        }
+        return label(step)
     }
 
     /// The labels of several actions, waits left out: "Tap “Search”, then type “cats”".

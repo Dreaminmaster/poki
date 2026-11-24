@@ -48,11 +48,12 @@ final class BackgroundKeeper: NSObject, CLLocationManagerDelegate {
             continued = run
             run.onExpired = { [weak self] in
                 guard let self, self.isOn else { return }
-                self.startAudio(); self.watchInterruptions()
+                if !self.audioPaused { self.startAudio() }
+                self.watchInterruptions()
             }
             if run.begin(subtitle: AppLocalization.text(LocalizedStringResource("Agents can reach this iPhone"))) { return }
         }
-        startAudio()
+        if !audioPaused { startAudio() }
         watchInterruptions()
     }
 

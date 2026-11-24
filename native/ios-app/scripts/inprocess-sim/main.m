@@ -14,9 +14,25 @@ static void Write(NSString *name, id object) {
 /// refused, and the new session must have a new generation.
 static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
     NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    BOOL coverCompat = [mode isEqualToString:@"cover-compat"];
+    if (coverCompat) {
+        NSString *failure = [PKInProcess.shared app:@"local.pokimcp.fixture" action:@"launch"];
+        out[@"launch_code"] = failure ?: @"";
+        if (failure) return out;
+    }
     out[@"front"] = [PKInProcess.shared frontApp];
-    NSString *code;
+    NSString *code = nil;
     NSString *before = [PKInProcess.shared sourceXML:NULL code:&code];
+    if (coverCompat && !before && [code hasSuffix:@"kAXErrorServerNotFound"]) {
+        out[@"first_source_code"] = code;
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 15;
+        while (!before && [code hasSuffix:@"kAXErrorServerNotFound"] &&
+               NSProcessInfo.processInfo.systemUptime < deadline) {
+            [NSThread sleepForTimeInterval:0.25];
+            code = nil;
+            before = [PKInProcess.shared sourceXML:NULL code:&code];
+        }
+    }
     if (code) out[@"source_code"] = code;
     Write([tag stringByAppendingString:@".xml"], before ?: @"");
     const char *model = getenv("SIMULATOR_MODEL_IDENTIFIER");
@@ -25,8 +41,13 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         // UIScreen says (an app linked before the iOS 27.1 SDK is letterboxed on an iPhone Duo).
         NSString *shotCode = nil;
         NSData *shot = [PKInProcess.shared screenshot:&shotCode];
+        if (coverCompat && [shotCode isEqualToString:@"display_changed_during_screenshot"]) {
+            out[@"first_screenshot_code"] = shotCode;
+            shotCode = nil;
+            shot = [PKInProcess.shared screenshot:&shotCode];
+        }
         UIImage *picture = shot ? [UIImage imageWithData:shot] : nil;
-        PKDisplayGeometry geometry = PKInProcess.shared.displayGeometry;
+        PKDisplayGeometry geometry = coverCompat ? [PKInProcess.shared readDisplayGeometry] : PKInProcess.shared.displayGeometry;
         out[@"screenshot"] = @{@"bytes": @(shot.length), @"code": shotCode ?: @"",
                                @"width": @(picture.size.width * picture.scale), @"height": @(picture.size.height * picture.scale)};
         out[@"display"] = @{@"bounds": NSStringFromCGRect(geometry.bounds), @"native": NSStringFromCGSize(geometry.nativeSize),
@@ -57,13 +78,15 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         if (code) out[@"source_code2"] = code;
         Write([tag stringByAppendingString:@"-reopened.xml"], before ?: @"");
         if (!before) return out;
-    } else if (![mode isEqualToString:@"field"] || !before) return out;
+    } else if ((!coverCompat && ![mode isEqualToString:@"field"]) || !before) return out;
     NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"<XCUIElementTypeTextField[^>]*x=\"(\\d+)\" y=\"(\\d+)\" width=\"(\\d+)\" height=\"(\\d+)\"" options:0 error:nil];
     NSTextCheckingResult *m = [re firstMatchInString:before options:0 range:NSMakeRange(0, before.length)];
     if (!m) { out[@"field"] = @"none"; return out; }
     double v[4];
     for (int i = 0; i < 4; i++) v[i] = [[before substringWithRange:[m rangeAtIndex:i + 1]] doubleValue];
     CGPoint c = CGPointMake(v[0] + v[2] / 2, v[1] + v[3] / 2);
+    // A centered or right-aligned compatibility window would offset this point into the system area.
+    if (coverCompat) c.x = v[0] + v[2] - 8;
     // The tree's frames are relative to the front app's part of the screen (viewport); a touch is
     // on the whole screen, as InProcessWDA moves it.
     CGRect viewport = PKInProcess.shared.viewport;
@@ -71,8 +94,14 @@ static NSDictionary *Run(NSString *mode, NSString *tag, NSString *text) {
         out[@"viewport"] = NSStringFromCGRect(viewport);
         c.x += viewport.origin.x; c.y += viewport.origin.y;
     }
-    PKOutcome *tap = [PKInProcess.shared touch:@[@[[PKTouchPoint at:c offset:0], [PKTouchPoint at:c offset:0.05]]] timeout:5];
+    NSArray<NSArray<PKTouchPoint *> *> *fingers = @[@[[PKTouchPoint at:c offset:0], [PKTouchPoint at:c offset:0.05]]];
+    PKOutcome *tap = coverCompat ? [PKInProcess.shared touch:fingers timeout:5 geometry:PKInProcess.shared.displayGeometry]
+                                : [PKInProcess.shared touch:fingers timeout:5];
     out[@"tap"] = @(tap.delivery);
+    if (coverCompat && tap.delivery != PKDeliverySent) {
+        out[@"tap_code"] = tap.code ?: @"";
+        return out;
+    }
     [NSThread sleepForTimeInterval:1];
     NSInteger times = MAX(1, [NSUserDefaults.standardUserDefaults integerForKey:@"times"]);
     PKOutcome *typed = nil;

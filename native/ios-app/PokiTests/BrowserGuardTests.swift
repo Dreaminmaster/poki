@@ -2,6 +2,8 @@ import Foundation
 import Network
 import Observation
 import PokiCore
+import SwiftUI
+import UIKit
 import WebKit
 import XCTest
 @testable import Poki
@@ -319,6 +321,83 @@ final class BrowserGuardTests: XCTestCase {
                 XCTAssertFalse(text.replacingOccurrences(of: "\\/", with: "/").contains(value), "Field \(index) leaked into \(surface)")
             }
         }
+    }
+
+    func testBrowserTakeOverInstructionIsSelectableAndCopyableWithLineBreaks() async throws {
+        let instruction = "Run this command and open the URL:\ncurl -fsSL https://example.com/setup.sh | sh\nhttps://example.com/verify?code=482913"
+        let browser = PokiBrowser.shared
+        browser.close()
+        _ = browser.begin("Waiting for you")
+        browser.takeOver(reason: instruction)
+
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.screen.bounds
+        let host = UIHostingController(rootView: BrowserTakeOverSheet(running: true, stop: {}))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            browser.close()
+        }
+
+        var textView: UITextView?
+        var copyButton: NSObject?
+        for _ in 0..<50 {
+            window.layoutIfNeeded()
+            CATransaction.flush()
+            textView = Self.findView(ofType: UITextView.self, in: window) { $0.text == instruction }
+            copyButton = Self.findAccessibilityButton(identifier: "browser.instruction.copy", in: window)
+            if textView != nil && copyButton != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let instructionView = try XCTUnwrap(textView, "Built-in browser top instruction must render in a selectable UITextView with the verbatim instruction")
+        XCTAssertTrue(instructionView.isSelectable, "Instruction text must support standard text selection")
+        XCTAssertFalse(instructionView.isEditable, "Instruction text must remain read-only")
+        XCTAssertEqual(instructionView.text, instruction, "Multi-line commands and URLs must preserve line breaks")
+
+        let previousPasteboard = UIPasteboard.general.string
+        defer { UIPasteboard.general.string = previousPasteboard }
+
+        UIPasteboard.general.string = ""
+        instructionView.becomeFirstResponder()
+        instructionView.selectAll(nil)
+        instructionView.copy(nil)
+        XCTAssertEqual(UIPasteboard.general.string, instruction, "Standard Copy must copy the full instruction with line breaks preserved")
+
+        let button = try XCTUnwrap(copyButton, "Built-in browser instruction bar must provide a Copy button")
+        UIPasteboard.general.string = ""
+        XCTAssertTrue(button.accessibilityActivate(), "Tapping the Copy button must activate")
+        XCTAssertEqual(UIPasteboard.general.string, instruction, "Dedicated Copy button must copy the full instruction with line breaks preserved")
+    }
+
+    private static func findView<T: UIView>(ofType type: T.Type, in root: UIView, where match: (T) -> Bool) -> T? {
+        if let typed = root as? T, match(typed) { return typed }
+        for child in root.subviews {
+            if let found = findView(ofType: type, in: child, where: match) { return found }
+        }
+        return nil
+    }
+
+    private static func findAccessibilityButton(identifier: String, in root: NSObject) -> NSObject? {
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        let selector = NSSelectorFromString("accessibilityIdentifier")
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            let id = item.responds(to: selector) ? item.perform(selector)?.takeUnretainedValue() as? String : nil
+            if id == identifier && item.accessibilityTraits.contains(.button) { return item }
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                for index in 0..<count {
+                    if let child = item.accessibilityElement(at: index) as? NSObject { pending.append(child) }
+                }
+            }
+        }
+        return nil
     }
 
     private static let page = """

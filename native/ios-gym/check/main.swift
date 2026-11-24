@@ -14,13 +14,57 @@ setvbuf(stdout, nil, _IOLBF, 0)
 @discardableResult func sh(_ args: [String]) -> String {
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args
     let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
-    try? p.run(); p.waitUntilExit()
-    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    do { try p.run() } catch { return "" }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return String(data: data, encoding: .utf8) ?? ""
 }
 
 let environment = ProcessInfo.processInfo.environment
 let url = URL(string: environment["POKI_WDA_URL"] ?? "http://127.0.0.1:8100")!
 let udid = environment["UDID"] ?? "booted"
+
+struct SimulatorApps: Sendable {
+    let bundleIDs: Set<String>
+    private let byName: [String: Set<String>]
+
+    init(_ inventory: String) {
+        let apps = (try? PropertyListSerialization.propertyList(from: Data(inventory.utf8), format: nil) as? [String: [String: Any]]) ?? [:]
+        bundleIDs = Set(apps.keys)
+        var names: [String: Set<String>] = [:]
+        for (id, app) in apps {
+            var appNames = Self.displayName(app).map { [$0] } ?? []
+            if app["ApplicationType"] as? String == "System",
+               let path = app["Path"] as? String, let bundle = Bundle(path: path) {
+                for language in bundle.localizations {
+                    guard let url = bundle.url(forResource: "InfoPlist", withExtension: "strings", subdirectory: nil, localization: language),
+                          let data = try? Data(contentsOf: url),
+                          let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                          let name = Self.displayName(info) else { continue }
+                    appNames.append(name)
+                }
+            }
+            if id == "com.apple.Preferences" { appNames += ["设置", "設定"] }
+            for name in appNames { names[Self.nameKey(name), default: []].insert(id) }
+        }
+        byName = names
+    }
+
+    func resolve(_ given: String) -> String? {
+        if bundleIDs.contains(given) { return given }
+        let key = Self.nameKey(given)
+        guard !key.isEmpty, let matches = byName[key], matches.count == 1 else { return nil }
+        return matches.first
+    }
+
+    private static func displayName(_ info: [String: Any]) -> String? {
+        (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String)
+    }
+
+    private static func nameKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
 
 final class Host: CoreHost, @unchecked Sendable {
     struct NoKey: Error {}
@@ -63,7 +107,12 @@ final class Host: CoreHost, @unchecked Sendable {
     }
 }
 
-let core = PokiCore(config: CoreConfig(runnerURL: url), host: Host())
+let simulatorApps = SimulatorApps(sh(["xcrun", "simctl", "listapps", udid]))
+let core: PokiCore = {
+    var config = CoreConfig(runnerURL: url)
+    config.resolveInstalledApp = { simulatorApps.resolve($0) }
+    return PokiCore(config: config, host: Host())
+}()
 var session: String?
 
 /// One MCP request to PokiCore's handler, exactly as the relay delivers an agent's.
@@ -101,7 +150,12 @@ var session: String?
         guard let raw = try? await URLSession.shared.data(from: url.appendingPathComponent("source").appending(queryItems: [URLQueryItem(name: "format", value: "xml")])).0 else { return nil }
         return (try? JSON.parse(raw))?["value"]?.string
     }
-    env.installed = { bundle in await Task.detached { sh(["xcrun", "simctl", "listapps", udid]).contains("\"\(bundle)\"") }.value }
+    env.foregroundBundle = {
+        let request = URLRequest(url: url.appendingPathComponent("wda/activeAppInfo"), timeoutInterval: 2)
+        guard let (raw, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return (try? JSON.parse(raw))?["value"]?["bundleId"]?.string
+    }
+    env.installed = { simulatorApps.bundleIDs.contains($0) }
     env.approveNext = { approver.next($0) }
     env.path = "runner"
     return GymScorecard(env: env)

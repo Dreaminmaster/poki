@@ -12,13 +12,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "核对中"
+            "value" : "检查中"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "核對中"
+            "value" : "檢查中"
           }
         }
       }

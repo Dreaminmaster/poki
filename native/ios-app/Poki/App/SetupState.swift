@@ -27,18 +27,18 @@ struct SetupState: Codable, Equatable {
     /// Preferences first; after a reinstall (a sideloaded app that was deleted and installed again,
     /// or a signing tool that could not keep the container), the copy in the Keychain, which outlives
     /// the app's container as long as the same team signs it. See `SetupVault`.
-    static func load() -> SetupState {
-        if let data = UserDefaults.standard.data(forKey: "setup"), let state = try? JSONDecoder().decode(SetupState.self, from: data) { return state }
-        if let data = SetupVault.readSetup(), let state = try? JSONDecoder().decode(SetupState.self, from: data) {
-            UserDefaults.standard.set(data, forKey: "setup")
+    static func load(storage: PokiStorage = .live) -> SetupState {
+        if let data = storage.defaults.data(forKey: "setup"), let state = try? JSONDecoder().decode(SetupState.self, from: data) { return state }
+        if let data = SetupVault.readSetup(storage: storage), let state = try? JSONDecoder().decode(SetupState.self, from: data) {
+            storage.defaults.set(data, forKey: "setup")
             return state
         }
         return SetupState()
     }
-    func save() {
+    func save(storage: PokiStorage = .live) {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: "setup")
-        SetupVault.storeSetup(data)
+        storage.defaults.set(data, forKey: "setup")
+        SetupVault.storeSetup(data, storage: storage)
     }
 }
 
@@ -50,17 +50,18 @@ enum SetupVault {
     private static let pairingAccount = "setup.pairing"
     private static let setupAccount = "setup.state"
 
-    static func storeSetup(_ data: Data) { try? Keychain.write(data, account: setupAccount) }
-    static func readSetup() -> Data? { try? Keychain.read(setupAccount) }
+    static func storeSetup(_ data: Data, storage: PokiStorage = .live) { try? Keychain.write(data, account: setupAccount, storage: storage) }
+    static func readSetup(storage: PokiStorage = .live) -> Data? { try? Keychain.read(setupAccount, storage: storage) }
 
-    static func storePairing(_ data: Data) { try? Keychain.write(data, account: pairingAccount) }
+    static func storePairing(_ data: Data, storage: PokiStorage = .live) { try? Keychain.write(data, account: pairingAccount, storage: storage) }
 
     /// The pairing file is back in the container when the container lost it and the Keychain has it.
     /// Returns true when it was restored.
-    @discardableResult static func restorePairingIfMissing() -> Bool {
-        let file = AppFiles.pairingFile
-        guard !FileManager.default.fileExists(atPath: file.path), let data = try? Keychain.read(pairingAccount), !data.isEmpty else { return false }
+    @discardableResult static func restorePairingIfMissing(storage: PokiStorage = .live) -> Bool {
+        let file = storage.pairingFileURL
+        guard !FileManager.default.fileExists(atPath: file.path), let data = try? Keychain.read(pairingAccount, storage: storage), !data.isEmpty else { return false }
         do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch { return false }
@@ -68,12 +69,12 @@ enum SetupVault {
 
     /// A pairing file put in the container from outside (Poki Setup on a computer writes it there
     /// over house_arrest) is mirrored too, so it survives a reinstall like one Poki took itself.
-    static func mirrorPairingFromContainer() {
-        guard let data = try? Data(contentsOf: AppFiles.pairingFile), !data.isEmpty else { return }
-        if (try? Keychain.read(pairingAccount)) != data { storePairing(data) }
+    static func mirrorPairingFromContainer(storage: PokiStorage = .live) {
+        guard let data = try? Data(contentsOf: storage.pairingFileURL), !data.isEmpty else { return }
+        if (try? Keychain.read(pairingAccount, storage: storage)) != data { storePairing(data, storage: storage) }
     }
 
-    static func forget() { Keychain.delete(pairingAccount); Keychain.delete(setupAccount) }
+    static func forget(storage: PokiStorage = .live) { Keychain.delete(pairingAccount, storage: storage); Keychain.delete(setupAccount, storage: storage) }
 }
 
 enum AppFiles {

@@ -1,0 +1,25 @@
+[package]
+name = "poki-codex-voice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+anyhow.workspace = true
+codex-app-server.workspace = true
+codex-app-server-protocol.workspace = true
+codex-config.workspace = true
+codex-core.workspace = true
+codex-exec-server.workspace = true
+codex-feedback.workspace = true
+codex-protocol.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+toml.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# The iOS sandbox does not expose the Unix root bundle used by the default connector.
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }

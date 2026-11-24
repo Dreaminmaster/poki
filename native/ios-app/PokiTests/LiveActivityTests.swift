@@ -38,6 +38,33 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(activity.state.phase, .idle)
     }
 
+    func testNewRunAndNilThumbnailClearPreviousTaskThumbnail() {
+        let activity = ActivityController()
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20))
+        let jpeg = renderer.jpegData(withCompressionQuality: 0.7) { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+        }
+
+        activity.update { $0.phase = .working; $0.headline = "Open Calculator" }
+        activity.setThumbnail(jpeg)
+        XCTAssertTrue(activity.state.hasThumbnail)
+        activity.finishNow(alert: false)
+        XCTAssertEqual(activity.state.phase, .done)
+        XCTAssertTrue(activity.state.hasThumbnail, "finished task keeps its final thumbnail on Done")
+
+        activity.update { $0.phase = .working; $0.headline = "Thinking" }
+        XCTAssertFalse(activity.state.hasThumbnail, "a new run must not inherit the previous task's thumbnail")
+        if let url = SharedContainer.thumbnailURL {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+
+        activity.setThumbnail(jpeg)
+        XCTAssertTrue(activity.state.hasThumbnail)
+        activity.setThumbnail(nil)
+        XCTAssertFalse(activity.state.hasThumbnail, "a step without a fresh screenshot clears the thumbnail")
+    }
+
     private var language = AppLocalization.system
 
     override func setUp() async throws {
@@ -326,6 +353,24 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertTrue(state.face.compact.says("Allow?"))
     }
 
+    func testAnsweringAnIslandApprovalReturnsToProgressWithoutConfirmation() {
+        let controller = ActivityController()
+        controller.update { $0.phase = .working; $0.headline = "Working"; $0.app = "Messages" }
+        let normalProgress = controller.state.face
+
+        let approval = PendingApproval(id: "approval", app: "Messages", summary: "Send message",
+                                       reason: "sending a message", expires: .now.addingTimeInterval(60))
+        controller.update { $0.phase = .approval; $0.approval = approval; $0.headline = "Allow this step?" }
+        XCTAssertEqual(controller.state.face.bottom, .approval(id: approval.id))
+
+        controller.update { $0.phase = .deciding; $0.decision = true }
+        XCTAssertEqual(controller.state.face.compact, normalProgress.compact, "Answering shows normal progress")
+        XCTAssertEqual(controller.state.face.bottom, normalProgress.bottom, "Answering shows no confirmation card")
+
+        controller.update { $0.phase = .working; $0.approval = nil; $0.headline = "Continuing" }
+        XCTAssertNotEqual(controller.state.face.event, "Allowed", "Continuing shows no approval confirmation")
+    }
+
     private static var runningSession: RunningSession?
 
     private struct RunningSession {
@@ -479,6 +524,88 @@ final class LiveActivityTests: XCTestCase {
                 let banner = try await waitForDeliveredNotice("poki-reply")
                 XCTAssertEqual(banner.request.content.body, "The task has ended. Open Poki to see the result.")
             }
+        }
+    }
+
+    func testNonDynamicIslandApprovalIntentResolvesBeforeReturningAndSchedulesFallbackNotice() async throws {
+        try await withFinishWindow(dynamicIsland: false) {
+            InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
+            let defaults = UserDefaults.standard
+            let keys = ["relayAddress", "relayEnabled", "wantsOn", ApprovalClassifier.modeKey]
+            let saved = keys.map { defaults.object(forKey: $0) }
+            let setup = SetupState.load()
+            let automation = FakeAutomation()
+            // Ordinary-page Delete is allowed under ESP-1328; use a payment button so approval always triggers.
+            let transport = SessionScreenTransport(session: automation, screenLabel: { "Pay" })
+            let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
+            defer {
+                automation.answer(nil)
+                if app.sessionOn { app.stopSession() }
+                for (key, value) in zip(keys, saved) { defaults.set(value, forKey: key) }
+                setup.save()
+            }
+            UserDefaults.standard.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+            app.loopback.simulate(.working(ms: 9))
+            app.setup.loopback = .proxy
+            XCTAssertTrue(app.setRelay("https://relay.invalid"))
+            app.becameActive()
+            app.startSession()
+            app.wakeRunner()
+            for _ in 0..<150 where !["failed", "running"].contains(app.runner.state) {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            app.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+            for _ in 0..<150 where !app.hasOpenInProcessSession {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            await app.chatTaskBegan()
+
+            let look = await app.runTool("look", arguments: "{}")
+            XCTAssertFalse(look.isError, look.text)
+
+            let allowTask = Task { await app.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+            for _ in 0..<150 where app.approvals.isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let first = try XCTUnwrap(app.approvals.first, "Sensitive tap must raise a pending approval")
+            let firstNoticeID = "approval-\(first.id)"
+            defer { clearNotice(firstNoticeID) }
+
+            var scheduledFallback: UNNotificationRequest?
+            for _ in 0..<50 {
+                let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+                if let match = pending.first(where: { $0.identifier == firstNoticeID }) {
+                    scheduledFallback = match
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertNotNil(scheduledFallback, "Without a Dynamic Island, a fallback approval notification must be scheduled after the Live Activity banner dismisses")
+
+            let allowStarted = ContinuousClock.now
+            _ = try await ApproveActionIntent(approvalID: first.id).perform()
+            let allowResult = await allowTask.value
+            let allowElapsed = ContinuousClock.now - allowStarted
+            XCTAssertFalse(allowResult.isError, allowResult.text)
+            XCTAssertLessThan(allowElapsed, .milliseconds(900), "On a device without a Dynamic Island, ApproveActionIntent must resolve before returning instead of waiting behind an unawaited collapse sleep")
+
+            let pendingAfterAllow = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            XCTAssertFalse(pendingAfterAllow.contains { $0.identifier == firstNoticeID }, "Answering on the Live Activity must cancel the fallback approval notification")
+
+            let denyTask = Task { await app.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+            for _ in 0..<150 where app.approvals.isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let second = try XCTUnwrap(app.approvals.first, "Second sensitive tap must raise a pending approval")
+            let secondNoticeID = "approval-\(second.id)"
+            defer { clearNotice(secondNoticeID) }
+
+            let denyStarted = ContinuousClock.now
+            _ = try await DenyActionIntent(approvalID: second.id).perform()
+            let denyResult = await denyTask.value
+            let denyElapsed = ContinuousClock.now - denyStarted
+            XCTAssertTrue(denyResult.isError || denyResult.text.lowercased().contains("denied") || denyResult.text.lowercased().contains("not"), denyResult.text)
+            XCTAssertLessThan(denyElapsed, .milliseconds(900), "On a device without a Dynamic Island, DenyActionIntent must resolve before returning")
         }
     }
 

@@ -530,9 +530,8 @@ final class ApprovalDefaultTests: XCTestCase {
 @MainActor
 final class PasscodeTests: XCTestCase {
     /// After a restart iOS asks for the passcode before the first automation. The launcher says so
-    /// (code "passcode"); the agent reads a plain "starting" with the reason, and the Live Activity
-    /// asks the owner; the hint clears when the runner answers.
-    func testPasscodeWaitIsNamedAndClears() {
+    /// (code "passcode"); the tool waits for the owner, and the Live Activity asks them.
+    func testRunnerPasscodePromptReportsAuthorizationWaitUntilReady() {
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
         model.loopback.simulate(.working(ms: 9))
         model.inProcessReadyForProbe()
@@ -541,8 +540,9 @@ final class PasscodeTests: XCTestCase {
         XCTAssertTrue(model.passcodeHint)
         let text = model.host.currentRunner.describe
         XCTAssertTrue(text.contains("passcode"), text)
-        XCTAssertTrue(text.contains("Call again"), text)
-        XCTAssertTrue(text.hasPrefix("starting"), text)
+        guard case .awaitingAutomationAuthorization = model.host.currentRunner else {
+            return XCTFail("The original tool cannot wait for the owner in state: \(text)")
+        }
         model.runnerChanged(RunnerStatus(state: "running"))
         XCTAssertFalse(model.passcodeHint)
         XCTAssertTrue(model.host.currentRunner.isRunning)
@@ -742,7 +742,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         UIAccessibility.post(notification: .screenChanged, argument: window.rootViewController?.view)
@@ -1144,7 +1144,8 @@ final class InProcessPasscodeTests: XCTestCase {
         model.checkIdle(now: Date().addingTimeInterval(6))
         XCTAssertTrue(model.passcodeHint, "Poki's home asks the owner for the passcode")
         let waiting = model.host.currentRunner.describe
-        XCTAssertTrue(waiting.contains("owner to enter the iPhone passcode"), waiting)
+        XCTAssertTrue(waiting.contains("owner to allow UI automation"), waiting)
+        XCTAssertTrue(waiting.contains("Live Activity asks them"), waiting)
         try await captureSessionState("passcode")
         session.answer(["ok": false, "code": "com.apple.dt.XCTest.XCTFuture 1000", "detail": "Timed out while enabling automation mode.", "seconds": 60.0])
         await waitFor("iOS gave up on the passcode") { !self.model.passcodeHint && !self.model.host.currentRunner.describe.hasPrefix("starting") }
@@ -1247,6 +1248,390 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertFalse(next.isError, next.text)
         XCTAssertTrue(next.text.contains("General"), next.text)
         XCTAssertTrue(model.hasOpenInProcessSession)
+    }
+
+    func testLiveActivityTapBetweenChatStepsKeepsSessionOpenAndReturnsToTargetApp() async throws {
+        let stateLock = NSLock()
+        let pokiBundle = Bundle.main.bundleIdentifier ?? "nz.zheha.poki"
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        let transport = SessionScreenTransport(
+            session: session,
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let read = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        await waitFor("step finished and model is thinking between steps") { self.model.activityText == "Idle" }
+
+        let workingFace = PokiState(phase: .working, headline: "Looking", thumbnailVersion: 0).face
+        XCTAssertEqual(workingFace.link, URL(string: "poki://activity"))
+
+        stateLock.withLock { front = (pokiBundle, "Poki") }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+
+        await waitFor("target app reactivated after Live Activity tap") {
+            stateLock.withLock { activated.contains("com.apple.Preferences") }
+        }
+        XCTAssertTrue(session.isOpen, "bringing Poki forward between chat steps must keep the automation session open")
+        XCTAssertTrue(model.hasOpenInProcessSession)
+        XCTAssertFalse(model.runnerPaused)
+        XCTAssertEqual(session.closes, 0)
+
+        model.chatTaskEnded(reply: nil, session: "test", acted: true)
+        await waitFor("completed task still closes the session") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        await openSessionForATask()
+        model.wentToBackground()
+        model.becameActive()
+        await waitFor("opening Poki with no active task closes an idle session at once") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        // Explicit Stop on the Live Activity during an active task still closes the session at once.
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+        model.stopFromOutside(AppModel.liveActivityStop)
+        await waitFor("Live Activity Stop still closes the session immediately") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+    }
+
+    func testLiveActivityTapBetweenChatStepsReturnsWhenActiveAppInfoLags() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        var activationAttempts = 0
+        var holdNextRequest = false
+        var enteredHold = false
+        var releaseHold: CheckedContinuation<Void, Never>?
+        let transport = SessionScreenTransport(
+            session: session,
+            beforePathRequest: { path in
+                let shouldHold = stateLock.withLock { () -> Bool in
+                    if path == "/wda/apps/activate" { activationAttempts += 1 }
+                    guard holdNextRequest else { return false }
+                    holdNextRequest = false
+                    enteredHold = true
+                    return true
+                }
+                guard shouldHold else { return }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    stateLock.withLock { releaseHold = continuation }
+                }
+            },
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let read = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(read.isError, read.text)
+        await waitFor("step finished and model is thinking between steps") { self.model.activityText == "Idle" }
+
+        // On real iOS, scenePhase == .active fires while SpringBoard's activeAppInfo still reports
+        // the previous app or SpringBoard during the Dynamic Island zoom animation.
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let firstReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await firstReturn.value
+
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+        XCTAssertTrue(session.isOpen)
+        XCTAssertEqual(session.closes, 0)
+
+        // Leaving Poki while an in-flight read holds the gate cancels the pending return.
+        stateLock.withLock {
+            activated.removeAll()
+            activationAttempts = 0
+            front = ("com.apple.Preferences", "Settings")
+            holdNextRequest = true
+            enteredHold = false
+        }
+        model.wentToBackground()
+        let heldRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("in-flight read is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let cancelledReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        model.wentToBackground()
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let heldResult = await heldRead.value
+        XCTAssertFalse(heldResult.isError, heldResult.text)
+        await cancelledReturn.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+
+        // Leaving Poki before becameActive clears pendingLiveActivityReturnAt without spawning a return task.
+        stateLock.withLock {
+            activated.removeAll()
+            activationAttempts = 0
+            front = ("com.apple.Preferences", "Settings")
+        }
+        let prepRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(prepRead.isError, prepRead.text)
+        model.wentToBackground()
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.wentToBackground()
+        model.becameActive()
+        XCTAssertNil(model.liveActivityReturnTask)
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+    }
+
+    func testLiveActivityReturnIgnoresSpringBoardEmptyBundleAndPreviousTaskForeground() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        var activationAttempts = 0
+        let transport = SessionScreenTransport(
+            session: session,
+            beforePathRequest: { path in
+                if path == "/wda/apps/activate" { stateLock.withLock { activationAttempts += 1 } }
+            },
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let initialRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(initialRead.isError, initialRead.text)
+
+        // A mid-transition read that records SpringBoard as lastForeground must still return to Settings.
+        stateLock.withLock { front = ("com.apple.springboard", "SpringBoard") }
+        let springBoardRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(springBoardRead.isError, springBoardRead.text)
+        await waitFor("SpringBoard read finished") { self.model.activityText == "Idle" }
+
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let springBoardReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await springBoardReturn.value
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+
+        // A read with an empty bundle ID and non-empty name must also fall back to Settings.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("", "Transition")
+        }
+        model.wentToBackground()
+        let emptyBundleRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(emptyBundleRead.isError, emptyBundleRead.text)
+        await waitFor("empty-bundle read finished") { self.model.activityText == "Idle" }
+
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let emptyBundleReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await emptyBundleReturn.value
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+
+        // Ending the task clears previous-task target state so a new task before its first read does not reactivate Settings.
+        stateLock.withLock {
+            activated.removeAll()
+            front = ("com.apple.Preferences", "Settings")
+        }
+        let closingRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(closingRead.isError, closingRead.text)
+        model.chatTaskEnded(reply: nil, session: "task-1", acted: true)
+        await waitFor("task 1 finished and closed automation") {
+            !self.session.isOpen && self.model.runnerPaused
+        }
+
+        stateLock.withLock {
+            activated.removeAll()
+            activationAttempts = 0
+            front = ("com.apple.springboard", "SpringBoard")
+        }
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let newTaskReturn = try XCTUnwrap(model.liveActivityReturnTask)
+        await newTaskReturn.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0)
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty },
+                      "a new task before any non-SpringBoard read must not reactivate the previous task's app")
+    }
+
+    func testLiveActivityReturnWaitsPastBusyWaitForSlowReadAndCancelsOnStopOrHandoff() async throws {
+        let stateLock = NSLock()
+        var front = (bundleID: "com.apple.Preferences", name: "Settings")
+        var activated: [String] = []
+        var activationAttempts = 0
+        var holdPath: String?
+        var enteredHold = false
+        var releaseHold: CheckedContinuation<Void, Never>?
+        let transport = SessionScreenTransport(
+            session: session,
+            beforePathRequest: { path in
+                let shouldHold = stateLock.withLock { () -> Bool in
+                    if path == "/wda/apps/activate" { activationAttempts += 1 }
+                    guard holdPath == path else { return false }
+                    holdPath = nil
+                    enteredHold = true
+                    return true
+                }
+                guard shouldHold else { return }
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    stateLock.withLock { releaseHold = continuation }
+                }
+            },
+            beforeActivation: { bundle in
+                stateLock.withLock {
+                    activated.append(bundle)
+                    if bundle == "com.apple.Preferences" { front = ("com.apple.Preferences", "Settings") }
+                }
+            },
+            activeApp: { stateLock.withLock { front } }
+        )
+        useSystem(27, transport: transport)
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        model.wentToBackground()
+
+        let initialRead = await model.runTool("look", arguments: "{}")
+        XCTAssertFalse(initialRead.isError, initialRead.text)
+
+        // Hold /source until a concurrent look hits CoreConfig.busyWait and returns busy, proving
+        // the return task outlives busyWait without a fixed sleep.
+        stateLock.withLock {
+            holdPath = "/source"
+            enteredHold = false
+        }
+        let slowRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("slow /source read is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        let activityLink = try XCTUnwrap(URL(string: "poki://activity"))
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let slowReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
+
+        let busy = await model.runTool("look", arguments: "{}")
+        XCTAssertTrue(busy.text.contains("busy:"), busy.text)
+
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let slowResult = await slowRead.value
+        XCTAssertFalse(slowResult.isError, slowResult.text)
+        await slowReturnTask.value
+
+        XCTAssertEqual(stateLock.withLock { activated }, ["com.apple.Preferences"])
+        XCTAssertTrue(session.isOpen)
+
+        // Handoff arriving while a pending Live Activity return waits on the gate must cancel it
+        // without issuing any outbound activation attempt even if the session closes later.
+        stateLock.withLock {
+            activated.removeAll()
+            activationAttempts = 0
+            front = ("com.apple.Preferences", "Settings")
+            holdPath = "/wda/keys"
+            enteredHold = false
+        }
+        model.wentToBackground()
+        let handoffStep = Task {
+            await self.model.runTool("do", arguments: #"{"actions":[{"key":"return"},{"handoff":{"kind":"password","text":"Sign in"}}]}"#)
+        }
+        await waitFor("pre-handoff key action is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let handoffReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        let handoffResult = await handoffStep.value
+        XCTAssertFalse(handoffResult.isError, handoffResult.text)
+        await handoffReturnTask.value
+        await waitFor("handoff reached AppModel and closed automation") {
+            self.model.handoffText != nil && !self.session.isOpen
+        }
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0,
+                       "a Live Activity return must not send any activation attempt once handoff starts")
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
+
+        // Explicit Stop while a slow read holds the gate must also cancel a pending Live Activity return.
+        await openSessionForATask()
+        await model.chatTaskBegan()
+        let takeBack = await model.runTool("do", arguments: #"{"actions":[{"handoff":false}]}"#)
+        XCTAssertFalse(takeBack.isError, takeBack.text)
+        await waitFor("handoff cleared") { self.model.handoffText == nil }
+
+        stateLock.withLock {
+            activated.removeAll()
+            activationAttempts = 0
+            front = ("com.apple.Preferences", "Settings")
+            holdPath = "/source"
+            enteredHold = false
+        }
+        model.wentToBackground()
+        let stoppedRead = Task { await self.model.runTool("look", arguments: "{}") }
+        await waitFor("read before stop is holding the gate") {
+            stateLock.withLock { enteredHold && releaseHold != nil }
+        }
+        XCTAssertEqual(model.open(link: activityLink), .ignored)
+        model.becameActive()
+        let stopReturnTask = try XCTUnwrap(model.liveActivityReturnTask)
+        model.stopFromOutside(AppModel.liveActivityStop)
+        await waitFor("Stop closed the session") { !self.session.isOpen && self.model.runnerPaused }
+        stateLock.withLock { () -> CheckedContinuation<Void, Never>? in
+            let continuation = releaseHold
+            releaseHold = nil
+            return continuation
+        }?.resume()
+        _ = await stoppedRead.value
+        await stopReturnTask.value
+        XCTAssertEqual(stateLock.withLock { activationAttempts }, 0,
+                       "Stop must cancel any pending Live Activity return before it sends an activation")
+        XCTAssertTrue(stateLock.withLock { activated.isEmpty })
     }
 
     /// Talk Here starts a relaunched Poki in the background. On iOS 27 its first open asks for no
@@ -1540,7 +1925,7 @@ final class InProcessPasscodeTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.accessibilityEnabled, true))
         window.makeKeyAndVisible()
         defer { window.endEditing(true); window.isHidden = true }
@@ -1593,7 +1978,7 @@ final class InProcessPasscodeTests: XCTestCase {
         window.frame = scene.screen.bounds
         let chat = chat ?? ChatModel(app: model)
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(model).environment(chat).environment(\.locale, AppLocalization.locale))
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
@@ -1832,6 +2217,94 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(runnerIssue?.fix, .setup)
     }
 
+    /// Any web page, message or app can open a `poki://` link. One that names a relay only asks: the
+    /// relay could see the screen and act on the phone, so nothing changes until the owner allows it.
+    func testARelayLinkAsksAndDoesNotSetTheRelay() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let before = model.relayAddress
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .continueRouting)
+        XCTAssertEqual(model.relayAddress, before, "not set by the link alone")
+        XCTAssertEqual(model.linkAsk?.host, "https://evil.example")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+        XCTAssertEqual(model.relayAddress, before, "declined")
+    }
+
+    /// #350 review: a second link while the first one's alert is on screen. Allow and Don't Allow apply
+    /// to the request the alert shows, and the second link changes nothing.
+    func testASecondLinkWhileOneAsksChangesNothing() throws {
+        for allow in [true, false] {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let keys = ["relayAddress", "relayEnabled"]
+            let saved = keys.map { UserDefaults.standard.object(forKey: $0) }
+            defer { for (key, value) in zip(keys, saved) { UserDefaults.standard.set(value, forKey: key) } }
+            let before = model.relayAddress
+            let missingChecksum = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist"))
+            _ = model.open(link: missingChecksum)
+            let previousNote = try XCTUnwrap(model.pairingNote)
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fmine.example"))), .continueRouting)
+            let shown = try XCTUnwrap(model.linkAsk)
+            XCTAssertEqual(shown.host, "https://mine.example")
+            XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://setup?relay=https%3A%2F%2Fevil.example"))), .ignored)
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "the second link does not replace the one on screen")
+            let sum = String(repeating: "ab", count: 32)
+            let download = try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F127.0.0.1%2Fpairing.plist&sha256=\(sum)"))
+            let inline = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+            for link in [download, inline, missingChecksum] {
+                XCTAssertEqual(model.open(link: link), .ignored, "discarded pairing links do not open the pairing page")
+                XCTAssertEqual(model.pairingNote, previousNote, "discarded pairing links leave the previous message alone")
+                XCTAssertEqual(model.linkAsk?.id, shown.id, "discarded pairing links do not replace the request")
+            }
+
+            model.answerLink(allow, to: UUID())
+            XCTAssertEqual(model.linkAsk?.id, shown.id, "an answer to another request does nothing")
+            model.answerLink(allow, to: shown.id)
+            XCTAssertNil(model.linkAsk, "nothing else waits: the second link was turned away")
+            XCTAssertNotEqual(model.relayAddress?.origin.host(), "evil.example")
+            if allow {
+                XCTAssertEqual(model.relayAddress?.origin.host(), "mine.example", "Allow sets the relay the alert showed")
+            } else {
+                XCTAssertEqual(model.relayAddress, before, "Don't Allow leaves the relay as it was")
+            }
+        }
+    }
+
+    func testInvalidInlinePairingDataShowsAnErrorWithoutAsking() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let invalid = try XCTUnwrap(URL(string: "poki://pairing?data=AP8"))
+        XCTAssertEqual(model.open(link: invalid), .showSetup(.pairing))
+        XCTAssertNil(model.linkAsk, "invalid property-list bytes cannot be approved")
+        XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+    }
+
+    func testIncompleteInlinePairingRecordsShowAnErrorWithoutAsking() throws {
+        let records: [[String: Any]] = [["identifier": "example"], ["HostID": "example"]]
+        for record in records {
+            let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+            let data = try PropertyListSerialization.data(fromPropertyList: record, format: .binary, options: 0)
+            var link = URLComponents()
+            link.scheme = "poki"
+            link.host = "pairing"
+            link.queryItems = [URLQueryItem(name: "data", value: data.base64URL)]
+            XCTAssertEqual(model.open(link: try XCTUnwrap(link.url)), .showSetup(.pairing))
+            XCTAssertNil(model.linkAsk, "an incomplete pairing record cannot be approved")
+            XCTAssertNotNil(model.pairingNote, "the pairing page explains why the link was refused")
+        }
+    }
+
+    /// A pairing link from outside asks before it replaces the pairing file, and one that fetches a
+    /// file must say which file (its checksum), or Poki would fetch and keep whatever the address serves.
+    func testAPairingLinkAsksAndNeedsItsChecksum() throws {
+        let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist"))), .showSetup(.pairing))
+        XCTAssertNil(model.linkAsk, "no checksum, nothing to ask")
+        let sum = String(repeating: "ab", count: 32)
+        XCTAssertEqual(model.open(link: try XCTUnwrap(URL(string: "poki://pairing?url=http%3A%2F%2F192.168.1.5%3A4000%2Fp.plist&sha256=\(sum)"))), .showSetup(.pairing))
+        XCTAssertEqual(model.linkAsk?.host, "192.168.1.5")
+        model.answerLink(false, to: try XCTUnwrap(model.linkAsk).id)
+        XCTAssertNil(model.linkAsk)
+    }
+
     /// Every setup step done and a connection chosen, with the loopback not yet checked.
     private func modelWithLoopbackChosen(launcher: FakeLauncher, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted }) throws -> (model: AppModel, restore: () -> Void) {
         let keys = ["chat.provider", "chat.customURL", "chat.customModel", "custom.providers", "chat.customProvider", "chat.model.custom", "relayAddress", "relayEnabled", "wantsOn"]
@@ -1869,8 +2342,8 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.automation), "Home chat must not treat an unfinished loopback check as off")
         XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.automation), "Conversation chat must not treat an unfinished loopback check as off")
         model.setup.uiAutomation = true
-        let checkingLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(checkingLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+        let checkingLabels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(checkingLabels.contains { $0 == "Next" || $0.hasSuffix(", Next") },
                        "Connection must not ask to turn on a configured loopback while checking: \(checkingLabels)")
 
         model.loopback.simulate(.working(ms: 6))
@@ -1911,15 +2384,15 @@ final class FrontendSubtractionTests: XCTestCase {
                        "Settings must clear waiting_network loopback issues once 10.7.0.1 answers")
 
         let chatLabels = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chatLabels.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") },
                        "Chat screen must not prompt for Local Connection when 10.7.0.1 answers: \(chatLabels)")
-        let connectionLabels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(connectionLabels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") },
+        let connectionLabels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(connectionLabels.contains { $0 == "Next" || $0.hasSuffix(", Next") },
                        "Connection screen must not prompt to turn on Local Connection when 10.7.0.1 answers: \(connectionLabels)")
-        XCTAssertTrue(connectionLabels.contains { $0.contains("Set Up Again") },
+        XCTAssertTrue(connectionLabels.contains { $0.contains("Guide Me") },
                       "Connection screen must report setup complete when 10.7.0.1 answers: \(connectionLabels)")
     }
 
@@ -1940,9 +2413,9 @@ final class FrontendSubtractionTests: XCTestCase {
             XCTAssertEqual(SetupIssueHint.homeLine(model: model)?.target, .step(.loopback), "Home, \(answer)")
             XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, \(answer)")
             XCTAssertFalse(model.setupReadyForUse, "the Settings entry, \(answer)")
-            let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-            XCTAssertTrue(connection.contains { $0.contains("Turn On") }, "Connection, \(answer): \(connection)")
-            XCTAssertFalse(connection.contains { $0.contains("Set Up Again") }, "Connection, \(answer): \(connection)")
+            let connection = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+            XCTAssertTrue(connection.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "Connection, \(answer): \(connection)")
+            XCTAssertTrue(connection.contains { $0.contains("Guide Me") }, "Setup, \(answer): \(connection)")
         }
     }
 
@@ -1961,9 +2434,9 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertFalse(model.hasOpenInProcessSession, "the session is not open yet, so nothing else stands in for the loopback")
         XCTAssertNil(SetupIssueHint.first(model: model))
         XCTAssertTrue(model.setupReadyForUse)
-        let labels = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(labels.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "\(labels)")
-        XCTAssertTrue(labels.contains { $0.contains("Set Up Again") }, "\(labels)")
+        let labels = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(labels.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "\(labels)")
+        XCTAssertTrue(labels.contains { $0.contains("Guide Me") }, "\(labels)")
     }
 
     /// A task on the mounted image ends and the runner stands by, as after every chat or agent task:
@@ -1995,14 +2468,14 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertNil(SetupIssueHint.homeLine(model: model), "Home after the task")
         XCTAssertFalse(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues after the task")
         XCTAssertTrue(model.setupReadyForUse, "the Settings entry after the task")
-        let connection = try await renderedLabels(of: NavigationStack { ConnectionView() }, model: model)
-        XCTAssertFalse(connection.contains { $0.contains("Turn On") || $0.contains("Continue Setup") }, "Connection after the task: \(connection)")
+        let connection = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
+        XCTAssertFalse(connection.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "Connection after the task: \(connection)")
         model.setup.proxyApp = "localdevvpn"
         let page = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
         XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")
         XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
         let chat = try await renderedLabels(
-            of: NavigationStack { ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
+            of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
         )
         XCTAssertFalse(chat.contains { $0.contains("Turn On Local Connection") || $0.contains("Local Connection is off") }, "Chat after the task: \(chat)")
@@ -2018,7 +2491,10 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "a computer's pairing file")
         XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, a computer's pairing file")
         let refused = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
-        XCTAssertTrue(refused.contains { $0.contains("with the loopback on") }, "the loopback page, a computer's pairing file: \(refused)")
+        XCTAssertTrue(refused.contains { $0.contains("Tunnel On, No Answer") },
+                      "The computer pairing must still require a working loopback: \(refused)")
+        XCTAssertTrue(refused.contains { $0.contains("Finish step 2 in LocalDevVPN") },
+                      "Setup must show the VPN repair steps for a computer pairing: \(refused)")
     }
 
     private func waitOnMain(_ condition: @escaping () -> Bool) async {

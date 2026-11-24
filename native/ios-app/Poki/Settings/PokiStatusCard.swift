@@ -1,8 +1,9 @@
 import SwiftUI
+import UIKit
 
-// Tapping Poki's picture, on the home page, in the conversation or on the voice page, opens Poki's card
-// under it (the owner's home of 2026-11-12, boards 定稿 08 and 01c): two rows, the model that answers and
-// how Poki asks before a sensitive step, each showing its choice and opening in place to change it. These
+// The home avatar, conversation name pill, and voice header open Poki's native status menu.
+// On iOS 26 the menu uses Liquid Glass and opens from the control that was tapped. The model that answers
+// and how Poki asks before a sensitive step each show their choice and open to change it. These
 // live only here: Settings keeps the accounts. Settings opens from the bottom of the conversations
 // (SettingsEntryButton). Pause is not on it (the owner, 2026-11-13): it only stopped the task, which the
 // message field's Stop does, and the next task woke Poki again.
@@ -48,267 +49,366 @@ extension PowerTile {
     }
 }
 
-/// Poki's card under its picture (board 定稿 08): a system-style menu card of two rows. The model that
-/// answers, which opens in place to the chat models of every account that is set up (07b), or Add
-/// Model with none; and the approval method, which opens in place the same way to the three methods,
-/// the one in use ticked, and the line on what always asks you. The method is `AppModel.approvalMode`,
-/// the one setting Settings › Approvals reads. Each acts at once; one row is open at a time.
-struct PokiStatusCard: View {
+/// Where `PokiMenu` opens relative to its control. `.automatic` uses SwiftUI's `Menu` in place
+/// (the chat top bar's Liquid Glass capsule already sits below the bear); `.below` anchors a native
+/// `UIButton` below the control's bottom edge so the menu opens downward clear of the bear's face.
+enum PokiMenuAnchor: Equatable {
+    case automatic
+    case below(spacing: CGFloat = 10)
+}
+
+/// Poki's menu: the status word as its heading, the model that answers (the chat models of every
+/// account that is set up, by account, or Add Model with none) and the approval method with the line on
+/// what always asks you. The method is `AppModel.approvalMode`, the one setting Settings › Approvals
+/// reads. Each choice acts at once.
+struct PokiMenu<Face: View>: View {
     @Environment(AppModel.self) private var model
-    @Environment(ChatModel.self) private var chat
-    var maximumHeight: CGFloat = 600
-    @State private var contentHeight: CGFloat = 160
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @ScaledMetric(relativeTo: .body) private var rowInset = 10.0
-    @ScaledMetric(relativeTo: .body) private var rowHeight = 52.0
-    @Environment(\.colorScheme) private var scheme
     /// Settings › Models, for Add Model.
     var openModel: () -> Void
-    @State private var open: Row?
-    private enum Row { case model, approvals }
+    /// The tap that opens the menu, for the bear to answer.
+    var tapped: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
+    var anchor: PokiMenuAnchor = .automatic
+    var accessibilityLabel: String? = nil
+    var accessibilityIdentifier: String? = nil
+    @ViewBuilder var face: () -> Face
     /// Bumped when the chosen model changes (ModelKeys is not observable).
     @State private var modelVersion = 0
-
-    private var dark: Bool { scheme == .dark }
-    private var soft: Color { Color(.secondaryLabel) }
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Where Poki stands, which the top bar no longer says in words: its face shows it there.
-                Text(verbatim: PokiStatusCopy.word(PokiStatus.current(model: model, chat: chat)))
-                    .font(.footnote).foregroundStyle(soft)
-                    .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
-                    .accessibilityIdentifier("status.word")
-                modelRow
-                if open == .model { modelChoices }
-                rule
-                approvalRow
-                if open == .approvals { approvalChoices }
-            }
-            .padding(.vertical, 6)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(height: min(contentHeight, maximumHeight))
-        .frame(maxWidth: typeSize.isAccessibilitySize ? 520 : 330, alignment: .leading)
-        .background(.regularMaterial, in: shape)
-        .background(Color(dark ? .secondarySystemBackground : .systemBackground).opacity(0.6), in: shape)
-        .overlay(shape.strokeBorder(Color.white.opacity(dark ? 0.12 : 0.95), lineWidth: 1))
-        .shadow(color: .black.opacity(dark ? 0.4 : 0.16), radius: 24, y: 16)
-        .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
-        .animation(.snappy(duration: 0.28), value: open)
-        // A container, so each row keeps its own identifier.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("status.card")
-    }
-
-    private var rule: some View {
-        Rectangle().fill(Color(.separator)).frame(height: 1 / 3).padding(.leading, 20)
-    }
+    @State private var showsAutoUnlock = false
+    @State private var showsAutoUnlockPasscode = false
 
     private var providers: [ModelProvider] {
-        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }
+        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0, storage: model.storage) && ModelAccounts.canChat($0) }
     }
 
-    // MARK: Model
-
-    @ViewBuilder private var modelRow: some View {
-        if ModelKeys.hasUsableKey {
-            Button { toggle(.model) } label: {
-                choiceRow("Model", value: ModelKeys.selectedModelName, open: open == .model)
-            }
-            .buttonStyle(CardRowStyle())
-            .id(modelVersion)
-            .accessibilityValue(Text(verbatim: ModelKeys.selectedModelName))
-            .accessibilityIdentifier("status.model")
-        } else {
-            Button(action: openModel) {
-                HStack(spacing: 8) {
-                    Text("Add Model").foregroundStyle(Tint.blue).frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+    var body: some View {
+        menuTrigger
+            .sensoryFeedback(.selection, trigger: model.approvalMode)
+            .sensoryFeedback(.selection, trigger: modelVersion)
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
+            .sheet(isPresented: $showsAutoUnlock) {
+                NavigationStack {
+                    Form {
+                        AutoUnlockSection(setting: model.autoUnlock, canEnable: model.supportsAutoUnlock,
+                                          showsPasscode: $showsAutoUnlockPasscode)
+                    }
+                    .navigationTitle("Automatic Unlock")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { showsAutoUnlock = false } }
+                    }
+                    .sheet(isPresented: $showsAutoUnlockPasscode) {
+                        AutoUnlockPasscodeForm(setting: model.autoUnlock)
+                    }
                 }
-                .padding(.horizontal, 20).frame(minHeight: min(64, max(44, rowHeight))).contentShape(.rect)
             }
-            .buttonStyle(CardRowStyle())
-            .accessibilityIdentifier("status.addModel")
+    }
+
+    @ViewBuilder private var menuTrigger: some View {
+        switch anchor {
+        case .automatic:
+            Menu {
+                Section {
+                    if ModelKeys.hasUsableKey(in: model.storage) {
+                        Menu {
+                            ForEach(providers) { provider in
+                                let choices = ModelCatalog.available(provider, storage: model.storage)
+                                if provider == .custom {
+                                    ForEach(CustomProviders.all(in: model.storage)) { custom in
+                                        let models = choices.compactMap { choice -> ChatModelChoice? in
+                                            guard let selection = CustomProviders.parse(choice.id),
+                                                  selection.provider == custom.id else { return nil }
+                                            return ChatModelChoice(id: choice.id, name: selection.model)
+                                        }
+                                        if !models.isEmpty {
+                                            modelGroup(custom.displayName, provider: provider, choices: models)
+                                        }
+                                    }
+                                } else {
+                                    modelGroup(provider.name, provider: provider, choices: choices)
+                                }
+                            }
+                        } label: {
+                            Label("Model", systemImage: "sparkles")
+                            Text(verbatim: ModelKeys.selectedModelName(in: model.storage))
+                        }
+                        .accessibilityIdentifier("status.model")
+                    } else {
+                        Button(action: openModel) { Label("Add Model", systemImage: "plus") }
+                            .accessibilityIdentifier("status.addModel")
+                    }
+                    Menu {
+                        Section {
+                            ForEach(ApprovalClassifier.Mode.allCases) { mode in
+                                Toggle(isOn: Binding(
+                                    get: { model.approvalMode == mode },
+                                    set: { on in if on { model.approvalMode = mode } }
+                                )) {
+                                    Text(verbatim: mode.title)
+                                }
+                            }
+                        } header: {
+                            Text(ApprovalCopy.alwaysConfirm)
+                        }
+                    } label: {
+                        Label("Approval", systemImage: "checkmark.shield")
+                        Text(verbatim: model.approvalMode.title)
+                    }
+                    .accessibilityIdentifier("status.approvals")
+                    if let openCustomization {
+                        Button(action: openCustomization) {
+                            Label("Outfits", systemImage: "hanger")
+                            Text(verbatim: outfitName)
+                        }
+                        .accessibilityIdentifier("status.customizePoki")
+                    }
+                }
+                .id(modelVersion)
+                if model.supportsAutoUnlock {
+                    Button { showsAutoUnlock = true } label: {
+                        Label("Automatic Unlock", systemImage: "lock.open")
+                    }
+                    .accessibilityIdentifier("status.autoUnlock")
+                }
+            } label: {
+                face()
+            }
+            .menuOrder(.fixed)
+            .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture().onEnded { tapped() })
+        case .below(let spacing):
+            face()
+                .accessibilityHidden(true)
+                .overlay {
+                    AnchoredPokiMenuButton(
+                        menu: nativeMenu,
+                        attachmentSpacing: spacing,
+                        accessibilityLabel: accessibilityLabel,
+                        accessibilityIdentifier: accessibilityIdentifier,
+                        onOpen: tapped
+                    )
+                }
         }
     }
 
-    /// The chat models of every account that is set up, by account, the one that answers ticked.
-    private var modelChoices: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(providers) { provider in
+    private var nativeMenu: UIMenu {
+        _ = AppLocalization.language
+        _ = modelVersion
+
+        var primaryItems: [UIMenuElement] = []
+        if ModelKeys.hasUsableKey(in: model.storage) {
+            var providerMenus: [UIMenu] = []
+            for provider in providers {
+                let choices = ModelCatalog.available(provider, storage: model.storage)
                 if provider == .custom {
-                    // Each custom service under its own name, its models by their ids.
-                    ForEach(CustomProviders.all) { custom in
-                        let choices = ModelCatalog.available(.custom).filter { CustomProviders.parse($0.id)?.provider == custom.id }
-                        if !choices.isEmpty {
-                            choiceGroup(custom.displayName, provider: .custom, choices: choices.map {
-                                ChatModelChoice(id: $0.id, name: CustomProviders.parse($0.id)?.model ?? $0.name)
-                            })
+                    for custom in CustomProviders.all(in: model.storage) {
+                        let models = choices.compactMap { choice -> ChatModelChoice? in
+                            guard let selection = CustomProviders.parse(choice.id),
+                                  selection.provider == custom.id else { return nil }
+                            return ChatModelChoice(id: choice.id, name: selection.model)
+                        }
+                        if !models.isEmpty {
+                            providerMenus.append(nativeModelGroup(custom.displayName, provider: provider, choices: models))
                         }
                     }
                 } else {
-                    choiceGroup(provider.name, provider: provider, choices: ModelCatalog.available(provider))
+                    providerMenus.append(nativeModelGroup(provider.name, provider: provider, choices: choices))
                 }
             }
+            let modelMenu = UIMenu(
+                title: AppLocalization.text("Model"),
+                subtitle: ModelKeys.selectedModelName(in: model.storage),
+                image: UIImage(systemName: "sparkles"),
+                children: providerMenus
+            )
+            modelMenu.accessibilityIdentifier = "status.model"
+            primaryItems.append(modelMenu)
+        } else {
+            let addModel = UIAction(
+                title: AppLocalization.text("Add Model"),
+                image: UIImage(systemName: "plus")
+            ) { _ in openModel() }
+            addModel.accessibilityIdentifier = "status.addModel"
+            primaryItems.append(addModel)
         }
-        .padding(.bottom, 4)
-        .id(modelVersion)
-        .transition(.opacity)
-    }
 
-    @ViewBuilder private func choiceGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
-        Text(verbatim: title).font(.footnote).foregroundStyle(soft)
-            .padding(.horizontal, 36).padding(.top, 8).padding(.bottom, 2)
-        ForEach(choices) { choice in
-            let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
-            Button {
-                ModelKeys.selectedProvider = provider
-                ModelKeys.selectedModel = choice.id
-                ModelKeys.saved += 1
-                modelVersion += 1
-                open = nil
-            } label: {
-                tickRow(choice.name, ticked: chosen, inset: 36)
-            }
-            .buttonStyle(CardRowStyle())
-            .accessibilityAddTraits(chosen ? .isSelected : [])
-        }
-    }
-
-    // MARK: Approvals
-
-    private var approvalRow: some View {
-        Button { toggle(.approvals) } label: {
-            choiceRow("Approval Method", value: model.approvalMode.title, open: open == .approvals)
-        }
-        .buttonStyle(CardRowStyle())
-        .accessibilityValue(Text(verbatim: model.approvalMode.title))
-        .accessibilityIdentifier("status.approvals")
-    }
-
-    /// The three methods, the one in use ticked, and under them what always asks you whatever the method.
-    private var approvalChoices: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(ApprovalClassifier.Mode.allCases) { mode in
-                let chosen = model.approvalMode == mode
-                Button {
-                    if !chosen { model.approvalMode = mode }
-                    open = nil
-                } label: {
-                    tickRow(mode.title, ticked: chosen, inset: 36)
-                }
-                .buttonStyle(CardRowStyle())
-                .accessibilityAddTraits(chosen ? .isSelected : [])
-                .accessibilityIdentifier("status.approvals.\(mode.rawValue)")
-            }
-            Text("Payments, deletions and actions in Wallet always need your confirmation.")
-                .font(.footnote).foregroundStyle(soft)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 36).padding(.trailing, 20).padding(.top, 4).padding(.bottom, 10)
-        }
-        .sensoryFeedback(.selection, trigger: model.approvalMode)
-        .transition(.opacity)
-    }
-
-    private func toggle(_ row: Row) { open = open == row ? nil : row }
-
-    /// A row of the card: its name, what is chosen, and the arrow that opens the choices under it.
-    @ViewBuilder private func choiceRow(_ title: LocalizedStringKey, value: String, open: Bool) -> some View {
-        let chevron = Image(systemName: open ? "chevron.up" : "chevron.down")
-            .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
-        Group {
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(title).foregroundStyle(Color(.label))
-                        Spacer(minLength: 0)
-                        chevron
-                    }
-                    Text(verbatim: value).foregroundStyle(soft)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-            } else {
-                HStack(spacing: 8) {
-                    Text(title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(verbatim: value).foregroundStyle(soft).lineLimit(1)
-                    chevron
-                }
+        let approvalActions = ApprovalClassifier.Mode.allCases.map { mode in
+            UIAction(title: mode.title, state: model.approvalMode == mode ? .on : .off) { _ in
+                model.approvalMode = mode
             }
         }
-        .padding(.horizontal, 20).padding(.vertical, min(16, rowInset)).frame(minHeight: min(64, max(44, rowHeight))).contentShape(.rect)
+        let approvalSection = UIMenu(
+            title: AppLocalization.text(ApprovalCopy.alwaysConfirm),
+            options: .displayInline,
+            children: approvalActions
+        )
+        let approvalsMenu = UIMenu(
+            title: AppLocalization.text("Approval"),
+            subtitle: model.approvalMode.title,
+            image: UIImage(systemName: "checkmark.shield"),
+            children: [approvalSection]
+        )
+        approvalsMenu.accessibilityIdentifier = "status.approvals"
+        primaryItems.append(approvalsMenu)
+
+        if let openCustomization {
+            let outfits = UIAction(
+                title: AppLocalization.text("Outfits"),
+                subtitle: outfitName,
+                image: UIImage(systemName: "hanger")
+            ) { _ in openCustomization() }
+            outfits.accessibilityIdentifier = "status.customizePoki"
+            primaryItems.append(outfits)
+        }
+
+        var topLevel: [UIMenuElement] = [UIMenu(title: "", options: .displayInline, children: primaryItems)]
+        if model.supportsAutoUnlock {
+            let autoUnlock = UIAction(
+                title: AppLocalization.text("Automatic Unlock"),
+                image: UIImage(systemName: "lock.open")
+            ) { _ in showsAutoUnlock = true }
+            autoUnlock.accessibilityIdentifier = "status.autoUnlock"
+            topLevel.append(autoUnlock)
+        }
+        return UIMenu(title: "", children: topLevel)
     }
 
-    private func tickRow(_ title: String, ticked: Bool, inset: CGFloat, height: CGFloat = 44) -> some View {
-        HStack(spacing: 8) {
-            Text(verbatim: title).foregroundStyle(Color(.label)).frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blue)
-                .opacity(ticked ? 1 : 0).frame(width: 20)
+    private func nativeModelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> UIMenu {
+        let actions = choices.map { choice in
+            let chosen = ModelKeys.selectedProvider(in: model.storage) == provider && ModelKeys.selectedModel(in: model.storage) == choice.id
+            return UIAction(title: choice.name, state: chosen ? .on : .off) { _ in
+                pick(provider, choice.id)
+            }
         }
-        .padding(.leading, inset).padding(.trailing, 20).frame(minHeight: height).contentShape(.rect)
+        return UIMenu(title: title, options: .displayInline, children: actions)
+    }
+
+    private var outfitName: String {
+        let worn = BearWardrobe.shared.selection
+        if let clothes = worn.clothes, worn.headwear == clothes {
+            return AppLocalization.text(clothes.name)
+        }
+        let pieces = BearOutfitSlot.allCases.compactMap { slot in
+            worn[slot].map { AppLocalization.text($0.piece(slot).name) }
+        }
+        return pieces.isEmpty ? AppLocalization.text("None") : ListFormatter.localizedString(byJoining: pieces)
+    }
+
+    private func modelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
+        Section {
+            ForEach(choices) { choice in
+                let chosen = ModelKeys.selectedProvider(in: model.storage) == provider && ModelKeys.selectedModel(in: model.storage) == choice.id
+                Toggle(isOn: Binding(get: { chosen }, set: { on in if on { pick(provider, choice.id) } })) {
+                    Text(verbatim: choice.name)
+                }
+            }
+        } header: {
+            Text(verbatim: title)
+        }
+    }
+
+    private func pick(_ provider: ModelProvider, _ id: String) {
+        ModelKeys.setSelectedProvider(provider, in: model.storage)
+        ModelKeys.setSelectedModel(id, in: model.storage)
+        ModelKeys.saved += 1
     }
 }
 
-/// A row of the card: a light press highlight, as a system menu's.
-private struct CardRowStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(Color(.label).opacity(configuration.isPressed ? 0.08 : 0))
+private struct AnchoredPokiMenuButton: UIViewRepresentable {
+    var menu: UIMenu
+    var attachmentSpacing: CGFloat
+    var accessibilityLabel: String?
+    var accessibilityIdentifier: String?
+    var onOpen: () -> Void
+
+    func makeUIView(context: Context) -> BelowAnchoredMenuContainer {
+        let container = BelowAnchoredMenuContainer()
+        update(container)
+        return container
+    }
+
+    func updateUIView(_ container: BelowAnchoredMenuContainer, context: Context) {
+        update(container)
+    }
+
+    private func update(_ container: BelowAnchoredMenuContainer) {
+        container.attachmentSpacing = attachmentSpacing
+        container.menuButton.onOpen = onOpen
+        container.menuButton.menu = menu
+        container.menuButton.accessibilityLabel = accessibilityLabel
+        container.menuButton.accessibilityIdentifier = accessibilityIdentifier
     }
 }
 
-extension View {
-    /// Poki's card over the page; a tap outside closes it. Add Model closes it and opens Settings › Models.
-    /// It opens under `under`, the bottom of Poki's picture over the home page's greeting in global
-    /// points, and under the top bar where that is nil. `leading` is where the chat begins: beside the
-    /// conversations on iPad.
-    func pokiStatusCard(isPresented: Binding<Bool>, under: CGFloat? = nil, leading: CGFloat = 0, openModel: @escaping () -> Void) -> some View {
-        modifier(PokiStatusCardOverlay(isPresented: isPresented, under: under, leading: leading, openModel: openModel))
-    }
-}
-
-private struct PokiStatusCardOverlay: ViewModifier {
-    @Binding var isPresented: Bool
-    var under: CGFloat?
-    var leading: CGFloat
-    var openModel: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The top of the overlay in global points, to place the card under the picture on the home page.
-    @State private var origin: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .top) {
-            GeometryReader { geometry in
-                ZStack(alignment: .top) {
-                    if isPresented {
-                        let top = under.map { max(0, $0 - origin + 12) } ?? 84
-                        // The page stays behind the card; a tap outside closes it.
-                        Color.black.opacity(0.001)
-                            .ignoresSafeArea()
-                            .contentShape(.rect)
-                            .onTapGesture { isPresented = false }
-                            .accessibilityLabel(Text("Close"))
-                            .accessibilityAddTraits(.isButton)
-                        PokiStatusCard(maximumHeight: max(120, geometry.size.height - top - 16), openModel: {
-                            isPresented = false
-                            openModel()
-                        })
-                        .padding(.horizontal, 16)
-                        .padding(.top, top)
-                        .transition(reduceMotion ? .opacity : .scale(scale: 0.9, anchor: .top).combined(with: .opacity))
-                        .accessibilityAddTraits(.isModal)
-                        .accessibilityAction(.escape) { isPresented = false }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.leading, leading)
-            }
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { origin = $0 }
-            .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.18), value: isPresented)
+/// Hosts a native `UIButton` whose own frame sits directly below the bear avatar while routing taps
+/// and accessibility bounds from the avatar's frame. On iOS 26/27 Liquid Glass, `UIButton` aligns
+/// a downward primary-action menu's top edge with the button's own frame top edge (while
+/// `menuAttachmentPoint(for:)` controls downward vs upward direction).
+private final class BelowAnchoredMenuContainer: UIView {
+    let menuButton = BelowAnchoredMenuButton(type: .custom)
+    var attachmentSpacing: CGFloat = 10 {
+        didSet {
+            if oldValue != attachmentSpacing { setNeedsLayout() }
         }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        clipsToBounds = false
+        isAccessibilityElement = false
+        menuButton.backgroundColor = .clear
+        menuButton.showsMenuAsPrimaryAction = true
+        menuButton.preferredMenuElementOrder = .fixed
+        menuButton.isAccessibilityElement = true
+        addSubview(menuButton)
+        accessibilityElements = [menuButton]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        menuButton.frame = CGRect(x: 0, y: bounds.maxY + attachmentSpacing, width: bounds.width, height: 2)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.contains(point)
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard isUserInteractionEnabled, !isHidden, alpha >= 0.01, bounds.contains(point) else { return nil }
+        return menuButton
+    }
+}
+
+private final class BelowAnchoredMenuButton: UIButton {
+    var onOpen: (() -> Void)?
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard let container = superview else { return super.point(inside: point, with: event) }
+        return container.bounds.contains(convert(point, to: container))
+    }
+
+    override func menuAttachmentPoint(for configuration: UIContextMenuConfiguration) -> CGPoint {
+        CGPoint(x: bounds.midX, y: bounds.maxY)
+    }
+
+    override var accessibilityFrame: CGRect {
+        get {
+            guard let container = superview else { return super.accessibilityFrame }
+            return UIAccessibility.convertToScreenCoordinates(container.bounds, in: container)
+        }
+        set { super.accessibilityFrame = newValue }
+    }
+
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+        onOpen?()
     }
 }
