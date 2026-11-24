@@ -1480,7 +1480,9 @@ final class ChatHarnessTests: XCTestCase {
             ])
             let automation = FakeAutomation()
             _ = automation.prepare()
-            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Delete" }),
+            // A Pay button asks wherever it is. A lone Delete asks only inside a menu or a dialog
+            // (main's rules, kept for 0.5.1), and a chained tap is judged on the screen it lands on.
+            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Pay" }),
                             automation: automation)
             let session = chat.sessionID
             let app = try XCTUnwrap(app)

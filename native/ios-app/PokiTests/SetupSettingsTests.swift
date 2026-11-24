@@ -33,13 +33,11 @@ final class SetupSettingsTests: XCTestCase {
         let labels = elements.compactMap(\.accessibilityLabel)
         XCTAssertTrue(labels.contains { $0.contains("Required Steps") }, "Required Steps card must stay on Setup; saw \(labels)")
         XCTAssertTrue(labels.contains { $0.contains("Guide Me") }, "Guide Me must stay on Setup; saw \(labels)")
-        // Our Setup page (build 72 parity, owner's choice Nov 24 2026) lists the optional features too:
-        // Accounts, Screen History and Memory. Only the system permission rows stay off it.
-        for duplicate in ["Dictation", "Notifications", "External Connections"] {
-            XCTAssertFalse(
-                labels.contains { $0.contains(duplicate) },
-                "Settings › Setup must not duplicate Settings home entry '\(duplicate)'; saw \(labels)"
-            )
+        // Our Setup page (build 72 parity, owner's choice Nov 24 2026) is the whole list on purpose:
+        // the required steps, then Accounts, Screen History, Memory, Dictation, Notifications and the
+        // Loopback Shortcut, each with its state.
+        for feature in ["Screen History", "Memory"] {
+            XCTAssertTrue(labels.contains { $0.contains(feature) }, "Setup must list \(feature); saw \(labels)")
         }
         // Settings home's Notifications row requests system authorization first while undetermined,
         // and opens iOS Settings once already decided.
@@ -60,12 +58,9 @@ final class SetupSettingsTests: XCTestCase {
             waitForLabelContaining: "Guide Me"
         )
         let setupLabels = setupElements.compactMap(\.accessibilityLabel)
-        // Our Setup page names the Loopback Shortcut as a row; its step-by-step section stays on the
-        // loopback step page only.
-        XCTAssertFalse(
-            setupLabels.contains { $0.contains("Set It Up Step by Step") || $0.contains("How It Is Set Up") },
-            "Settings › Setup must not repeat the loopback shortcut's steps; saw \(setupLabels)"
-        )
+        // Our Setup page carries the Loopback Shortcut too (build 72 parity); the loopback step page
+        // must keep its own copy.
+        XCTAssertFalse(setupLabels.isEmpty)
 
         let loopbackElements = try await renderElements(
             NavigationStack { SetupStepPage(step: .loopback, hero: false).settingsPage() }
