@@ -889,8 +889,11 @@ final class SessionStore {
         pendingWrites.insert(session.id)
         guard writeTask == nil else { return }
         // Writes are gathered for half a second: a task changes its session many times a second.
+        // A cancelled task must not drain a batch scheduled after flush().
         writeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
             self?.flushInBackground()
         }
     }
