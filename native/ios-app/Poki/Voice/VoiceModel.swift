@@ -543,6 +543,7 @@ final class VoiceModel {
     private let openingSpeech: OpeningSpeech
     private let recentAppAudio: @MainActor () async -> AppAudioContext?
     private let codex: any SubscriptionVoice
+    private let hasSubscriptionBridge: Bool
     private let storage: PokiStorage
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
@@ -554,7 +555,7 @@ final class VoiceModel {
          openingSpeech: OpeningSpeech = .system,
          recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() },
          codex: (any SubscriptionVoice)? = nil,
-         storage: PokiStorage = .live) {
+         storage: PokiStorage) {
         self.storage = storage
         self.bridge = VoiceBridge.saved(in: storage)
         self.clearTap = clearTap
@@ -565,7 +566,8 @@ final class VoiceModel {
         self.time = time
         self.openingSpeech = openingSpeech
         self.recentAppAudio = recentAppAudio
-        self.codex = codex ?? CodexVoice.shared
+        self.hasSubscriptionBridge = codex != nil
+        self.codex = codex ?? UnavailableSubscriptionVoice()
         // Poki in the background goes on with the talk (the owner, 2026-11-13): you speak to it from the
         // app you went to, and the Live Activity says what it is doing and carries End. In the foreground
         // silence stays open until the owner ends it; in the background it ends after `backgroundFollowUp`
@@ -611,7 +613,7 @@ final class VoiceModel {
     /// Without one, voice is dictation into the message field, turn by turn.
     var canTalkLive: Bool { usesChatGPTSubscription || VoiceDirect.apiKey(in: storage) != nil || bridge != nil || rehearsing }
 
-    var usesChatGPTSubscription: Bool { ModelKeys.selectedProvider(in: storage) == .chatgpt && ChatGPTAccount.isSignedIn(storage: storage) }
+    var usesChatGPTSubscription: Bool { hasSubscriptionBridge && ModelKeys.selectedProvider(in: storage) == .chatgpt && ChatGPTAccount.isSignedIn(storage: storage) }
 
     /// Talk with Poki was asked for with no live voice (no OpenAI key, no voice bridge), from the message
     /// field's button, Poki's profile or `poki://voice`: the message field says what is missing, with
@@ -2534,4 +2536,34 @@ final class VoiceModel {
             return "error: \(name) is not a phone tool"
         }
     }
+}
+
+extension VoiceModel {
+    /// Production entry point bound to `.live` storage and the singleton `CodexVoice.shared` bridge.
+    convenience init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
+                     phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
+                     holdMicrophone: @escaping @MainActor (Bool) -> Void = { _ in },
+                     readyCue: @escaping @MainActor () -> Void = { VoiceReadyCue.play() },
+                     connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
+                     time: VoiceClock = VoiceClock(),
+                     openingSpeech: OpeningSpeech = .system,
+                     recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() }) {
+        self.init(clearTap: clearTap, phoneTool: phoneTool, holdMicrophone: holdMicrophone,
+                  readyCue: readyCue, connection: connection, time: time,
+                  openingSpeech: openingSpeech, recentAppAudio: recentAppAudio,
+                  codex: CodexVoice.shared, storage: .live)
+    }
+}
+
+@MainActor
+private struct UnavailableSubscriptionVoice: SubscriptionVoice {
+    func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
+        throw CodexVoice.Failure.unavailable
+    }
+
+    func start(offer: String) async throws -> String {
+        throw CodexVoice.Failure.unavailable
+    }
+
+    func stop() {}
 }

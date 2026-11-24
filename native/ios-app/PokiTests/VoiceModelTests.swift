@@ -1,6 +1,7 @@
 import ActivityKit
 import AVFoundation
 import PokiCore
+import Security
 import Speech
 import WebRTC
 import XCTest
@@ -1805,18 +1806,34 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceStartupIncludesRealtimeInstructionsAndPhoneTools() async throws {
-        try await withChatGPTSelected { chatGPTStorage in
+        let legacyAccount = "cli|1111111111111111"
+        let outerLegacyAccount = "cli|e111111111111111"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-1",
+            refreshToken: "outer-untouched-refresh-1",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
             let expectedInstructions = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["instructions"] as? String)
             let expectedTools = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["tools"] as? [[String: Any]])
             var sent: [[String: Any]] = []
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -1826,7 +1843,12 @@ final class VoiceModelTests: XCTestCase {
                     guard let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
                     case "thread/realtime/start":
@@ -1851,6 +1873,13 @@ final class VoiceModelTests: XCTestCase {
             })
             defer { h.voice.stop() }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
 
             let threadStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/start" })
             let threadParams = try XCTUnwrap(threadStart["params"] as? [String: Any])
@@ -1932,15 +1961,31 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceSurfacesBackendFailureAndSanitizedDiagnostics() async throws {
-        try await withChatGPTSelected { chatGPTStorage in
+        let legacyAccount = "cli|2222222222222222"
+        let outerLegacyAccount = "cli|e222222222222222"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-2",
+            refreshToken: "outer-untouched-refresh-2",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -1949,7 +1994,12 @@ final class VoiceModelTests: XCTestCase {
                           let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
                     case "thread/realtime/start":
@@ -1972,6 +2022,13 @@ final class VoiceModelTests: XCTestCase {
             h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
             defer { h.voice.stop() }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
 
             push(["method": "poki/backend/warning", "params": [
                 "threadId": "fixture-thread",
@@ -2103,12 +2160,43 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    private func withChatGPTSelected(_ run: (PokiStorage) async throws -> Void) async throws {
+    private struct LiveReadOnlySnapshot {
+        let localization: HostLocalizationSnapshot
+        let defaultsValues: [String: Any?]
+    }
+
+    private func captureLiveReadOnlySnapshot() -> LiveReadOnlySnapshot {
+        let keys = [ApprovalClassifier.modeKey, ApprovalClassifier.levelKey, "chat.provider", "chat.model", "voice.openai.enabled"]
+        var values: [String: Any?] = [:]
+        for key in keys {
+            values[key] = UserDefaults.standard.object(forKey: key)
+        }
+        return LiveReadOnlySnapshot(localization: HostLocalizationSnapshot.capture(), defaultsValues: values)
+    }
+
+    private func assertLiveReadOnlySnapshotUnchanged(_ snapshot: LiveReadOnlySnapshot, file: StaticString = #filePath, line: UInt = #line) {
+        snapshot.localization.assertUnchanged(file: file, line: line)
+        for (key, expected) in snapshot.defaultsValues {
+            let actual = UserDefaults.standard.object(forKey: key)
+            XCTAssertEqual(actual != nil, expected != nil, "Live defaults presence changed for \(key)", file: file, line: line)
+            if let expectedString = expected as? String {
+                XCTAssertEqual(actual as? String, expectedString, "Live defaults string changed for \(key)", file: file, line: line)
+            } else if let expectedBool = expected as? Bool {
+                XCTAssertEqual(actual as? Bool, expectedBool, "Live defaults bool changed for \(key)", file: file, line: line)
+            }
+        }
+    }
+
+    private func withChatGPTSelected(seedLegacyAccount: String? = nil, _ run: (PokiStorage) async throws -> Void) async throws {
         let isolated = try IsolatedTestStorage(prefix: "voice-chatgpt")
         var runError: Error?
         do {
             VoiceDirect.setEnabled(false, in: isolated.storage)
-            try isolated.seedCodexCredential(accessToken: "fixture-codex-voice-access")
+            try isolated.seedCodexCredential(
+                accessToken: "fixture-codex-voice-access",
+                account: seedLegacyAccount,
+                accessible: seedLegacyAccount == nil ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly : kSecAttrAccessibleWhenUnlocked
+            )
             ModelKeys.setSelectedProvider(.chatgpt, in: isolated.storage)
             try await run(isolated.storage)
         } catch {
@@ -2414,16 +2502,32 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testCodexHandoffTurnAndRetryingBackendErrorStayOpenPastOldEightSecondWindow() async throws {
-        try await withChatGPTSelected { chatGPTStorage in
+        let legacyAccount = "cli|3333333333333333"
+        let outerLegacyAccount = "cli|e333333333333333"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-3",
+            refreshToken: "outer-untouched-refresh-3",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
             // Part 1: Real CodexVoice bridge forwarding handoff_request, turnStarted, retrying error (ignored), and turnCompleted.
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -2432,7 +2536,12 @@ final class VoiceModelTests: XCTestCase {
                           let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "busy-thread"]]])
                     case "thread/realtime/start":
@@ -2451,6 +2560,13 @@ final class VoiceModelTests: XCTestCase {
                 NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
             }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
             let link = try XCTUnwrap(h.links.last)
             NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
 

@@ -317,7 +317,8 @@ enum ModelCatalog {
         }
     }
 
-    static func setVoice(_ id: String, on: Bool, for account: VoiceAccount = VoiceDirect.settingsAccount, storage: PokiStorage = .live) {
+    static func setVoice(_ id: String, on: Bool, for account: VoiceAccount? = nil, storage: PokiStorage = .live) {
+        let account = account ?? VoiceDirect.settingsAccount(in: storage)
         var ids = voiceOn(for: account, storage: storage)
         if on { ids.insert(id) } else { ids.remove(id) }
         storage.defaults.set(Array(ids), forKey: "models.enabled.voice" + account.storeSuffix)

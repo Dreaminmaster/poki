@@ -127,6 +127,10 @@ final class PokiMenuTests: XCTestCase {
             "Expected status.approvals submenu"
         )
         XCTAssertEqual(approvalsMenu.subtitle, ApprovalClassifier.Mode.confirm.title)
+        let approvalSection = try XCTUnwrap(approvalsMenu.children.first as? UIMenu)
+        XCTAssertEqual(approvalSection.title, AppLocalization.text(ApprovalCopy.alwaysConfirm))
+        XCTAssertTrue(approvalSection.title.contains("full screen details are unavailable"), approvalSection.title)
+        XCTAssertTrue(approvalSection.title.contains("matching deletions"), approvalSection.title)
         let approvalActions = flattenMenuElements(approvalsMenu).compactMap { $0 as? UIAction }
         XCTAssertEqual(approvalActions.count, ApprovalClassifier.Mode.allCases.count)
         let offAction = try XCTUnwrap(approvalActions.first { $0.title == ApprovalClassifier.Mode.off.title })

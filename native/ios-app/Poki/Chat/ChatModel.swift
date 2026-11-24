@@ -271,7 +271,7 @@ final class ChatModel {
         [ChatEntry(.time(Date())),
          ChatEntry(.poki(localization.text(LocalizedStringResource("Hi, I’m Poki. Tell me what to do on this iPhone.")))),
          ChatEntry(.poki(app.asksBeforeSensitiveSteps ? localization.text(LocalizedStringResource("I’ll ask before anything you can’t undo."))
-                         : localization.text(LocalizedStringResource("Payments, deletions in menus and confirmation dialogs (or when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
+                         : localization.text(ApprovalCopy.neverAskGreeting)))]
     }
 
     private var greetingIDs: [UUID] = []
@@ -1669,7 +1669,7 @@ final class ChatModel {
                     steps.append(PlanStep(approval.summary, state: .waiting))
                 }
             }
-            let route = ApprovalClassifier.route(approval, voiceOn: app.voice.isOn)
+            let route = ApprovalClassifier.route(approval, voiceOn: app.voice.isOn, storage: app.storage)
             // Asking is off: the step goes straight through, with nothing to show.
             guard route != .allow else { break }
             // Each approval has its own card: it stays in the conversation with its answer.
@@ -1685,7 +1685,7 @@ final class ChatModel {
             note.state = approved == true ? .allowed : approved == false ? .refused : .expired
             note.byModel = ApprovalClassifier.modelAnswered(id)
             note.reason = note.byModel ? (ApprovalClassifier.verdicts[id]?.reason ?? "") : ""
-            note.reply = note.byModel && ApprovalClassifier.mode == .reply
+            note.reply = note.byModel && ApprovalClassifier.mode(in: app.storage) == .reply
             note.answered = Date()
             asked = nil
             setNote(.approval(note))

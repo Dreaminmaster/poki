@@ -42,6 +42,20 @@ enum CodexAccount {
         storageLock.unlock()
     }
 
+    static func hasStoredCredential(service: String = defaultService, home: URL = CodexAccount.home) -> Bool {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+
+        guard signOutDepth == 0 else { return false }
+        let account = currentAccount(for: home)
+        if let current = try? Keychain.read(account, service: service),
+           decodeValidSignIn(current) != nil {
+            return true
+        }
+        guard let allItems = try? Keychain.readAll(service: service) else { return false }
+        return selectNewestCredential(from: allItems, excluding: account) != nil
+    }
+
     static func readAccessToken(storage: PokiStorage) -> String? {
         readAccessToken(service: storage.codexService, home: storage.codexHome)
     }
@@ -82,10 +96,6 @@ enum CodexAccount {
         return prepareStorageLocked(service: service, home: home)
     }
 
-    static func ensureAfterFirstUnlock(storage: PokiStorage) {
-        ensureAfterFirstUnlock(service: storage.codexService, home: storage.codexHome)
-    }
-
     static func ensureAfterFirstUnlock(service: String = defaultService, home: URL = CodexAccount.home) {
         storageLock.lock()
         defer { storageLock.unlock() }
@@ -98,10 +108,6 @@ enum CodexAccount {
         } catch {
             logVoice("Codex Keychain read failed: OSStatus \((error as NSError).code)")
         }
-    }
-
-    static func clearLegacyCredentials(storage: PokiStorage) throws {
-        try clearLegacyCredentials(service: storage.codexService, home: storage.codexHome)
     }
 
     static func clearLegacyCredentials(service: String = defaultService, home: URL = CodexAccount.home) throws {
@@ -124,10 +130,6 @@ enum CodexAccount {
                 throw error
             }
         }
-    }
-
-    static func clearStoredCredentials(storage: PokiStorage) throws {
-        try clearStoredCredentials(service: storage.codexService)
     }
 
     static func clearStoredCredentials(service: String = defaultService) throws {

@@ -32,9 +32,11 @@ enum ApprovalClassifier {
     }
 
     /// A chat model with a key: without one there is nobody to ask.
-    static var hasModel: Bool {
-        let provider = ModelKeys.selectedProvider
-        return ModelKeys.hasUsableKey && provider.piModel(ModelKeys.selectedModel) != nil
+    static var hasModel: Bool { hasModel(in: .live) }
+
+    static func hasModel(in storage: PokiStorage = .live) -> Bool {
+        let provider = ModelKeys.selectedProvider(in: storage)
+        return ModelKeys.hasUsableKey(in: storage) && provider.piModel(ModelKeys.selectedModel(in: storage), storage: storage) != nil
     }
 
     /// Who answers an approval first.
@@ -52,15 +54,15 @@ enum ApprovalClassifier {
     /// Approvals the model did not allow that went on to the owner's card.
     private(set) static var handed: Set<String> = []
 
-    static func route(_ approval: PendingApproval, voiceOn: Bool) -> Route {
+    static func route(_ approval: PendingApproval, voiceOn: Bool, storage: PokiStorage = .live) -> Route {
         if let known = routes[approval.id] { return known }
-        let mode = Self.mode
+        let mode = Self.mode(in: storage)
         let own = AskPoki.chat?.running == true || voiceOn
         let reply = mode == .reply && own
         let route: Route
         if requiresOwner(approval) { route = .owner }
         else if mode == .off { route = .allow }
-        else if own, hasModel, reply || Level.saved != .everything { route = .model(reply: reply) }
+        else if own, hasModel(in: storage), reply || Level.saved(in: storage) != .everything { route = .model(reply: reply) }
         else { route = .owner }
         if routes.count > 200 { routes.removeAll(); handed.removeAll() }
         routes[approval.id] = route
@@ -89,8 +91,8 @@ enum ApprovalClassifier {
     /// The latest decisions by approval id, for the chat's grey line.
     private(set) static var verdicts: [String: Verdict] = [:]
 
-    static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine]) async -> Verdict {
-        let verdict = await ask(approval, level: level, voice: voice)
+    static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine], storage: PokiStorage = .live) async -> Verdict {
+        let verdict = await ask(approval, level: level, voice: voice, storage: storage)
         verdicts[approval.id] = verdict
         if verdicts.count > 50 { verdicts.removeAll() }
         return verdict
@@ -139,10 +141,10 @@ enum ApprovalClassifier {
         return (text, complete)
     }
 
-    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine]) async -> Verdict {
-        let provider = ModelKeys.selectedProvider
-        guard ModelKeys.hasUsableKey,
-              let model = provider.piModel(ModelKeys.selectedModel) else {
+    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine], storage: PokiStorage = .live) async -> Verdict {
+        let provider = ModelKeys.selectedProvider(in: storage)
+        guard ModelKeys.hasUsableKey(in: storage),
+              let model = provider.piModel(ModelKeys.selectedModel(in: storage), storage: storage) else {
             return Verdict(allowed: false, reason: "no chat model to ask")
         }
         var said = AskPoki.chat?.ownerContext ?? []
@@ -194,6 +196,13 @@ enum ApprovalClassifier {
         return Verdict(allowed: allowed, reason: why.isEmpty ? (allowed ? "allowed" : "refused") : String(why.prefix(120)))
     }
 
+}
+
+enum ApprovalCopy {
+    static let alwaysConfirm: LocalizedStringResource = "Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation."
+    static let neverAskFooter: LocalizedStringResource = "Optional steps continue without asking. Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions still require your confirmation."
+    static let sensitiveSteps: LocalizedStringResource = "Sensitive steps are paying, deleting in menus or confirmation dialogs (or matching deletions when full screen details are unavailable, such as voice taps by button name), sending a message, placing a call, typing a password, and anything in Wallet."
+    static let neverAskGreeting: LocalizedStringResource = "Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
 }
 
 extension ApprovalMode {

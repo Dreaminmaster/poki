@@ -293,7 +293,8 @@ enum VoiceDirect {
     }
 
     /// A one-minute Realtime key from the voice account's service, using that account's key.
-    static func token(apiKey: String, account: VoiceAccount = settingsAccount, storage: PokiStorage = .live) async throws -> VoiceBridge.Token {
+    static func token(apiKey: String, account: VoiceAccount? = nil, storage: PokiStorage = .live) async throws -> VoiceBridge.Token {
+        let account = account ?? settingsAccount(in: storage)
         guard let base = account.base(in: storage) else { throw VoiceError.noBridge }
         let session = realtimeSession(for: account, storage: storage)
         var request = URLRequest(url: base.appending(path: "realtime/client_secrets"), timeoutInterval: 20)

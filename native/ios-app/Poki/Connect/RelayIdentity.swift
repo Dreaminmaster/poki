@@ -166,37 +166,12 @@ enum Keychain {
         try read(account, service: storage.keychainService)
     }
 
-    static func readWithAttributes(
-        _ account: String,
-        storage: PokiStorage
-    ) throws -> (data: Data, modified: Date?, accessible: String?)? {
-        try readWithAttributes(account, service: storage.keychainService)
-    }
-
-    static func readAll(
-        storage: PokiStorage
-    ) throws -> [(account: String, data: Data, modified: Date?, accessible: String?)] {
-        try readAll(service: storage.keychainService)
-    }
-
     static func write(_ data: Data, account: String, storage: PokiStorage) throws {
         try write(data, account: account, service: storage.keychainService)
     }
 
-    static func updateAccessibility(
-        _ account: String,
-        storage: PokiStorage,
-        accessible: CFString
-    ) throws {
-        try updateAccessibility(account, service: storage.keychainService, accessible: accessible)
-    }
-
     static func delete(_ account: String, storage: PokiStorage) {
         delete(account, service: storage.keychainService)
-    }
-
-    static func remove(_ account: String, storage: PokiStorage) throws {
-        try remove(account, service: storage.keychainService)
     }
 
     static func read(_ account: String, service name: String = defaultService) throws -> Data? {

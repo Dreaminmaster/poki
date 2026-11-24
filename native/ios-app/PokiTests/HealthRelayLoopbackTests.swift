@@ -517,8 +517,6 @@ final class HealthRelayLoopbackTests: XCTestCase {
             XCTAssertNil(ModelKeys.key(.openai, storage: innerStorage), "inner storage must not read outer OpenAI credential")
             ModelKeys.setSelectedProvider(.openai, in: innerStorage)
             XCTAssertFalse(ModelKeys.hasUsableKey(in: innerStorage), "inner storage with .openai selected must still have no usable key")
-            inner.defaults.removeObject(forKey: "chat.provider")
-            XCTAssertFalse(ModelKeys.hasUsableKey(in: innerStorage), "inner isolated storage must not inherit outer model keys")
             XCTAssertNil(RelayAddress.saved(in: innerStorage), "inner isolated storage must not inherit outer relay address")
 
             // S2: Codex legacy fixture isolation boundary — outer legacy cli|* item must never migrate into inner storage.
@@ -573,6 +571,185 @@ final class HealthRelayLoopbackTests: XCTestCase {
 
         // Verify real host `.live` localization keys remained untouched (both existing values and missing-key absence).
         hostLocalization.assertUnchanged()
+    }
+
+    /// 7. P1 / ST-1 regression: isolated `PokiStorage` instances follow their own approval mode,
+    /// sensitivity, model selection, voice account settings, and subscription bridge boundary
+    /// regardless of outer or `.live` storage configuration, and never write or mutate `.live`
+    /// or outer storage.
+    func testIsolatedApprovalAndSubscriptionBoundariesIgnoreOuterAndLiveStorage() async throws {
+        // Capture read-only snapshots of real `.live` UserDefaults keys without mutating `.live`.
+        let liveKeys = [
+            ApprovalClassifier.modeKey,
+            ApprovalClassifier.levelKey,
+            "chat.provider",
+            "chat.model",
+            "models.enabled.voice",
+            "voice.model",
+            "voice.openai.enabled",
+            "relayAddress",
+            "relayEnabled",
+            "wantsOn",
+        ]
+        var liveSnapshot: [String: Any?] = [:]
+        for key in liveKeys {
+            liveSnapshot[key] = UserDefaults.standard.object(forKey: key)
+        }
+
+        // Configure outer isolated storage with `.off` (Never Ask), `.permissive`, and an OpenAI key.
+        let outer = storage.storage
+        outer.defaults.set(ApprovalClassifier.Mode.off.rawValue, forKey: ApprovalClassifier.modeKey)
+        outer.defaults.set(ApprovalClassifier.Level.permissive.rawValue, forKey: ApprovalClassifier.levelKey)
+        try ModelKeys.save("outer-openai-key", for: .openai, storage: outer)
+        ModelKeys.setSelectedProvider(.openai, in: outer)
+
+        let inner = try IsolatedTestStorage(prefix: "approval-subscription-inner")
+        defer { try? inner.tearDown() }
+        let innerStorage = inner.storage
+
+        // 1. ApprovalClassifier route, hasModel, and decide use explicit `storage` rather than `.live` or outer.
+        innerStorage.defaults.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        innerStorage.defaults.set(ApprovalClassifier.Level.everything.rawValue, forKey: ApprovalClassifier.levelKey)
+
+        let optionalApprovalInner = PendingApproval(
+            id: "inner-optional-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        let optionalApprovalOuter = PendingApproval(
+            id: "outer-optional-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        XCTAssertEqual(ApprovalClassifier.route(optionalApprovalOuter, voiceOn: false, storage: outer), .allow)
+        XCTAssertEqual(ApprovalClassifier.route(optionalApprovalInner, voiceOn: false, storage: innerStorage), .owner)
+        XCTAssertTrue(ApprovalClassifier.hasModel(in: outer))
+        XCTAssertFalse(ApprovalClassifier.hasModel(in: innerStorage), "isolated storage without a key must not fall back to outer or .live model")
+
+        let noModelVerdict = await ApprovalClassifier.decide(
+            optionalApprovalInner,
+            level: ApprovalClassifier.Level.saved(in: innerStorage),
+            voice: [],
+            storage: innerStorage
+        )
+        XCTAssertFalse(noModelVerdict.allowed)
+        XCTAssertEqual(noModelVerdict.reason, "no chat model to ask")
+
+        // 2. End-to-end AppModel + LiveCore optional approval path honors isolated `.confirm` (asks owner).
+        InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
+        let automation = FakeAutomation()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Call" })
+        let innerApp = AppModel(
+            launcher: FakeLauncher(),
+            pairer: FakePairing(),
+            automation: automation,
+            transport: transport,
+            storage: innerStorage
+        )
+        defer {
+            automation.answer(nil)
+            if innerApp.sessionOn { innerApp.stopSession() }
+        }
+        XCTAssertEqual(innerApp.approvalMode, .confirm)
+        XCTAssertEqual(innerApp.classifierLevel, .everything)
+        innerApp.loopback.simulate(.working(ms: 9))
+        innerApp.setup.loopback = .proxy
+        XCTAssertTrue(innerApp.setRelay("https://relay.invalid"))
+        innerApp.becameActive()
+        innerApp.startSession()
+        innerApp.wakeRunner()
+        for _ in 0..<150 where !["failed", "running"].contains(innerApp.runner.state) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        innerApp.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        for _ in 0..<150 where !innerApp.hasOpenInProcessSession {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await innerApp.chatTaskBegan()
+        let look = await innerApp.runTool("look", arguments: "{}")
+        XCTAssertFalse(look.isError, look.text)
+
+        let callTask = Task { await innerApp.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+        for _ in 0..<150 where innerApp.approvals.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let pending = try XCTUnwrap(innerApp.approvals.first, "Isolated AppModel with .confirm must ask owner for optional Call approval")
+        XCTAssertFalse(ApprovalClassifier.requiresOwner(pending), "Call tap must exercise the optional-approval branch")
+        innerApp.resolve(pending, approved: false)
+        let deniedResult = await callTask.value
+        XCTAssertTrue(deniedResult.isError || deniedResult.text.localizedCaseInsensitiveContains("denied") || deniedResult.text.localizedCaseInsensitiveContains("not allow"), deniedResult.text)
+
+        // 3. Switching isolated storage to `.reply` + custom model routes to `.model(reply: true)` without touching outer or `.live`.
+        try ModelKeys.saveCustom(address: "http://127.0.0.1:8765/v1", model: "isolated-classifier-model", typedKey: "", storage: innerStorage)
+        innerApp.approvalMode = .reply
+        innerApp.classifierLevel = .balanced
+        XCTAssertTrue(ApprovalClassifier.hasModel(in: innerStorage))
+        let replyApproval = PendingApproval(
+            id: "inner-reply-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        XCTAssertEqual(ApprovalClassifier.route(replyApproval, voiceOn: true, storage: innerStorage), .model(reply: true))
+
+        // 4. Subscription voice boundary: isolated storage without an injected bridge must not silently fall back to `CodexVoice.shared`.
+        try inner.seedCodexCredential(accessToken: "inner-isolated-codex-token")
+        ModelKeys.setSelectedProvider(.chatgpt, in: innerStorage)
+        XCTAssertFalse(innerApp.voice.usesChatGPTSubscription, "Isolated AppModel without an explicit SubscriptionVoice bridge must not report ChatGPT subscription usable via CodexVoice.shared")
+        let injectedVoice = VoiceModel(
+            clearTap: { _, _, _ in .clear },
+            phoneTool: { _, _, _ in ("", false, nil) },
+            codex: StubSubscriptionVoice(),
+            storage: innerStorage
+        )
+        XCTAssertTrue(injectedVoice.usesChatGPTSubscription, "Isolated VoiceModel with an explicit SubscriptionVoice bridge must match its isolated storage sign-in state")
+
+        // 5. ModelCatalog.setVoice without explicit `account:` resolves `VoiceDirect.settingsAccount(in: storage)`.
+        let customProvider = CustomProvider(
+            name: "Isolated Voice Gateway",
+            endpoints: [CustomEndpoint(url: "https://isolated-voice.invalid/v1")],
+            model: "isolated-chat",
+            liveVoice: true
+        )
+        CustomProviders.setAll([customProvider], in: innerStorage)
+        XCTAssertEqual(VoiceDirect.settingsAccount(in: innerStorage), .custom(customProvider.id))
+        ModelCatalog.setVoice("isolated-rt-model", on: true, storage: innerStorage)
+        let customVoiceKey = "models.enabled.voice" + VoiceAccount.custom(customProvider.id).storeSuffix
+        XCTAssertTrue(ModelCatalog.voiceOn(for: .custom(customProvider.id), storage: innerStorage).contains("isolated-rt-model"))
+        XCTAssertNil(outer.defaults.object(forKey: customVoiceKey))
+        XCTAssertNil(UserDefaults.standard.object(forKey: customVoiceKey))
+
+        // 6. Verify outer storage and real `.live` storage remained completely unchanged.
+        XCTAssertEqual(ApprovalClassifier.mode(in: outer), .off)
+        XCTAssertEqual(ApprovalClassifier.Level.saved(in: outer), .permissive)
+        XCTAssertEqual(ModelKeys.key(.openai, storage: outer), "outer-openai-key")
+        XCTAssertEqual(ModelKeys.selectedProvider(in: outer), .openai)
+
+        for key in liveKeys {
+            let expected = liveSnapshot[key] ?? nil
+            let actual = UserDefaults.standard.object(forKey: key)
+            XCTAssertEqual(actual != nil, expected != nil, "Live UserDefaults presence changed for \(key)")
+            if let expectedString = expected as? String {
+                XCTAssertEqual(actual as? String, expectedString, "Live UserDefaults string changed for \(key)")
+            } else if let expectedBool = expected as? Bool {
+                XCTAssertEqual(actual as? Bool, expectedBool, "Live UserDefaults bool changed for \(key)")
+            } else if let expectedArray = expected as? [String] {
+                XCTAssertEqual(actual as? [String], expectedArray, "Live UserDefaults array changed for \(key)")
+            }
+        }
+        hostLocalization.assertUnchanged()
+    }
+
+    @MainActor
+    private struct StubSubscriptionVoice: SubscriptionVoice {
+        func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {}
+        func start(offer: String) async throws -> String { "stub-sdp" }
+        func stop() {}
     }
 
     // MARK: - Helpers

@@ -785,7 +785,7 @@ struct ApprovalsSettingsView: View {
             Section {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "lock.fill").foregroundStyle(Tint.amberInk).accessibilityHidden(true)
-                    Text("Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation.")
+                    Text(ApprovalCopy.alwaysConfirm)
                         .font(.subheadline.weight(.medium)).foregroundStyle(Tint.amberInk)
                 }
                 .padding(.vertical, 4)
@@ -808,9 +808,9 @@ struct ApprovalsSettingsView: View {
                         switch model.approvalMode {
                         case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
                         case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                        case .off: Text("Optional steps continue without asking. Payments, deletions in menus and confirmation dialogs, and Wallet actions still require your confirmation.")
+                        case .off: Text(ApprovalCopy.neverAskFooter)
                         }
-                        Text("Sensitive steps are paying, deleting in menus or confirmation dialogs, sending a message, placing a call, typing a password, and anything in Wallet.")
+                        Text(ApprovalCopy.sensitiveSteps)
                         Text("Changes apply right away, starting from Poki’s next step.")
                     } else {
                         Button("Learn More") { withAnimation(.snappy) { more = true } }

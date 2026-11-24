@@ -13,7 +13,7 @@ final class LiveCore: CoreSession {
     private let continuation: AsyncStream<ShellEvent>.Continuation
     private var pump: Task<Void, Never>?
 
-    init(host: AppCoreHost, transport: HTTPTransport) {
+    init(host: AppCoreHost, transport: HTTPTransport, storage: PokiStorage = .live) {
         self.host = host
         var config = CoreConfig()
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
@@ -23,7 +23,7 @@ final class LiveCore: CoreSession {
         if let own = Bundle.main.bundleIdentifier { config.ownApps.append(own) }
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
-        config.approvalMode = { ApprovalClassifier.mode }
+        config.approvalMode = { ApprovalClassifier.mode(in: storage) }
         // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
         // their Testing Options switch.
         config.resolveApp = { KnownApps.launchID($0) }

@@ -148,7 +148,7 @@ struct PokiMenu<Face: View>: View {
                                 }
                             }
                         } header: {
-                            Text("Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation.")
+                            Text(ApprovalCopy.alwaysConfirm)
                         }
                     } label: {
                         Label("Approval", systemImage: "checkmark.shield")
@@ -238,7 +238,7 @@ struct PokiMenu<Face: View>: View {
             }
         }
         let approvalSection = UIMenu(
-            title: AppLocalization.text("Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation."),
+            title: AppLocalization.text(ApprovalCopy.alwaysConfirm),
             options: .displayInline,
             children: approvalActions
         )

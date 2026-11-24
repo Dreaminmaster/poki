@@ -360,16 +360,17 @@ final class AppModel {
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
          systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
          requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted },
-         localVPNAvailable: Bool? = nil, storage: PokiStorage = .live) {
-        self.storage = storage
-        self.setup = SetupState.load(storage: storage)
-        self.identity = RelayIdentity(storage: storage)
-        self.relayAddress = RelayAddress.saved(in: storage)
-        self.relayEnabled = storage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
-        self.classifierLevel = ApprovalClassifier.Level.saved(in: storage)
-        self.askPokiTool = storage.defaults.bool(forKey: AskPoki.onKey)
-        self.idleStopSeconds = storage.defaults.object(forKey: Self.idleStopDefaultsName) as? Int ?? 60
-        self.pairingFileSeen = FileManager.default.fileExists(atPath: storage.pairingFileURL.path)
+         localVPNAvailable: Bool? = nil, codex: (any SubscriptionVoice)? = nil, storage: PokiStorage? = nil) {
+        let resolvedStorage = storage ?? .live
+        self.storage = resolvedStorage
+        self.setup = SetupState.load(storage: resolvedStorage)
+        self.identity = RelayIdentity(storage: resolvedStorage)
+        self.relayAddress = RelayAddress.saved(in: resolvedStorage)
+        self.relayEnabled = resolvedStorage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
+        self.classifierLevel = ApprovalClassifier.Level.saved(in: resolvedStorage)
+        self.askPokiTool = resolvedStorage.defaults.bool(forKey: AskPoki.onKey)
+        self.idleStopSeconds = resolvedStorage.defaults.object(forKey: Self.idleStopDefaultsName) as? Int ?? 60
+        self.pairingFileSeen = FileManager.default.fileExists(atPath: resolvedStorage.pairingFileURL.path)
         ActivityController.endAll()
         self.localVPNAvailableOverride = localVPNAvailable
         self.imageMounted = imageMounted
@@ -378,17 +379,20 @@ final class AppModel {
         self.idleSessionPolicy = .forSystem(systemVersion)
         // iOS 27 lets a relaunched Poki open automation without the passcode while the boot's allowance
         // lasts, so a phone step from the background (Poki Anytime, an agent) does not wait for Poki in front.
-        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved(in: storage)?.covers(boot: BootClock.current, at: Date()) == true {
+        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved(in: resolvedStorage)?.covers(boot: BootClock.current, at: Date()) == true {
             InProcessWDA.gate.withLock { $0.startedThisBoot = true }
         }
         self.requiresDiskImageCheck = requiresDiskImageCheck ?? !Self.onSimulator
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
-        if SetupVault.restorePairingIfMissing(storage: storage) { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
-        else { SetupVault.mirrorPairingFromContainer(storage: storage) }
-        let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()))
+        if SetupVault.restorePairingIfMissing(storage: resolvedStorage) { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
+        else { SetupVault.mirrorPairingFromContainer(storage: resolvedStorage) }
+        let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()), storage: resolvedStorage)
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
+        // Production instances (`storage == nil`) bind the live singleton CodexVoice bridge; isolated storage
+        // instances must inject an explicit SubscriptionVoice bridge instead of falling back to `.shared`.
+        let subscriptionBridge: (any SubscriptionVoice)? = codex ?? (storage == nil ? CodexVoice.shared : nil)
         voice = VoiceModel(clearTap: { text, bundle, name in await core.clearTap(on: text, inApp: bundle, named: name, waiting: VoiceModel.approvalWait) },
                            phoneTool: { name, arguments, cancellation in
                                #if DEBUG && targetEnvironment(simulator)
@@ -408,7 +412,8 @@ final class AppModel {
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
                            connection: VoiceModel.connection,
-                           storage: storage)
+                           codex: subscriptionBridge,
+                           storage: resolvedStorage)
         self.launcher = launcher
         self.pairer = pairer
         // inFront starts true before the first scene callback, including a background launch.
@@ -1996,7 +2001,7 @@ final class AppModel {
             lastShot = thumbnail.flatMap(UIImage.init(data:))
             closeAfterTalk()
         case .approvalRequested(let approval):
-            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
+            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn, storage: storage) {
             case .allow:
                 // The rules were on when Poki started and asking has been turned off since.
                 checking.append(approval)
@@ -2006,8 +2011,9 @@ final class AppModel {
                 // The chat model checks it first: no Live Activity card, no notification, no tap. The chat shows it.
                 checking.append(approval)
                 log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
+                let storage = self.storage
                 Task { [weak self] in
-                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
+                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved(in: storage), voice: self?.voice.lines ?? [], storage: storage)
                     guard let self, self.checking.contains(where: { $0.id == approval.id }) else { return }
                     self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
                     if verdict.allowed || reply {
@@ -2313,7 +2319,7 @@ final class AppModel {
         let detail: String
         if ApprovalClassifier.modelAnswered(approval.id), let verdict = ApprovalClassifier.verdicts[approval.id] {
             detail = (approved == true ? AppLocalization.text(LocalizedStringResource("Allowed automatically")) : AppLocalization.text(LocalizedStringResource("Not allowed automatically"))) + (verdict.reason.isEmpty ? "" : ": \(verdict.reason)")
-        } else if ApprovalClassifier.mode == .off, !ApprovalClassifier.requiresOwner(approval) {
+        } else if ApprovalClassifier.mode(in: storage) == .off, !ApprovalClassifier.requiresOwner(approval) {
             detail = AppLocalization.text(LocalizedStringResource("Allowed, asking is off"))
 
         } else {

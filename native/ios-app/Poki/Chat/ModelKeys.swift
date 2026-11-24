@@ -203,9 +203,12 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     /// `customURL`, an address not saved yet (the connection test on the editing page), `id` is the bare
     /// model id and `customAPI` and `customReasoning` are the page's choices.
     func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil,
-                 codexService: String = CodexAccount.defaultService, codexHome: URL = CodexAccount.home,
-                 storage: PokiStorage = .live) -> Model? {
-        let provider = self == .chatgpt && CodexAccount.readAccessToken(service: codexService, home: codexHome) != nil ? "openai-codex" : piProvider
+                 codexService: String? = nil, codexHome: URL? = nil,
+                 storage: PokiStorage? = nil) -> Model? {
+        let resolvedStorage = storage ?? .live
+        let resolvedCodexService = codexService ?? storage?.codexService ?? CodexAccount.defaultService
+        let resolvedCodexHome = codexHome ?? storage?.codexHome ?? CodexAccount.home
+        let provider = self == .chatgpt && CodexAccount.readAccessToken(service: resolvedCodexService, home: resolvedCodexHome) != nil ? "openai-codex" : piProvider
         guard let piProvider = provider else { return nil }
         if self == .custom {
             if let customURL {
@@ -213,7 +216,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
                 guard !base.isEmpty, !id.isEmpty else { return nil }
                 return Self.customModel(id, baseUrl: base, api: customAPI.piAPI, reasoning: customReasoning, piProvider: piProvider)
             }
-            guard let chosen = CustomProviders.parse(id), let provider = CustomProviders.provider(chosen.provider, storage: storage),
+            guard let chosen = CustomProviders.parse(id), let provider = CustomProviders.provider(chosen.provider, storage: resolvedStorage),
                   let endpoint = provider.primary else { return nil }
             return Self.customModel(chosen.model, baseUrl: endpoint.normalized, api: endpoint.sent.piAPI,
                                     reasoning: provider.reasoning, piProvider: provider.piProvider)
@@ -224,13 +227,13 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         // reasoning only for a model OpenRouter's own list says supports it.
         if self == .openrouter {
             return unlistedModel(id, provider: piProvider, baseUrl: Self.openRouterBaseURL,
-                                 reasoning: ModelCatalog.supportsReasoning(id, for: self, storage: storage))
+                                 reasoning: ModelCatalog.supportsReasoning(id, for: self, storage: resolvedStorage))
         }
         // PiSwift's catalog (pi-mono, October 2026) lacks gpt-6.1-terra, which pi-ai 1.5.0 lists with the
         // same API and inputs as gpt-6.1-sol.
         // A model from the provider's own list that pi's catalog lacks takes the shape of a built-in one of
         // the same provider (same API and inputs), with its own id.
-        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models(in: storage).lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
+        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models(in: resolvedStorage).lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
         guard let template, let base = getModel(provider: piProvider, modelId: template),
               var json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(base))) as? [String: Any] else { return nil }
         json["id"] = id
