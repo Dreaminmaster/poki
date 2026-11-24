@@ -44,7 +44,7 @@ final class PokiBrowser: NSObject {
     @ObservationIgnored private var activeNavigation: WKNavigation?
     @ObservationIgnored private let supersededNavigations = NSHashTable<WKNavigation>.weakObjects()
     @ObservationIgnored private var loadWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
-    @ObservationIgnored private var ownerWaiters: [CheckedContinuation<Bool, Never>] = []
+    @ObservationIgnored private var ownerWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -175,14 +175,24 @@ final class PokiBrowser: NSObject {
         webView.endEditing(true)
         sheetShown = false
         let waiters = ownerWaiters
-        ownerWaiters = []
-        waiters.forEach { $0.resume(returning: true) }
+        ownerWaiters.removeAll()
+        waiters.values.forEach { $0.resume(returning: true) }
     }
 
     /// Waits while the owner has the page. False when the task was stopped meanwhile.
     func waitForPoki() async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard ownerHasIt else { return true }
-        return await withCheckedContinuation { c in ownerWaiters.append(c) }
+        let id = UUID()
+        let handedBack = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume(returning: false) }
+                else { ownerWaiters[id] = continuation }
+            }
+        } onCancel: {
+            Task { @MainActor in self.ownerWaiters.removeValue(forKey: id)?.resume(returning: false) }
+        }
+        return handedBack && !Task.isCancelled
     }
 
     /// The chat's Stop: whatever waits ends, loading stops, the page stays for the owner to see.
@@ -190,8 +200,8 @@ final class PokiBrowser: NSObject {
         webView.stopLoading()
         finishLoads()
         let waiters = ownerWaiters
-        ownerWaiters = []
-        waiters.forEach { $0.resume(returning: false) }
+        ownerWaiters.removeAll()
+        waiters.values.forEach { $0.resume(returning: false) }
         for i in steps.indices where steps[i].state == .working || steps[i].state == .waiting { steps[i].state = .failed }
     }
 

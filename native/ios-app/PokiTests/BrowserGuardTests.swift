@@ -14,6 +14,25 @@ import XCTest
 /// was tapped into the page, so a test reads the page to see whether a tap happened.
 @MainActor
 final class BrowserGuardTests: XCTestCase {
+    func testCancelledOwnerWaitLeavesThePageWithTheOwner() async {
+        let browser = PokiBrowser()
+        browser.takeOver()
+        let started = expectation(description: "waiting for owner")
+        let cancelled = expectation(description: "cancelled wait returned")
+        let wait = Task { @MainActor in
+            started.fulfill()
+            let allowed = await browser.waitForPoki()
+            XCTAssertFalse(allowed)
+            cancelled.fulfill()
+        }
+        await fulfillment(of: [started], timeout: 2)
+        wait.cancel()
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertTrue(browser.ownerHasIt)
+        browser.handBack()
+        await wait.value
+    }
+
     private var language = AppLocalization.system
 
     /// The steps' words follow Poki's language; these tests read the English ones.
