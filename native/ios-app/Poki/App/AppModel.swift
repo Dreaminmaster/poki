@@ -246,6 +246,7 @@ final class AppModel {
     let log = AppLog.shared
     private var eventsTask: Task<Void, Never>?
     private var handoffTimer: Timer?
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     private var sessionStartTask: Task<Void, Never>?
     private(set) var sessionStarting = false
     private var pendingPrepareForTask = false
@@ -473,7 +474,7 @@ final class AppModel {
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
         if UserDefaults.standard.string(forKey: "pokiSample") != nil { loadSample() }
-        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+        terminationObserver = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
         // Installed over the local-VPN build (both use one bundle ID): this build has only external
@@ -484,6 +485,12 @@ final class AppModel {
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    isolated deinit {
+        idleTimer?.invalidate()
+        handoffTimer?.invalidate()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
