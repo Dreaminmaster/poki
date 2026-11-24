@@ -12,15 +12,50 @@ fi
 case "$mode" in check|build|test) ;; *) exit 2 ;; esac
 
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
-if [[ "$target" != host ]] && ! rustup target list --toolchain stable --installed | grep -Fxq "$target"; then
-    rustup target add --toolchain stable "$target"
-fi
 
 adapter_dir=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$adapter_dir/../.." && pwd)
 revision=6aaac694803004a63c6f393d153c96d22521a6b9
 build_dir="$repo/build/codex-voice/$target"
 source_dir="$build_dir/$revision"
+
+# Upstream codex-rs enables cross-crate thin LTO (lto = "thin", opt-level = 3, codegen-units = 4),
+# which spikes rustc to ~14 GB RSS and 18+ CPU-minutes when linking the staticlib on CI runners.
+# Default to local-only LTO (lto = false) and size optimization (opt-level = "s") to cut peak
+# memory, compile time, and archive size while keeping caller overrides intact.
+release_lto="${CARGO_PROFILE_RELEASE_LTO:-false}"
+release_opt_level="${CARGO_PROFILE_RELEASE_OPT_LEVEL:-s}"
+release_codegen_units="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-8}"
+output_lib="$build_dir/target/$target/release/libpoki_codex_voice.a"
+stamp_file="${output_lib}.sha256"
+
+if [[ "$mode" == build ]]; then
+    fingerprint=$(python3 - "$target" "$revision" "$release_lto" "$release_opt_level" "$release_codegen_units" \
+        "$adapter_dir/build.sh" \
+        "$adapter_dir/Cargo.toml" \
+        "$adapter_dir/src/lib.rs" \
+        "$adapter_dir/poki_codex_voice.h" <<'PY'
+import hashlib, pathlib, sys
+h = hashlib.sha256()
+for meta in sys.argv[1:6]:
+    h.update(meta.encode())
+    h.update(b"\0")
+for file_path in sys.argv[6:]:
+    h.update(pathlib.Path(file_path).read_bytes())
+    h.update(b"\0")
+print(h.hexdigest())
+PY
+    )
+    if [[ -s "$output_lib" && -f "$stamp_file" ]] && [[ "$(cat "$stamp_file")" == "$fingerprint" ]]; then
+        echo "Codex Voice ($target) is up to date (cached)."
+        exit 0
+    fi
+fi
+
+if [[ "$target" != host ]] && ! rustup target list --toolchain stable --installed | grep -Fxq "$target"; then
+    rustup target add --toolchain stable "$target"
+fi
+
 mkdir -p "$build_dir"
 if [[ "$target" == host && ! -f "$source_dir/.poki-prepared" ]]; then
     for existing in "$repo/build/codex-voice/aarch64-apple-ios-sim/$revision" "$repo/build/codex-voice/aarch64-apple-ios/$revision"; do
@@ -176,8 +211,14 @@ fi
 cd "$workspace"
 export CARGO_TARGET_DIR="$build_dir/target"
 export CARGO_PROFILE_RELEASE_DEBUG=0
+export CARGO_PROFILE_RELEASE_LTO="$release_lto"
+export CARGO_PROFILE_RELEASE_OPT_LEVEL="$release_opt_level"
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="$release_codegen_units"
 if [[ "$mode" == test ]]; then
     cargo +stable test "${options[@]}" --lib -p poki-codex-voice -- --nocapture
 else
     cargo +stable "$mode" "${options[@]}" --target "$target" -p poki-codex-voice
+    if [[ "$mode" == build && -s "$output_lib" ]]; then
+        printf '%s\n' "$fingerprint" > "$stamp_file"
+    fi
 fi
