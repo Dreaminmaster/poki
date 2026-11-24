@@ -163,6 +163,12 @@ pub struct Account {
     /// the saved password or otherwise, until the person signs in by hand.
     #[serde(default)]
     pub needs_reauth: bool,
+    /// Apple turned the session away (-22411) and the signer already signed in again by itself,
+    /// possibly through a code the person entered. Until a token comes through or the person signs
+    /// in by hand, another -22411 waits for the person instead of signing in (and asking for a
+    /// code) again.
+    #[serde(default)]
+    pub rejected_resign_in: bool,
 }
 
 /// Cooldown window after Apple rate-limits sign-in or code requests ("Wait about an hour").

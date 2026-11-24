@@ -383,6 +383,10 @@ impl Client {
         loop {
             match self.sign_in_once(apple_id, password, caller).await {
                 Err(Error::Apple { code: -80045, .. }) | Err(Error::Apple { code: -80046, .. }) if self.anisette.rotate() => continue,
+                // -22411 at the password step, before any code was asked for: Apple turned this
+                // anisette identity away (SideStore and iloader users see it on servers Apple has
+                // started to block). Another server is another "Mac", as for -80045.
+                Err(e) if is_session_rejected(&e) && self.anisette.rotate() => continue,
                 other => return other,
             }
         }
@@ -789,7 +793,7 @@ pub const WRONG_CODE_FIRST: &str = "That verification code is incorrect. Check t
 pub const WRONG_CODE_WAIT: &str = "That verification code is incorrect. Stop and wait a few minutes before trying again so Apple does not lock this Apple Account, then enter the newest 6-digit code.";
 pub const EXPIRED_CODE: &str = "That verification code has expired. Enter the newest 6-digit code, or request a new code.";
 /// Apple's -22411 with any status but 503: it turned this session away, which is not a rate limit.
-pub const SESSION_REJECTED: &str = "Apple did not accept this sign-in (error -22411). Sign out, then sign in again.";
+pub const SESSION_REJECTED: &str = "Apple did not accept this sign-in (error -22411). Sign in again.";
 pub const INCOMPLETE_SESSION: &str = "Apple verified the code, but did not finish opening the session. Sign in again to start a fresh session.";
 
 pub fn rate_limited() -> Error { Error::NeedsPerson(RATE_LIMITED.into()) }
@@ -808,6 +812,12 @@ pub fn is_rate_limit(e: &Error) -> bool {
         Error::Apple { code, message } => is_rate_limit_code_or_text(*code, message),
         _ => false,
     }
+}
+
+/// Apple turned the session away with -22411 (any status but 503). The session is no use any more,
+/// so the signer opens a new one with the kept password, as for an expired session.
+pub fn is_session_rejected(e: &Error) -> bool {
+    matches!(e, Error::NeedsPerson(m) if m == SESSION_REJECTED)
 }
 
 pub fn is_session_expired(e: &Error) -> bool {
@@ -2532,6 +2542,192 @@ mod rate_limit_regressions {
             signer.finish_sign_in(resent.unwrap(), "654321").await.unwrap();
             assert!(signer.signed_in());
             assert!(!store::load().unwrap().needs_reauth, "finishing the person's sign-in lifts the sign-in-again state");
+        });
+    }
+
+    const TURNED_AWAY: &str = "This action cannot be completed at this time";
+
+    /// Apple turns the saved session away with hsc 401 and ec -22411 (issue #681: "Preparing the
+    /// update: Apple did not accept this sign-in"). With a kept password the signer signs in again by
+    /// itself and gets the token, instead of asking the person to sign out and in.
+    #[test]
+    fn token_signs_in_again_with_the_kept_password_after_22411() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                hsc: 200,
+                au: None,
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                second_apptokens: Some((200, 0, String::new())),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_expired_session_with_kept_password();
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let token = signer.token().await;
+            assert!(token.is_ok(), "a -22411 session must be replaced with the kept password, got {:?}", token.err().map(|e| e.to_string()));
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.srp_complete, 1, "one sign-in with the kept password");
+            assert_eq!(c.apptokens, 2);
+            assert_eq!(c.total_codes_sent(), 0);
+            assert!(signer.signed_in());
+            assert!(!store::load().unwrap().needs_reauth);
+        });
+    }
+
+    /// When the new sign-in needs a code, the person gets the code prompt (NeedsCode), not an error.
+    #[test]
+    fn token_after_22411_asks_for_a_code_when_apple_wants_one() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_expired_session_with_kept_password();
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let Err(Error::NeedsCode(pending)) = signer.token().await else { panic!("a -22411 session with a kept password must lead to the code prompt") };
+            assert_eq!(mock.counts.lock().unwrap().trusted_device_push, 1, "one code for the new sign-in");
+            // A second call while the code is outstanding asks Apple for nothing.
+            assert!(matches!(signer.token().await, Err(Error::NeedsCode(_))));
+            assert_eq!(mock.counts.lock().unwrap().srp_complete, 1);
+            assert_eq!(mock.counts.lock().unwrap().trusted_device_push, 1);
+            signer.finish_sign_in(*pending, "654321").await.unwrap();
+            assert!(signer.signed_in());
+        });
+    }
+
+    /// With no kept password the person is asked to sign in again (the app's Sign In Again row).
+    #[test]
+    fn token_after_22411_without_a_kept_password_asks_to_sign_in_again() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_account_for_teams(None, None);
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let err = signer.token().await.unwrap_err();
+            assert!(matches!(&err, Error::NeedsPerson(m) if m == SESSION_EXPIRED), "got {err}");
+            assert_eq!(mock.counts.lock().unwrap().srp_init, 0);
+            assert!(!is_rate_limit(&err));
+        });
+    }
+
+    /// When Apple turns the new session away as well, nothing signs in again by itself: no loop of
+    /// sign-ins and codes every time the app prepares an update.
+    #[test]
+    fn token_signs_in_again_only_once_when_the_new_session_is_turned_away_too() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                hsc: 200,
+                au: None,
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_expired_session_with_kept_password();
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let err = signer.token().await.unwrap_err();
+            assert!(is_session_rejected(&err), "got {err}");
+            assert!(store::load().unwrap().needs_reauth, "the person signs in next");
+            let _ = signer.token().await.unwrap_err();
+            let c = mock.counts.lock().unwrap().clone();
+            assert_eq!(c.srp_complete, 1, "no second sign-in with the kept password");
+            assert_eq!(c.apptokens, 2);
+        });
+    }
+
+    /// Codex review on #742: a recovery that needs a code must not start another one when Apple
+    /// turns the new session away as well (iOS loads teams right after the code).
+    #[test]
+    fn token_does_not_sign_in_again_after_a_code_recovery_is_turned_away_too() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_expired_session_with_kept_password();
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let Err(Error::NeedsCode(pending)) = signer.token().await else { panic!("expected the code prompt") };
+            signer.finish_sign_in(*pending, "654321").await.unwrap();
+            let before = mock.counts.lock().unwrap().clone();
+
+            let err = signer.token().await.unwrap_err();
+            let after = mock.counts.lock().unwrap().clone();
+            assert!(is_session_rejected(&err), "got {err}");
+            assert_eq!(after.srp_init - before.srp_init, 0, "no new sign-in after the code");
+            assert_eq!(after.total_codes_sent() - before.total_codes_sent(), 0, "no new code after the code");
+            assert!(store::load().unwrap().needs_reauth, "the person signs in next");
+
+            // The person signs in by hand: that lifts the guard.
+            *mock.behavior.lock().unwrap() = MockBehavior { hsc: 200, au: None, ..MockBehavior::default() };
+            signer.sign_in("person@example.com", "correct-horse-battery", true).await.unwrap();
+            assert!(!store::load().unwrap().rejected_resign_in);
+            assert!(signer.token().await.is_ok());
+        });
+    }
+
+    /// main-agent and Codex review on #742: a recovery sign-in that fails on the way (HTTP 503)
+    /// must not leave the guard set, or the next call would treat the old session as the new one
+    /// and stop for good.
+    #[test]
+    fn token_tries_again_after_a_recovery_sign_in_fails_on_the_way() {
+        let (_home_guard, _dir) = crate::paths::test_home();
+        run_in_vault(async {
+            let mock = start_mock_gsa(MockBehavior {
+                srp_status: 503,
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                ..MockBehavior::default()
+            })
+            .await;
+            seed_expired_session_with_kept_password();
+            let mut signer = Signer::for_test(test_client(&mock.base_url)).unwrap();
+
+            let err = signer.token().await.unwrap_err();
+            assert!(!is_session_rejected(&err), "the 503 shows, got {err}");
+            let stored = store::load().unwrap();
+            assert!(!stored.rejected_resign_in, "a sign-in that never finished sets no guard");
+            assert!(!stored.needs_reauth);
+
+            // Apple answers again: the next call signs in with the kept password and gets the token.
+            *mock.counts.lock().unwrap() = Counts::default();
+            *mock.behavior.lock().unwrap() = MockBehavior {
+                hsc: 200,
+                au: None,
+                apptokens_status: 401,
+                apptokens_ec: -22411,
+                apptokens_em: TURNED_AWAY.into(),
+                second_apptokens: Some((200, 0, String::new())),
+                ..MockBehavior::default()
+            };
+            let token = signer.token().await;
+            assert!(token.is_ok(), "got {:?}", token.err().map(|e| e.to_string()));
+            assert_eq!(mock.counts.lock().unwrap().srp_complete, 1, "the retry signs in once");
+            assert!(!store::load().unwrap().needs_reauth);
         });
     }
 }
