@@ -8,6 +8,7 @@ protocol VoiceConnection: AnyObject, Sendable {
     @MainActor func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws
     @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture?
     @MainActor func useOpeningCapture(_ capture: OpeningVoiceCapture?)
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool
     func hasRemoteSpeech() async -> Bool
     @discardableResult func send(_ event: [String: Any]) -> Bool
     func setRemoteVolume(_ value: Double)
@@ -19,19 +20,24 @@ extension VoiceConnection {
     func connectLive(microphone: Bool, direct: Bool, exchange: (String) async throws -> String) async throws { throw VoiceError.noWebRTC }
     func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? { nil }
     func useOpeningCapture(_ capture: OpeningVoiceCapture?) {}
+    @MainActor func ensureOpeningCaptureRunning(_ capture: OpeningVoiceCapture) -> Bool { capture.audio.ensureRunning() }
     func hasRemoteSpeech() async -> Bool { false }
 }
 
 /// The microphone and speaker are WebRTC tracks. The `oai-events` data channel carries JSON events.
 /// The SDP exchange is supplied by the selected OpenAI endpoint or the Mac bridge.
 final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTCDataChannelDelegate, @unchecked Sendable {
-    private static let factory: RTCPeerConnectionFactory = {
+    private static let configureWebRTCAudioDefaults: Void = {
         // Voice chat: echo cancellation on, so Poki's own voice from the speaker doesn't interrupt it.
         let audio = RTCAudioSessionConfiguration.webRTC()
         audio.category = AVAudioSession.Category.playAndRecord.rawValue
         audio.mode = AVAudioSession.Mode.voiceChat.rawValue
         audio.categoryOptions = [.defaultToSpeaker, .allowBluetoothHFP]
         RTCAudioSessionConfiguration.setWebRTC(audio)
+    }()
+
+    private static let factory: RTCPeerConnectionFactory = {
+        _ = configureWebRTCAudioDefaults
         return RTCPeerConnectionFactory()
     }()
     /// The second try: the same, but WebRTC leaves VPN interfaces out. A loopback VPN or a proxy app
@@ -70,6 +76,39 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
     init(onEvent: @escaping @MainActor ([String: Any]) -> Void, onClosed: @escaping @MainActor (String) -> Void) {
         self.onEvent = onEvent
         self.onClosed = onClosed
+    }
+
+    @MainActor
+    static func activateAudioSession(configure: Bool) throws {
+        let session = RTCAudioSession.sharedInstance()
+        session.lockForConfiguration()
+        defer { session.unlockForConfiguration() }
+        if configure {
+            _ = configureWebRTCAudioDefaults
+            do {
+                try session.setConfiguration(RTCAudioSessionConfiguration.webRTC())
+            } catch {
+                AppLog.shared.add("voice", "RTCAudioSession configuration fallback: \(error.localizedDescription)")
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            }
+            try session.setActive(true)
+            try? session.setPreferredInputNumberOfChannels(1)
+            return
+        }
+        try session.setActive(true)
+    }
+
+    @MainActor
+    static func deactivateAudioSession(onFailure: (() -> Void)? = nil) {
+        let session = RTCAudioSession.sharedInstance()
+        session.lockForConfiguration()
+        defer { session.unlockForConfiguration() }
+        do {
+            try session.setActive(false)
+        } catch {
+            onFailure?()
+            AppLog.shared.add("voice", "could not deactivate the realtime audio session: \(error.localizedDescription)")
+        }
     }
 
     @MainActor func startOpeningCapture(session: Int) throws -> OpeningVoiceCapture? {
@@ -133,24 +172,10 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         config.continualGatheringPolicy = .gatherContinually
         guard let peer = factory.peerConnection(with: config, constraints: constraints, delegate: self) else { throw VoiceError.noWebRTC }
         self.peer = peer
-        if microphone, openingCapture == nil {
-            // Poki's background keep-alive may have left the shared session in .playback, which cannot
-            // record; set voice chat explicitly before the microphone track starts.
-            let session = RTCAudioSession.sharedInstance()
-            do {
-                session.lockForConfiguration()
-                defer { session.unlockForConfiguration() }
-                do {
-                    // WebRTC can activate the session even if configuring a preference throws.
-                    try session.setConfiguration(RTCAudioSessionConfiguration.webRTC())
-                } catch {
-                    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-                }
-                try session.setActive(true)
-            }
-            holdsAudioSession = true
-        }
         if microphone {
+            let needsConfiguration = openingCapture == nil || !RTCAudioSession.sharedInstance().isActive
+            try Self.activateAudioSession(configure: needsConfiguration)
+            holdsAudioSession = true
             let mic = factory.audioTrack(with: factory.audioSource(with: constraints), trackId: "poki-mic")
             peer.add(mic, streamIds: ["poki-voice"])
             diagnostics?("microphone track enabled; \(Self.audioSession())")
@@ -272,14 +297,8 @@ final class VoiceLink: NSObject, VoiceConnection, RTCPeerConnectionDelegate, RTC
         guard holdsAudioSession else { return }
         holdsAudioSession = false
         diagnostics?("microphone track closed")
-        let session = RTCAudioSession.sharedInstance()
-        session.lockForConfiguration()
-        defer { session.unlockForConfiguration() }
-        do {
-            try session.setActive(false)
-        } catch {
-            diagnostics?("audio session release failed")
-            AppLog.shared.add("voice", "could not deactivate the realtime audio session: \(error.localizedDescription)")
+        Self.deactivateAudioSession { [weak self] in
+            self?.diagnostics?("audio session release failed")
         }
     }
 

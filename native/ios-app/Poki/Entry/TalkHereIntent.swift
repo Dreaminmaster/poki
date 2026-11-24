@@ -38,11 +38,32 @@ struct TalkHereIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundConti
         VoiceOpeningFeedback.vibrate()
         AppLog.shared.add("voice", "Talk Here: starting a talk with Poki in the background")
         app.prepareForTask()
-        guard await app.talkHere(presentSpeechPermission: presentSpeechPermission) else {
+        let outcome = await app.talkHere(presentSpeechPermission: presentSpeechPermission)
+        switch outcome {
+        case .liveActivityUnavailable:
             return try await openPoki(LocalizedStringResource("Poki couldn’t show the talk on the Lock Screen, so it opens to talk.", table: "Entry"))
+        case .microphoneUnavailable:
+            return try await handleBackgroundMicrophoneUnavailable()
+        case .lost(let why):
+            throw TalkHereError(why: why)
+        case .superseded, .ended, .started:
+            return .result()
         }
-        if case .lost(let why) = app.voice.phase { throw TalkHereError(why: why) }
-        return .result()
+    }
+
+    @MainActor
+    private func handleBackgroundMicrophoneUnavailable() async throws -> IntentResultContainer<Never, Never, Never, Never> {
+        let openWords = LocalizedStringResource("Poki couldn’t capture the microphone in the background, so it opens to talk.", table: "Entry")
+        let errorWords = LocalizedStringResource("Poki couldn’t capture the microphone in the background. Open Poki to talk.", table: "Entry")
+        if #available(iOS 26.0, *), systemContext.currentMode.canContinueInForeground {
+            do {
+                return try await openPoki(openWords)
+            } catch {
+                AppLog.shared.add("voice", "Talk Here could not open Poki after background microphone failure: \(error.localizedDescription)")
+                throw TalkHereError(why: AppLocalization.text(errorWords))
+            }
+        }
+        throw TalkHereError(why: AppLocalization.text(errorWords))
     }
 
     @MainActor

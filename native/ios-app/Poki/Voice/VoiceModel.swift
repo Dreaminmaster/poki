@@ -339,6 +339,64 @@ final class VoiceModel {
     private(set) var waitsForOpeningDictation = false
     private var openingDictation: Task<Void, Never>?
     var isCapturingOpening: Bool { openingCapture != nil }
+    private var backgroundRecordingGrant: (grant: BackgroundRecordingGrant, session: Int?)?
+    private var lostReasonsBySession: [Int: String] = [:]
+    private let monotonicUptime: @Sendable () -> TimeInterval
+
+    private func setLost(_ reason: String, session number: Int) {
+        phase = .lost(reason)
+        lostReasonsBySession[number] = reason
+        if lostReasonsBySession.count > 16 {
+            let cutoff = session - 16
+            lostReasonsBySession = lostReasonsBySession.filter { $0.key >= cutoff }
+        }
+    }
+
+    func lostReason(forSession number: Int) -> String? {
+        lostReasonsBySession[number]
+    }
+
+    func makeBackgroundRecordingGrant(
+        token: UUID,
+        duration: TimeInterval = OpeningAudioRecoveryPolicy.defaultBackgroundGrantDuration
+    ) -> BackgroundRecordingGrant {
+        BackgroundRecordingGrant(token: token, deadline: monotonicUptime() + duration)
+    }
+
+    func endBackgroundRecordingGrant(token: UUID) {
+        if backgroundRecordingGrant?.grant.token == token {
+            backgroundRecordingGrant = nil
+        }
+        openingCapture?.audio.clearBackgroundRecordingGrant(token: token)
+    }
+
+    func ownsSession(_ number: Int) -> Bool {
+        session == number
+    }
+
+    func recommendedLiveInputWaitTimeout(for grant: BackgroundRecordingGrant) -> Duration {
+        let remaining = grant.deadline - monotonicUptime()
+        let seconds = max(0.5, min(OpeningAudioRecoveryPolicy.defaultLiveInputWaitTimeoutSeconds, remaining + 1.0))
+        return .seconds(seconds)
+    }
+
+    func waitForOpeningLiveInput(
+        session number: Int,
+        timeout: Duration = OpeningVoiceAudio.defaultLiveInputWaitTimeout
+    ) async -> LiveInputWaitResult {
+        guard number == session else { return .stopped }
+        guard let audio = openingCapture?.audio else { return .skippedDisabled }
+        return await audio.waitForLiveInput(timeout: timeout)
+    }
+
+    func ensureBackgroundAudioActive(session number: Int) -> Bool {
+        guard number == session else { return false }
+        guard let capture = openingCapture else { return true }
+        if let link {
+            return link.ensureOpeningCaptureRunning(capture)
+        }
+        return capture.audio.ensureRunning()
+    }
     private var usesLive = false
     private var appAudio: AppAudioContext?
     private var usesCodexLive = false
@@ -346,7 +404,38 @@ final class VoiceModel {
     private var codexHandoffPending = false
     private var codexHandoffTimeout: Task<Void, Never>?
     private var activeCodexTools = 0
+    private final class LiveCloseWaiters: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+        func register(id: UUID, continuation: CheckedContinuation<Void, Never>, canWait: Bool) -> Bool {
+            lock.withLock {
+                guard !Task.isCancelled, canWait else { return false }
+                waiters[id] = continuation
+                return true
+            }
+        }
+
+        func resume(id: UUID) {
+            let continuation = lock.withLock { waiters.removeValue(forKey: id) }
+            continuation?.resume()
+        }
+
+        func resumeAll() {
+            let pending = lock.withLock {
+                let values = Array(waiters.values)
+                waiters.removeAll()
+                return values
+            }
+            for continuation in pending {
+                continuation.resume()
+            }
+        }
+    }
+
     private var liveCloseTimeout: Task<Void, Never>?
+    private let liveCloseWaiters = LiveCloseWaiters()
+    var onAwaitingLiveClose: (@MainActor () -> Void)?
     private var liveUsageSeconds: Double?
     private var liveSpeechStopped = false
     private enum LiveDelegationState: Equatable {
@@ -552,6 +641,7 @@ final class VoiceModel {
          readyCue: @escaping @MainActor () -> Void = { VoiceReadyCue.play() },
          connection: @escaping @MainActor (@escaping @MainActor ([String: Any]) -> Void, @escaping @MainActor (String) -> Void) -> VoiceConnection = { VoiceLink(onEvent: $0, onClosed: $1) },
          time: VoiceClock = VoiceClock(),
+         monotonicUptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          openingSpeech: OpeningSpeech = .system,
          recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() },
          codex: (any SubscriptionVoice)? = nil,
@@ -564,6 +654,7 @@ final class VoiceModel {
         self.readyCue = readyCue
         self.connection = connection
         self.time = time
+        self.monotonicUptime = monotonicUptime
         self.openingSpeech = openingSpeech
         self.recentAppAudio = recentAppAudio
         self.hasSubscriptionBridge = codex != nil
@@ -728,30 +819,83 @@ final class VoiceModel {
         #endif
     }
 
+    private func waitForLiveClose() async {
+        let waiterID = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let registered = liveCloseWaiters.register(
+                    id: waiterID,
+                    continuation: continuation,
+                    canWait: self.liveCloseTimeout != nil
+                )
+                if registered {
+                    onAwaitingLiveClose?()
+                } else {
+                    continuation.resume()
+                }
+            }
+        } onCancel: { [liveCloseWaiters] in
+            liveCloseWaiters.resume(id: waiterID)
+        }
+    }
+
+    @discardableResult
     func start(microphone: Bool = true, captureOpening: Bool = false,
-               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() }) async {
-        if let liveCloseTimeout { await liveCloseTimeout.value }
-        guard !isOn else { return }
+               backgroundRecordingGrant grant: BackgroundRecordingGrant? = nil,
+               presentSpeechPermission: SpeechPermissionPresenter = { request in await request() },
+               onSessionClaimed: (@MainActor (Int) -> Bool)? = nil) async -> Int? {
+        guard !Task.isCancelled else { return nil }
+        var expectedSessionAfterClose: Int?
+        if liveCloseTimeout != nil {
+            expectedSessionAfterClose = session + 1
+            await waitForLiveClose()
+        }
+        guard !Task.isCancelled, liveCloseTimeout == nil, !isOn else { return nil }
+        if let expectedSessionAfterClose, session != expectedSessionAfterClose {
+            return nil
+        }
+        let nextSession = session + 1
+        if let onSessionClaimed, !onSessionClaimed(nextSession) {
+            return nil
+        }
         phase = .connecting
         needsChatGPTSignIn = false
-        session += 1
+        session = nextSession
         let number = session
+        if let grant {
+            backgroundRecordingGrant = (grant, number)
+        }
         openingSpeechAuthorized = false
+        func cancelClaimedSessionIfNeeded() -> Bool {
+            guard Task.isCancelled else { return false }
+            if number == session {
+                if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+                    backgroundRecordingGrant = nil
+                }
+                if liveCloseTimeout == nil {
+                    stop(ifOwningSession: number)
+                }
+            }
+            return true
+        }
         let context = microphone ? await recentAppAudio() : nil
-        guard number == session else { return }
+        guard number == session else { return nil }
+        if cancelClaimedSessionIfNeeded() { return nil }
         appAudio = context
-        let account = VoiceDirect.account
-        let key = VoiceDirect.apiKey(for: account)
+        let account = VoiceDirect.account(in: storage)
+        let key = VoiceDirect.apiKey(for: account, storage: storage)
         let wantsSubscription = usesChatGPTSubscription && microphone && !rehearsing
         let subscription = wantsSubscription && appAudio == nil
         if !subscription, key == nil, bridge == nil, !rehearsing {
-            if VoiceDirect.canDictate, microphone, appAudio == nil {
-                await startDictation()
+            if VoiceDirect.canDictate(in: storage), microphone, appAudio == nil {
+                await startDictation(session: number)
+                guard number == session else { return nil }
+                if cancelClaimedSessionIfNeeded() { return nil }
             } else {
                 appAudio = nil
-                phase = .lost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words)
+                setLost(wantsSubscription ? VoiceError.appAudioNeedsKeyOrBridge.words : VoiceError.noBridge.words, session: number)
             }
-            return
+            return number
         }
         let bridge = self.bridge
         func configuration() async throws -> VoiceBridge.Token {
@@ -771,6 +915,7 @@ final class VoiceModel {
                     guard Self.phoneTools.contains(name) else {
                         return (Self.localTool(name), false, nil)
                     }
+                    openingCapture?.audio.markPhoneActionStarted(session: number)
                     activeCodexTools += 1
                     lastActivity = time.now()
                     keepOpen()
@@ -788,11 +933,11 @@ final class VoiceModel {
                 return VoiceBridge.Token(value: nil, model: CodexVoice.model, local_tools: [], live: true)
             }
             if let key, let account {
-                let model = ModelCatalog.voiceModelID(for: account)
+                let model = ModelCatalog.voiceModelID(for: account, storage: storage)
                 if microphone, account == .openai, model.hasPrefix("gpt-live-") {
                     return VoiceBridge.Token(value: nil, model: model, local_tools: VoiceDirect.localTools, live: true)
                 }
-                return try await VoiceDirect.token(apiKey: key, account: account)
+                return try await VoiceDirect.token(apiKey: key, account: account, storage: storage)
             }
             guard let bridge else { throw VoiceError.noBridge }
             return try await bridge.token(preferLive: microphone)
@@ -839,11 +984,15 @@ final class VoiceModel {
                 let captureStarted = time.now()
                 holdingMicrophone = true
                 openingCapture = try openingLink.startOpeningCapture(session: number)
+                if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+                    openingCapture?.audio.setBackgroundRecordingGrant(grant)
+                }
                 if openingCapture != nil {
                     let firstTimeAuth = openingSpeech.authorizationStatus() == .notDetermined
                     let authStart = time.now()
                     let authorized = await openingSpeech.authorize(present: presentSpeechPermission)
-                    guard number == session else { return }
+                    guard number == session else { return nil }
+                    if cancelClaimedSessionIfNeeded() { return nil }
                     let authMS = max(0, Int(time.now().timeIntervalSince(authStart) * 1000))
                     openingTiming = (captureStarted, firstTimeAuth, authMS, nil, false)
                     openingSpeechAuthorized = authorized
@@ -851,7 +1000,8 @@ final class VoiceModel {
             }
             var token = try await configuration()
             // Ended (End, or the button again) while the key was exchanged.
-            guard number == session else { return }
+            guard number == session else { return nil }
+            if cancelClaimedSessionIfNeeded() { return nil }
             transcript = ("voice-\(UUID().uuidString.prefix(8).lowercased())", Date(), lines.count)
             if microphone { holdingMicrophone = true }
             if subscription {
@@ -864,46 +1014,60 @@ final class VoiceModel {
             } catch VoiceError.noPath {
                 // No path opened: once more, off VPN interfaces (Poki's loopback, a proxy
                 // app) and with a fresh key, before telling the owner.
-                guard number == session else { return }
+                guard number == session else { return nil }
+                if cancelClaimedSessionIfNeeded() { return nil }
                 closeConnection("network path failed; retrying without VPN interfaces")
                 ready = false
                 phase = .connecting
                 if subscription { codex.stop() }
                 token = try await configuration()
-                guard number == session else { return }
+                guard number == session else { return nil }
+                if cancelClaimedSessionIfNeeded() { return nil }
                 let second = makeLink(attempt: 2, direct: true)
                 second.useOpeningCapture(openingCapture)
                 try await connect(second, token, direct: true)
             }
-            guard number == session, liveCloseTimeout == nil, let link else { return }
+            guard number == session, liveCloseTimeout == nil, let link else { return nil }
+            if cancelClaimedSessionIfNeeded() { return nil }
             connectionOpen = true
             if var timing = openingTiming {
                 timing.connectedMS = max(0, Int(time.now().timeIntervalSince(timing.started) * 1000))
                 openingTiming = timing
             }
             trace("connection open")
+            let wasConnecting = !ready
+            if subscription {
+                ready = true
+                phase = .listening
+            }
             if !sendOpeningAudioIfReady() {
                 if !waitsForOpeningDictation { await openingDictation?.value }
-                return
+                return number
             }
             lastActivity = time.now()
             if subscription {
-                let wasConnecting = !ready
-                ready = true
-                phase = .listening
                 if wasConnecting && holdingMicrophone && openingCapture == nil { readyCue() }
                 endIfDone()
             }
             watchForStall(session: number)
             link.setRemoteVolume(muted || liveSpeechStopped ? 0 : 1)
             if usesLive { watchLivePlayback(link, session: number) }
+            return number
         } catch {
             // Ended while connecting: stop() already put everything back.
-            guard number == session, liveCloseTimeout == nil else { return }
+            guard number == session, liveCloseTimeout == nil else { return nil }
+            if Task.isCancelled || error is CancellationError {
+                if let grant, backgroundRecordingGrant?.grant.token == grant.token {
+                    backgroundRecordingGrant = nil
+                }
+                stop(ifOwningSession: number)
+                return nil
+            }
+            log.add("voice", "could not connect: \(error.localizedDescription)")
             if startOpeningDictation() {
                 // Return control to Shortcuts so the owner can run Poki Anytime again.
                 if !waitsForOpeningDictation { await openingDictation?.value }
-                return
+                return number
             }
             transcript = nil
             appAudio = nil
@@ -914,9 +1078,9 @@ final class VoiceModel {
                 closeConnection("could not connect")
                 holdingMicrophone = false
             }
-            phase = .lost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error))
+            setLost(captureOpening ? Self.openingAudioUnsent : VoiceError.reason(for: error), session: number)
             needsChatGPTSignIn = error as? CodexVoice.Failure == .signIn
-            log.add("voice", "could not connect: \(error.localizedDescription)")
+            return number
         }
     }
 
@@ -955,7 +1119,7 @@ final class VoiceModel {
         _ = releaseOpeningCapture(session: number)
         endVoiceConnection()
         session += 1
-        phase = .lost(Self.openingAudioUnsent)
+        setLost(Self.openingAudioUnsent, session: number)
         return false
     }
 
@@ -974,7 +1138,7 @@ final class VoiceModel {
             endSession()
             session += 1
             let note = Self.openingUncertainAfterAction
-            phase = .lost(note)
+            setLost(note, session: number)
             lines.append(VoiceLine(role: .note, text: note))
             endTranscript()
             return true
@@ -998,14 +1162,14 @@ final class VoiceModel {
         }
         guard authorized else {
             _ = releaseOpeningCapture(session: number, forDictation: false)
-            phase = .lost(Self.openingSpeechUnavailable)
+            setLost(Self.openingSpeechUnavailable, session: number)
             openingDictation = Task { [weak self] in
                 guard let self else { return }
                 defer {
                     if session == number { openingDictation = nil }
                 }
                 await openingSpeech.announce(Self.openingSpeechUnavailable)
-                if session == number { phase = .lost(Self.openingSpeechUnavailable) }
+                if session == number { setLost(Self.openingSpeechUnavailable, session: number) }
             }
             return true
         }
@@ -1042,9 +1206,9 @@ final class VoiceModel {
                 if session == number { phase = .off }
             } else {
                 let why = text?.isEmpty == false ? Self.openingAudioUnsent : Self.openingSpeechUnavailable
-                phase = .lost(why)
+                setLost(why, session: number)
                 await openingSpeech.announce(why)
-                if session == number { phase = .lost(why) }
+                if session == number { setLost(why, session: number) }
             }
         }
         return true
@@ -1105,6 +1269,12 @@ final class VoiceModel {
         lines.removeAll()
     }
 
+    /// Ends the conversation only if the caller still owns the active session.
+    func stop(ifOwningSession expectedSession: Int) {
+        guard expectedSession == session else { return }
+        stop()
+    }
+
     /// Ends the conversation. Calls already running keep running; the next session hears how they ended.
     func stop() {
         guard liveCloseTimeout == nil else { return }
@@ -1154,6 +1324,9 @@ final class VoiceModel {
     /// Drops the connection and the state of its turns; calls already running keep running. The lines of
     /// the conversation are kept for one opened soon after, before the chat takes them.
     private func endSession() {
+        if backgroundRecordingGrant?.session == session {
+            backgroundRecordingGrant = nil
+        }
         releaseOpeningCapture(session: session)
         openingDictation?.cancel()
         openingDictation = nil
@@ -1203,6 +1376,7 @@ final class VoiceModel {
         }
         liveCloseTimeout?.cancel()
         liveCloseTimeout = nil
+        liveCloseWaiters.resumeAll()
         closeConnection("session ended")
         usesLive = false
         appAudio = nil
@@ -1443,8 +1617,13 @@ final class VoiceModel {
         }
     }
 
-    private func startDictation() async {
-        guard await Dictation.allowed() else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
+    private func startDictation(session number: Int) async {
+        let allowed = await Dictation.allowed()
+        guard number == session, !Task.isCancelled else { return }
+        guard allowed else {
+            setLost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki.")), session: number)
+            return
+        }
         let dictation = Dictation()
         dictation.onHeard = { [weak self] text in
             guard let self, self.phase == .hearing else { return }
@@ -1461,7 +1640,7 @@ final class VoiceModel {
         } catch {
             self.dictation = nil
             holdingMicrophone = false
-            phase = .lost(VoiceError.reason(for: error))
+            setLost(VoiceError.reason(for: error), session: number)
         }
     }
 
@@ -1523,7 +1702,7 @@ final class VoiceModel {
         if usesLive && ready { logLiveClose(reason, confirmed: confirmed) }
         endSession()
         session += 1
-        phase = .lost(lostMessage ?? TalkState.connectionLost)
+        setLost(lostMessage ?? TalkState.connectionLost, session: number)
         lines.append(VoiceLine(role: .note, text: note ?? AppLocalization.text(LocalizedStringResource("Connection lost. Nothing is sent again. Talk again to hear how running steps ended."))))
         endTranscript()
         log.add("voice", "connection lost: \(reason)")
@@ -1561,7 +1740,7 @@ final class VoiceModel {
             closed("the ChatGPT voice session ended", session: number, confirmed: method == "thread/realtime/closed")
             if needsSignIn {
                 needsChatGPTSignIn = true
-                phase = .lost(CodexVoice.Failure.signIn.localizedDescription)
+                setLost(CodexVoice.Failure.signIn.localizedDescription, session: number)
             }
         case "thread/realtime/itemAdded":
             guard (params["item"] as? CodexVoice.JSON)?["type"] as? String == "handoff_request" else { return }
@@ -1629,6 +1808,7 @@ final class VoiceModel {
                 phase = .thinking
                 watchForStall(session: number)
             } else if role == "assistant", !text.isEmpty {
+                openingCapture?.audio.markRemoteReplied(session: number)
                 lines.append(VoiceLine(role: .poki, text: text))
             }
         default:

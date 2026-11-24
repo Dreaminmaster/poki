@@ -245,10 +245,9 @@ final class AppModel {
     /// The Live Activity during a talk with Poki: what the talk is doing, and End.
     private var talkActivity: TalkActivity?
 
-    /// Talk Here (TalkHereIntent): starts the talk with Poki in the background. false: the Live
-    /// Activity iOS asks for did not start, so neither did the talk.
-    func talkHere(presentSpeechPermission: SpeechPermissionPresenter) async -> Bool {
-        await talkActivity?.startHere(presentSpeechPermission: presentSpeechPermission) ?? false
+    /// Talk Here (TalkHereIntent): starts the talk with Poki in the background.
+    func talkHere(presentSpeechPermission: SpeechPermissionPresenter) async -> TalkHereOutcome {
+        await talkActivity?.startHere(presentSpeechPermission: presentSpeechPermission) ?? .liveActivityUnavailable
     }
     let log = AppLog.shared
     private var eventsTask: Task<Void, Never>?
