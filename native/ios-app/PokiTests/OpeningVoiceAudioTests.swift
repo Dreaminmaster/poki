@@ -171,4 +171,73 @@ final class OpeningVoiceAudioTests: XCTestCase {
         }
         XCTAssertFalse(deliveryLogs.isEmpty, "WebRTC deliverRecordedData failure must be logged explicitly")
     }
+
+    @MainActor
+    func testZeroInputRecoveryRestartsOnSustainedSilenceAndStopsOnceNonZeroArrives() async throws {
+        let priorLogs = Set(AppLog.shared.lines)
+        var restarts: [String] = []
+        let audio = OpeningVoiceAudio(
+            session: 1,
+            playReadyChime: false,
+            zeroInputRecoveryEnabled: true,
+            isInputMuted: { false },
+            restartAudioUnit: { reason in restarts.append(reason) }
+        )
+
+        let zeroChunk = try makeMonoPCM16Buffer(frames: 960, value: 0)
+        for index in 0..<75 {
+            audio.recordRawInputMetrics(frameCount: 960, maxSample: 0, peak: 0)
+            audio.input(zeroChunk, at: AVAudioTime(sampleTime: AVAudioFramePosition(index * 960), atRate: 48_000))
+        }
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(restarts, ["sustained zero input (#1)"],
+                       "Sustained exact-zero input at threshold must trigger a VPIO restart")
+        XCTAssertEqual(audio.bufferedFrameCount, 0,
+                       "Zero-input recovery while buffering must clear dead leading zeros so speech reaches WebRTC without stale silence")
+
+        audio.recoverFromZeroInput(reason: "spatial playback capabilities changed", requiresExistingZeroInput: false)
+        XCTAssertEqual(restarts.count, 2)
+
+        audio.recordRawInputMetrics(frameCount: 960, maxSample: 1_800, peak: Float(1_800) / 32_768.0)
+        let recoveryLogs = AppLog.shared.lines.filter {
+            !priorLogs.contains($0) && $0.contains("opening audio recovered non-zero input after 2 VPIO restart(s)")
+        }
+        XCTAssertFalse(recoveryLogs.isEmpty, "Receiving live non-zero audio after VPIO restart must log recovery")
+
+        for _ in 0..<200 {
+            audio.recordRawInputMetrics(frameCount: 960, maxSample: 0, peak: 0)
+        }
+        await Task.yield()
+        audio.recoverFromZeroInput(reason: "spatial playback capabilities changed", requiresExistingZeroInput: false)
+        XCTAssertEqual(restarts.count, 2,
+                       "Once non-zero hardware input has been observed, quiet pauses must never trigger further VPIO restarts")
+    }
+
+    @MainActor
+    func testZeroInputRecoverySkipsWhenMutedAndCapsRestartAttempts() async {
+        var muted = true
+        var restarts: [String] = []
+        let audio = OpeningVoiceAudio(
+            session: 1,
+            playReadyChime: false,
+            zeroInputRecoveryEnabled: true,
+            isInputMuted: { muted },
+            restartAudioUnit: { reason in restarts.append(reason) }
+        )
+
+        for _ in 0..<100 {
+            audio.recordRawInputMetrics(frameCount: 960, maxSample: 0, peak: 0)
+        }
+        await Task.yield()
+        await Task.yield()
+        XCTAssertTrue(restarts.isEmpty, "Zero-input recovery must not restart VPIO while input is muted")
+
+        muted = false
+        for attempt in 1...10 {
+            audio.recoverFromZeroInput(reason: "attempt \(attempt)", requiresExistingZeroInput: false)
+        }
+        XCTAssertEqual(restarts.count, OpeningVoiceAudio.maxZeroInputRecoveryRestarts,
+                       "Zero-input recovery must remain strictly bounded")
+    }
 }

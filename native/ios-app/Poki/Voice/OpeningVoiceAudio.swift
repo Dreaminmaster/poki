@@ -40,6 +40,11 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private static let maxFramesPerSlice: UInt32 = 4_096
     // Covers two connection attempts plus fallback dictation without unbounded memory growth.
     static let maxOpeningFrames = Int(sampleRate) * 180
+    // Cumulative exact-zero frames (~1.5 s, 3.5 s, 6.5 s, 10.0 s at 48 kHz) before restarting VPIO
+    // to recover from sticky remote-control / Oneness input mute without an interruption notice.
+    static let zeroInputRecoveryThresholds = [72_000, 168_000, 312_000, 480_000]
+    static let maxZeroInputRecoveryRestarts = 6
+    private static let minZeroInputNotificationRestartInterval: TimeInterval = 0.5
     private static let channelFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true
     )!
@@ -60,6 +65,11 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     @MainActor private var holdsAudioSession = false
     @MainActor private var interruptionObserver: NSObjectProtocol?
     @MainActor private var resetObserver: NSObjectProtocol?
+    @MainActor private var spatialObserver: NSObjectProtocol?
+    @MainActor private var lastZeroInputRestartAt = Date.distantPast
+    private let zeroInputRecoveryEnabled: Bool
+    private let isInputMuted: @MainActor () -> Bool
+    private let restartAudioUnitOverride: (@MainActor (String) -> Void)?
     private let lock = NSLock()
     // Revocation waits only for a delivery already in progress; WebRTC is never called under `lock`.
     private let sendLock = NSLock()
@@ -110,6 +120,10 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
     private var nonZeroTapCallbacks = 0
     private var rawNonZeroTapCallbacks = 0
     private var rawMaxPeak: Float = 0
+    private var zeroInputFrames = 0
+    private var zeroInputRecoveryAttempts = 0
+    private var zeroInputRecoveryPending = false
+    private var loggedNonZeroRecovery = false
     private var renderErrors = 0
     private var deliveryErrors = 0
 
@@ -136,8 +150,21 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         lock.withLock { overflow }
     }
 
-    init(session: Int, playReadyChime: Bool = true) {
+    init(
+        session: Int,
+        playReadyChime: Bool = true,
+        zeroInputRecoveryEnabled: Bool? = nil,
+        isInputMuted: @escaping @MainActor () -> Bool = { AVAudioApplication.shared.isInputMuted },
+        restartAudioUnit: (@MainActor (String) -> Void)? = nil
+    ) {
         self.session = session
+        #if targetEnvironment(simulator)
+        self.zeroInputRecoveryEnabled = zeroInputRecoveryEnabled ?? false
+        #else
+        self.zeroInputRecoveryEnabled = zeroInputRecoveryEnabled ?? true
+        #endif
+        self.isInputMuted = isInputMuted
+        self.restartAudioUnitOverride = restartAudioUnit
         chimeOffset = playReadyChime ? 0 : VoiceOpeningFeedback.readyChime.count
         super.init()
     }
@@ -285,13 +312,59 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
         ) { [weak self] _ in
             Task { @MainActor in self?.restartAudioUnit(reason: "media services reset") }
         }
+        spatialObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.spatialPlaybackCapabilitiesChangedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.recoverFromZeroInput(reason: "spatial playback capabilities changed", requiresExistingZeroInput: true)
+            }
+        }
     }
 
     @MainActor private func removeAudioLifecycleObservers() {
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         if let resetObserver { NotificationCenter.default.removeObserver(resetObserver) }
+        if let spatialObserver { NotificationCenter.default.removeObserver(spatialObserver) }
         interruptionObserver = nil
         resetObserver = nil
+        spatialObserver = nil
+    }
+
+    @MainActor func recoverFromZeroInput(reason: String, requiresExistingZeroInput: Bool = false) {
+        guard zeroInputRecoveryEnabled else { return }
+        if isInputMuted() {
+            lock.withLock { zeroInputRecoveryPending = false }
+            return
+        }
+        let now = Date()
+        if requiresExistingZeroInput,
+           now.timeIntervalSince(lastZeroInputRestartAt) < Self.minZeroInputNotificationRestartInterval {
+            return
+        }
+        let plan: (attempt: Int, taps: Int, zeroFrames: Int)? = lock.withLock {
+            zeroInputRecoveryPending = false
+            if case .stopped = state { return nil }
+            guard rawNonZeroTapCallbacks == 0 else { return nil }
+            if requiresExistingZeroInput, tapCallbacks == 0 { return nil }
+            guard zeroInputRecoveryAttempts < Self.maxZeroInputRecoveryRestarts else { return nil }
+            zeroInputRecoveryAttempts += 1
+            if case .buffering = state, lastNonZeroOpeningFrame == 0 {
+                queued.removeAll(keepingCapacity: true)
+                readIndex = 0
+                openingEndFrame = 0
+            }
+            return (zeroInputRecoveryAttempts, tapCallbacks, zeroInputFrames)
+        }
+        guard let plan else { return }
+        lastZeroInputRestartAt = now
+        Self.logVoice("opening audio restarting VPIO for \(reason) (attempt \(plan.attempt), taps=\(plan.taps), zeroFrames=\(plan.zeroFrames))")
+        if let restartAudioUnitOverride {
+            restartAudioUnitOverride(reason)
+        } else {
+            restartAudioUnit(reason: reason)
+        }
     }
 
     @MainActor private func restartAudioUnit(reason: String) {
@@ -486,16 +559,54 @@ final class OpeningVoiceAudio: NSObject, RTCAudioDevice, @unchecked Sendable {
                 if magnitude > maxSample { maxSample = magnitude }
             }
             let peak = Float(maxSample) / 32_768.0
-            lock.withLock {
-                tapCallbacks += 1
-                if maxSample > 0 {
-                    nonZeroTapCallbacks += 1
-                    rawNonZeroTapCallbacks += 1
-                }
-                if peak > rawMaxPeak { rawMaxPeak = peak }
-            }
+            recordRawInputMetrics(frameCount: count, maxSample: maxSample, peak: peak)
             inputSamples(samples, timestamp: inTimeStamp.pointee)
             return noErr
+        }
+    }
+
+    func recordRawInputMetrics(frameCount: Int, maxSample: Int32, peak: Float) {
+        enum Action {
+            case none
+            case restart(Int)
+            case recovered(Int, Float)
+        }
+        let action: Action = lock.withLock {
+            tapCallbacks += 1
+            if maxSample > 0 {
+                nonZeroTapCallbacks += 1
+                rawNonZeroTapCallbacks += 1
+                if peak > rawMaxPeak { rawMaxPeak = peak }
+                zeroInputFrames = 0
+                zeroInputRecoveryPending = false
+                if zeroInputRecoveryAttempts > 0, !loggedNonZeroRecovery {
+                    loggedNonZeroRecovery = true
+                    return .recovered(zeroInputRecoveryAttempts, peak)
+                }
+                return .none
+            }
+            if peak > rawMaxPeak { rawMaxPeak = peak }
+            guard zeroInputRecoveryEnabled, rawNonZeroTapCallbacks == 0 else { return .none }
+            if case .stopped = state { return .none }
+            zeroInputFrames += frameCount
+            guard !zeroInputRecoveryPending,
+                  zeroInputRecoveryAttempts < Self.zeroInputRecoveryThresholds.count,
+                  zeroInputFrames >= Self.zeroInputRecoveryThresholds[zeroInputRecoveryAttempts] else {
+                return .none
+            }
+            zeroInputRecoveryPending = true
+            return .restart(zeroInputRecoveryAttempts + 1)
+        }
+        switch action {
+        case .none:
+            break
+        case .restart(let attempt):
+            Task { @MainActor [weak self] in
+                self?.recoverFromZeroInput(reason: "sustained zero input (#\(attempt))")
+            }
+        case .recovered(let attempts, let peak):
+            let formatted = String(format: "%.5f", peak)
+            Self.logVoice("opening audio recovered non-zero input after \(attempts) VPIO restart(s): peak=\(formatted)")
         }
     }
 
