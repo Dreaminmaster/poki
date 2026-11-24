@@ -8,6 +8,61 @@ import XCTest
 
 @MainActor
 final class LiveActivityTests: XCTestCase {
+    func testActivityPayloadBoundsUnicodeWithoutChangingControllerState() throws {
+        let activity = ActivityController()
+        let headline = String(repeating: "👩🏽‍💻", count: 500)
+        let result = String(repeating: "e" + String(repeating: "\u{0301}", count: 90), count: 80)
+        activity.update {
+            $0.headline = headline
+            $0.result = result
+        }
+
+        let payload = try XCTUnwrap(activity.content()).state
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(payload).count, 3_500)
+        XCTAssertFalse(payload.headline.isEmpty)
+        XCTAssertEqual(payload.phase, activity.state.phase)
+        XCTAssertEqual(activity.state.headline, headline)
+        XCTAssertEqual(activity.state.result, result)
+    }
+
+    func testOversizedPlanKeepsApprovalIdentityAndExpiry() throws {
+        let activity = ActivityController()
+        let expires = Date().addingTimeInterval(120)
+        activity.update {
+            $0.phase = .approval
+            $0.approval = .init(id: "approval-id", app: "Notes", summary: "Edit note",
+                                reason: "deleting", expires: expires)
+            $0.plan = .init(steps: Array(repeating: String(repeating: "查", count: 60), count: 80), current: 2)
+        }
+
+        let content = try XCTUnwrap(activity.content())
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(content.state).count, 3_500)
+        XCTAssertEqual(content.state.phase, .approval)
+        XCTAssertEqual(content.state.approval?.id, "approval-id")
+        XCTAssertEqual(content.staleDate, expires)
+        XCTAssertEqual(activity.state.plan?.steps.count, 80)
+    }
+
+    func testEscapedFallbackStillFitsAndKeepsApprovalIdentity() throws {
+        let activity = ActivityController()
+        let escaped = String(repeating: "\u{0001}", count: 160)
+        let expiry = Date().addingTimeInterval(60)
+        activity.update {
+            $0.phase = .approval
+            $0.headline = escaped
+            $0.approval = .init(id: "approval-id", app: escaped, summary: escaped,
+                                reason: escaped, expires: expiry)
+            $0.handoff = .init(id: "handoff-id", kind: .other, text: escaped, app: escaped, since: Date())
+        }
+
+        let content = try XCTUnwrap(activity.content())
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(content.state).count, 3_500)
+        XCTAssertEqual(content.state.approval?.id, "approval-id")
+        XCTAssertEqual(content.state.handoff?.id, "handoff-id")
+        XCTAssertEqual(content.staleDate, expiry)
+        XCTAssertEqual(activity.state.headline, escaped)
+    }
+
     func testSplitViewChatKeepsStopAvailableWhileWaitingForTheModel() async throws {
         let activity = ActivityController()
         activity.finishAfter = .milliseconds(20)
