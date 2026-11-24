@@ -735,22 +735,33 @@ final class VoiceModel {
         guard number == session else { return }
         guard allowed else { phase = .lost(AppLocalization.text(LocalizedStringResource("Poki needs the microphone and speech recognition: allow them in Settings › Poki."))); return }
         let dictation = Dictation()
-        dictation.onHeard = { [weak self] text in
-            guard let self, self.phase == .hearing else { return }
-            if self.lines.last?.role == .you { self.lines.removeLast() }
-            self.lines.append(VoiceLine(role: .you, text: text))
-        }
-        dictation.onSpoken = { [weak self] in if self?.phase == .speaking { self?.phase = .listening } }
-        self.dictation = dictation
+        activateDictation(dictation, listen: dictation.listen)
+    }
+
+    func activateDictation(_ dictation: Dictation, listen: () throws -> Void) {
+        bindDictation(dictation)
         holdingMicrophone = true
         do {
-            try dictation.listen()
+            try listen()
             phase = .hearing
             log.add("voice", "dictation to the chat (no Realtime key or bridge)")
         } catch {
             self.dictation = nil
             holdingMicrophone = false
             phase = .lost(VoiceError.reason(for: error))
+        }
+    }
+
+    private func bindDictation(_ dictation: Dictation) {
+        self.dictation = dictation
+        dictation.onHeard = { [weak self, weak dictation] text in
+            guard let self, let dictation, self.dictation === dictation, self.phase == .hearing else { return }
+            if self.lines.last?.role == .you { self.lines.removeLast() }
+            self.lines.append(VoiceLine(role: .you, text: text))
+        }
+        dictation.onSpoken = { [weak self, weak dictation] in
+            guard let self, let dictation, self.dictation === dictation, self.phase == .speaking else { return }
+            self.phase = .listening
         }
     }
 

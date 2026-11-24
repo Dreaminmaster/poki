@@ -96,12 +96,16 @@ final class VoiceModelTests: XCTestCase {
 
     func testStoppedDictationDoesNotPublishLateTranscript() async {
         let h = Harness()
-        let task = h.voice.finishDictation(Dictation()) {
+        let original = Dictation()
+        h.voice.activateDictation(original, listen: {})
+        let task = h.voice.finishDictation(original) {
             h.voice.stop()
+            h.voice.activateDictation(Dictation(), listen: {})
+            original.onHeard?("Old partial transcript")
             return "Old transcript"
         }
         await task.value
-        XCTAssertEqual(h.voice.phase, .off)
+        XCTAssertEqual(h.voice.phase, .hearing)
         XCTAssertTrue(h.voice.lines.isEmpty)
     }
 
