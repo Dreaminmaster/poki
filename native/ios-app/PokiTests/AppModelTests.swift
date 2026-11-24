@@ -101,6 +101,25 @@ final class FakePairing: DevicePairing {
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testDarwinMailboxDeliveryStopsWhenSubscriptionIsReleased() async {
+        let name = "nz.zheha.poki.tests.mailbox.\(UUID().uuidString)"
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let delivered = expectation(description: "mailbox callback on the main actor")
+        let late = expectation(description: "callback after teardown")
+        late.isInverted = true
+        var subscription: AppModel.MailboxNotifications? = .init()
+        var calls = 0
+        subscription?.observe(name) {
+            calls += 1
+            if calls == 1 { delivered.fulfill() } else { late.fulfill() }
+        }
+        CFNotificationCenterPostNotification(center, CFNotificationName(name as CFString), nil, nil, true)
+        await fulfillment(of: [delivered], timeout: 2)
+        subscription = nil
+        CFNotificationCenterPostNotification(center, CFNotificationName(name as CFString), nil, nil, true)
+        await fulfillment(of: [late], timeout: 0.2)
+    }
+
     private var language = AppLocalization.system
 
     /// The loopback's words follow Poki's language; these tests read the English ones.

@@ -3,6 +3,7 @@ import PokiCore
 import SwiftUI
 import UIKit
 import UserNotifications
+import notify
 
 /// The app's state and the glue between PokiCore, PokiLauncher, the loopback, the Live Activity and
 /// approvals. One instance, owned by PokiApp.
@@ -2182,24 +2183,34 @@ final class AppModel {
         for observer in stopAskingObservers { observer() }
     }
 
+    @ObservationIgnored private let mailboxNotifications = MailboxNotifications()
+
+    final class MailboxNotifications {
+        private var tokens: [Int32] = []
+
+        func observe(_ name: String, action: @escaping @MainActor @Sendable () -> Void) {
+            var token: Int32 = 0
+            let status = notify_register_dispatch(name, &token, .main) { _ in
+                MainActor.assumeIsolated { action() }
+            }
+            if status == NOTIFY_STATUS_OK { tokens.append(token) }
+        }
+
+        deinit {
+            for token in tokens { notify_cancel(token) }
+        }
+    }
+
     private func listenForApprovals() {
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.drainApprovals() }
-        }, ApprovalMailbox.notification as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.stopFromOutside(AppModel.liveActivityStop) }
-        }, ApprovalMailbox.stopRunner as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.handoffDone() }
-        }, ApprovalMailbox.handoffDone as CFString, nil, .deliverImmediately)
+        mailboxNotifications.observe(ApprovalMailbox.notification) { [weak self] in
+            self?.drainApprovals()
+        }
+        mailboxNotifications.observe(ApprovalMailbox.stopRunner) { [weak self] in
+            self?.stopFromOutside(AppModel.liveActivityStop)
+        }
+        mailboxNotifications.observe(ApprovalMailbox.handoffDone) { [weak self] in
+            self?.handoffDone()
+        }
     }
 
     /// The person tapped "Continue" on the Live Activity's "Your turn" card.
