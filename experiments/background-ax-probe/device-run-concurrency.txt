@@ -1,0 +1,31 @@
+PROBE 04:20:41.847 [F] assertion granted=Optional(1)
+PROBE 04:20:42.050 [F] START: owner may now use the phone (Settings / Notes). Settings=4 Notes=1 Calculator=4
+PROBE 04:20:42.939 [F] #1 +0s press 2 ok=true err=none display=2 expected=2 match=true in 881 ms | Settings=4 Notes=1 Calculator=3
+PROBE 04:20:53.610 [F] #2 +11s press 3 ok=true err=none display=23 expected=23 match=true in 667 ms | Settings=2 Notes=1 Calculator=3
+PROBE 04:21:04.393 [F] #3 +22s press 4 ok=true err=none display=234 expected=234 match=true in 776 ms | Settings=2 Notes=1 Calculator=3
+PROBE 04:21:15.091 [F] #4 +33s press 5 ok=true err=none display=2,345 expected=2345 match=true in 690 ms | Settings=2 Notes=1 Calculator=3
+PROBE 04:21:25.793 [F] #5 +43s press 6 ok=true err=none display=23,456 expected=23456 match=true in 697 ms | Settings=2 Notes=1 Calculator=3
+PROBE 04:21:36.568 [F] #6 +54s press 7 ok=true err=none display=234,567 expected=234567 match=true in 768 ms | Settings=2 Notes=1 Calculator=3
+PROBE 04:21:47.313 [F] #7 +65s press 8 ok=true err=none display=2,345,678 expected=2345678 match=true in 738 ms | Settings=2 Notes=4 Calculator=3
+PROBE 04:21:58.064 [F] #8 +76s press 9 ok=true err=none display=23,456,789 expected=23456789 match=true in 740 ms | Settings=2 Notes=3 Calculator=3
+PROBE 04:22:08.748 [F] #9 +86s press 1 ok=true err=none display=234,567,891 expected=234567891 match=true in 674 ms | Settings=2 Notes=3 Calculator=3
+PROBE 04:22:19.529 [F] #10 +97s press 2 ok=true err=none display=2,345,678,912 expected= match=true in 769 ms | Settings=2 Notes=3 Calculator=3
+PROBE 04:22:30.236 [F] #11 +108s press 3 ok=true err=none display=3 expected=3 match=true in 697 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:22:40.981 [F] #12 +118s press 4 ok=true err=none display=34 expected=34 match=true in 737 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:22:51.673 [F] #13 +129s press 5 ok=true err=none display=345 expected=345 match=true in 689 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:02.350 [F] #14 +140s press 6 ok=true err=none display=3,456 expected=3456 match=true in 668 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:13.108 [F] #15 +151s press 7 ok=true err=none display=34,567 expected=34567 match=true in 752 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:23.825 [F] #16 +161s press 8 ok=true err=none display=345,678 expected=345678 match=true in 710 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:34.558 [F] #17 +172s press 9 ok=true err=none display=3,456,789 expected=3456789 match=true in 720 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:45.319 [F] #18 +183s press 1 ok=true err=none display=34,567,891 expected=34567891 match=true in 751 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:23:55.989 [F] #19 +193s press 2 ok=true err=none display=345,678,912 expected=345678912 match=true in 662 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:24:06.797 [F] #20 +204s press 3 ok=true err=none display=3,456,789,123 expected= match=true in 800 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:24:17.503 [F] #21 +215s press 4 ok=true err=none display=4 expected=4 match=true in 699 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:24:28.245 [F] #22 +226s press 5 ok=true err=none display=45 expected=45 match=true in 732 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:24:38.978 [F] #23 +236s press 6 ok=true err=none display=456 expected=456 match=true in 722 ms | Settings=2 Notes=2 Calculator=3
+PROBE 04:24:49.695 [F] #24 +247s press 7 ok=true err=none display=4,567 expected=4567 match=true in 709 ms | Settings=4 Notes=2 Calculator=3
+PROBE 04:25:00.401 [F] #25 +258s press 8 ok=true err=none display=45,678 expected=45678 match=true in 702 ms | Settings=4 Notes=2 Calculator=3
+PROBE 04:25:11.128 [F] #26 +269s press 9 ok=true err=none display=456,789 expected=456789 match=true in 717 ms | Settings=4 Notes=2 Calculator=3
+PROBE 04:25:21.819 [F] #27 +279s press 1 ok=true err=none display=4,567,891 expected=4567891 match=true in 682 ms | Settings=4 Notes=2 Calculator=3
+PROBE 04:25:32.552 [F] #28 +290s press 2 ok=true err=none display=45,678,912 expected=45678912 match=true in 721 ms | Settings=4 Notes=2 Calculator=3
+PROBE 04:25:42.565 [F] END: presses verified=28 failed=0 | Settings=4 Notes=2 Calculator=3

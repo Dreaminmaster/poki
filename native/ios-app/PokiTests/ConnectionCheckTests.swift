@@ -6,6 +6,7 @@ final class ModelServerStub: URLProtocol {
     struct Sent {
         let url: URL?
         let body: Data
+        let headers: [String: String]
         var json: [String: Any] {
             (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         }
@@ -36,7 +37,14 @@ final class ModelServerStub: URLProtocol {
     override func startLoading() {
         let body = Self.bodyData(from: request)
         let customResponder = Self.lock.withLock { () -> (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))? in
-            Self.recorded.append(Sent(url: request.url, body: body))
+            // Only inspect non-secret routing fields in tests: never retain
+            // Authorization, API keys, cookies or other credential headers.
+            let visible: Set<String> = ["x-opencode-session", "x-opencode-client", "user-agent"]
+            let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into: [String: String]()) { result, field in
+                let name = field.key.lowercased()
+                if visible.contains(name) { result[name] = field.value }
+            }
+            Self.recorded.append(Sent(url: request.url, body: body, headers: headers))
             return Self.responder
         }
         let reply: (status: Int, type: String, body: String)
@@ -255,7 +263,7 @@ final class ConnectionCheckTests: XCTestCase {
 
         try ModelKeys.save(key, for: .openrouter)
         let model = try XCTUnwrap(ModelProvider.openrouter.piModel(modelID))
-        let loop = PiLoop(provider: .openrouter, model: model, tools: []) { _ in
+        let loop = PiLoop(provider: .openrouter, model: model, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let turnOutcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -292,7 +300,7 @@ final class ConnectionCheckTests: XCTestCase {
         ModelKeys.selectedProvider = .openrouter
         ModelKeys.selectedModel = "vendor/plain-chat"
         let plainModel = try XCTUnwrap(ModelProvider.openrouter.piModel("vendor/plain-chat"))
-        let plainLoop = PiLoop(provider: .openrouter, model: plainModel, tools: []) { _ in
+        let plainLoop = PiLoop(provider: .openrouter, model: plainModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let plainOutcome = await plainLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -311,7 +319,7 @@ final class ConnectionCheckTests: XCTestCase {
         XCTAssertNil(checkSent.json["thinking"])
 
         let reasoningModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-terra"))
-        let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, tools: []) { _ in
+        let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let reasoningOutcome = await reasoningLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -361,7 +369,7 @@ final class ConnectionCheckTests: XCTestCase {
 
         ModelServerStub.recordedReset()
         let solModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-sol"))
-        let solLoop = PiLoop(provider: .openrouter, model: solModel, tools: []) { _ in
+        let solLoop = PiLoop(provider: .openrouter, model: solModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         let solOutcome = await solLoop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }
@@ -404,7 +412,7 @@ final class ConnectionCheckTests: XCTestCase {
         func chatRequest(_ modelID: String) async throws -> ModelServerStub.Sent {
             ModelServerStub.recordedReset()
             let model = try XCTUnwrap(ModelProvider.anthropic.piModel(modelID))
-            let loop = PiLoop(provider: .anthropic, model: model, tools: []) { _ in
+            let loop = PiLoop(provider: .anthropic, model: model, sessionID: UUID().uuidString, tools: []) { _ in
                 .init(text: "", jpeg: nil, isError: false)
             }
             let outcome = await loop.run("Reply with OK.", instructions: "Be brief.", maxTurns: 1) { _ in }

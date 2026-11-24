@@ -3,6 +3,7 @@ import PokiCore
 import SwiftUI
 import UIKit
 import UserNotifications
+import notify
 
 /// The app's state and the glue between PokiCore, PokiLauncher, the loopback, the Live Activity and
 /// approvals. One instance, owned by PokiApp.
@@ -246,6 +247,7 @@ final class AppModel {
     let log = AppLog.shared
     private var eventsTask: Task<Void, Never>?
     private var handoffTimer: Timer?
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
     private var sessionStartTask: Task<Void, Never>?
     private(set) var sessionStarting = false
     private var pendingPrepareForTask = false
@@ -473,7 +475,7 @@ final class AppModel {
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
         if UserDefaults.standard.string(forKey: "pokiSample") != nil { loadSample() }
-        NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+        terminationObserver = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
         // Installed over the local-VPN build (both use one bundle ID): this build has only external
@@ -484,6 +486,12 @@ final class AppModel {
             setup.save()
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
+    }
+
+    isolated deinit {
+        idleTimer?.invalidate()
+        handoffTimer?.invalidate()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     /// The in-process session as prepare last answered it in this process (ESP-152).
@@ -1843,7 +1851,8 @@ final class AppModel {
             if let thumbnail, let image = UIImage(data: thumbnail) { lastShot = image }
             closeAfterTalk()
         case .approvalRequested(let approval):
-            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn) {
+            let origin = ApprovalClassifier.origin(voiceOn: voice.isOn, outsideSession: approval.sourceSession)
+            switch ApprovalClassifier.route(approval, voiceOn: voice.isOn, origin: origin) {
             case .allow:
                 // The rules were on when Poki started and asking has been turned off since.
                 checking.append(approval)
@@ -1854,7 +1863,8 @@ final class AppModel {
                 checking.append(approval)
                 log.add("approval", "requested \(approval.id) in \(approval.app): \(approval.summary); asking the auto-classifier")
                 Task { [weak self] in
-                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved, voice: self?.voice.lines ?? [])
+                    let verdict = await ApprovalClassifier.decide(approval, level: ApprovalClassifier.Level.saved,
+                                                                  voice: self?.voice.lines ?? [], origin: origin)
                     guard let self, self.checking.contains(where: { $0.id == approval.id }) else { return }
                     self.log.add("approval", "auto-classifier \(verdict.allowed ? "allowed" : "refused") \(approval.id): \(verdict.reason)")
                     if verdict.allowed || reply {
@@ -2173,24 +2183,34 @@ final class AppModel {
         for observer in stopAskingObservers { observer() }
     }
 
+    @ObservationIgnored private let mailboxNotifications = MailboxNotifications()
+
+    final class MailboxNotifications {
+        private var tokens: [Int32] = []
+
+        func observe(_ name: String, action: @escaping @MainActor @Sendable () -> Void) {
+            var token: Int32 = 0
+            let status = notify_register_dispatch(name, &token, .main) { _ in
+                MainActor.assumeIsolated { action() }
+            }
+            if status == NOTIFY_STATUS_OK { tokens.append(token) }
+        }
+
+        deinit {
+            for token in tokens { notify_cancel(token) }
+        }
+    }
+
     private func listenForApprovals() {
-        let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let observer = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.drainApprovals() }
-        }, ApprovalMailbox.notification as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.stopFromOutside(AppModel.liveActivityStop) }
-        }, ApprovalMailbox.stopRunner as CFString, nil, .deliverImmediately)
-        CFNotificationCenterAddObserver(center, observer, { _, observer, _, _, _ in
-            guard let observer else { return }
-            let model = Unmanaged<AppModel>.fromOpaque(observer).takeUnretainedValue()
-            Task { @MainActor in model.handoffDone() }
-        }, ApprovalMailbox.handoffDone as CFString, nil, .deliverImmediately)
+        mailboxNotifications.observe(ApprovalMailbox.notification) { [weak self] in
+            self?.drainApprovals()
+        }
+        mailboxNotifications.observe(ApprovalMailbox.stopRunner) { [weak self] in
+            self?.stopFromOutside(AppModel.liveActivityStop)
+        }
+        mailboxNotifications.observe(ApprovalMailbox.handoffDone) { [weak self] in
+            self?.handoffDone()
+        }
     }
 
     /// The person tapped "Continue" on the Live Activity's "Your turn" card.
@@ -2568,6 +2588,8 @@ final class AppModel {
             return (AppLocalization.text(LocalizedStringResource("iOS asked for the iPhone passcode to allow automation, but it was not entered. Turn Poki off and on, then enter the passcode.")), false)
         case .failed(let code, _) where loopback.cellularOnly:
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)). Connect to Wi-Fi and try again.")), false)
+        case .failed(let code, _) where runner.loopbackHandshakeDropped == true:
+            return (AppLocalization.text(LocalizedStringResource("The loopback connection closed during the opening handshake, and Poki could not open its own automation session (\(code)). Check the loopback in Setup, then try again.")), true)
         case .failed(let code, _):
             return (AppLocalization.text(LocalizedStringResource("Poki could not open its own automation session (\(code)), and the loopback refused the connection. Check the loopback in Setup, then try again.")), true)
         }

@@ -21,6 +21,7 @@ final class PiLoop {
 
     let provider: ModelProvider
     let model: Model
+    let sessionID: String
     let inSplitView: Bool
     private let agent: Agent
     private let allTools: [AgentTool]
@@ -37,13 +38,24 @@ final class PiLoop {
         return endpoint.backups == CustomEndpointClient.backupAddresses(for: model)
     }
 
-    init(provider: ModelProvider, model: Model, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
+    /// Keep custom provider requests identified as Poki without imitating another client.
+    static func clientIdentity(version: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) -> ClientIdentity {
+        let cleanVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agent = "Poki/\(cleanVersion.flatMap { $0.isEmpty ? nil : $0 } ?? "dev")"
+        return ClientIdentity(
+            userAgent: .custom(agent),
+            attribution: .value(ClientAttribution(name: "Poki", url: "https://github.com/JosssphZhou/poki"))
+        )
+    }
+
+    init(provider: ModelProvider, model: Model, sessionID: String, tools: [ToolSpec], inSplitView: Bool = false, carrying messages: [AgentMessage] = [],
          perform: @escaping @MainActor (ToolCall) async -> PokiCore.ToolAnswer) {
         self.provider = provider
         self.model = model
+        self.sessionID = sessionID
         self.inSplitView = inSplitView
         let gate = self.gate
-        let endpoint = provider == .custom ? CustomEndpointClient(for: model) : nil
+        let endpoint = provider == .custom ? CustomEndpointClient(for: model, sessionID: sessionID) : nil
         self.endpoint = endpoint
         let stall = self.stall
         let grants = HistoryDeliveryGrants()
@@ -100,8 +112,24 @@ final class PiLoop {
                 }
                 var options = options
                 if let endpoint { options.httpClient = endpoint }
+                if provider == .custom {
+                    // PiSwift uses sessionId for both OpenCode's routing header and
+                    // the OpenAI Responses prompt_cache_key. Generic compatible
+                    // gateways may reject that extra JSON field, even when their
+                    // connection check succeeds. Preserve the SDK's narrowly scoped
+                    // OpenCode header, then prevent implicit cache fields on every
+                    // custom request (including auxiliary naming/approvals).
+                    options.headers = openCodeSessionHeaders(
+                        model: model, sessionId: sessionID, headers: options.headers)
+                    options.sessionId = nil
+                }
                 return try streamSimple(model: model, context: Context(messages: messages), options: options)
             },
+            // Built-in providers do not need a Poki routing ID in their HTTP
+            // payloads. Avoid PiSwift's implicit Responses cache metadata on
+            // every ordinary OpenAI request; custom OpenCode routing stays explicit.
+            sessionId: provider == .custom ? sessionID : nil,
+            identity: provider == .custom ? Self.clientIdentity() : nil,
             getApiKey: { _ in await ModelCredential.apiKey(for: provider, piProvider: model.provider) },
             toolExecution: .sequential,
             prepareToolResultMessage: { result in

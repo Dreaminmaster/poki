@@ -30,6 +30,11 @@ struct PokiApp: App {
         // Someone updating from an earlier version keeps the dictation microphone it always showed; this
         // reads what that version left behind, so it runs before the conversations and the model load.
         FieldDictation.keepButtonForUpgrade()
+        #if DEBUG
+        // Only a dedicated UI-test launch flag installs the disposable Memory
+        // source records; production launches never write synthetic conversations.
+        MemorySourceUITestFixture.installIfRequested()
+        #endif
         // Whether this phone gets the first run: not when an earlier version was used here. Read before
         // anything this version writes, like the line above.
         FirstRun.decide()
@@ -115,6 +120,8 @@ struct RootView: View {
     /// Where the card opens: under Poki's picture on the home page (global points), or under the top bar.
     @State private var cardUnder: CGFloat?
     @State private var detailsPath = NavigationPath()
+    @State private var searchNavigation = ConversationSearchNavigation()
+    private var searchJump: ConversationSearchJump? { searchNavigation.pending }
     /// The first run is up, over everything (`FirstRunGuide`).
     @State private var welcoming = false
     /// A setup step a link opened while the first run is up: it opens there.
@@ -129,9 +136,15 @@ struct RootView: View {
     enum HomeRoute: Hashable { case chat, session(String), voice, setup }
 
     private func show(_ route: HomeRoute) {
+        // Ordinary navigation must not replay a previously selected search result.
+        searchNavigation = ConversationSearchNavigation()
         if threadsOpen { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = false } }
         wide = route
         home = route == .chat ? NavigationPath() : NavigationPath([route])
+    }
+
+    private func consumeSearchJump(_ requestID: UUID) {
+        searchNavigation.consume(requestID)
     }
 
     private func openDetails(_ items: [any Hashable] = []) {
@@ -179,6 +192,9 @@ struct RootView: View {
             openSetup: { fix(.setup, split: split) },
             openSetupStep: { fix(.step($0), split: split) },
             openModel: { fix(.model, split: split) },
+            searchJump: searchJump?.sessionID == chat.sessionID ? searchJump : nil,
+            revealedSearchEntryID: searchNavigation.revealedEntry(in: chat.sessionID),
+            onSearchJumpApplied: consumeSearchJump,
             openVoiceKey: { openDetails([DetailsRoute.voiceKey]) },
             openThreads: split ? nil : { withAnimation(ThreadsDrawerMotion.settle) { threadsOpen = true } },
             openAgents: { fix(.agents, split: split) },
@@ -209,7 +225,10 @@ struct RootView: View {
             .background(Site.blue.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         case .session(let id):
-            SessionView(id: id, back: { show(.chat) })
+            SessionView(id: id, back: { show(.chat) },
+                        searchJump: searchJump?.sessionID == id ? searchJump : nil,
+                        onSearchJumpApplied: consumeSearchJump,
+                        sessionStore: sessionStore)
         case .setup:
             SetupChecklist().toolbar(.visible, for: .navigationBar)
         }
@@ -268,15 +287,23 @@ struct RootView: View {
                 next.append(DetailsRoute.connection)
                 detailsPath = next
             },
-            openSession: { id in
-                detailsOpen = false
-                openRun(id)
-            },
+            openSession: { id, entryID in openRun(id, entryID: entryID) },
+            searchJump: searchJump,
+            onSearchJumpApplied: consumeSearchJump,
+            revealedSearchEntryID: { id in searchNavigation.revealedEntry(in: id) },
+            sessionStore: sessionStore,
             path: $detailsPath
         )
         // Presented on its own, so it says the edge's style itself rather than counting on the
         // presenting page's.
         .softTopEdge()
+        // A Memory source is an internal navigation action, not an external app launch.
+        // Use the same handler as onOpenURL while keeping the presented Settings stack.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme == "poki", url.host() == "session" else { return .systemAction }
+            open(link: url)
+            return .handled
+        })
         .modifier(AutomationNotices())
     }
 
@@ -356,7 +383,12 @@ struct RootView: View {
                 for window in scene.windows { AppInterfaceSize.updateNavigationFonts(in: window) }
             }
         }
-        .onAppear(perform: openLaunchScreen)
+        .onAppear {
+            openLaunchScreen()
+            #if DEBUG
+            MemorySourceUITestFixture.beginActualLiveTaskIfRequested(chat)
+            #endif
+        }
         // A conversation archived or deleted (in the list or in Settings) is not left open on screen.
         .onChange(of: SessionStore.shared.removed) { _, removed in
             if let removed { leave(removed.id) }
@@ -401,8 +433,7 @@ struct RootView: View {
         } else if url.host() == "session" {
             // poki://session/<id>: a memory's Source, back to the conversation it was heard in. A conversation
             // that is no longer kept leaves the page where it is.
-            if let id = url.pathComponents.dropFirst().first, SessionStore.shared.session(id) != nil {
-                detailsOpen = false
+            if let id = url.pathComponents.dropFirst().first, sessionStore.session(id) != nil {
                 openRun(id)
             }
         } else if url.host() == "voice" {
@@ -457,18 +488,37 @@ struct RootView: View {
     }
 
     /// A run from the Activity Log: Poki's own chat or an outside agent's session.
-    private func openRun(_ id: String) {
-        if let session = SessionStore.shared.session(id), session.kind == .poki {
+    private func openRun(_ id: String, entryID: UUID? = nil) {
+        // Replacing the right-hand ChatView on iPad would destroy its unsent draft
+        // and attachments. Open history within Settings while a live task is running.
+        // Both search and Memory source links use this route. A preview must be on a
+        // presented stack; never close Settings before pushing a destination into it.
+        guard let session = sessionStore.session(id) else { return }
+        if Self.usesSessionPreview(id: id, activeID: chat.sessionID, running: chat.running, wide: showsSidebar) {
+            if !detailsOpen { detailsPath = NavigationPath() }
+            detailsOpen = true
+            searchNavigation.open(entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }, preview: true)
+            // A preview is separate from the active chat; don't perturb its transcript selection.
+            detailsPath.append(DetailsRoute.sessionPreview(id))
+            return
+        }
+        detailsOpen = false
+        if session.kind == .poki {
             if session.id != chat.sessionID { chat.restore(session) }
             show(.chat)
         } else {
             show(.session(id))
         }
+        // show() clears the old request; install a new one after routing.
+        searchNavigation.open(entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }, preview: false)
     }
 
-    /// `-pokiScreen setup` (connect, debug, activity, details, model, voice…) opens that screen at launch,
-    /// for the build's screenshots; `-pokiSetupStep 3` opens setup at that step. The names are the ones
-    /// the build's scripts already pass; each opens where that screen lives now.
+    static func usesSessionPreview(id: String, activeID: String, running: Bool, wide: Bool) -> Bool {
+        id != activeID && (running || wide)
+    }
+
+    /// Opens an initial screen from the app's local screenshot/test launch flags.
+    /// These launch arguments remain unchanged by conversation search.
     private func openLaunchScreen() {
         let defaults = UserDefaults.standard
         if let address = defaults.string(forKey: "pokiVoiceBridge") { _ = model.voice.setBridge(address) }
@@ -563,5 +613,25 @@ private struct AutomationNotices: ViewModifier {
         } message: {
             Text(AppModel.passcodeHeadsUpMessage)
         }
+    }
+}
+
+/// A one-shot scroll and a retained, session-scoped reveal serve different purposes.
+/// Opening a read-only preview does not disturb the current chat's retained selection.
+struct ConversationSearchNavigation {
+    private(set) var pending: ConversationSearchJump?
+    private var selected: ConversationSearchJump?
+
+    mutating func open(_ jump: ConversationSearchJump?, preview: Bool) {
+        pending = jump
+        if !preview { selected = jump }
+    }
+
+    mutating func consume(_ requestID: UUID) {
+        if pending?.requestID == requestID { pending = nil }
+    }
+
+    func revealedEntry(in sessionID: String) -> UUID? {
+        selected?.sessionID == sessionID ? selected?.entryID : nil
     }
 }

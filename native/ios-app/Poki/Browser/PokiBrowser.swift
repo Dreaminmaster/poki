@@ -43,7 +43,7 @@ final class PokiBrowser: NSObject {
     @ObservationIgnored private var committed = true
     @ObservationIgnored private var activeNavigation: WKNavigation?
     @ObservationIgnored private let supersededNavigations = NSHashTable<WKNavigation>.weakObjects()
-    @ObservationIgnored private var loadWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var loadWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     @ObservationIgnored private var ownerWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     override init() {
@@ -104,29 +104,38 @@ final class PokiBrowser: NSObject {
     /// Until the page under way has loaded, at most `seconds`; at once when nothing is loading. A page
     /// whose document is parsed is readable before its last image or ad arrives, so that ends it too.
     private func waitForLoad(seconds: Double = 12) async {
+        let waiterID = UUID()
         await withTaskGroup(of: Void.self) { group in
             group.addTask { @MainActor in
                 await withCheckedContinuation { c in
-                    if self.isLoading || !self.committed { self.loadWaiters.append(c) } else { c.resume() }
+                    // The timeout can win before this child gets a turn on the main actor.
+                    // Do not register after the parent has already drained the waiters.
+                    if !Task.isCancelled, self.isLoading || !self.committed {
+                        self.loadWaiters[waiterID] = c
+                    } else {
+                        c.resume()
+                    }
                 }
             }
             group.addTask { @MainActor in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(300))
+                    do { try await Task.sleep(for: .milliseconds(300)) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
                     if self.committed, let state = try? await self.webView.evaluateJavaScript("document.readyState") as? String, state != "loading" { return }
                 }
             }
             group.addTask { try? await Task.sleep(for: .seconds(seconds)) }
             await group.next()
             group.cancelAll()
-            self.finishLoads()
+            self.loadWaiters.removeValue(forKey: waiterID)?.resume()
         }
     }
 
     private func finishLoads() {
         let waiters = loadWaiters
-        loadWaiters = []
-        waiters.forEach { $0.resume() }
+        loadWaiters.removeAll()
+        waiters.values.forEach { $0.resume() }
     }
 
     private func trackNavigation(_ navigation: WKNavigation?) {

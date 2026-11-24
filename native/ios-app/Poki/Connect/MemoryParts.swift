@@ -40,12 +40,15 @@ struct MemoryItemRow: View {
                 summary
                     .contentShape(.rect)
                     .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = isOpen ? nil : item.id } }
+                    // Keep the row's identifier on its tappable summary only.
+                    // An identifier on the enclosing VStack is inherited by
+                    // descendant SwiftUI buttons and masks Memory Source.
+                    .accessibilityIdentifier("memory.item.\(item.id)")
                 if isOpen {
                     MemoryItemDetail(item: item, page: page)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .accessibilityIdentifier("memory.item.\(item.id)")
         }
     }
 

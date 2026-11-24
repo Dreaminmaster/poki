@@ -274,7 +274,7 @@ final class CustomModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(probe.api, .responses)
 
         let model = try XCTUnwrap(ModelProvider.custom.piModel(ModelKeys.selectedModel))
-        let loop = PiLoop(provider: .custom, model: model, tools: []) { _ in
+        let loop = PiLoop(provider: .custom, model: model, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }
         var messages: [String] = []

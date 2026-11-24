@@ -17,8 +17,29 @@ pub fn ensure(dir: PathBuf) -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-/// Pairing records, one per UDID.
-pub fn pairings_dir() -> std::io::Result<PathBuf> { ensure(data_dir().join("pairings")) }
+/// Pairing records, one per UDID. Readable by this user only (0700 where the platform has modes),
+/// from creation on, and closed again if an earlier version left it open.
+pub fn pairings_dir() -> std::io::Result<PathBuf> { ensure_private(data_dir().join("pairings")) }
+
+#[cfg(unix)]
+fn ensure_private(dir: PathBuf) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    if std::fs::metadata(&dir)?.permissions().mode() & 0o077 != 0 {
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(dir)
+}
+
+/// Windows: the folder is in the person's own profile (`%APPDATA%`), which only they can read.
+#[cfg(not(unix))]
+fn ensure_private(dir: PathBuf) -> std::io::Result<PathBuf> { ensure(dir) }
 /// Downloaded release IPAs and developer disk images.
 pub fn cache_dir() -> std::io::Result<PathBuf> { ensure(data_dir().join("cache")) }
 /// The keeper's records and the app's settings.
