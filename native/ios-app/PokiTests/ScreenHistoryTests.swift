@@ -77,6 +77,23 @@ final class ScreenHistoryTests: XCTestCase {
         ["ok": true, "app": app, "title": "", "text": text, "changed": true]
     }
 
+    func testLauncherReadPreparesTextAndTreeBeforeMainActorDelivery() throws {
+        let rows = [[0, "Button", "Open", "", 1, 2, 3, 4] as [Any]]
+        var line = read("com.example.reader", ["Café", "你好"])
+        line["tree"] = rows
+        let prepared = HistoryBridge.Read(line)
+        XCTAssertEqual(prepared.text, "Café\n你好")
+        let decoded = try JSONSerialization.jsonObject(with: XCTUnwrap(prepared.tree)) as? NSArray
+        XCTAssertEqual(decoded, rows as NSArray)
+
+        line.removeValue(forKey: "text")
+        XCTAssertNil(HistoryBridge.Read(line).tree)
+        line["text"] = ["Ignored"]
+        line["ok"] = false
+        XCTAssertNil(HistoryBridge.Read(line).text)
+        XCTAssertNil(HistoryBridge.Read(line).tree)
+    }
+
     func testALeftOutAppAndTheHomeScreenLeaveNothingInTheStore() async {
         let capture = HistoryCapture()
         capture.exclude("com.example.bank")

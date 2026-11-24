@@ -3,10 +3,33 @@ import Foundation
 /// poki_history_* through the C ABI (native/launcher/src/history.rs): the screen read as text through
 /// the accessibility audit service, on a tunnel of its own and with no XCTest session.
 enum HistoryBridge {
+    /// Prepared on the launcher callback thread. The main actor checks the current capture
+    /// permissions before handing these bytes to the store.
+    struct Read: Sendable {
+        let ok: Bool
+        let app: String
+        let title: String
+        let text: String?
+        let tree: Data?
+
+        init(_ line: [String: Any]) {
+            ok = line["ok"] as? Bool == true
+            app = line["app"] as? String ?? ""
+            title = line["title"] as? String ?? ""
+            if ok, let lines = line["text"] as? [String], !lines.isEmpty {
+                text = lines.joined(separator: "\n")
+                tree = (line["tree"] as? [Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+            } else {
+                text = nil
+                tree = nil
+            }
+        }
+    }
+
     final class Box: @unchecked Sendable {
-        let progress: (@Sendable (Data) -> Void)?
+        let progress: (@Sendable (Read) -> Void)?
         var continuation: CheckedContinuation<Data, Error>?
-        init(progress: (@Sendable (Data) -> Void)?, continuation: CheckedContinuation<Data, Error>) {
+        init(progress: (@Sendable (Read) -> Void)?, continuation: CheckedContinuation<Data, Error>) {
             self.progress = progress
             self.continuation = continuation
         }
@@ -20,8 +43,8 @@ enum HistoryBridge {
     }
 
     /// Runs one request. The answer is the result's `value` as JSON; `progress` gets every read of a
-    /// run as JSON, on a launcher thread.
-    static func call(_ request: [String: Any], progress: (@Sendable (Data) -> Void)? = nil) async throws -> Data {
+    /// run on a launcher thread.
+    static func call(_ request: [String: Any], progress: (@Sendable (Read) -> Void)? = nil) async throws -> Data {
         let json = try JSONSerialization.data(withJSONObject: request)
         return try await withCheckedThrowingContinuation { (c: CheckedContinuation<Data, Error>) in
             let box = Unmanaged.passRetained(Box(progress: progress, continuation: c))
@@ -30,7 +53,8 @@ enum HistoryBridge {
                     guard let context, let event else { return }
                     let unmanaged = Unmanaged<Box>.fromOpaque(context)
                     let box = unmanaged.takeUnretainedValue()
-                    guard let object = (try? JSONSerialization.jsonObject(with: Data(String(cString: event).utf8))) as? [String: Any] else { return }
+                    let data = Data(bytes: event, count: strlen(event))
+                    guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
                     if object["event"] as? String == "result" {
                         if object["ok"] as? Bool == true {
                             let value = (try? JSONSerialization.data(withJSONObject: object["value"] as? [String: Any] ?? [:])) ?? Data("{}".utf8)
@@ -40,8 +64,8 @@ enum HistoryBridge {
                         }
                         box.continuation = nil
                         unmanaged.release()
-                    } else if let line = object["progress"] as? [String: Any], let data = try? JSONSerialization.data(withJSONObject: line) {
-                        box.progress?(data)
+                    } else if let line = object["progress"] as? [String: Any] {
+                        box.progress?(Read(line))
                     }
                 }, box.toOpaque())
             }
