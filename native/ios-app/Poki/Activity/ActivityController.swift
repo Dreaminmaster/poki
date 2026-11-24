@@ -174,7 +174,7 @@ final class ActivityController {
     func end(dismissalPolicy: ActivityUIDismissalPolicy? = nil) -> Task<Void, Never>? {
         wanted = nil
         chatOwnsCompletion = false
-        finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel()
+        finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel(); approvalReminder?.cancel()
         if Self.runPhases.contains(state.phase) { logRun("cut off by ending the Live Activity") }
         worker?.cancel(); worker = nil; plainWaiting = false
         guard let activity else { return tail }
@@ -225,6 +225,7 @@ final class ActivityController {
         }
         attention = nil
         if state.handoff == nil, state.phase != .problem, old.handoff != nil || old.phase == .problem { AttentionNotice.clear() }
+        if let approval = state.approval, approval.id != old.approval?.id { remindHalfway(approval) }
         send(alert: alert, critical: Self.isCritical(state, after: old))
     }
     /// The hand-off or problem this change pops up for (`update` posts a banner when no activity runs).
@@ -304,7 +305,6 @@ final class ActivityController {
         // Approval: always pops up and lights the screen.
         if let approval = state.approval, approval.id != old.approval?.id {
             alert = critical(approval.question, "")
-            remindHalfway(approval)
         }
         if state.approval == nil, let was = old.approval, state.phase != .stopped {
             state.decision = nil
@@ -347,10 +347,10 @@ final class ActivityController {
     private func remindHalfway(_ approval: PendingApproval) {
         approvalReminder?.cancel()
         let half = approval.expires.timeIntervalSinceNow / 2
-        guard half > 5 else { return }
+        guard half > 5, let activityID = activity?.id else { return }
         approvalReminder = Task { [weak self] in
             try? await Task.sleep(for: .seconds(half))
-            guard !Task.isCancelled, let self, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
+            guard !Task.isCancelled, let self, self.activity?.id == activityID, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
             AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
             self.send(alert: self.critical(approval.question, ""), critical: true)
         }
