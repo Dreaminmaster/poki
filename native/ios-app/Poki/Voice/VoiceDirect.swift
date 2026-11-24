@@ -16,18 +16,22 @@ enum VoiceAccount: Hashable, Sendable {
         }
     }
 
-    var name: String {
+    var name: String { name(in: .live) }
+
+    func name(in storage: PokiStorage = .live) -> String {
         switch self {
         case .openai: "OpenAI"
-        case .custom(let id): CustomProviders.provider(id)?.displayName ?? AppLocalization.text(LocalizedStringResource("Custom Endpoint"))
+        case .custom(let id): CustomProviders.provider(id, storage: storage)?.displayName ?? AppLocalization.text(LocalizedStringResource("Custom Endpoint"))
         }
     }
 
     /// The Realtime API's base address.
-    var base: URL? {
+    var base: URL? { base(in: .live) }
+
+    func base(in storage: PokiStorage = .live) -> URL? {
         switch self {
         case .openai: URL(string: "https://api.openai.com/v1")
-        case .custom(let id): CustomProviders.provider(id)?.primary.flatMap { URL(string: $0.normalized) }
+        case .custom(let id): CustomProviders.provider(id, storage: storage)?.primary.flatMap { URL(string: $0.normalized) }
         }
     }
 }
@@ -42,62 +46,80 @@ enum VoiceAccount: Hashable, Sendable {
 ///   it can) and lets go to send it to Poki's chat; Poki reads the answer out loud.
 enum VoiceDirect {
     /// The voice model the owner picked under their account's Live Voice settings.
-    static var model: String { ModelCatalog.voiceModel }
+    static var model: String { model(in: .live) }
+    static func model(in storage: PokiStorage = .live) -> String { ModelCatalog.voiceModelID(for: settingsAccount(in: storage), storage: storage) }
     static let localTools = ["get_ios_version", "look", "open_app", "do"]
     private static let liveBackend = "gpt-6-luna"
 
     /// The account live voice runs on now: a custom provider with live voice on and an address, else
     /// the OpenAI key with live voice on, else none.
-    static var account: VoiceAccount? {
-        if let custom = CustomProviders.all.first(where: { $0.liveVoice && $0.primary != nil }) { return .custom(custom.id) }
-        return enabled && ModelKeys.hasKey(.openai) ? .openai : nil
+    static var account: VoiceAccount? { account(in: .live) }
+
+    static func account(in storage: PokiStorage = .live) -> VoiceAccount? {
+        if let custom = CustomProviders.all(in: storage).first(where: { $0.liveVoice && $0.primary != nil }) { return .custom(custom.id) }
+        return isEnabled(in: storage) && ModelKeys.hasKey(.openai, storage: storage) ? .openai : nil
     }
 
     /// The account whose voice models the settings show and the session uses: the live one, else OpenAI.
-    static var settingsAccount: VoiceAccount { account ?? .openai }
+    static var settingsAccount: VoiceAccount { settingsAccount(in: .live) }
+
+    static func settingsAccount(in storage: PokiStorage = .live) -> VoiceAccount { account(in: storage) ?? .openai }
 
     /// The live voice account's key, when live voice can run: the OpenAI key, or the custom service's
     /// (empty when it needs none).
-    static var apiKey: String? { apiKey(for: account) }
+    static var apiKey: String? { apiKey(in: .live) }
 
-    static func apiKey(for account: VoiceAccount?) -> String? {
+    static func apiKey(in storage: PokiStorage = .live) -> String? { apiKey(for: account(in: storage), storage: storage) }
+
+    static func apiKey(for account: VoiceAccount?, storage: PokiStorage = .live) -> String? {
         switch account {
-        case .openai: ModelKeys.key(.openai)
-        case .custom(let id): CustomProviders.key(id) ?? ""
+        case .openai: ModelKeys.key(.openai, storage: storage)
+        case .custom(let id): CustomProviders.key(id, storage: storage) ?? ""
         case nil: nil
         }
     }
 
     /// The owner's switch in Accounts › OpenAI › Live Voice (on unless turned off).
     static var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: "voice.openai.enabled") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "voice.openai.enabled"); ModelKeys.saved += 1 }
+        get { isEnabled(in: .live) }
+        set { setEnabled(newValue, in: .live) }
+    }
+
+    static func isEnabled(in storage: PokiStorage = .live) -> Bool {
+        storage.defaults.object(forKey: "voice.openai.enabled") as? Bool ?? true
+    }
+
+    static func setEnabled(_ value: Bool, in storage: PokiStorage = .live) {
+        storage.defaults.set(value, forKey: "voice.openai.enabled")
+        ModelKeys.saved += 1
     }
 
     /// Live voice on one account. One account runs it at a time: switching one on switches the others off.
-    static func isOn(_ account: VoiceAccount) -> Bool {
+    static func isOn(_ account: VoiceAccount, storage: PokiStorage = .live) -> Bool {
         switch account {
-        case .openai: enabled && !CustomProviders.all.contains(where: { $0.liveVoice })
-        case .custom(let id): CustomProviders.provider(id)?.liveVoice == true
+        case .openai: isEnabled(in: storage) && !CustomProviders.all(in: storage).contains(where: { $0.liveVoice })
+        case .custom(let id): CustomProviders.provider(id, storage: storage)?.liveVoice == true
         }
     }
 
-    static func set(_ account: VoiceAccount, on: Bool) {
-        var providers = CustomProviders.all
+    static func set(_ account: VoiceAccount, on: Bool, storage: PokiStorage = .live) {
+        var providers = CustomProviders.all(in: storage)
         for index in providers.indices {
             if case .custom(let id) = account, providers[index].id == id { providers[index].liveVoice = on }
             else if on { providers[index].liveVoice = false }
         }
-        CustomProviders.all = providers
+        CustomProviders.setAll(providers, in: storage)
         switch account {
-        case .openai: enabled = on
-        case .custom: if on { UserDefaults.standard.set(false, forKey: "voice.openai.enabled") }
+        case .openai: setEnabled(on, in: storage)
+        case .custom: if on { storage.defaults.set(false, forKey: "voice.openai.enabled") }
         }
         ModelKeys.saved += 1
     }
 
     /// Dictation into the chat works with any model the chat can use.
-    static var canDictate: Bool { ModelKeys.hasUsableKey }
+    static var canDictate: Bool { canDictate(in: .live) }
+
+    static func canDictate(in storage: PokiStorage = .live) -> Bool { ModelKeys.hasUsableKey(in: storage) }
 
     /// Poki's interface language, named in English ("Chinese, Simplified"): the language Poki speaks
     /// from its first sentence. The owner picks it in Poki (it can differ from the iPhone's own).
@@ -186,10 +208,14 @@ enum VoiceDirect {
         ?? "Run actions on the iPhone in order, then read the screen once. Actions: {launch: \"bundle id\"} (any installed app); {tap: n} or {tap: [x, y]}; {type: \"text\", ref?: n} (taps n first, then types); {key: \"return\"}; {scroll_to: \"text\"}; {swipe: \"up\"|\"down\"|\"left\"|\"right\"}; {button: \"home\"}; {wait_until: \"text\"}; {wait: ms}; {back: true}. The answer says what each action did and what is new on screen."
 
     /// The Realtime session Poki opens: model, instructions, voice, turn detection and tools.
-    static var session: [String: Any] { realtimeSession(for: settingsAccount) }
+    static var session: [String: Any] { session(in: .live) }
 
-    private static func realtimeSession(for account: VoiceAccount) -> [String: Any] {
-        let selected = ModelCatalog.voiceModelID(for: account)
+    static func session(in storage: PokiStorage = .live) -> [String: Any] {
+        realtimeSession(for: settingsAccount(in: storage), storage: storage)
+    }
+
+    private static func realtimeSession(for account: VoiceAccount, storage: PokiStorage = .live) -> [String: Any] {
+        let selected = ModelCatalog.voiceModelID(for: account, storage: storage)
         return [
             "type": "realtime", "model": account == .openai && selected.hasPrefix("gpt-live-") ? ModelCatalog.voiceRealtime : selected,
             "instructions": realtimeInstructions, "output_modalities": ["audio"],
@@ -267,9 +293,10 @@ enum VoiceDirect {
     }
 
     /// A one-minute Realtime key from the voice account's service, using that account's key.
-    static func token(apiKey: String, account: VoiceAccount = settingsAccount) async throws -> VoiceBridge.Token {
-        guard let base = account.base else { throw VoiceError.noBridge }
-        let session = realtimeSession(for: account)
+    static func token(apiKey: String, account: VoiceAccount? = nil, storage: PokiStorage = .live) async throws -> VoiceBridge.Token {
+        let account = account ?? settingsAccount(in: storage)
+        guard let base = account.base(in: storage) else { throw VoiceError.noBridge }
+        let session = realtimeSession(for: account, storage: storage)
         var request = URLRequest(url: base.appending(path: "realtime/client_secrets"), timeoutInterval: 20)
         request.httpMethod = "POST"
         if !apiKey.isEmpty, apiKey != "none" { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }

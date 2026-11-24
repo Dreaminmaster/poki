@@ -76,7 +76,9 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var models: [ChatModelChoice] {
+    var models: [ChatModelChoice] { models(in: .live) }
+
+    func models(in storage: PokiStorage = .live) -> [ChatModelChoice] {
         switch self {
         case .anthropic: [
             ChatModelChoice(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5"),
@@ -115,7 +117,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         // Whatever model each of the owner's services serves (a local server, a company gateway), named
         // with its service once there is more than one.
         case .custom:
-            Self.customChoices(CustomProviders.all)
+            Self.customChoices(CustomProviders.all(in: storage))
         }
     }
 
@@ -201,8 +203,12 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
     /// `customURL`, an address not saved yet (the connection test on the editing page), `id` is the bare
     /// model id and `customAPI` and `customReasoning` are the page's choices.
     func piModel(_ id: String, customURL: String? = nil, customAPI: CustomAPIStyle = .chatCompletions, customReasoning: Bool? = nil,
-                 codexService: String = CodexAccount.defaultService, codexHome: URL = CodexAccount.home) -> Model? {
-        let provider = self == .chatgpt && CodexAccount.readAccessToken(service: codexService, home: codexHome) != nil ? "openai-codex" : piProvider
+                 codexService: String? = nil, codexHome: URL? = nil,
+                 storage: PokiStorage? = nil) -> Model? {
+        let resolvedStorage = storage ?? .live
+        let resolvedCodexService = codexService ?? storage?.codexService ?? CodexAccount.defaultService
+        let resolvedCodexHome = codexHome ?? storage?.codexHome ?? CodexAccount.home
+        let provider = self == .chatgpt && CodexAccount.readAccessToken(service: resolvedCodexService, home: resolvedCodexHome) != nil ? "openai-codex" : piProvider
         guard let piProvider = provider else { return nil }
         if self == .custom {
             if let customURL {
@@ -210,7 +216,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
                 guard !base.isEmpty, !id.isEmpty else { return nil }
                 return Self.customModel(id, baseUrl: base, api: customAPI.piAPI, reasoning: customReasoning, piProvider: piProvider)
             }
-            guard let chosen = CustomProviders.parse(id), let provider = CustomProviders.provider(chosen.provider),
+            guard let chosen = CustomProviders.parse(id), let provider = CustomProviders.provider(chosen.provider, storage: resolvedStorage),
                   let endpoint = provider.primary else { return nil }
             return Self.customModel(chosen.model, baseUrl: endpoint.normalized, api: endpoint.sent.piAPI,
                                     reasoning: provider.reasoning, piProvider: provider.piProvider)
@@ -221,13 +227,13 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         // reasoning only for a model OpenRouter's own list says supports it.
         if self == .openrouter {
             return unlistedModel(id, provider: piProvider, baseUrl: Self.openRouterBaseURL,
-                                 reasoning: ModelCatalog.supportsReasoning(id, for: self))
+                                 reasoning: ModelCatalog.supportsReasoning(id, for: self, storage: resolvedStorage))
         }
         // PiSwift's catalog (pi-mono, October 2026) lacks gpt-6.1-terra, which pi-ai 1.5.0 lists with the
         // same API and inputs as gpt-6.1-sol.
         // A model from the provider's own list that pi's catalog lacks takes the shape of a built-in one of
         // the same provider (same API and inputs), with its own id.
-        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models.lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
+        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models(in: resolvedStorage).lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
         guard let template, let base = getModel(provider: piProvider, modelId: template),
               var json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(base))) as? [String: Any] else { return nil }
         json["id"] = id
@@ -250,13 +256,30 @@ enum ModelKeys {
     private static func account(_ provider: ModelProvider) -> String { "model-key.\(provider.rawValue)" }
 
     /// For a custom provider, the key of the one the chat uses now (`CustomProviders.current`).
+    static func key(_ provider: ModelProvider, storage: PokiStorage) -> String? {
+        if provider == .custom { return CustomProviders.current(in: storage).flatMap { CustomProviders.key($0.id, storage: storage) } }
+        return key(provider, service: storage.keychainService)
+    }
+
     static func key(_ provider: ModelProvider, service: String = defaultService) -> String? {
         if provider == .custom { return CustomProviders.current.flatMap { CustomProviders.key($0.id) } }
         guard let data = try? Keychain.read(account(provider), service: service), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
         return key
     }
 
+    static func hasKey(_ provider: ModelProvider, storage: PokiStorage) -> Bool {
+        key(provider, storage: storage) != nil
+    }
+
     static func hasKey(_ provider: ModelProvider, service: String = defaultService) -> Bool { key(provider, service: service) != nil }
+
+    static func save(_ key: String, for provider: ModelProvider, storage: PokiStorage) throws {
+        if provider == .custom {
+            let current = CustomProviders.current(in: storage) ?? CustomProviders.upsert(CustomProvider(), storage: storage)
+            return try CustomProviders.saveKey(key, for: current.id, storage: storage)
+        }
+        try save(key, for: provider, service: storage.keychainService)
+    }
 
     static func save(_ key: String, for provider: ModelProvider, service: String = defaultService) throws {
         if provider == .custom {
@@ -268,6 +291,14 @@ enum ModelKeys {
         saved += 1
     }
 
+    static func remove(_ provider: ModelProvider, storage: PokiStorage) {
+        if provider == .custom {
+            if let current = CustomProviders.current(in: storage) { CustomProviders.removeKey(current.id, storage: storage) }
+            return
+        }
+        remove(provider, service: storage.keychainService)
+    }
+
     static func remove(_ provider: ModelProvider, service: String = defaultService) {
         if provider == .custom {
             if let current = CustomProviders.current { CustomProviders.removeKey(current.id) }
@@ -275,6 +306,10 @@ enum ModelKeys {
         }
         try? Keychain.remove(account(provider), service: service)
         saved += 1
+    }
+
+    static func removeChatGPTSignIn(storage: PokiStorage) throws {
+        try removeChatGPTSignIn(service: storage.keychainService)
     }
 
     static func removeChatGPTSignIn(service: String = defaultService) throws {
@@ -285,100 +320,142 @@ enum ModelKeys {
     /// The first address of the custom provider the chat uses now (not a secret: kept in the app's
     /// settings). Setting it changes that address, or adds a provider when there is none.
     static var customURL: String {
-        get { CustomProviders.current?.primary?.url ?? "" }
-        set { editCurrentCustom { provider in
-            if provider.endpoints.isEmpty { provider.endpoints = [CustomEndpoint(url: newValue)] }
-            else { provider.endpoints[0].url = newValue }
-        } }
+        get { customURL(in: .live) }
+        set { setCustomURL(newValue, in: .live) }
+    }
+
+    static func customURL(in storage: PokiStorage = .live) -> String {
+        CustomProviders.current(in: storage)?.primary?.url ?? ""
+    }
+
+    static func setCustomURL(_ value: String, in storage: PokiStorage = .live) {
+        editCurrentCustom(in: storage) { provider in
+            if provider.endpoints.isEmpty { provider.endpoints = [CustomEndpoint(url: value)] }
+            else { provider.endpoints[0].url = value }
+        }
     }
 
     /// The model id of the custom provider the chat uses now.
     static var customModel: String {
-        get { CustomProviders.current?.model ?? "" }
-        set { editCurrentCustom { $0.model = newValue } }
+        get { customModel(in: .live) }
+        set { setCustomModel(newValue, in: .live) }
     }
 
-    private static func editCurrentCustom(_ change: (inout CustomProvider) -> Void) {
-        var provider = CustomProviders.current ?? CustomProvider()
+    static func customModel(in storage: PokiStorage = .live) -> String {
+        CustomProviders.current(in: storage)?.model ?? ""
+    }
+
+    static func setCustomModel(_ value: String, in storage: PokiStorage = .live) {
+        editCurrentCustom(in: storage) { $0.model = value }
+    }
+
+    private static func editCurrentCustom(in storage: PokiStorage = .live, _ change: (inout CustomProvider) -> Void) {
+        var provider = CustomProviders.current(in: storage) ?? CustomProvider()
         change(&provider)
-        CustomProviders.upsert(provider)
-        UserDefaults.standard.set(provider.id.uuidString, forKey: CustomProviders.selectedKey)
+        CustomProviders.upsert(provider, storage: storage)
+        storage.defaults.set(provider.id.uuidString, forKey: CustomProviders.selectedKey)
     }
 
     /// A different address never inherits the previous service's secret.
-    static func customDraftKey(address: String, typedKey: String) -> String? {
+    static func customDraftKey(address: String, typedKey: String, storage: PokiStorage = .live) -> String? {
         let typed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty { return typed }
-        return ModelCatalog.normalizedAddress(address) == ModelCatalog.normalizedAddress(customURL) ? key(.custom) : nil
+        return ModelCatalog.normalizedAddress(address) == ModelCatalog.normalizedAddress(customURL(in: storage)) ? key(.custom, storage: storage) : nil
     }
 
     /// Saves the custom provider the chat uses now with one address and model (a new one when there is
     /// none) and makes its model the chat's.
     @MainActor
-    static func saveCustom(address: String, model: String, typedKey: String) throws {
+    static func saveCustom(address: String, model: String, typedKey: String, storage: PokiStorage = .live) throws {
         let address = ModelCatalog.normalizedAddress(address)
-        let credential = customDraftKey(address: address, typedKey: typedKey)
-        var provider = CustomProviders.current ?? CustomProvider()
+        let credential = customDraftKey(address: address, typedKey: typedKey, storage: storage)
+        var provider = CustomProviders.current(in: storage) ?? CustomProvider()
         provider.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if provider.endpoints.isEmpty { provider.endpoints = [CustomEndpoint(url: address)] } else { provider.endpoints[0].url = address }
-        try saveCustom(provider, typedKey: credential ?? "", keepKey: false)
+        try saveCustom(provider, typedKey: credential ?? "", keepKey: false, storage: storage)
     }
 
     /// Saves a custom provider from its editing page: the key typed (else, with `keepKey`, the saved
     /// one stays; without it none), its addresses and model, and makes its model the chat's.
     @MainActor
-    static func saveCustom(_ provider: CustomProvider, typedKey: String, keepKey: Bool) throws {
+    static func saveCustom(_ provider: CustomProvider, typedKey: String, keepKey: Bool, storage: PokiStorage = .live) throws {
         let typed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
         // Save the secret first: a keychain failure must not change the addresses or the model.
-        if !typed.isEmpty { try CustomProviders.saveKey(typed, for: provider.id) }
-        else if !keepKey, CustomProviders.key(provider.id) != nil { CustomProviders.removeKey(provider.id) }
-        let saved = CustomProviders.upsert(provider)
-        UserDefaults.standard.set(saved.id.uuidString, forKey: CustomProviders.selectedKey)
+        if !typed.isEmpty { try CustomProviders.saveKey(typed, for: provider.id, storage: storage) }
+        else if !keepKey, CustomProviders.key(provider.id, storage: storage) != nil { CustomProviders.removeKey(provider.id, storage: storage) }
+        let saved = CustomProviders.upsert(provider, storage: storage)
+        storage.defaults.set(saved.id.uuidString, forKey: CustomProviders.selectedKey)
         guard !saved.model.isEmpty, saved.primary != nil else { return }
-        selectedProvider = .custom
-        selectedModel = CustomProviders.choiceID(saved.id, saved.model)
+        setSelectedProvider(.custom, in: storage)
+        setSelectedModel(CustomProviders.choiceID(saved.id, saved.model), in: storage)
     }
 
     /// The chat can run: the chosen provider is wired and has a key (a custom endpoint: an address and a
     /// model; its key is optional).
-    static var hasUsableKey: Bool {
-        if selectedProvider == .custom {
-            guard let chosen = CustomProviders.parse(selectedModel), let provider = CustomProviders.provider(chosen.provider) else { return false }
-            return provider.primary != nil
+    static var hasUsableKey: Bool { hasUsableKey(in: .live) }
+
+    static func hasUsableKey(in storage: PokiStorage = .live) -> Bool {
+        let provider = selectedProvider(in: storage)
+        if provider == .custom {
+            guard let chosen = CustomProviders.parse(selectedModel(in: storage)), let custom = CustomProviders.provider(chosen.provider, storage: storage) else { return false }
+            return custom.primary != nil
         }
-        if selectedProvider == .chatgpt { return ChatGPTAccount.signedIn }
-        return selectedProvider.wired && hasKey(selectedProvider)
+        if provider == .chatgpt { return ChatGPTAccount.isSignedIn(storage: storage) }
+        return provider.wired && hasKey(provider, storage: storage)
     }
 
     static var selectedProvider: ModelProvider {
-        get { UserDefaults.standard.string(forKey: "chat.provider").flatMap(ModelProvider.init(rawValue:)) ?? .anthropic }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "chat.provider"); saved += 1 }
+        get { selectedProvider(in: .live) }
+        set { setSelectedProvider(newValue, in: .live) }
+    }
+
+    static func selectedProvider(in storage: PokiStorage = .live) -> ModelProvider {
+        storage.defaults.string(forKey: "chat.provider").flatMap(ModelProvider.init(rawValue:)) ?? .anthropic
+    }
+
+    static func setSelectedProvider(_ provider: ModelProvider, in storage: PokiStorage = .live) {
+        storage.defaults.set(provider.rawValue, forKey: "chat.provider")
+        saved += 1
     }
 
     /// Each provider's model: its first (Claude Sonnet 5.5, GPT-6.1 Terra) unless the owner picks another.
-    static func model(for provider: ModelProvider) -> String {
-        let available = ModelCatalog.available(provider)
-        let saved = UserDefaults.standard.string(forKey: "chat.model.\(provider.rawValue)")
-        return saved.flatMap { id in available.contains { $0.id == id } ? id : nil } ?? available.first?.id ?? provider.models.first?.id ?? ""
+    static func model(for provider: ModelProvider, storage: PokiStorage = .live) -> String {
+        let available = ModelCatalog.available(provider, storage: storage)
+        let saved = storage.defaults.string(forKey: "chat.model.\(provider.rawValue)")
+        return saved.flatMap { id in available.contains { $0.id == id } ? id : nil } ?? available.first?.id ?? provider.models(in: storage).first?.id ?? ""
     }
 
     static var selectedModel: String {
-        get { model(for: selectedProvider) }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "chat.model.\(selectedProvider.rawValue)")
-            if selectedProvider == .custom, let chosen = CustomProviders.parse(newValue) {
-                UserDefaults.standard.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
-            }
+        get { selectedModel(in: .live) }
+        set { setSelectedModel(newValue, in: .live) }
+    }
+
+    static func selectedModel(in storage: PokiStorage = .live) -> String {
+        model(for: selectedProvider(in: storage), storage: storage)
+    }
+
+    static func setSelectedModel(_ value: String, in storage: PokiStorage = .live) {
+        let provider = selectedProvider(in: storage)
+        storage.defaults.set(value, forKey: "chat.model.\(provider.rawValue)")
+        if provider == .custom, let chosen = CustomProviders.parse(value) {
+            storage.defaults.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
         }
     }
 
     /// The account the chat uses, as the owner reads it: the provider's name, or the custom service's.
-    static var selectedAccountName: String {
-        selectedProvider == .custom ? (CustomProviders.current?.displayName ?? selectedProvider.name) : selectedProvider.name
+    static var selectedAccountName: String { selectedAccountName(in: .live) }
+
+    static func selectedAccountName(in storage: PokiStorage = .live) -> String {
+        let provider = selectedProvider(in: storage)
+        return provider == .custom ? (CustomProviders.current(in: storage)?.displayName ?? provider.name) : provider.name
     }
 
-    static var selectedModelName: String {
-        ModelCatalog.all(selectedProvider).first { $0.id == selectedModel }?.name ?? selectedModel
+    static var selectedModelName: String { selectedModelName(in: .live) }
+
+    static func selectedModelName(in storage: PokiStorage = .live) -> String {
+        let provider = selectedProvider(in: storage)
+        let model = selectedModel(in: storage)
+        return ModelCatalog.all(provider, storage: storage).first { $0.id == model }?.name ?? model
     }
 
     /// Bumped on every change, so views that read keys can redraw; `changed` is posted too (ask_poki is

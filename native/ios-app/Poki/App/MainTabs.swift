@@ -44,13 +44,13 @@ struct ApprovalsSections: View {
                 .accessibilityIdentifier("approvals.mode")
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Sensitive steps are paying, deleting, sending a message, placing a call, typing a password and anything in Wallet.")
+                    Text(ApprovalCopy.sensitiveSteps)
                     switch model.approvalMode {
                     case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
                     case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                    case .off: Text("Optional steps continue without asking. Payments, deletions and actions in Wallet still need your confirmation.")
+                    case .off: Text(ApprovalCopy.neverAskFooter)
                     }
-                    Text("Payments, deletions and actions in Wallet always need your confirmation.")
+                    Text(ApprovalCopy.alwaysConfirm)
                     Text("Changes apply right away, starting from Poki’s next step.")
                 }
             }
@@ -102,12 +102,12 @@ struct AgentsView: View {
                 Section {
                     NavigationLink(value: AgentsRoute.accounts) {
                         LabeledContent {
-                            Text(ModelKeys.hasUsableKey ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add an Account"))).foregroundStyle(ModelKeys.hasUsableKey ? Color.secondary : Color.orange)
+                            Text(ModelKeys.hasUsableKey(in: model.storage) ? ModelKeys.selectedModelName(in: model.storage) : AppLocalization.text(LocalizedStringResource("Add an Account"))).foregroundStyle(ModelKeys.hasUsableKey(in: model.storage) ? Color.secondary : Color.orange)
                         } label: { Label("Accounts and Models", systemImage: "person.crop.circle") }
                     }
                     NavigationLink(value: AgentsRoute.voice) {
                         LabeledContent {
-                            Text(VoiceDirect.apiKey != nil ? VoiceDirect.model : AppLocalization.text(LocalizedStringResource("Dictation Only")))
+                            Text(VoiceDirect.apiKey(in: model.storage) != nil ? VoiceDirect.model(in: model.storage) : AppLocalization.text(LocalizedStringResource("Dictation Only")))
                         } label: { Label("Voice", systemImage: "waveform") }
                     }
                     NavigationLink(value: SettingsRoute.memory) {

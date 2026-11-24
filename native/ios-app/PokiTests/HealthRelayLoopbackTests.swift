@@ -6,67 +6,39 @@ import XCTest
 
 @MainActor
 final class HealthRelayLoopbackTests: XCTestCase {
-    private var savedLanguage = AppLocalization.system
-    private let defaultsKeys = [
-        "chat.provider",
-        "chat.customURL",
-        "chat.customModel",
-        "custom.providers",
-        "chat.customProvider",
-        "chat.model.custom",
-        "chat.apiKey.anthropic",
-        "chat.apiKey.openai",
-        "chat.apiKey.gemini",
-        "chat.apiKey.deepseek",
-        "chat.apiKey.openrouter",
-        "relayAddress",
-        "relayEnabled",
-        "wantsOn",
-    ]
-    private var savedDefaults: [String: Any] = [:]
-    private var savedSetup = SetupState()
-    private var savedKeychain: [String: Data?] = [:]
-    private let keychainAccounts = [
-        "api.anthropic",
-        "api.openai",
-        "api.gemini",
-        "api.deepseek",
-        "api.openrouter",
-        "chatgpt.oauth.v1",
-    ]
+    private var hostLocalization: HostLocalizationSnapshot!
+    private var storage: IsolatedTestStorage!
 
     override func setUp() async throws {
-        savedLanguage = AppLocalization.shared.preference
-        savedSetup = SetupState.load()
-        for key in defaultsKeys { savedDefaults[key] = UserDefaults.standard.object(forKey: key) }
-        for account in keychainAccounts { savedKeychain[account] = try? Keychain.read(account) }
+        hostLocalization = HostLocalizationSnapshot.capture()
+        storage = try IsolatedTestStorage(prefix: "health-relay-loopback")
     }
 
     override func tearDown() async throws {
-        AppLocalization.shared.preference = savedLanguage
-        for key in defaultsKeys { UserDefaults.standard.set(savedDefaults[key], forKey: key) }
-        for (account, value) in savedKeychain {
-            if let value { try? Keychain.write(value, account: account) }
-            else { Keychain.delete(account) }
+        hostLocalization.restore()
+        hostLocalization.assertUnchanged()
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
         }
-        savedSetup.save()
     }
 
-    private func clearModelKeysAndRelay() {
-        for key in defaultsKeys { UserDefaults.standard.removeObject(forKey: key) }
-        for account in keychainAccounts { Keychain.delete(account) }
+    private func resetIsolatedState() throws {
+        try storage.reset()
     }
 
     private func makeModel(
         imageMounted: @escaping () -> Bool = { false },
-        localVPNAvailable: Bool? = nil
+        localVPNAvailable: Bool? = nil,
+        storage: PokiStorage? = nil
     ) -> AppModel {
         let model = AppModel(
             launcher: FakeLauncher(),
             pairer: FakePairing(),
             automation: FakeAutomation(),
             imageMounted: imageMounted,
-            localVPNAvailable: localVPNAvailable
+            localVPNAvailable: localVPNAvailable,
+            storage: storage ?? self.storage.storage
         )
         model.setup.runnerInstalled = true
         model.setup.developerMode = true
@@ -77,8 +49,8 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// 1. Simplified and Traditional Chinese UI must localize `AppModel.noRelay` in
     /// `Issue.current(model)`, `PokiDetailsView` ("需要处理"), and `SetupSettingsPage` without raw English.
     func testChineseUILocalizesNoRelayProblemInIssuesDetailsAndSetup() async throws {
-        clearModelKeysAndRelay()
-        XCTAssertFalse(ModelKeys.hasUsableKey, "test precondition: no usable model key")
+        try resetIsolatedState()
+        XCTAssertFalse(ModelKeys.hasUsableKey(in: storage.storage), "test precondition: no usable model key")
 
         let model = makeModel()
         defer { model.stopSession() }
@@ -127,7 +99,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// `AgentsAndRelayView`, `AgentsView`, and `Issue.current(model)`, and disabling the relay switch
     /// must settle to `.off` (not `.offline("stopped")`) and remove the offline issue.
     func testChineseUILocalizesRelayOfflineStatusAcrossViewsAndDisablingClearsIssue() async throws {
-        clearModelKeysAndRelay()
+        try resetIsolatedState()
         AppLocalization.shared.preference = "zh-Hans"
 
         let model = makeModel()
@@ -214,9 +186,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// must stop showing the stale loopback banner after recovery.
     func testWorkingLoopbackClearsStaleLoopbackProblemAndTunnelAttention() async throws {
         AppLocalization.shared.preference = "zh-Hans"
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
 
         let model = makeModel()
         defer { model.stopSession() }
@@ -273,7 +245,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertNil(model.problem, "choosing external proxy must clear built-in VPN attention")
 
         // Non-loopback problem (noRelay) must NOT be cleared when loopback recovers.
-        clearModelKeysAndRelay()
+        try resetIsolatedState()
         let noRelayModel = makeModel()
         defer { noRelayModel.stopSession() }
         noRelayModel.setup.loopback = .proxy
@@ -290,9 +262,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// `SetupSettingsPage`, or `SetupStepPage(step: .loopback)`.
     func testWorkingExternalLoopbackHidesStaleBuiltInTunnelErrorAndExternalBuildIssues() async throws {
         AppLocalization.shared.preference = "zh-Hans"
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
 
         // External build (`local VPN: unavailable`): stale `.builtIn` with working external proxy
         // must auto-migrate to `.proxy` and show clean Settings and Setup UI.
@@ -467,9 +439,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertFalse(refusedUnknown.contains("x509") || refusedUnknown.contains("mismatch") || refusedUnknown.contains("The phone refused"), refusedUnknown)
 
         // Pairing trouble surfaced through `Issue.current(model)` and `PokiDetailsView` must also hide raw English.
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
         let model = makeModel()
         defer { model.stopSession() }
         model.setup.loopback = .proxy
@@ -505,6 +477,279 @@ final class HealthRelayLoopbackTests: XCTestCase {
         let refusedCertHant = Issue.localizedProblem("The phone refused the pairing (invalid cert). Pair again in Setup.")
         XCTAssertTrue(refusedCertHant.contains("重新配對") && refusedCertHant.contains("配對憑證已失效或不受信任"), refusedCertHant)
         XCTAssertFalse(refusedCertHant.contains("invalid cert"), refusedCertHant)
+    }
+
+    /// 6. Explicit isolated `PokiStorage` instances never inherit or mutate a pre-configured outer
+    /// storage's credentials (including the same OpenAI Keychain item and legacy Codex entries),
+    /// pairing file, language preferences, or originally absent keys.
+    func testIsolatedStoragePreservesPreconfiguredHostCredentialsAndPreferences() throws {
+        let outer = storage.storage
+
+        // Seed outer storage like a pre-configured host: OpenAI key, selected provider, relay,
+        // localization, pairing.plist, and a legacy Codex Keychain entry.
+        try ModelKeys.save("test-host-openai-credential", for: .openai, storage: outer)
+        ModelKeys.setSelectedProvider(.openai, in: outer)
+        RelayAddress.setSaved(RelayAddress("https://host-relay.example"), in: outer)
+        let outerLocalization = AppLocalization(storage: outer)
+        outerLocalization.preference = "zh-Hans"
+        let hostPairingData = Data("host-pairing-record".utf8)
+        try hostPairingData.write(to: outer.pairingFileURL)
+        let outerLegacyCodexAccount = "cli|aaaaaaaaaaaaaaaa"
+        try storage.seedCodexCredential(
+            accessToken: "outer-legacy-codex-token",
+            refreshToken: "outer-legacy-refresh",
+            account: outerLegacyCodexAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+
+        // Preconditions on outer storage: existing values present and untouched keys absent.
+        XCTAssertTrue(ModelKeys.hasUsableKey(in: outer))
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+        XCTAssertNil(ModelKeys.key(.chatgpt, storage: outer))
+
+        let inner = try IsolatedTestStorage(prefix: "health-relay-inner")
+        do {
+            defer { try? inner.tearDown() }
+            let innerStorage = inner.storage
+
+            // S2: directly read the SAME OpenAI credential item and evaluate hasUsableKey with .openai selected.
+            XCTAssertNil(ModelKeys.key(.openai, storage: innerStorage), "inner storage must not read outer OpenAI credential")
+            ModelKeys.setSelectedProvider(.openai, in: innerStorage)
+            XCTAssertFalse(ModelKeys.hasUsableKey(in: innerStorage), "inner storage with .openai selected must still have no usable key")
+            XCTAssertNil(RelayAddress.saved(in: innerStorage), "inner isolated storage must not inherit outer relay address")
+
+            // S2: Codex legacy fixture isolation boundary — outer legacy cli|* item must never migrate into inner storage.
+            XCTAssertEqual(CodexAccount.prepareStorage(storage: innerStorage), .empty)
+            XCTAssertNil(CodexAccount.readAccessToken(storage: innerStorage))
+            let innerLegacyAccount = "cli|bbbbbbbbbbbbbbbb"
+            try inner.seedCodexCredential(
+                accessToken: "inner-legacy-codex-token",
+                refreshToken: "inner-legacy-refresh",
+                account: innerLegacyAccount,
+                accessible: kSecAttrAccessibleWhenUnlocked
+            )
+            XCTAssertEqual(CodexAccount.prepareStorage(storage: innerStorage), .migrated)
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: innerStorage), "inner-legacy-codex-token")
+            XCTAssertNil(try Keychain.read(innerLegacyAccount, service: innerStorage.codexService))
+
+            // P1: SetupState/AppModel pairing.plist isolation — building AppModel must not read or mirror outer/host pairing.plist.
+            let model = makeModel(storage: innerStorage)
+            defer { model.stopSession() }
+            XCTAssertNil(model.pairingPath, "isolated AppModel must not see outer or host pairing.plist")
+            XCTAssertNil(try Keychain.read("setup.pairing", storage: innerStorage), "isolated AppModel must not mirror outer or host pairing.plist into Keychain")
+            model.setup.loopback = .proxy
+            model.loopback.simulate(.working(ms: 12))
+            model.startSession()
+            XCTAssertEqual(model.problem, AppModel.noRelay)
+
+            // P1: Mutate localization and keys that are absent in outer storage inside inner storage.
+            let innerLocalization = AppLocalization(storage: innerStorage)
+            innerLocalization.preference = "zh-Hant"
+            model.approvalMode = .off
+            try ModelKeys.save("inner-only-anthropic-key", for: .anthropic, storage: innerStorage)
+            XCTAssertEqual(innerStorage.defaults.string(forKey: AppLocalization.key), "zh-Hant")
+            XCTAssertEqual(innerStorage.appGroupDefaults.string(forKey: AppLocalization.effectiveKey), "zh-Hant")
+        }
+
+        // Verify outer storage's existing values remained completely intact.
+        XCTAssertEqual(ModelKeys.key(.openai, storage: outer), "test-host-openai-credential")
+        XCTAssertEqual(ModelKeys.selectedProvider(in: outer), .openai)
+        XCTAssertEqual(RelayAddress.saved(in: outer)?.origin.absoluteString, "https://host-relay.example")
+        XCTAssertTrue(ModelKeys.hasUsableKey(in: outer))
+        XCTAssertEqual(outer.defaults.string(forKey: AppLocalization.key), "zh-Hans")
+        XCTAssertEqual(outer.appGroupDefaults.string(forKey: AppLocalization.effectiveKey), "zh-Hans")
+        XCTAssertEqual(try Data(contentsOf: outer.pairingFileURL), hostPairingData)
+        XCTAssertNotNil(try Keychain.read(outerLegacyCodexAccount, service: outer.codexService), "outer legacy Codex entry must remain untouched by inner migration")
+        XCTAssertEqual(CodexAccount.prepareStorage(storage: outer), .migrated)
+        XCTAssertEqual(CodexAccount.readAccessToken(storage: outer), "outer-legacy-codex-token")
+
+        // Verify outer storage's originally absent keys remained absent.
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+        XCTAssertNil(ModelKeys.key(.chatgpt, storage: outer))
+
+        // Verify real host `.live` localization keys remained untouched (both existing values and missing-key absence).
+        hostLocalization.assertUnchanged()
+    }
+
+    /// 7. P1 / ST-1 regression: isolated `PokiStorage` instances follow their own approval mode,
+    /// sensitivity, model selection, voice account settings, and subscription bridge boundary
+    /// regardless of outer or `.live` storage configuration, and never write or mutate `.live`
+    /// or outer storage.
+    func testIsolatedApprovalAndSubscriptionBoundariesIgnoreOuterAndLiveStorage() async throws {
+        // Capture read-only snapshots of real `.live` UserDefaults keys without mutating `.live`.
+        let liveKeys = [
+            ApprovalClassifier.modeKey,
+            ApprovalClassifier.levelKey,
+            "chat.provider",
+            "chat.model",
+            "models.enabled.voice",
+            "voice.model",
+            "voice.openai.enabled",
+            "relayAddress",
+            "relayEnabled",
+            "wantsOn",
+        ]
+        var liveSnapshot: [String: Any?] = [:]
+        for key in liveKeys {
+            liveSnapshot[key] = UserDefaults.standard.object(forKey: key)
+        }
+
+        // Configure outer isolated storage with `.off` (Never Ask), `.permissive`, and an OpenAI key.
+        let outer = storage.storage
+        outer.defaults.set(ApprovalClassifier.Mode.off.rawValue, forKey: ApprovalClassifier.modeKey)
+        outer.defaults.set(ApprovalClassifier.Level.permissive.rawValue, forKey: ApprovalClassifier.levelKey)
+        try ModelKeys.save("outer-openai-key", for: .openai, storage: outer)
+        ModelKeys.setSelectedProvider(.openai, in: outer)
+
+        let inner = try IsolatedTestStorage(prefix: "approval-subscription-inner")
+        defer { try? inner.tearDown() }
+        let innerStorage = inner.storage
+
+        // 1. ApprovalClassifier route, hasModel, and decide use explicit `storage` rather than `.live` or outer.
+        innerStorage.defaults.set(ApprovalClassifier.Mode.confirm.rawValue, forKey: ApprovalClassifier.modeKey)
+        innerStorage.defaults.set(ApprovalClassifier.Level.everything.rawValue, forKey: ApprovalClassifier.levelKey)
+
+        let optionalApprovalInner = PendingApproval(
+            id: "inner-optional-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        let optionalApprovalOuter = PendingApproval(
+            id: "outer-optional-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        XCTAssertEqual(ApprovalClassifier.route(optionalApprovalOuter, voiceOn: false, storage: outer), .allow)
+        XCTAssertEqual(ApprovalClassifier.route(optionalApprovalInner, voiceOn: false, storage: innerStorage), .owner)
+        XCTAssertTrue(ApprovalClassifier.hasModel(in: outer))
+        XCTAssertFalse(ApprovalClassifier.hasModel(in: innerStorage), "isolated storage without a key must not fall back to outer or .live model")
+
+        let noModelVerdict = await ApprovalClassifier.decide(
+            optionalApprovalInner,
+            level: ApprovalClassifier.Level.saved(in: innerStorage),
+            voice: [],
+            storage: innerStorage
+        )
+        XCTAssertFalse(noModelVerdict.allowed)
+        XCTAssertEqual(noModelVerdict.reason, "no chat model to ask")
+
+        // 2. End-to-end AppModel + LiveCore optional approval path honors isolated `.confirm` (asks owner).
+        InProcessWDA.gate.withLock { $0 = InProcessWDA.OpenGate() }
+        let automation = FakeAutomation()
+        let transport = SessionScreenTransport(session: automation, screenLabel: { "Call" })
+        let innerApp = AppModel(
+            launcher: FakeLauncher(),
+            pairer: FakePairing(),
+            automation: automation,
+            transport: transport,
+            storage: innerStorage
+        )
+        defer {
+            automation.answer(nil)
+            if innerApp.sessionOn { innerApp.stopSession() }
+        }
+        XCTAssertEqual(innerApp.approvalMode, .confirm)
+        XCTAssertEqual(innerApp.classifierLevel, .everything)
+        innerApp.loopback.simulate(.working(ms: 9))
+        innerApp.setup.loopback = .proxy
+        XCTAssertTrue(innerApp.setRelay("https://relay.invalid"))
+        innerApp.becameActive()
+        innerApp.startSession()
+        innerApp.wakeRunner()
+        for _ in 0..<150 where !["failed", "running"].contains(innerApp.runner.state) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        innerApp.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        for _ in 0..<150 where !innerApp.hasOpenInProcessSession {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await innerApp.chatTaskBegan()
+        let look = await innerApp.runTool("look", arguments: "{}")
+        XCTAssertFalse(look.isError, look.text)
+
+        let callTask = Task { await innerApp.runTool("do", arguments: #"{"actions":[{"tap":1}]}"#) }
+        for _ in 0..<150 where innerApp.approvals.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let pending = try XCTUnwrap(innerApp.approvals.first, "Isolated AppModel with .confirm must ask owner for optional Call approval")
+        XCTAssertFalse(ApprovalClassifier.requiresOwner(pending), "Call tap must exercise the optional-approval branch")
+        innerApp.resolve(pending, approved: false)
+        let deniedResult = await callTask.value
+        XCTAssertTrue(deniedResult.isError || deniedResult.text.localizedCaseInsensitiveContains("denied") || deniedResult.text.localizedCaseInsensitiveContains("not allow"), deniedResult.text)
+
+        // 3. Switching isolated storage to `.reply` + custom model routes to `.model(reply: true)` without touching outer or `.live`.
+        try ModelKeys.saveCustom(address: "http://127.0.0.1:8765/v1", model: "isolated-classifier-model", typedKey: "", storage: innerStorage)
+        innerApp.approvalMode = .reply
+        innerApp.classifierLevel = .balanced
+        XCTAssertTrue(ApprovalClassifier.hasModel(in: innerStorage))
+        let replyApproval = PendingApproval(
+            id: "inner-reply-\(UUID().uuidString)",
+            app: "Messages",
+            summary: "Tap “Send”",
+            reason: #"sending a message ("send")"#,
+            expires: Date().addingTimeInterval(60)
+        )
+        XCTAssertEqual(ApprovalClassifier.route(replyApproval, voiceOn: true, storage: innerStorage), .model(reply: true))
+
+        // 4. Subscription voice boundary: isolated storage without an injected bridge must not silently fall back to `CodexVoice.shared`.
+        try inner.seedCodexCredential(accessToken: "inner-isolated-codex-token")
+        ModelKeys.setSelectedProvider(.chatgpt, in: innerStorage)
+        XCTAssertFalse(innerApp.voice.usesChatGPTSubscription, "Isolated AppModel without an explicit SubscriptionVoice bridge must not report ChatGPT subscription usable via CodexVoice.shared")
+        let injectedVoice = VoiceModel(
+            clearTap: { _, _, _ in .clear },
+            phoneTool: { _, _, _ in ("", false, nil) },
+            codex: StubSubscriptionVoice(),
+            storage: innerStorage
+        )
+        XCTAssertTrue(injectedVoice.usesChatGPTSubscription, "Isolated VoiceModel with an explicit SubscriptionVoice bridge must match its isolated storage sign-in state")
+
+        // 5. ModelCatalog.setVoice without explicit `account:` resolves `VoiceDirect.settingsAccount(in: storage)`.
+        let customProvider = CustomProvider(
+            name: "Isolated Voice Gateway",
+            endpoints: [CustomEndpoint(url: "https://isolated-voice.invalid/v1")],
+            model: "isolated-chat",
+            liveVoice: true
+        )
+        CustomProviders.setAll([customProvider], in: innerStorage)
+        XCTAssertEqual(VoiceDirect.settingsAccount(in: innerStorage), .custom(customProvider.id))
+        ModelCatalog.setVoice("isolated-rt-model", on: true, storage: innerStorage)
+        let customVoiceKey = "models.enabled.voice" + VoiceAccount.custom(customProvider.id).storeSuffix
+        XCTAssertTrue(ModelCatalog.voiceOn(for: .custom(customProvider.id), storage: innerStorage).contains("isolated-rt-model"))
+        XCTAssertNil(outer.defaults.object(forKey: customVoiceKey))
+        XCTAssertNil(UserDefaults.standard.object(forKey: customVoiceKey))
+
+        // 6. Verify outer storage and real `.live` storage remained completely unchanged.
+        XCTAssertEqual(ApprovalClassifier.mode(in: outer), .off)
+        XCTAssertEqual(ApprovalClassifier.Level.saved(in: outer), .permissive)
+        XCTAssertEqual(ModelKeys.key(.openai, storage: outer), "outer-openai-key")
+        XCTAssertEqual(ModelKeys.selectedProvider(in: outer), .openai)
+
+        for key in liveKeys {
+            let expected = liveSnapshot[key] ?? nil
+            let actual = UserDefaults.standard.object(forKey: key)
+            XCTAssertEqual(actual != nil, expected != nil, "Live UserDefaults presence changed for \(key)")
+            if let expectedString = expected as? String {
+                XCTAssertEqual(actual as? String, expectedString, "Live UserDefaults string changed for \(key)")
+            } else if let expectedBool = expected as? Bool {
+                XCTAssertEqual(actual as? Bool, expectedBool, "Live UserDefaults bool changed for \(key)")
+            } else if let expectedArray = expected as? [String] {
+                XCTAssertEqual(actual as? [String], expectedArray, "Live UserDefaults array changed for \(key)")
+            }
+        }
+        hostLocalization.assertUnchanged()
+    }
+
+    @MainActor
+    private struct StubSubscriptionVoice: SubscriptionVoice {
+        func prepare(onEvent: @escaping (String, [String: Any]) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {}
+        func start(offer: String) async throws -> String { "stub-sdp" }
+        func stop() {}
     }
 
     // MARK: - Helpers

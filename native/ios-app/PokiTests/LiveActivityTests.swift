@@ -535,7 +535,8 @@ final class LiveActivityTests: XCTestCase {
             let saved = keys.map { defaults.object(forKey: $0) }
             let setup = SetupState.load()
             let automation = FakeAutomation()
-            let transport = SessionScreenTransport(session: automation, screenLabel: { "Delete" })
+            // Ordinary-page Delete is allowed under ESP-1328; use a payment button so approval always triggers.
+            let transport = SessionScreenTransport(session: automation, screenLabel: { "Pay" })
             let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: automation, transport: transport)
             defer {
                 automation.answer(nil)

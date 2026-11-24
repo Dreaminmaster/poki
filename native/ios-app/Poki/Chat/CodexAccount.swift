@@ -12,6 +12,7 @@ enum CodexAccount {
         case failed(OSStatus)
     }
 
+    static let defaultServiceName = "Codex Auth"
     @TaskLocal static var defaultService = "Codex Auth"
     @TaskLocal static var defaultHome: URL?
     private static let cliAccountPrefix = "cli|"
@@ -20,7 +21,7 @@ enum CodexAccount {
     private static var signOutDepth = 0
 
     static var home: URL {
-        defaultHome ?? URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory)
+        defaultHome ?? PokiStorage.live.codexHome
     }
 
     /// The pinned App Server's direct Keychain store. Read the same item for text requests so the
@@ -39,6 +40,24 @@ enum CodexAccount {
         storageLock.lock()
         signOutDepth = max(0, signOutDepth - 1)
         storageLock.unlock()
+    }
+
+    static func hasStoredCredential(service: String = defaultService, home: URL = CodexAccount.home) -> Bool {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+
+        guard signOutDepth == 0 else { return false }
+        let account = currentAccount(for: home)
+        if let current = try? Keychain.read(account, service: service),
+           decodeValidSignIn(current) != nil {
+            return true
+        }
+        guard let allItems = try? Keychain.readAll(service: service) else { return false }
+        return selectNewestCredential(from: allItems, excluding: account) != nil
+    }
+
+    static func readAccessToken(storage: PokiStorage) -> String? {
+        readAccessToken(service: storage.codexService, home: storage.codexHome)
     }
 
     static func readAccessToken(service: String = defaultService, home: URL = CodexAccount.home) -> String? {
@@ -62,6 +81,11 @@ enum CodexAccount {
             logVoice("Codex Keychain read failed: OSStatus \((error as NSError).code)")
             return nil
         }
+    }
+
+    @discardableResult
+    static func prepareStorage(storage: PokiStorage) -> StorageState {
+        prepareStorage(service: storage.codexService, home: storage.codexHome)
     }
 
     @discardableResult

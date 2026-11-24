@@ -7,36 +7,28 @@ import XCTest
 @MainActor
 final class PokiMenuTests: XCTestCase {
     private var window: UIWindow?
-    private var savedLanguage = AppLocalization.system
-    private var savedApprovalMode: Any?
-    private var savedProvider: Any?
-    private var savedCustomProviders: Any?
-    private var savedCustomSelected: Any?
-    private var savedCustomModel: Any?
+    private var hostLocalization: HostLocalizationSnapshot!
+    private var storage: IsolatedTestStorage!
 
     override func setUp() async throws {
-        savedLanguage = AppLocalization.shared.preference
-        savedApprovalMode = UserDefaults.standard.object(forKey: ApprovalClassifier.modeKey)
-        savedProvider = UserDefaults.standard.object(forKey: "chat.provider")
-        savedCustomProviders = UserDefaults.standard.object(forKey: CustomProviders.storeKey)
-        savedCustomSelected = UserDefaults.standard.object(forKey: CustomProviders.selectedKey)
-        savedCustomModel = UserDefaults.standard.object(forKey: "chat.model.custom")
+        hostLocalization = HostLocalizationSnapshot.capture()
+        storage = try IsolatedTestStorage(prefix: "poki-menu")
         AppLocalization.shared.preference = "en"
     }
 
     override func tearDown() async throws {
         window?.isHidden = true
         window = nil
-        AppLocalization.shared.preference = savedLanguage
-        UserDefaults.standard.set(savedApprovalMode, forKey: ApprovalClassifier.modeKey)
-        UserDefaults.standard.set(savedProvider, forKey: "chat.provider")
-        UserDefaults.standard.set(savedCustomProviders, forKey: CustomProviders.storeKey)
-        UserDefaults.standard.set(savedCustomSelected, forKey: CustomProviders.selectedKey)
-        UserDefaults.standard.set(savedCustomModel, forKey: "chat.model.custom")
+        hostLocalization.restore()
+        hostLocalization.assertUnchanged()
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
+        }
     }
 
     func testHomeBearMenuAnchorsBelowAvatarWithoutCoveringFace() throws {
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         let bearPlace = CGRect(x: 161, y: 260, width: 80, height: 80)
         let window = try show(
             PokiFlight(
@@ -96,7 +88,7 @@ final class PokiMenuTests: XCTestCase {
     }
 
     func testHomeBearMenuPreservesItemsActionsAndAccessibilityIdentifiers() throws {
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         app.approvalMode = .confirm
         var openedModel = 0
         var openedCustomization = 0
@@ -135,6 +127,10 @@ final class PokiMenuTests: XCTestCase {
             "Expected status.approvals submenu"
         )
         XCTAssertEqual(approvalsMenu.subtitle, ApprovalClassifier.Mode.confirm.title)
+        let approvalSection = try XCTUnwrap(approvalsMenu.children.first as? UIMenu)
+        XCTAssertEqual(approvalSection.title, AppLocalization.text(ApprovalCopy.alwaysConfirm))
+        XCTAssertTrue(approvalSection.title.contains("full screen details are unavailable"), approvalSection.title)
+        XCTAssertTrue(approvalSection.title.contains("matching deletions"), approvalSection.title)
         let approvalActions = flattenMenuElements(approvalsMenu).compactMap { $0 as? UIAction }
         XCTAssertEqual(approvalActions.count, ApprovalClassifier.Mode.allCases.count)
         let offAction = try XCTUnwrap(approvalActions.first { $0.title == ApprovalClassifier.Mode.off.title })
@@ -153,8 +149,8 @@ final class PokiMenuTests: XCTestCase {
     }
 
     func testHomeBearMenuWithConfiguredModelExposesStatusModelSubmenu() throws {
-        try ModelKeys.saveCustom(address: "http://127.0.0.1:8765/v1", model: "poki-test-model", typedKey: "")
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        try ModelKeys.saveCustom(address: "http://127.0.0.1:8765/v1", model: "poki-test-model", typedKey: "", storage: storage.storage)
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         let bearPlace = CGRect(x: 161, y: 260, width: 80, height: 80)
         let window = try show(
             PokiFlight(
@@ -179,13 +175,13 @@ final class PokiMenuTests: XCTestCase {
             elements.first(where: { $0.accessibilityIdentifier == "status.model" }) as? UIMenu,
             "Expected status.model submenu when a model is configured"
         )
-        XCTAssertEqual(modelMenu.subtitle, ModelKeys.selectedModelName)
+        XCTAssertEqual(modelMenu.subtitle, ModelKeys.selectedModelName(in: storage.storage))
         let modelActions = flattenMenuElements(modelMenu).compactMap { $0 as? UIAction }
         XCTAssertTrue(modelActions.contains { $0.title == "poki-test-model" && $0.state == .on })
     }
 
     func testVoiceHeaderMenuAnchorsBelowAvatar() throws {
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         let window = try show(
             VStack(spacing: 0) {
                 MessageListHeader(dark: true, openModel: {})
@@ -212,7 +208,7 @@ final class PokiMenuTests: XCTestCase {
     }
 
     func testChatTopBarCapsulePreservesDetailsAccessibilityIdentifier() throws {
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         let window = try show(
             PokiHead(
                 status: PokiStatus(.ready),

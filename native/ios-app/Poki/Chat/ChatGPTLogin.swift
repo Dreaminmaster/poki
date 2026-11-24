@@ -44,12 +44,20 @@ enum ChatGPTAccount {
         isSignedIn()
     }
 
+    static func isSignedIn(storage: PokiStorage) -> Bool {
+        isSignedIn(
+            codexService: storage.codexService,
+            codexHome: storage.codexHome,
+            modelKeysService: storage.keychainService
+        )
+    }
+
     static func isSignedIn(
         codexService: String = CodexAccount.defaultService,
         codexHome: URL = CodexAccount.home,
         modelKeysService: String = ModelKeys.defaultService
     ) -> Bool {
-        CodexAccount.readAccessToken(service: codexService, home: codexHome) != nil
+        CodexAccount.hasStoredCredential(service: codexService, home: codexHome)
             || ModelKeys.key(.chatgpt, service: modelKeysService).flatMap(decode)?.clientId?.isEmpty == false
     }
 

@@ -1,6 +1,7 @@
 import ActivityKit
 import AVFoundation
 import PokiCore
+import Security
 import Speech
 import WebRTC
 import XCTest
@@ -1214,7 +1215,7 @@ final class VoiceModelTests: XCTestCase {
         XCTAssertEqual(Self.navigationBarTitles(in: spoofedSettingsPayload), ["Settings"])
         XCTAssertFalse(Self.isOnGeneralSettingsPage(rawScreenText: spoofedSettingsPayload))
 
-        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: PKInProcess.shared())
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: PKInProcess.shared(), storage: storage.storage)
         let background = UIApplication.shared.beginBackgroundTask(withName: "Voice simulator screen and action check")
         let prepared = await Task.detached { InProcessWDA.openThroughGate { PKInProcess.shared().prepare() } }.value
         XCTAssertEqual(prepared["ok"] as? Bool, true, "Simulator in-process automation must prepare: \(prepared)")
@@ -1516,27 +1517,52 @@ final class VoiceModelTests: XCTestCase {
         statusHarness.voice.stop()
     }
 
-    private var savedBridge: String?
-    private var savedDirect: Any?
+    private var storage: IsolatedTestStorage!
 
-    override func setUp() {
-        savedBridge = UserDefaults.standard.string(forKey: "voiceBridge")
-        savedDirect = UserDefaults.standard.object(forKey: "voice.openai.enabled")
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        storage = try IsolatedTestStorage(prefix: "voice-model")
         // The token comes from the stubbed bridge, never from an OpenAI key this simulator may hold.
-        VoiceDirect.enabled = false
+        VoiceDirect.setEnabled(false, in: storage.storage)
         BridgeStub.resetScreenshots()
         URLProtocol.registerClass(BridgeStub.self)
     }
 
-    override func tearDown() {
+    override func tearDownWithError() throws {
         URLProtocol.unregisterClass(BridgeStub.self)
-        UserDefaults.standard.set(savedBridge, forKey: "voiceBridge")
-        UserDefaults.standard.set(savedDirect, forKey: "voice.openai.enabled")
+        if let storage {
+            self.storage = nil
+            try storage.tearDown()
+        }
+        try super.tearDownWithError()
+    }
+
+    @MainActor
+    private func Harness(
+        time: FakeTime? = nil,
+        failFirstNetworkPath: Bool = false,
+        openingAudio: OpeningAudioProbe? = nil,
+        onBeforeStartOpeningCapture: (@MainActor () -> Void)? = nil,
+        recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { nil },
+        codex: (any SubscriptionVoice)? = nil,
+        storage: PokiStorage? = nil,
+        phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }
+    ) -> VoiceHarness {
+        VoiceHarness(
+            time: time,
+            failFirstNetworkPath: failFirstNetworkPath,
+            openingAudio: openingAudio,
+            onBeforeStartOpeningCapture: onBeforeStartOpeningCapture,
+            recentAppAudio: recentAppAudio,
+            codex: codex,
+            storage: storage ?? self.storage.storage,
+            phoneTool: phoneTool
+        )
     }
 
     /// One VoiceModel with its connections (one per conversation), its time, and what Poki was told about
     /// the microphone (true: the voice session holds it).
-    private final class Harness {
+    private final class VoiceHarness {
         let voice: VoiceModel
         let time: FakeTime
         private(set) var links: [FakeConnection] = []
@@ -1548,6 +1574,7 @@ final class VoiceModelTests: XCTestCase {
                         onBeforeStartOpeningCapture: (@MainActor () -> Void)? = nil,
                         recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { nil },
                         codex: (any SubscriptionVoice)? = nil,
+                        storage: PokiStorage,
                         phoneTool: @escaping @MainActor (String, String) async -> PhoneAnswer = { _, _ in ("", false, nil) }) {
             let time = time ?? FakeTime()
             self.time = time
@@ -1558,7 +1585,8 @@ final class VoiceModelTests: XCTestCase {
                 await PhoneOperationCancellation.$current.withValue(cancellation) { await phoneTool(name, arguments) }
             }, holdMicrophone: { held($0) }, readyCue: { cued() },
                                connection: { onEvent, onClosed in let link = made(); link.onEvent = onEvent; link.onClosed = onClosed; return link },
-                               time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex)
+                               time: time.clock, openingSpeech: openingAudio?.speech ?? .system, recentAppAudio: recentAppAudio, codex: codex,
+                               storage: storage)
             made = { [unowned self] in
                 let link = FakeConnection()
                 link.failNetworkPath = failFirstNetworkPath && self.links.isEmpty
@@ -1628,13 +1656,14 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceWithAppAudioFallsBackToBridgeAndBlocksPhoneTools() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             for live in [false, true] {
                 var openedApps: [String] = []
                 let codex = FakeSubscriptionVoice()
                 let h = Harness(
                     recentAppAudio: { .transcript("打开微信", stillCapturing: { true }) },
                     codex: codex,
+                    storage: chatGPTStorage,
                     phoneTool: { name, arguments in
                         if name == "do" { openedApps.append(arguments) }
                         return ("opened", false, nil)
@@ -1666,7 +1695,7 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceWithAppAudioFailsBeforeConnectingWithoutFallback() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             weak var retainedContextToken: NSObject?
             var openedApps: [String] = []
             let codex = FakeSubscriptionVoice()
@@ -1677,6 +1706,7 @@ final class VoiceModelTests: XCTestCase {
                     return .transcript("打开微信", stillCapturing: { token.hash != 0 })
                 },
                 codex: codex,
+                storage: chatGPTStorage,
                 phoneTool: { name, arguments in
                     if name == "do" { openedApps.append(arguments) }
                     return ("opened", false, nil)
@@ -1703,10 +1733,10 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceClosesTheMicrophoneAfterSilenceOrAnUnansweredTurn() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             for spoke in [false, true] {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 await h.connect()
                 XCTAssertEqual(h.links.last?.liveAnswer, "fixture-sdp-answer")
                 guard let link = h.links.last else { continue }
@@ -1729,9 +1759,9 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceAuthorizationFailureShowsSignInAndClosesTheMicrophone() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             await h.connect()
             let link = try XCTUnwrap(h.links.last)
             codex.notify("thread/realtime/error", ["kind": "signInRequired"])
@@ -1744,9 +1774,9 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceClosesOnTimeIfTheAnswerTranscriptArrivesAfterPlayback() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             defer {
                 h.voice.stop()
                 NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -1776,18 +1806,34 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceStartupIncludesRealtimeInstructionsAndPhoneTools() async throws {
-        try await withChatGPTSelected {
-            let expectedInstructions = try XCTUnwrap(VoiceDirect.session["instructions"] as? String)
-            let expectedTools = try XCTUnwrap(VoiceDirect.session["tools"] as? [[String: Any]])
+        let legacyAccount = "cli|1111111111111111"
+        let outerLegacyAccount = "cli|e111111111111111"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-1",
+            refreshToken: "outer-untouched-refresh-1",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
+            let expectedInstructions = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["instructions"] as? String)
+            let expectedTools = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["tools"] as? [[String: Any]])
             var sent: [[String: Any]] = []
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -1797,7 +1843,12 @@ final class VoiceModelTests: XCTestCase {
                     guard let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
                     case "thread/realtime/start":
@@ -1807,7 +1858,8 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                storage: chatGPTStorage
             )
             var called: [(name: String, arguments: String)] = []
             let marker = UUID().uuidString
@@ -1815,12 +1867,19 @@ final class VoiceModelTests: XCTestCase {
             @MainActor func newLogs() -> String {
                 AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
             }
-            let h = Harness(codex: codex, phoneTool: { name, arguments in
+            let h = Harness(codex: codex, storage: chatGPTStorage, phoneTool: { name, arguments in
                 called.append((name, arguments))
                 return ("Opened Settings", false, nil)
             })
             defer { h.voice.stop() }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
 
             let threadStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/start" })
             let threadParams = try XCTUnwrap(threadStart["params"] as? [String: Any])
@@ -1854,6 +1913,10 @@ final class VoiceModelTests: XCTestCase {
                 "threadId": "fixture-thread", "tool": "shell_command",
                 "arguments": ["cmd": "secret-cmd"],
             ]])
+            push(["id": 904, "method": "item/tool/call", "params": [
+                "threadId": "fixture-thread", "tool": "private_peer_tool_secret_token",
+                "arguments": ["note": "never-log-tool-name"],
+            ]])
             await h.time.settle()
 
             XCTAssertEqual(called.map(\.name), ["open_app"])
@@ -1865,16 +1928,20 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertTrue(versionText.contains("ios_version"), versionText)
             let rejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 903 }?["result"] as? [String: Any])
             XCTAssertEqual(rejectedReply["success"] as? Bool, false)
+            let privateRejectedReply = try XCTUnwrap(sent.first { $0["id"] as? Int == 904 }?["result"] as? [String: Any])
+            XCTAssertEqual(privateRejectedReply["success"] as? Bool, false)
 
             let logs = newLogs()
             XCTAssertTrue(logs.contains("\(expectedTools.count) tools"), logs)
             XCTAssertTrue(logs.contains("\(expectedInstructions.count) chars"), logs)
             XCTAssertTrue(logs.contains("Codex tool requested: open_app"), logs)
             XCTAssertTrue(logs.contains("Codex tool executed: open_app"), logs)
-            XCTAssertTrue(logs.contains("Codex tool requested: shell_command"), logs)
-            XCTAssertTrue(logs.contains("Codex tool rejected: shell_command"), logs)
+            XCTAssertTrue(logs.contains("Codex tool rejected: disallowed (disallowed tool)"), logs)
+            XCTAssertFalse(logs.contains("shell_command"), "disallowed peer tool name must not be written to diagnostics: \(logs)")
+            XCTAssertFalse(logs.contains("private_peer_tool_secret_token"), "arbitrary disallowed tool name must not be written to diagnostics: \(logs)")
             XCTAssertFalse(logs.contains("do-not-log-this-phrase"), logs)
             XCTAssertFalse(logs.contains("secret-cmd"), logs)
+            XCTAssertFalse(logs.contains("never-log-tool-name"), logs)
 
             push(["method": "thread/realtime/itemAdded", "params": [
                 "threadId": "fixture-thread", "item": ["type": "handoff_request"],
@@ -1894,15 +1961,31 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceSurfacesBackendFailureAndSanitizedDiagnostics() async throws {
-        try await withChatGPTSelected {
+        let legacyAccount = "cli|2222222222222222"
+        let outerLegacyAccount = "cli|e222222222222222"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-2",
+            refreshToken: "outer-untouched-refresh-2",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -1911,7 +1994,12 @@ final class VoiceModelTests: XCTestCase {
                           let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "fixture-thread"]]])
                     case "thread/realtime/start":
@@ -1921,18 +2009,26 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                storage: chatGPTStorage
             )
             let marker = UUID().uuidString
             AppLog.shared.add("test", marker)
             @MainActor func newLogs() -> String {
                 AppLog.shared.lines.drop(while: { !$0.hasSuffix(marker) }).dropFirst().joined(separator: "\n")
             }
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             var delivered: [[VoiceLine]] = []
             h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
             defer { h.voice.stop() }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
 
             push(["method": "poki/backend/warning", "params": [
                 "threadId": "fixture-thread",
@@ -1978,9 +2074,9 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceSurfacesFailedBackendTurnAndSignInFailure() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             await h.connect()
             codex.notify("poki/backend/turnCompleted", [
                 "status": "failed",
@@ -1993,9 +2089,9 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertFalse(h.voice.needsChatGPTSignIn)
         }
 
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             await h.connect()
             codex.notify("poki/backend/error", [
                 "willRetry": false,
@@ -2009,8 +2105,11 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testSubscriptionVoiceBackendFailureDeliversSpecificNoteToChatHistoryAndClearsLiveLines() async throws {
-        let savedLanguage = AppLocalization.shared.preference
-        defer { AppLocalization.shared.preference = savedLanguage }
+        let hostLocalization = HostLocalizationSnapshot.capture()
+        defer {
+            hostLocalization.restore()
+            hostLocalization.assertUnchanged()
+        }
         AppLocalization.shared.preference = "en"
 
         let genericLostNote = "Connection lost. Nothing is sent again. Talk again to hear how running steps ended."
@@ -2038,10 +2137,10 @@ final class VoiceModelTests: XCTestCase {
             ),
         ]
 
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             for item in cases {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 var delivered: [[VoiceLine]] = []
                 h.voice.onConversationEnded = { lines, _ in delivered.append(lines) }
                 await h.connect()
@@ -2061,17 +2160,50 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
-    private func withChatGPTSelected(_ run: () async throws -> Void) async throws {
-        let selected = UserDefaults.standard.object(forKey: "chat.provider")
-        let saved = ModelKeys.key(.chatgpt)
-        defer {
-            ModelKeys.remove(.chatgpt)
-            if let saved { try? ModelKeys.save(saved, for: .chatgpt) }
-            UserDefaults.standard.set(selected, forKey: "chat.provider")
+    private struct LiveReadOnlySnapshot {
+        let localization: HostLocalizationSnapshot
+        let defaultsValues: [String: Any?]
+    }
+
+    private func captureLiveReadOnlySnapshot() -> LiveReadOnlySnapshot {
+        let keys = [ApprovalClassifier.modeKey, ApprovalClassifier.levelKey, "chat.provider", "chat.model", "voice.openai.enabled"]
+        var values: [String: Any?] = [:]
+        for key in keys {
+            values[key] = UserDefaults.standard.object(forKey: key)
         }
-        try ModelKeys.save(#"{"access":"fixture-access","refresh":"fixture-refresh","expires":1,"clientId":"fixture-registration"}"#, for: .chatgpt)
-        ModelKeys.selectedProvider = .chatgpt
-        try await run()
+        return LiveReadOnlySnapshot(localization: HostLocalizationSnapshot.capture(), defaultsValues: values)
+    }
+
+    private func assertLiveReadOnlySnapshotUnchanged(_ snapshot: LiveReadOnlySnapshot, file: StaticString = #filePath, line: UInt = #line) {
+        snapshot.localization.assertUnchanged(file: file, line: line)
+        for (key, expected) in snapshot.defaultsValues {
+            let actual = UserDefaults.standard.object(forKey: key)
+            XCTAssertEqual(actual != nil, expected != nil, "Live defaults presence changed for \(key)", file: file, line: line)
+            if let expectedString = expected as? String {
+                XCTAssertEqual(actual as? String, expectedString, "Live defaults string changed for \(key)", file: file, line: line)
+            } else if let expectedBool = expected as? Bool {
+                XCTAssertEqual(actual as? Bool, expectedBool, "Live defaults bool changed for \(key)", file: file, line: line)
+            }
+        }
+    }
+
+    private func withChatGPTSelected(seedLegacyAccount: String? = nil, _ run: (PokiStorage) async throws -> Void) async throws {
+        let isolated = try IsolatedTestStorage(prefix: "voice-chatgpt")
+        var runError: Error?
+        do {
+            VoiceDirect.setEnabled(false, in: isolated.storage)
+            try isolated.seedCodexCredential(
+                accessToken: "fixture-codex-voice-access",
+                account: seedLegacyAccount,
+                accessible: seedLegacyAccount == nil ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly : kSecAttrAccessibleWhenUnlocked
+            )
+            ModelKeys.setSelectedProvider(.chatgpt, in: isolated.storage)
+            try await run(isolated.storage)
+        } catch {
+            runError = error
+        }
+        try isolated.tearDown()
+        if let runError { throw runError }
     }
 
     /// Said once, answered once: in the foreground the conversation stays open until ended; in the
@@ -2370,16 +2502,32 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testCodexHandoffTurnAndRetryingBackendErrorStayOpenPastOldEightSecondWindow() async throws {
-        try await withChatGPTSelected {
+        let legacyAccount = "cli|3333333333333333"
+        let outerLegacyAccount = "cli|e333333333333333"
+        try storage.seedCodexCredential(
+            accessToken: "outer-untouched-codex-3",
+            refreshToken: "outer-untouched-refresh-3",
+            account: outerLegacyAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+        let liveSnapshot = captureLiveReadOnlySnapshot()
+
+        try await withChatGPTSelected(seedLegacyAccount: legacyAccount) { chatGPTStorage in
+            let currentAccount = try IsolatedTestStorage.codexAccountKey(for: chatGPTStorage.codexHome)
+            XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
+            XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
+
             // Part 1: Real CodexVoice bridge forwarding handoff_request, turnStarted, retrying error (ignored), and turnCompleted.
             var emit: (@MainActor (String) -> Void)?
+            var startedHomePath: String?
             func push(_ payload: [String: Any]) {
                 guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
                 let text = String(decoding: bytes, as: UTF8.self)
                 Task { @MainActor in emit?(text) }
             }
             let codex = CodexVoice(
-                startBridge: { _, next in
+                startBridge: { homePath, next in
+                    startedHomePath = homePath
                     emit = next
                     return true
                 },
@@ -2388,7 +2536,12 @@ final class VoiceModelTests: XCTestCase {
                           let method = object["method"] as? String, let id = object["id"] else { return true }
                     switch method {
                     case "account/read":
-                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        let hasMigratedAccount = (try? Keychain.read(currentAccount, service: chatGPTStorage.codexService)) != nil
+                        if hasMigratedAccount {
+                            push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                        } else {
+                            push(["id": id, "result": ["account": NSNull()]])
+                        }
                     case "thread/start":
                         push(["id": id, "result": ["thread": ["id": "busy-thread"]]])
                     case "thread/realtime/start":
@@ -2398,14 +2551,22 @@ final class VoiceModelTests: XCTestCase {
                         push(["id": id, "result": [:]])
                     }
                     return true
-                }
+                },
+                storage: chatGPTStorage
             )
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             defer {
                 h.voice.stop()
                 NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
             }
             await h.connect()
+
+            XCTAssertEqual(startedHomePath, chatGPTStorage.codexHome.path(percentEncoded: false))
+            XCTAssertNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must migrate and delete cli|<old>")
+            XCTAssertNotNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "real CodexVoice bridge prepareStorage must write current account format")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+            XCTAssertNotNil(try Keychain.read(outerLegacyAccount, service: storage.codexService), "outer storage legacy entry must stay untouched")
+            assertLiveReadOnlySnapshotUnchanged(liveSnapshot)
             let link = try XCTUnwrap(h.links.last)
             NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
 
@@ -2447,7 +2608,7 @@ final class VoiceModelTests: XCTestCase {
 
             // Part 2: Retrying backend error keeps busy state; final non-retrying poki/backend/error clears busy state and surfaces failure.
             let fakeCodex = FakeSubscriptionVoice()
-            let h2 = Harness(codex: fakeCodex)
+            let h2 = Harness(codex: fakeCodex, storage: chatGPTStorage)
             defer { h2.voice.stop() }
             await h2.connect()
             let link2 = try XCTUnwrap(h2.links.last)
@@ -2471,11 +2632,111 @@ final class VoiceModelTests: XCTestCase {
         }
     }
 
+    /// SP-1 regression: an empty or unaccepted Codex `handoff_request` that never emits `poki/backend/turnStarted`
+    /// must time out of pending handoff state after `codexHandoffGrace` and return to normal 60 s background idle
+    /// shutdown so the microphone is released. Conversely, once `poki/backend/turnStarted` confirms a backend turn,
+    /// the session must stay open past `codexHandoffGrace`, `backgroundStall`, and `backgroundFollowUp`.
+    func testCodexUnconfirmedHandoffTimesOutToBackgroundIdleAndReleasesMicrophone() async throws {
+        // Seed outer storage like a pre-configured host to prove `withChatGPTSelected` preserves
+        // both existing values and originally absent keys.
+        let outer = storage.storage
+        try ModelKeys.save("host-chatgpt-credential", for: .chatgpt, storage: outer)
+        try ModelKeys.save("host-openai-credential", for: .openai, storage: outer)
+        ModelKeys.setSelectedProvider(.openai, in: outer)
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+
+        try await withChatGPTSelected { chatGPTStorage in
+            XCTAssertNil(ModelKeys.key(.openai, storage: chatGPTStorage), "isolated ChatGPT storage must not see outer OpenAI key")
+            XCTAssertNil(ModelKeys.key(.chatgpt, storage: chatGPTStorage), "isolated ChatGPT storage must not see outer legacy ChatGPT key")
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: chatGPTStorage), "fixture-codex-voice-access")
+
+            // 1. Bare handoff_request with no turnStarted: waits codexHandoffGrace (10 s), returns to .listening,
+            // then ends after 60 s background idle and releases the microphone.
+            let codex1 = FakeSubscriptionVoice()
+            let h1 = Harness(codex: codex1, storage: chatGPTStorage)
+            defer {
+                h1.voice.stop()
+                NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+            await h1.connect()
+            let link1 = try XCTUnwrap(h1.links.last)
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+            codex1.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h1.time.settle()
+            XCTAssertEqual(h1.voice.phase, .thinking)
+            XCTAssertTrue(h1.voice.midTurn)
+
+            await h1.time.advance(9)
+            XCTAssertTrue(h1.voice.isOn, "pending handoff must stay open within codexHandoffGrace")
+            XCTAssertEqual(h1.voice.phase, .thinking)
+
+            await h1.time.advance(1)
+            XCTAssertTrue(h1.voice.isOn, "timing out an unconfirmed handoff returns to idle rather than abruptly failing")
+            XCTAssertEqual(h1.voice.phase, .listening)
+            XCTAssertFalse(h1.voice.midTurn)
+
+            await h1.time.advance(59)
+            XCTAssertTrue(h1.voice.isOn, "background idle must still grant the full 60 s window after returning to idle")
+            await h1.time.advance(1)
+            XCTAssertFalse(h1.voice.isOn, "unconfirmed handoff must release the microphone after returning to background idle")
+            XCTAssertEqual(h1.voice.phase, .off)
+            XCTAssertTrue(link1.closed)
+            XCTAssertEqual(h1.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+            // 2. Transcript done + unconfirmed handoff with no frontend speech and no turnStarted:
+            // unconfirmed handoff must not mask backgroundStall (30 s).
+            let codex2 = FakeSubscriptionVoice()
+            let h2 = Harness(codex: codex2, storage: chatGPTStorage)
+            defer { h2.voice.stop() }
+            await h2.connect()
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            codex2.notify("thread/realtime/transcript/done", ["role": "user", "text": "Check mail"])
+            codex2.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h2.time.advance(29)
+            XCTAssertTrue(h2.voice.isOn)
+            await h2.time.advance(1)
+            XCTAssertFalse(h2.voice.isOn, "unconfirmed handoff must not suppress background stall timeout when awaitingAnswer is still due")
+            XCTAssertEqual(h2.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+            // 3. Handoff confirmed by turnStarted within grace window stays open across long backend silence until turnCompleted.
+            let codex3 = FakeSubscriptionVoice()
+            let h3 = Harness(codex: codex3, storage: chatGPTStorage)
+            defer { h3.voice.stop() }
+            await h3.connect()
+            NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            codex3.notify("thread/realtime/itemAdded", ["item": ["type": "handoff_request"]])
+            await h3.time.advance(5)
+            codex3.notify("poki/backend/turnStarted", [:])
+            await h3.time.advance(80)
+            XCTAssertTrue(h3.voice.isOn, "confirmed backend turn must not be interrupted by handoff grace, stall, or idle timers")
+            XCTAssertEqual(h3.voice.phase, .thinking)
+            XCTAssertTrue(h3.voice.midTurn)
+
+            codex3.notify("poki/backend/turnCompleted", ["status": "completed"])
+            await h3.time.settle()
+            XCTAssertEqual(h3.voice.phase, .listening)
+            await h3.time.advance(60)
+            XCTAssertFalse(h3.voice.isOn)
+            XCTAssertEqual(h3.microphone, [true, false])
+            NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+
+        XCTAssertEqual(ModelKeys.key(.chatgpt, storage: outer), "host-chatgpt-credential")
+        XCTAssertEqual(ModelKeys.key(.openai, storage: outer), "host-openai-credential")
+        XCTAssertEqual(ModelKeys.selectedProvider(in: outer), .openai)
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+    }
+
     func testCodexRunningPhoneToolStaysOpenInForegroundAndBackgroundUntilFinished() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let (gate, releaseGate) = AsyncStream<Void>.makeStream()
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex, phoneTool: { _, _ in
+            let h = Harness(codex: codex, storage: chatGPTStorage, phoneTool: { _, _ in
                 for await _ in gate { break }
                 return ("Opened Settings", false, nil)
             })
@@ -2537,9 +2798,9 @@ final class VoiceModelTests: XCTestCase {
         live.voice.stop()
 
         // Codex subscription voice in foreground
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let sub = Harness(codex: codex)
+            let sub = Harness(codex: codex, storage: chatGPTStorage)
             defer { sub.voice.stop() }
             await sub.connect()
             let link = try XCTUnwrap(sub.links.last)
@@ -2582,13 +2843,13 @@ final class VoiceModelTests: XCTestCase {
     }
 
     func testCodexLiveHearingAndRemotePlaybackTransitionsAvoidFalseEndOrStuckPhase() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             defer { NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil) }
 
             // 1. Remote playback starts while phase is .hearing (before transcript/done): must enter .speaking, not stall in .hearing.
             do {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 defer { h.voice.stop() }
                 await h.connect()
                 let link = try XCTUnwrap(h.links.last)
@@ -2610,7 +2871,7 @@ final class VoiceModelTests: XCTestCase {
             // 2. Barge-in during playback: draining old audio keeps .hearing; when playback goes quiet, stays .hearing without triggering endIfDone.
             do {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 defer { h.voice.stop() }
                 await h.connect()
                 let link = try XCTUnwrap(h.links.last)
@@ -2632,7 +2893,7 @@ final class VoiceModelTests: XCTestCase {
             // 3. Echo transcript/delta during continuous remote playback: recovers back to .speaking instead of staying stuck in .hearing.
             do {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 defer { h.voice.stop() }
                 await h.connect()
                 let link = try XCTUnwrap(h.links.last)
@@ -2653,7 +2914,7 @@ final class VoiceModelTests: XCTestCase {
             // 4. Empty user transcript/done exits .hearing cleanly instead of staying stuck until stall timeout.
             do {
                 let codex = FakeSubscriptionVoice()
-                let h = Harness(codex: codex)
+                let h = Harness(codex: codex, storage: chatGPTStorage)
                 defer { h.voice.stop() }
                 await h.connect()
                 NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
@@ -2813,7 +3074,7 @@ final class VoiceLanguageTests: XCTestCase {
 /// The Live Activity during a talk: it says what the talk is doing in the state's own `voice` field,
 /// its End ends the talk, and an approval is never pushed aside by it.
 extension VoiceModelTests {
-    private func following(_ h: Harness) -> (ActivityController, TalkActivity) {
+    private func following(_ h: VoiceHarness) -> (ActivityController, TalkActivity) {
         let activity = ActivityController()
         return (activity, TalkActivity(voice: h.voice, activity: activity, deviceName: { "Test iPhone" }, keepsActivity: { false }))
     }
@@ -2976,7 +3237,7 @@ extension VoiceModelTests {
         XCTAssertFalse(h.voice.isOn)
         XCTAssertNil(h.voice.talkState)
         XCTAssertNil(h.voice.bridge)
-        XCTAssertNil(UserDefaults.standard.string(forKey: "voiceBridge"))
+        XCTAssertNil(VoiceBridge.saved(in: storage.storage))
         XCTAssertFalse(h.voice.canTalkLive)
     }
 
@@ -3827,9 +4088,9 @@ extension VoiceModelTests {
     }
 
     func testForegroundSubscriptionVoiceReadyCuePlaysWhenConnected() async throws {
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let codex = FakeSubscriptionVoice()
-            let h = Harness(codex: codex)
+            let h = Harness(codex: codex, storage: chatGPTStorage)
             await h.connect()
             XCTAssertEqual(h.voice.phase, .listening)
             XCTAssertEqual(h.readyCues, 1)
@@ -3853,10 +4114,10 @@ extension VoiceModelTests {
             h.voice.stop()
         }
 
-        try await withChatGPTSelected {
+        try await withChatGPTSelected { chatGPTStorage in
             let audio = OpeningAudioProbe()
             let codex = FakeSubscriptionVoice()
-            let h = Harness(openingAudio: audio, codex: codex)
+            let h = Harness(openingAudio: audio, codex: codex, storage: chatGPTStorage)
             await h.voice.start(captureOpening: true)
             XCTAssertTrue(h.voice.isCapturingOpening)
             XCTAssertEqual(h.microphone, [true])

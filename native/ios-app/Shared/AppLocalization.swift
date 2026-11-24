@@ -6,17 +6,25 @@ import Observation
 @Observable final class AppLocalization {
     static let shared = AppLocalization()
     static let key = "uiLanguage"
+    static let effectiveKey = "effectiveUILanguage"
     static let system = "system"
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let appGroupDefaults: UserDefaults
+    @ObservationIgnored private let cache: LocalizationCache
 
     var preference: String {
         didSet {
-            UserDefaults.standard.set(preference, forKey: Self.key)
-            Self.publish()
+            defaults.set(preference, forKey: Self.key)
+            publish()
         }
     }
 
-    private init() {
-        let saved = UserDefaults.standard.string(forKey: Self.key) ?? Self.system
+    init(defaults: UserDefaults = .standard, appGroupDefaults: UserDefaults = SharedContainer.defaults) {
+        self.defaults = defaults
+        self.appGroupDefaults = appGroupDefaults
+        self.cache = LocalizationCache(supported: Self.languages)
+        let saved = defaults.string(forKey: Self.key) ?? Self.system
         preference = Self.languages.contains(saved) ? saved : Self.system
     }
 
@@ -31,16 +39,38 @@ import Observation
         return Bundle.preferredLocalizations(from: supported, forPreferences: preferred).first ?? "en"
     }
 
-    private static let cache = LocalizationCache(supported: languages)
+    private var resolved: LocalizationCache.Value {
+        cache.value(for: preference) // Keep SwiftUI's Observation dependency on `preference`.
+    }
+
+    var language: String { resolved.language }
+    var locale: Locale { resolved.locale }
+    var bundle: Bundle { resolved.bundle }
+
+    /// String(localized:locale:) only changes interpolation formatting. A resource's locale also
+    /// chooses its translation. Keeping the resource at the call site preserves catalog extraction.
+    func text(_ resource: LocalizedStringResource) -> String {
+        var resource = resource
+        resource.locale = locale
+        return String(localized: resource)
+    }
+
+    func publish() {
+        appGroupDefaults.set(language, forKey: Self.effectiveKey)
+    }
+
+    #if !POKI_APP
+    private static let widgetCache = LocalizationCache(supported: languages)
+    #endif
 
     private static var resolved: LocalizationCache.Value {
         #if POKI_APP
-        let preference = shared.preference // Keep SwiftUI's Observation dependency.
+        return shared.resolved
         #else
         // Re-read this cheap key: defaults notifications do not reliably cross process boundaries.
-        let preference = SharedContainer.defaults.string(forKey: "effectiveUILanguage") ?? system
+        let preference = SharedContainer.defaults.string(forKey: effectiveKey) ?? system
+        return widgetCache.value(for: preference)
         #endif
-        return cache.value(for: preference)
     }
 
     static var language: String { resolved.language }
@@ -58,7 +88,11 @@ import Observation
     static var bundle: Bundle { resolved.bundle }
 
     static func publish() {
-        SharedContainer.defaults.set(language, forKey: "effectiveUILanguage")
+        #if POKI_APP
+        shared.publish()
+        #else
+        SharedContainer.defaults.set(language, forKey: effectiveKey)
+        #endif
     }
 }
 
