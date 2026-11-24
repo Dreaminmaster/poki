@@ -66,6 +66,23 @@ final class ActivityController {
     /// run's first step while the run went on (ESP-328, not seen on a simulator).
     private var tally = Tally()
     private struct Tally { var sent = 0, answered = 0, reported = 0, withoutActivity = 0, longestWait = 0.0 }
+    private var contentObserver: Task<Void, Never>?
+    private var stateObserver: Task<Void, Never>?
+
+    isolated deinit {
+        contentObserver?.cancel()
+        stateObserver?.cancel()
+    }
+
+    private func clearActivity() {
+        activity = nil
+        contentObserver?.cancel()
+        contentObserver = nil
+        stateObserver?.cancel()
+        stateObserver = nil
+        held = nil
+    }
+
     /// The phase and step iOS last reported holding for the activity.
     private var held: (phase: PokiState.Phase, step: Int)?
     private static let runPhases: Set<PokiState.Phase> = [.working, .approval, .deciding, .handoff]
@@ -139,15 +156,21 @@ final class ActivityController {
             activity = started
             budget = UpdateBudget()
             lastError = nil
-            Task { [weak self] in
+            contentObserver = Task { [weak self] in
                 for await content in started.contentUpdates {
-                    await MainActor.run { self?.tally.reported += 1; self?.held = (content.state.phase, content.state.stepCount) }
+                    guard !Task.isCancelled, let self, self.activity?.id == started.id else { return }
+                    self.tally.reported += 1
+                    self.held = (content.state.phase, content.state.stepCount)
                 }
             }
             // Dismissed by the person (swiped away) or ended by iOS: start again next time.
-            Task { [weak self] in
-                for await state in started.activityStateUpdates where state == .dismissed || state == .ended {
-                    await MainActor.run { if self?.activity?.id == started.id { self?.activity = nil } }
+            stateObserver = Task { [weak self] in
+                for await state in started.activityStateUpdates {
+                    guard !Task.isCancelled, let self, self.activity?.id == started.id else { return }
+                    if state == .dismissed || state == .ended {
+                        self.clearActivity()
+                        return
+                    }
                 }
             }
         } catch { lastError = AppLocalization.text(LocalizedStringResource("The Live Activity did not start. \(error.localizedDescription)")) }
@@ -178,7 +201,7 @@ final class ActivityController {
         if Self.runPhases.contains(state.phase) { logRun("cut off by ending the Live Activity") }
         worker?.cancel(); worker = nil; plainWaiting = false
         guard let activity else { return tail }
-        self.activity = nil
+        clearActivity()
         // A finished run or a problem stays on the Lock Screen with its final content for a while (HIG:
         // end at once, keep the outcome readable); anything else goes at once.
         let final: ActivityContent<PokiState>? = state.phase.isRunOutcome || state.phase == .problem
@@ -195,7 +218,7 @@ final class ActivityController {
     private func hide() {
         worker?.cancel(); worker = nil; plainWaiting = false
         guard let activity else { return }
-        self.activity = nil
+        clearActivity()
         let previous = tail
         tail = Task { await previous?.value; await activity.end(nil, dismissalPolicy: .immediate) }
     }
@@ -541,7 +564,7 @@ final class ActivityController {
             await previous?.value
             let began = Date()
             if let alert { await activity.update(content, alertConfiguration: alert) } else { await activity.update(content) }
-            self.tally.answered += 1
+            if self.activity?.id == activity.id { self.tally.answered += 1 }
             let seconds = Date().timeIntervalSince(began)
             if alert != nil {
                 // For the Activity Log: iOS opens the island for an alert, but not while Poki itself is in
