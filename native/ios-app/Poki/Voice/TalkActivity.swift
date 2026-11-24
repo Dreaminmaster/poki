@@ -89,8 +89,16 @@ final class TalkActivity {
             show(nil)
             return false
         }
+        voice.setBackgroundRecordingIntentActive(true)
+        defer { voice.setBackgroundRecordingIntentActive(false) }
         await voice.start(captureOpening: true, presentSpeechPermission: presentSpeechPermission)
         show(Self.state(of: voice))
+        // Keep AudioRecordingIntent active long enough for VPIO zero-input recovery to restart if
+        // remote-control / Oneness mute was active at launch; returns immediately once live audio arrives.
+        if voice.isOn {
+            _ = await voice.waitForOpeningLiveInput()
+            show(Self.state(of: voice))
+        }
         return true
     }
 

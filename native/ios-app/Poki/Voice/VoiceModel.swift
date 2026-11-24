@@ -331,6 +331,17 @@ final class VoiceModel {
     private(set) var waitsForOpeningDictation = false
     private var openingDictation: Task<Void, Never>?
     var isCapturingOpening: Bool { openingCapture != nil }
+    private var backgroundRecordingIntentActive = false
+
+    func setBackgroundRecordingIntentActive(_ active: Bool) {
+        backgroundRecordingIntentActive = active
+        openingCapture?.audio.backgroundRecordingIntentActive = active
+    }
+
+    func waitForOpeningLiveInput(timeout: Duration = OpeningVoiceAudio.defaultLiveInputWaitTimeout) async -> Bool {
+        guard let audio = openingCapture?.audio else { return true }
+        return await audio.waitForLiveInput(timeout: timeout)
+    }
 
     func ensureBackgroundAudioActive() -> Bool {
         openingCapture?.audio.ensureRunning() ?? true
@@ -825,6 +836,7 @@ final class VoiceModel {
                 let captureStarted = time.now()
                 holdingMicrophone = true
                 openingCapture = try openingLink.startOpeningCapture(session: number)
+                openingCapture?.audio.backgroundRecordingIntentActive = backgroundRecordingIntentActive
                 if openingCapture != nil {
                     let firstTimeAuth = openingSpeech.authorizationStatus() == .notDetermined
                     let authStart = time.now()

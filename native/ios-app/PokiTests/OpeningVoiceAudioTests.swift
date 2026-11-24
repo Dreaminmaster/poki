@@ -181,6 +181,7 @@ final class OpeningVoiceAudioTests: XCTestCase {
             playReadyChime: false,
             zeroInputRecoveryEnabled: true,
             isInputMuted: { false },
+            isInBackground: { false },
             restartAudioUnit: { reason in restarts.append(reason) }
         )
 
@@ -223,6 +224,7 @@ final class OpeningVoiceAudioTests: XCTestCase {
             playReadyChime: false,
             zeroInputRecoveryEnabled: true,
             isInputMuted: { muted },
+            isInBackground: { false },
             restartAudioUnit: { reason in restarts.append(reason) }
         )
 
@@ -234,10 +236,69 @@ final class OpeningVoiceAudioTests: XCTestCase {
         XCTAssertTrue(restarts.isEmpty, "Zero-input recovery must not restart VPIO while input is muted")
 
         muted = false
-        for attempt in 1...10 {
+        for attempt in 1...15 {
             audio.recoverFromZeroInput(reason: "attempt \(attempt)", requiresExistingZeroInput: false)
         }
         XCTAssertEqual(restarts.count, OpeningVoiceAudio.maxZeroInputRecoveryRestarts,
                        "Zero-input recovery must remain strictly bounded")
+    }
+
+    @MainActor
+    func testZeroInputRecoveryRespectsBackgroundIntentWindowAndWaitForLiveInput() async {
+        var inBackground = true
+        var restarts: [String] = []
+        let audio = OpeningVoiceAudio(
+            session: 1,
+            playReadyChime: false,
+            zeroInputRecoveryEnabled: true,
+            isInputMuted: { false },
+            isInBackground: { inBackground },
+            restartAudioUnit: { reason in restarts.append(reason) }
+        )
+
+        audio.recordRawInputMetrics(frameCount: 960, maxSample: 0, peak: 0)
+        audio.recoverFromZeroInput(reason: "post-intent background", requiresExistingZeroInput: true)
+        XCTAssertTrue(restarts.isEmpty,
+                      "Outside AudioRecordingIntent in background, zero-input recovery must not tear down VPIO")
+
+        audio.backgroundRecordingIntentActive = true
+        audio.recoverFromZeroInput(reason: "sustained zero input (#1)", requiresExistingZeroInput: true)
+        audio.recoverFromZeroInput(
+            reason: "spatial playback capabilities changed",
+            requiresExistingZeroInput: true,
+            fromSpatialNotification: true
+        )
+        XCTAssertEqual(restarts, ["sustained zero input (#1)", "spatial playback capabilities changed"],
+                       "Active AudioRecordingIntent must allow both threshold and spatial recovery restarts")
+
+        let timedOut = await audio.waitForLiveInput(timeout: .milliseconds(30))
+        XCTAssertFalse(timedOut, "waitForLiveInput must return false after timeout when input stays zero")
+
+        let waitTask = Task { @MainActor in
+            await audio.waitForLiveInput(timeout: .seconds(5))
+        }
+        await Task.yield()
+        audio.recordRawInputMetrics(frameCount: 960, maxSample: 2_400, peak: Float(2_400) / 32_768.0)
+        let recovered = await waitTask.value
+        XCTAssertTrue(recovered, "waitForLiveInput must wake immediately once non-zero hardware audio arrives")
+        XCTAssertTrue(await audio.waitForLiveInput(timeout: .milliseconds(10)),
+                      "waitForLiveInput must return true immediately after live input is already observed")
+
+        inBackground = false
+        audio.backgroundRecordingIntentActive = false
+        let stoppedAudio = OpeningVoiceAudio(
+            session: 2,
+            playReadyChime: false,
+            zeroInputRecoveryEnabled: true,
+            isInputMuted: { false },
+            isInBackground: { false }
+        )
+        let stopWaitTask = Task { @MainActor in
+            await stoppedAudio.waitForLiveInput(timeout: .seconds(5))
+        }
+        await Task.yield()
+        _ = stoppedAudio.stopCapture(session: 2)
+        let stoppedResult = await stopWaitTask.value
+        XCTAssertFalse(stoppedResult, "stopCapture must release any live-input waiter immediately")
     }
 }
