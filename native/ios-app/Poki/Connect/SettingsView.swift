@@ -244,10 +244,9 @@ struct RelayView: View {
         return !trimmed.isEmpty && trimmed != model.relayAddress?.origin.absoluteString
     }
 
-    /// "Online", or "Offline: why" with PokiCore's reason as it came.
+    /// "Online", or localized "Offline: reason".
     private var statusText: String {
-        if case .offline(let why) = model.relayStatus { return "\(Health.relay(model).word): \(why)" }
-        return Health.relay(model).word
+        Health.relayStatusText(model)
     }
 
     private func save() {

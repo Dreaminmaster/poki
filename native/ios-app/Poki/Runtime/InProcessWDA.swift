@@ -330,7 +330,13 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
     }
 
     func send(method: String, url: URL, body: Data?, timeout: Double) async throws -> (status: Int, body: Data) {
-        try await lanes.send(method: method, url: url, body: body, timeout: timeout)
+        let reply = try await lanes.send(method: method, url: url, body: body, timeout: timeout)
+        if method == "POST", url.path.hasSuffix("/wda/apps/activate"), reply.status == 500,
+           let message = (try? JSON.parse(reply.body))?["value"]?["message"]?.string,
+           message.hasPrefix("sent, no confirmation: ") {
+            throw TransportError.other(message)
+        }
+        return reply
     }
 
     private func answer(_ key: String, session: String?, element: String?, body: JSON?, route: Route?, refreshViewport: Bool) -> (status: Int, body: Data) {

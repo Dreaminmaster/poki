@@ -23,6 +23,7 @@ struct TalkBar: View {
     var end: () -> Void
     var retry: () -> Void
     var dismiss: () -> Void
+    var signInAgain = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var typeSize
     var controlSize = CompactControlMetrics(base: 44, maximum: 52)
@@ -79,7 +80,8 @@ struct TalkBar: View {
     @ViewBuilder private var controls: some View {
         if state.isFailed {
             round("xmark", label: "Close", identifier: "composer.talk.close", action: dismiss)
-            capsule("Try Again", fill: Tint.blue, ink: .white, identifier: "composer.talk.retry", action: retry)
+            capsule(signInAgain ? "Sign In Again" : "Try Again", fill: Tint.blue, ink: .white,
+                    identifier: signInAgain ? "composer.talk.sign-in" : "composer.talk.retry", action: retry)
         } else {
             if state == .speaking {
                 round("hand.raised.fill", label: "Interrupt", identifier: "composer.talk.interrupt", action: interrupt)

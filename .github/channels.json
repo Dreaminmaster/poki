@@ -87,6 +87,28 @@
       "source": "app-0.4.6-alpha.1922",
       "sha": "ad4c48ebae7abb6b29940c05e7ca66be7c018761",
       "version_bump": "0.4.6 -> 0.4.7"
+    },
+    {
+      "channel": "beta",
+      "proposed": "2026-11-21T16:42:31Z",
+      "version": "0.4.7-beta.1",
+      "tag": "app-0.4.7-beta.1",
+      "base_version": "0.4.7",
+      "build": "9971",
+      "source": "app-0.4.7-alpha.9971",
+      "sha": "5e550f8ff6d2a6c7acee99adbd859514be9825bd",
+      "version_bump": "0.4.7 -> 0.4.8"
+    },
+    {
+      "channel": "beta",
+      "proposed": "2026-11-24T10:01:01Z",
+      "version": "0.5.0-beta.1",
+      "tag": "app-0.5.0-beta.1",
+      "base_version": "0.5.0",
+      "build": "2500",
+      "source": "app-0.5.0-alpha.2500",
+      "sha": "31b7915c5b958326a7b6e4b9c39f5f8491b96f70",
+      "version_bump": "0.5.0 -> 0.5.1"
     }
   ]
 }

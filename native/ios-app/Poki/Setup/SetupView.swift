@@ -135,9 +135,7 @@ struct SetupView: View {
     /// the step opened on "Not on yet" with nothing to tap in view: it is dialled again here, and the
     /// check that follows moves the page on.
     private func reconnectBuiltIn() {
-        guard step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available,
-              !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse else { return }
-        Task { try? await model.tunnel.connect(); model.loopback.check() }
+        reconnectBuiltInIfNeeded(model, for: step)
     }
 
     private func advanceSoon() {
@@ -180,6 +178,14 @@ extension SetupStep {
 @MainActor func openSettings(_ model: AppModel, for step: SetupStep?) {
     if let step { model.guide(step) }
     if let url = settingsURL(for: step) { UIApplication.shared.open(url) }
+}
+
+/// Reconnects Poki's built-in tunnel when opening the loopback setup step, unless an external
+/// loopback is already working or the tunnel is already up, busy, or locked by a session.
+@MainActor private func reconnectBuiltInIfNeeded(_ model: AppModel, for step: SetupStep) {
+    guard step == .loopback, model.setup.loopback == .builtIn, model.tunnel.available,
+          !model.loopback.isWorking, !model.tunnel.connected, !model.tunnel.busy, !model.connectionInUse else { return }
+    Task { try? await model.tunnel.connect(); model.loopback.check() }
 }
 
 func settingsURL(for step: SetupStep?) -> URL? {
@@ -300,7 +306,9 @@ private struct LoopbackPage: View {
 
     var body: some View {
         let monitor = model.loopback
-        let localReady = model.hasOpenInProcessSession && !monitor.isWorking
+        let localTrouble = monitor.isWorking ? nil : model.localSessionTrouble
+        let localReady = !monitor.isWorking && localTrouble == nil
+            && (model.hasOpenInProcessSession || model.runner.code == "local_ddi" || model.mountedImageStandsIn)
         let chosen = LoopbackChoice.chosen(model.setup.proxyApp)
 
         Section {
@@ -378,8 +386,13 @@ private struct LoopbackPage: View {
                     Text("The loopback is on, but this iPhone does not answer through it yet. Turn \(chosen?.name ?? "your app") off and on again, then pair again.")
                 } else if monitor.isWorking {
                     Text("It works. You are done with this step.")
+                } else if let localTrouble {
+                    Text(verbatim: localTrouble.text)
                 } else if localReady {
                     Text("The network loopback is unavailable.")
+                } else if monitor.proxyAnswers {
+                    // A proxy took 10.7.0.1 for itself: its setting is the fix, whichever app was picked.
+                    Text(LoopbackMonitor.proxyHint)
                 } else if let chosen {
                     Text("Not yet. Finish step 2 in \(chosen.name), then come back. This turns green by itself.")
                 } else {
@@ -395,7 +408,7 @@ private struct LoopbackPage: View {
 
         // Poki's own connection is no longer offered (the owner, Nov 19 2026). Only an iPhone that
         // still uses it from before sees its state, and the way to the proxy app.
-        if model.tunnel.available && model.setup.loopback == .builtIn {
+        if model.tunnel.available {
             Section {
                 switch model.tunnel.state {
                 case .connecting:
@@ -406,10 +419,14 @@ private struct LoopbackPage: View {
                     Button("Disconnect Local Connection") { model.tunnel.disconnect() }.disabled(connectionLocked)
                 case .disconnecting:
                     LabeledContent("Built-in Connection") { ProgressView() }
-                case .failed(let message):
-                    Label(AppLocalization.bundle.localizedString(forKey: message, value: message, table: nil), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                case .off, .unavailable:
-                    EmptyView()
+                case .failed(let message) where model.setup.loopback == .builtIn && !monitor.isWorking && !localReady:
+                    Label(Issue.localizedProblem(message), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+                case .failed, .off, .unavailable:
+                    Button("Enable Local Connection") {
+                        model.chooseConnection(.builtIn)
+                        Task { try? await model.tunnel.connect(); model.loopback.check() }
+                    }
+                    .disabled(connectionLocked)
                 }
                 Button("Use the Current VPN") { model.chooseConnection(.proxy) }.disabled(connectionLocked)
             } header: {
@@ -456,7 +473,7 @@ private struct LoopbackPage: View {
                 }
             }
             Spacer()
-            if chosen { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.tint) }
+            if chosen { Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(.tint) }
         }
         .contentShape(.rect)
         .accessibilityAddTraits(chosen ? .isSelected : [])
@@ -483,7 +500,8 @@ private struct LoopbackPage: View {
         copied = false
         // The full list folds back once one is picked, so its steps come up right under it.
         withAnimation { showsAll = false }
-        model.chooseConnection(.proxy)
+        if model.setup.loopback != .proxy { model.chooseConnection(.proxy) }
+        guard model.setup.loopback == .proxy else { return }
         model.setup.proxyApp = choice.id
     }
 
@@ -495,7 +513,7 @@ private struct LoopbackPage: View {
     }
 
     private var connectionLocked: Bool { model.connectionInUse || model.tunnel.busy }
-    private var externalLocked: Bool { model.setup.loopback == .builtIn && connectionLocked }
+    private var externalLocked: Bool { model.setup.loopback != .proxy && connectionLocked }
 
     private func headline(_ monitor: LoopbackMonitor) -> LocalizedStringKey {
         switch monitor.state {
@@ -852,7 +870,7 @@ struct SetupStepPage: View {
     private var formPage: some View {
         Form {
             if hero {
-                StartHero(symbol: step.symbol, title: step.rowTitle, line: step.pageSummary, done: model.isDone(step))
+                StartHero(symbol: step.symbol, title: step.rowTitle, line: step.pageSummary, done: model.stepReadyForUse(step))
             } else {
             Section {
                 LabeledContent {
@@ -964,6 +982,7 @@ struct SetupStepPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             model.loopback.resume()
+            reconnectBuiltInIfNeeded(model, for: step)
         }
         .onDisappear { if step == .pairing { model.leftPairing() } }
     }

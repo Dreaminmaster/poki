@@ -6,6 +6,111 @@ import XCTest
 final class ItemPictureTests: XCTestCase {
     let screen = ScreenSize(width: 402, height: 874)
 
+    func testChatCanRetrieveAnEarlierScreenshotFromTheSameTask() async throws {
+        let (core, wda, host) = makeCore()
+        defer { withExtendedLifetime(host) {} }
+        let first = Data("original screenshot".utf8).base64EncodedString()
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(first)]) }
+        let before = await core.callTool("look", arguments: "{}", localTask: "compare")
+        let prefix = "screenshot_id: "
+        let line = try XCTUnwrap(before.text.split(separator: "\n").first { $0.hasPrefix(prefix) })
+        let id = String(line.dropFirst(prefix.count))
+        let args = JSON.object(["screenshot_id": .string(id)]).serialized()
+
+        let second = Data("next screenshot with a different size".utf8).base64EncodedString()
+        wda.set("GET /screenshot") { _ in (200, ["value": .string(second)]) }
+        let after = await core.callTool("look", arguments: "{}", localTask: "compare")
+        XCTAssertNotNil(before.jpeg)
+        XCTAssertNotNil(after.jpeg)
+        XCTAssertNotEqual(before.jpeg, after.jpeg)
+        let retrieved = await core.callTool("get_screenshot", arguments: args, localTask: "compare")
+        XCTAssertFalse(retrieved.isError, retrieved.text)
+        XCTAssertEqual(retrieved.jpeg, before.jpeg)
+
+        let fromAnotherTask = await core.callTool("get_screenshot", arguments: args, localTask: "another task")
+        XCTAssertTrue(fromAnotherTask.isError)
+        XCTAssertNil(fromAnotherTask.jpeg)
+    }
+
+    func testLongTaskCanRetrieveFirstScreenshotAfterMoreThanTenReads() async throws {
+        let (core, wda, host) = makeCore()
+        defer { withExtendedLifetime(host) {} }
+        let frame = Rect(x: 10, y: 200, width: 100, height: 100)
+        let box = Rect(x: 12, y: 201, width: 100, height: 100)
+        var captured: [(id: String, jpeg: Data, png: Data)] = []
+
+        for step in 1...11 {
+            let png = Data("long-task-screen-\(step)-\(String(repeating: "x", count: step))".utf8)
+            wda.set("GET /screenshot") { _ in (200, ["value": .string(png.base64EncodedString())]) }
+            wda.tree([Node("Image", "Step \(step)", [frame.x, frame.y, frame.width, frame.height])])
+            let answer = await core.callTool("look", arguments: "{}", localTask: "long-task")
+            let jpeg = try XCTUnwrap(answer.jpeg)
+            let prefix = "screenshot_id: "
+            let line = try XCTUnwrap(answer.text.split(separator: "\n").first { $0.hasPrefix(prefix) })
+            captured.append((String(line.dropFirst(prefix.count)), jpeg, png))
+        }
+
+        let first = try XCTUnwrap(captured.first)
+        let latest = try XCTUnwrap(captured.last)
+        XCTAssertNotEqual(first.jpeg, latest.jpeg)
+
+        let firstArgs = JSON.object(["screenshot_id": .string(first.id)]).serialized()
+        let retrieved = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "long-task")
+        XCTAssertFalse(retrieved.isError, retrieved.text)
+        XCTAssertEqual(retrieved.jpeg, first.jpeg)
+
+        let fromAnotherTask = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "other-task")
+        XCTAssertTrue(fromAnotherTask.isError)
+        XCTAssertNil(fromAnotherTask.jpeg)
+
+        let cardRequests = Dictionary(uniqueKeysWithValues: captured.enumerated().map { index, item in
+            ("step-\(index + 1)", ItemPictureRequest(screenshotID: item.id, box: box))
+        })
+        let cardPictures = await core.itemPictures(cardRequests, localTask: "long-task")
+        XCTAssertEqual(cardPictures.count, 8)
+        XCTAssertFalse(cardPictures.contains { $0.png == first.png })
+        XCTAssertTrue(cardPictures.contains { $0.png == latest.png })
+
+        _ = await core.finishTask(switching: false, localTask: "long-task")
+        let afterTaskEnded = await core.callTool("get_screenshot", arguments: firstArgs, localTask: "long-task")
+        XCTAssertTrue(afterTaskEnded.isError)
+        XCTAssertNil(afterTaskEnded.jpeg)
+    }
+
+    func testTaskScreenshotStoreExpiresAndDeletesTemporaryFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("poki-screenshot-store-test-\(UUID().uuidString.lowercased())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = LockedBox<Double>(100)
+        let store = TaskScreenshotStore(root: root, clock: { clock.value })
+
+        let firstBytes = Data("jpeg-step-1".utf8)
+        let secondBytes = Data("jpeg-step-2".utf8)
+        let otherTaskBytes = Data("jpeg-other".utf8)
+        store.record(firstBytes, id: "shot-1", task: "task-a")
+        clock.value = 160
+        store.record(secondBytes, id: "shot-2", task: "task-a")
+        store.record(otherTaskBytes, id: "shot-other", task: "task-b")
+
+        let firstFile = root.appendingPathComponent("shot-1.jpg")
+        let secondFile = root.appendingPathComponent("shot-2.jpg")
+        let otherFile = root.appendingPathComponent("shot-other.jpg")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstFile.path))
+        XCTAssertEqual(store.screenshot("shot-1", task: "task-a"), firstBytes)
+        XCTAssertNil(store.screenshot("shot-1", task: "task-b"))
+
+        clock.value = 220
+        XCTAssertNil(store.screenshot("shot-1", task: "task-a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstFile.path))
+        XCTAssertEqual(store.screenshot("shot-2", task: "task-a"), secondBytes)
+
+        store.clear(task: "task-a")
+        XCTAssertNil(store.screenshot("shot-2", task: "task-a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondFile.path))
+        XCTAssertEqual(store.screenshot("shot-other", task: "task-b"), otherTaskBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherFile.path))
+    }
+
     func testItemPicturesUseTheScreenThatSuppliedTheirCoordinates() async throws {
         let (core, wda, host) = makeCore()
         defer { withExtendedLifetime(host) {} }

@@ -673,7 +673,12 @@ final class FaultTests: XCTestCase {
     /// the first that needs approval go first, and the answer says which to send again.
     func testTheSafePartOfABatchGoesBeforeApprovalIsAsked() async {
         let (core, wda, _) = makeCore()
-        wda.source([("Button", "Photo"), ("Button", "Delete")], app: "Photos")
+        wda.tree([
+            Node("Button", "Photo", [16, 100, 358, 44]),
+            Node("Alert", nil, [16, 130, 358, 80], [
+                Node("Button", "Delete", [16, 144, 358, 44]),
+            ]),
+        ], app: "Photos")
         _ = await core.call("look", [:])
         let result = await core.call("do", ["actions": [["tap": 1], ["tap": 2]]])
         XCTAssertTrue(result.isError, "the requested batch stopped before the approval-gated action")
@@ -833,7 +838,6 @@ final class MailTestTests: XCTestCase {
         XCTAssertEqual(reason("Button", "Buy now"), "a payment (\"buy\")")
         XCTAssertEqual(reason("Button", "Pay $12.00"), "a payment (\"pay\")")
         XCTAssertEqual(reason("Button", "Confirm and pay"), "a payment (\"pay\")")
-        XCTAssertEqual(reason("Button", "Delete Message"), "deleting (\"delete\")")
         XCTAssertEqual(reason("Button", "Send"), "sending a message (\"send\")")
         XCTAssertNil(reason("Cell", "Re: Please send the files when you have them, John, Monday"))
     }
@@ -1100,7 +1104,7 @@ final class GymTests: XCTestCase {
         let look = await core.call("look", [:])
         XCTAssertFalse(look.isError, look.text)
         XCTAssertTrue(look.text.contains("runner: starting (the phone is asking the owner for the passcode)"), look.text)
-        XCTAssertTrue(look.text.contains("call look or status again every few seconds"), look.text)
+        XCTAssertTrue(look.text.contains("Call look or status again in a few seconds"), look.text)
     }
 
     func testABusyGateAnswersWithThePicture() async {

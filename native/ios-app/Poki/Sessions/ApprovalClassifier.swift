@@ -29,12 +29,18 @@ enum ApprovalClassifier {
     typealias Level = ApprovalLevel
 
     /// The saved choice; before there was one, what 752's two switches did (`ApprovalChoice.resolve`).
-    nonisolated static var mode: Mode { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).mode }
+    nonisolated static var mode: Mode { mode(in: .live) }
+
+    nonisolated static func mode(in storage: PokiStorage = .live) -> Mode {
+        ApprovalChoice.resolve(storage.defaults.object(forKey:)).mode
+    }
 
     /// A chat model with a key: without one there is nobody to ask.
-    static var hasModel: Bool {
-        let provider = ModelKeys.selectedProvider
-        return provider.wired && (ModelKeys.key(provider) != nil || provider == .custom) && provider.piModel(ModelKeys.selectedModel) != nil
+    static var hasModel: Bool { hasModel(in: .live) }
+
+    static func hasModel(in storage: PokiStorage = .live) -> Bool {
+        let provider = ModelKeys.selectedProvider(in: storage)
+        return ModelKeys.hasUsableKey(in: storage) && provider.piModel(ModelKeys.selectedModel(in: storage), storage: storage) != nil
     }
 
     /// Who answers an approval first.
@@ -52,19 +58,39 @@ enum ApprovalClassifier {
     /// Approvals the model did not allow that went on to the owner's card.
     private(set) static var handed: Set<String> = []
 
-    static func route(_ approval: PendingApproval, voiceOn: Bool) -> Route {
+    /// Capture the source when the approval event arrives. Checking whether the owner's chat
+    /// happens to be running later is not proof that an MCP agent's request belongs to it.
+    enum Origin: Equatable {
+        case chat(String)
+        case voice(String)
+        case outsideAgent(String)
+        case unknown
+
+        var belongsToOwner: Bool {
+            switch self { case .chat, .voice: true; case .outsideAgent, .unknown: false }
+        }
+        var routingSessionID: String? {
+            switch self { case .chat(let id), .voice(let id): id; case .outsideAgent, .unknown: nil }
+        }
+    }
+
+    static func origin(voiceOn: Bool, outsideSession: String?) -> Origin {
+        if let outsideSession { return .outsideAgent(outsideSession) }
+        if let delegatedID = AskPoki.liveSessionID { return .outsideAgent(delegatedID) }
+        if let chat = AskPoki.chat, chat.running { return .chat(chat.sessionID) }
+        if voiceOn, let chat = AskPoki.chat { return .voice(chat.sessionID) }
+        return .unknown
+    }
+
+    static func route(_ approval: PendingApproval, voiceOn: Bool, origin suppliedOrigin: Origin? = nil, storage: PokiStorage = .live) -> Route {
         if let known = routes[approval.id] { return known }
-        let mode = Self.mode
-        let own = AskPoki.chat?.running == true || voiceOn
+        let mode = Self.mode(in: storage)
+        let own = (suppliedOrigin ?? origin(voiceOn: voiceOn, outsideSession: approval.sourceSession)).belongsToOwner
         let reply = mode == .reply && own
         let route: Route
         if requiresOwner(approval) { route = .owner }
         else if mode == .off { route = .allow }
-        else if approval.session != nil {
-            let level = Level.saved
-            route = hasModel && approval.intent != nil && (level == .permissive || level == .balanced) ? .model(reply: false) : .owner
-        }
-        else if own, hasModel, reply || Level.saved != .everything { route = .model(reply: reply) }
+        else if own, hasModel(in: storage), reply || Level.saved(in: storage) != .everything { route = .model(reply: reply) }
         else { route = .owner }
         if routes.count > 200 { routes.removeAll(); handed.removeAll() }
         routes[approval.id] = route
@@ -93,8 +119,11 @@ enum ApprovalClassifier {
     /// The latest decisions by approval id, for the chat's grey line.
     private(set) static var verdicts: [String: Verdict] = [:]
 
-    static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine]) async -> Verdict {
-        let verdict = await ask(approval, level: level, voice: voice)
+    static func decide(_ approval: PendingApproval, level: Level, voice: [VoiceLine],
+                       origin suppliedOrigin: Origin? = nil, storage: PokiStorage = .live) async -> Verdict {
+        let verdict = await ask(approval, level: level, voice: voice,
+                                origin: suppliedOrigin ?? origin(voiceOn: !voice.isEmpty, outsideSession: approval.sourceSession),
+                                storage: storage)
         verdicts[approval.id] = verdict
         if verdicts.count > 50 { verdicts.removeAll() }
         return verdict
@@ -143,16 +172,14 @@ enum ApprovalClassifier {
         return (text, complete)
     }
 
-    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine]) async -> Verdict {
-        let provider = ModelKeys.selectedProvider
-        guard provider.wired, ModelKeys.key(provider) != nil || provider == .custom,
-              let model = provider.piModel(ModelKeys.selectedModel) else {
+    private static func ask(_ approval: PendingApproval, level: Level, voice: [VoiceLine], origin: Origin, storage: PokiStorage = .live) async -> Verdict {
+        guard origin.belongsToOwner else { return Verdict(allowed: false, reason: "outside approvals require owner confirmation") }
+        let provider = ModelKeys.selectedProvider(in: storage)
+        guard ModelKeys.hasUsableKey(in: storage),
+              let model = provider.piModel(ModelKeys.selectedModel(in: storage), storage: storage) else {
             return Verdict(allowed: false, reason: "no chat model to ask")
         }
-        if let session = approval.session {
-            return await askOutside(approval, session: session, level: level, model: model, provider: provider)
-        }
-        var said = AskPoki.chat?.ownerContext ?? []
+        var said = origin.routingSessionID == AskPoki.chat?.sessionID ? (AskPoki.chat?.ownerContext ?? []) : []
         for line in voice.suffix(12) {
             switch line.role {
             case .you: said.append(.init(text: "Owner (live call): \(line.text)"))
@@ -172,7 +199,11 @@ enum ApprovalClassifier {
         Conversation, oldest first:
         \(context.text)
         """
-        let loop = PiLoop(provider: provider, model: model, tools: []) { _ in
+        // A live chat's approval shares its session. External approvals use their own stable ID
+        // rather than accidentally borrowing an unrelated chat's provider routing identity.
+        let approvalSessionID = origin.routingSessionID
+        let loop = PiLoop(provider: provider, model: model,
+                          sessionID: approvalSessionID ?? "approval-\(approval.id)", tools: []) { _ in
             .init(text: "No tools.", jpeg: nil, isError: true)
         }
         // The first of the model's reply and the deadline answers; a late reply is dropped.
@@ -249,6 +280,13 @@ enum ApprovalClassifier {
 
 }
 
+enum ApprovalCopy {
+    static let alwaysConfirm: LocalizedStringResource = "Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation."
+    static let neverAskFooter: LocalizedStringResource = "Optional steps continue without asking. Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions still require your confirmation."
+    static let sensitiveSteps: LocalizedStringResource = "Sensitive steps are paying, deleting in menus or confirmation dialogs (or matching deletions when full screen details are unavailable, such as voice taps by button name), sending a message, placing a call, typing a password, and anything in Wallet."
+    static let neverAskGreeting: LocalizedStringResource = "Payments, deletions in menus and confirmation dialogs (and matching deletions when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
+}
+
 extension ApprovalMode {
     var title: String {
         switch self {
@@ -269,7 +307,11 @@ extension ApprovalLevel {
         }
     }
     /// The saved sensitivity (`ApprovalChoice.resolve`).
-    static var saved: ApprovalLevel { ApprovalChoice.resolve(UserDefaults.standard.object(forKey:)).level }
+    static var saved: ApprovalLevel { saved(in: .live) }
+
+    static func saved(in storage: PokiStorage = .live) -> ApprovalLevel {
+        ApprovalChoice.resolve(storage.defaults.object(forKey:)).level
+    }
     var rule: String {
         switch self {
         case .strict: "ALLOW only if the owner explicitly asked for this exact action, or said yes when asked about it. Otherwise REFUSE."

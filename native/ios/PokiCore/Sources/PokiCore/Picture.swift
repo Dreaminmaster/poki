@@ -38,6 +38,19 @@ struct PictureSketch: Equatable {
         return change.share > 0.01
     }
 
+    func differs(from other: PictureSketch, inside frame: Rect, on screen: ScreenSize) -> Bool? {
+        guard cells.count == Self.columns * Self.rows, other.cells.count == cells.count else { return nil }
+        var sawCell = false
+        for (index, (a, b)) in zip(cells, other.cells).enumerated() {
+            let x = (Double(index % Self.columns) + 0.5) * screen.width / Double(Self.columns)
+            let y = (Double(index / Self.columns) + 0.5) * screen.height / Double(Self.rows)
+            guard frame.contains((x, y)) else { continue }
+            sawCell = true
+            if abs(Int(a) - Int(b)) > 12 { return true }
+        }
+        return sawCell ? false : nil
+    }
+
     init(png: Data) {
         #if canImport(CoreGraphics) && canImport(ImageIO)
         if let source = CGImageSourceCreateWithData(png as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil),

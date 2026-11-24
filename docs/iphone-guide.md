@@ -68,7 +68,7 @@ Check the new note in Notes: the title must be "Poki Demo" and the body must con
 
 **No update shows up, for example on a network in mainland China. What now?** Poki looks for updates on GitHub, and some networks cannot reach it or hit GitHub's 403 and 429 limits. Try another network or proxy node, or update from the computer with Renew in Poki Setup. See [Update Poki](#update-poki).
 
-**Will Poki change things on my iPhone, and does it ask first?** Poki works in your real apps and does what you ask, including sending messages, and the screen contents go to the model service you set up. Payments, deletions, and actions in Wallet always need your confirmation. For other sensitive steps, such as sending a message or typing a password, you choose in `Settings > Approvals` how Poki asks, or whether it asks. See [Known issues](#known-issues).
+**Will Poki change things on my iPhone, and does it ask first?** Poki works in your real apps and does what you ask, including sending messages, and the screen contents go to the model service you set up. Payments, deletions in menus and confirmation dialogs, and actions in Wallet always need your confirmation. When full screen details are unavailable (for example, a voice tap using only a button name), matching deletions also ask for confirmation. For other sensitive steps, such as sending a message or typing a password, you choose in `Settings > Approvals` how Poki asks, or whether it asks. See [Known issues](#known-issues).
 
 ## Update Poki
 
@@ -102,11 +102,11 @@ More limits, with test results, are in [Verification and known limits](verificat
 If Poki shows **Turn On Loopback** after an iPhone restart even though Clash Mi is connected, use LocalDevVPN for the first startup of automation.
 
 1. Unlock your iPhone, connect to Wi-Fi, and disconnect Clash Mi.
-2. Connect LocalDevVPN. In Poki, open **Settings > Connection** and turn on **Automation** if it is off.
+2. Connect LocalDevVPN. In Poki, open **Settings > Setup** and turn on **Automation** if it is off.
 3. Open a chat and tap the message field to start preparing the developer disk image. In **Settings > Advanced > Log**, wait for a new `[runner] running` entry from this attempt before switching VPNs.
 4. Leave **Automation** on. Disconnect LocalDevVPN and reconnect Clash Mi. Ask Poki to calculate 37 × 19 in Calculator and check that Calculator shows 703.
 
-If Poki shows **Enter Your Passcode Next** when you turn on automation or run the first task, tap **Continue**. If Poki is waiting for confirmation and the alert does not appear, open **Settings > Connection** and tap **Continue** there. Enter your iPhone passcode when iOS asks.
+If Poki shows **Enter Your Passcode Next** when you turn on automation or run the first task, tap **Continue**. If Poki is waiting for confirmation and the alert does not appear, open **Settings > Setup** and tap **Continue** there. Enter your iPhone passcode when iOS asks.
 
 Poki needs to reach the iPhone's developer services to mount the developer disk image after a restart. Once the image is mounted, Poki can use it for local automation. If the prompt returns after the next restart, repeat these steps. If the switch still fails, open **Settings > Advanced > Diagnostics** and compare the **Reflected RemotePairing** results with each VPN.
 
