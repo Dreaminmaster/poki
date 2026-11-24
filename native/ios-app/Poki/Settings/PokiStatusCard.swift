@@ -136,7 +136,11 @@ struct PokiMenu<Face: View>: View {
         }
         .menuOrder(.fixed)
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture().onEnded { tapped() })
+        .simultaneousGesture(TapGesture().onEnded {
+            // The menu opens: the hint that Poki has a menu is done.
+            PokiMenuTip.menuOpened()
+            tapped()
+        })
         .sensoryFeedback(.selection, trigger: model.approvalMode)
         .sensoryFeedback(.selection, trigger: modelVersion)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }

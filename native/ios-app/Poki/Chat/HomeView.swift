@@ -175,6 +175,11 @@ struct PokiFlight: View {
                         PokiMenu(openModel: openModel, tapped: tap, openOutfits: openOutfits) {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
+                        // The one-time hint that the picture opens the menu, on a view of its own so the
+                        // picture and its bear are never made again when it comes and goes.
+                        .background {
+                            if !writing { Color.clear.popoverTip(PokiMenuTip(), arrowEdge: .top) }
+                        }
                         .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
                         .accessibilityIdentifier("home.poki")
                     } else {
@@ -226,10 +231,16 @@ struct PokiHead: View {
                     // label in a glass group, and a label that held the picture's place too put the
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
                     PokiMenu(openModel: openModel, tapped: openDetails) {
-                        Text(verbatim: "Poki")
-                            .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
-                            .padding(.horizontal, 12).frame(minHeight: 24)
-                            .contentShape(Capsule())
+                        // The chevron says the name opens a menu, as a title menu does in the system's apps.
+                        HStack(spacing: 3) {
+                            Text(verbatim: "Poki")
+                                .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.bold)).imageScale(.small)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12).frame(minHeight: 24)
+                        .contentShape(Capsule())
                     }
                     .glassSurface(in: Capsule())
                     .glassAppearing()

@@ -33,6 +33,8 @@ struct PokiApp: App {
         // Whether this phone gets the first run: not when an earlier version was used here. Read before
         // anything this version writes, like the line above.
         FirstRun.decide()
+        // The one-time hint on Poki's picture (`PokiMenuTip`).
+        PokiMenuTip.configure()
         // Page titles in Allo Rounded, the face for prominent text (Shared/Typeface.swift).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]

@@ -1,6 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Choose a model and how Poki asks before acting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择模型，以及 Poki 行动前如何征求你的同意"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇模型，以及 Poki 行動前如何徵求你的同意"
+          }
+        }
+      }
+    },
     "Required Steps" : {
       "localizations" : {
         "zh-Hans" : {
@@ -77,6 +93,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允許定位"
+          }
+        }
+      }
+    },
+    "Tap Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "點一下 Poki"
           }
         }
       }
