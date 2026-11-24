@@ -34,6 +34,7 @@ public struct Element: Equatable, Sendable {
     public var identifier: String?
     public var frame: Rect
     public var depth: Int
+    public var isDisabled: Bool
     /// The element's place in the tree, in document order, and the last place inside it: an element
     /// whose `node` is in `node+1...end` is inside this one.
     public var node = 0
@@ -41,13 +42,14 @@ public struct Element: Equatable, Sendable {
     /// Not in the tree: text read from the screenshot.
     public var fromPicture = false
 
-    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false) {
+    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false, isDisabled: Bool = false) {
         self.type = type
         self.label = label
         self.value = value
         self.identifier = identifier
         self.frame = frame
         self.depth = depth
+        self.isDisabled = isDisabled
         self.node = node
         self.end = end
         self.fromPicture = fromPicture
@@ -81,9 +83,11 @@ struct ScreenshotCompanion: Sendable {
     let pokiPane: String
 }
 
-private struct ScreenCapture: Sendable {
+struct ScreenCapture: Sendable {
     let data: Data
     let companion: ScreenshotCompanion?
+    let startedAt: Double
+    let finishedAt: Double
 }
 
 /// One read of the screen. Either part may be missing; `notes` says why.
@@ -92,6 +96,9 @@ public struct Reading: Sendable {
     public var foreground: Foreground?
     public var png: Data?
     var screenshotCompanion: ScreenshotCompanion?
+    var firstPictureStartedAt: Double?
+    var firstPictureAt: Double?
+    var treeAt: Double?
     public var notes: [String] = []
     public var ms = 0
 
@@ -99,6 +106,10 @@ public struct Reading: Sendable {
         png = capture.data
         screenshotCompanion = capture.companion
     }
+}
+
+private func reportsDisabled(_ enabled: String?) -> Bool {
+    enabled == "false" || enabled == "0"
 }
 
 /// WDA's JSON source as a flat list of the elements worth listing: not the application root, with a
@@ -118,7 +129,9 @@ func flatten(_ root: JSON) -> [Element] {
             let type = (node["type"]?.string ?? "Other").replacingOccurrences(of: "XCUIElementType", with: "")
             let name = node["name"]?.text
             index = out.count
-            out.append(Element(type: type, label: node["label"]?.text ?? name, value: node["value"]?.text, identifier: name, frame: frame, depth: depth, node: place, end: place))
+            let enabled = (node["isEnabled"] ?? node["enabled"])?.text
+            out.append(Element(type: type, label: node["label"]?.text ?? name, value: node["value"]?.text, identifier: name, frame: frame, depth: depth, node: place, end: place,
+                               isDisabled: reportsDisabled(enabled)))
         }
         for child in node["children"]?.array ?? [] { walk(child, depth + 1) }
         if let index { out[index].end = counter }
@@ -150,7 +163,8 @@ func flattenXML(_ data: Data) -> (elements: [Element], root: (label: String?, na
                 let type = name.replacingOccurrences(of: "XCUIElementType", with: "")
                 let id = attributes["name"]
                 index = out.count
-                out.append(Element(type: type, label: attributes["label"] ?? id, value: attributes["value"], identifier: id, frame: frame, depth: depth, node: place, end: place))
+                out.append(Element(type: type, label: attributes["label"] ?? id, value: attributes["value"], identifier: id, frame: frame, depth: depth, node: place, end: place,
+                                   isDisabled: reportsDisabled(attributes["enabled"])))
             }
             open.append(index)
         }
@@ -202,12 +216,19 @@ extension Runner {
     /// after a slow action does not cost the next read anything. The settings (deadline, detection
     /// point, depth) live in WDA's process, set by the first session of the runner's life.
     /// `countsAsMiss: false` for a read given less time than a read may take.
-    func tree(timeout: Double, format: String = "json", workspace: Bool = false, countsAsMiss: Bool = true) async throws -> (elements: [Element], foreground: Foreground) {
+    func tree(timeout: Double, format: String = "json", workspace: Bool = false, countsAsMiss: Bool = true,
+              appAfterSource: Bool = false) async throws -> (elements: [Element], foreground: Foreground) {
         let xml = format.lowercased() == "xml"
         await ensureSettings(timeout: min(timeout, 3))
-        async let source = raw("GET", "/source?format=\(xml ? "xml" : "json")&excluded_attributes=visible,accessible,enabled,index", timeout: timeout, countsAsMiss: countsAsMiss)
-        // /activeAppInfo queues behind /source, which confirms the selected pane before reading it.
-        async let app = try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? timeout : min(timeout, 2), countsAsMiss: countsAsMiss)
+        let started = now()
+        async let source = raw("GET", "/source?format=\(xml ? "xml" : "json")&excluded_attributes=visible,accessible,enabled,index",
+                               timeout: timeout, countsAsMiss: countsAsMiss)
+        // The in-process source remembers the foreground it actually sampled. Asking first can
+        // make it enumerate the foreground twice and leave the identity read queued before the tree.
+        if appAfterSource { _ = try? await source }
+        let appBudget = appAfterSource ? max(0.25, timeout - (now() - started)) : timeout
+        async let app = appBudget > 0 ? try? raw("GET", "/wda/activeAppInfo", timeout: workspace ? appBudget : min(appBudget, 2),
+                                                 countsAsMiss: countsAsMiss) : nil
         let appValue = await app
         let bundleID = appValue?["bundleId"]?.string.flatMap { $0.isEmpty ? nil : $0 }
         let appName = appValue?["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
@@ -230,23 +251,27 @@ extension Runner {
         return (flatten(root), Foreground(bundleID: bundleID, name: name, pokiPane: pokiPane))
     }
 
+    static let pictureLagLimit = 0.6
+
     func screenshot(timeout: Double) async throws -> Data {
         try await captureScreen(timeout: timeout).data
     }
 
-    private func captureScreen(timeout: Double) async throws -> ScreenCapture {
+    func captureScreen(timeout: Double) async throws -> ScreenCapture {
+        let startedAt = now()
         let value = try await raw("GET", "/screenshot", timeout: timeout)
+        let finishedAt = now()
         guard let base64 = value.string ?? value["image"]?.string,
               let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
             throw RunnerError(message: "the runner sent no screenshot", delivery: .notSent)
         }
-        if value.string != nil { return ScreenCapture(data: data, companion: nil) }
+        if value.string != nil { return ScreenCapture(data: data, companion: nil, startedAt: startedAt, finishedAt: finishedAt) }
         guard let companion = value["companion"], let identity = companion["identity"]?.string, !identity.isEmpty,
               let bundle = companion["bundleId"]?.string, !bundle.isEmpty,
               let side = companion["pokiPane"]?.string, side == "left" || side == "right" else {
             throw RunnerError(message: "the screenshot did not identify the companion pane", delivery: .notSent)
         }
-        return ScreenCapture(data: data, companion: ScreenshotCompanion(identity: identity, bundleID: bundle, pokiPane: side))
+        return ScreenCapture(data: data, companion: ScreenshotCompanion(identity: identity, bundleID: bundle, pokiPane: side), startedAt: startedAt, finishedAt: finishedAt)
     }
 
     /// /wda/screen needs no session; a session's window size fails once the app it was opened on is gone.
@@ -263,7 +288,8 @@ extension Runner {
     /// `extra`: time past `timeout` that a shallow re-read may take when the full-depth read timed
     /// out (seen in the gym: a 1,500-cell screen timed out twice at 4 s and answered nothing, while
     /// the depth-12 read after came in 0.2 s; a shallow tree now beats 4 s of nothing).
-    func read(timeout: Double, extra: Double = 0, wantPicture: Bool = true, format: String = "json", callEnds: Double? = nil, allowHostPicture: Bool = true, workspace: Bool = false) async -> Reading {
+    func read(timeout: Double, extra: Double = 0, wantPicture: Bool = true, format: String = "json", callEnds: Double? = nil,
+              allowHostPicture: Bool = true, workspace: Bool = false, appAfterSource: Bool = false) async -> Reading {
         let started = now()
         let pictureAt = LockedBox<Double?>(nil)
         // After a read that timed out, the next asks for half the tree's depth (a huge tree is what
@@ -272,7 +298,9 @@ extension Runner {
         if wanted != limits.value { await useLimits(wanted) }
         let readLimits = limits.value
         async let treePart: Result<(elements: [Element], foreground: Foreground), Error> = {
-            do { return .success(try await self.tree(timeout: timeout, format: format, workspace: workspace)) } catch { return .failure(error) }
+            do {
+                return .success(try await self.tree(timeout: timeout, format: format, workspace: workspace, appAfterSource: appAfterSource))
+            } catch { return .failure(error) }
         }()
         async let picturePart: Result<ScreenCapture, Error>? = wantPicture ? {
             defer { pictureAt.value = now() }
@@ -336,7 +364,10 @@ extension Runner {
             nextLimits.value = readLimits.smaller
         }
         switch await picturePart {
-        case .success(let capture)?: reading.use(capture)
+        case .success(let capture)?:
+            reading.use(capture)
+            reading.firstPictureStartedAt = capture.startedAt
+            reading.firstPictureAt = pictureAt.value ?? capture.finishedAt
         case .failure(let e)?:
             // The tree came (on a second try, from a runner that was busy or new) but the picture
             // taken beside the first try did not: the runner gives it now (seen in the gym). Else
@@ -345,6 +376,8 @@ extension Runner {
             let readLeft = started + timeout + extra - now()
             if treeCame, readLeft > 0.4, let again = try? await captureScreen(timeout: min(1.5, readLeft)) {
                 reading.use(again)
+                reading.firstPictureStartedAt = again.startedAt
+                reading.firstPictureAt = again.finishedAt
                 reading.notes.append("the screenshot came on the second try (the first: \(e))")
             } else if let early = hostEarly, let png = await early.value {
                 reading.png = png
@@ -374,7 +407,7 @@ extension Runner {
         // The tree and the picture are one moment: when the tree came well after the picture (a slow
         // snapshot while the screen moved on), the picture is taken again so the frames and the
         // pixels agree (seen on the phone: a tree of the inside of a chat with a picture of the list).
-        if treeCame, reading.png != nil, let at = pictureAt.value, treeAt - at > 0.6, started + timeout - now() > 0.4 {
+        if treeCame, reading.png != nil, let at = pictureAt.value, treeAt - at > Self.pictureLagLimit, started + timeout - now() > 0.4 {
             if let first = reading.png, let again = try? await captureScreen(timeout: min(1.5, started + timeout - now())) {
                 reading.use(again)
                 reading.notes.append("the picture was taken again after the tree, which came \(Int(((treeAt - at) * 1000).rounded())) ms later than the first picture")
@@ -388,6 +421,7 @@ extension Runner {
             }
         }
         reading.ms = Int(((now() - started) * 1000).rounded())
+        if treeCame { reading.treeAt = treeAt }
         return reading
     }
 }

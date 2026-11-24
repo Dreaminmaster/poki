@@ -56,6 +56,36 @@ final class DynamicAppsTests: XCTestCase {
         XCTAssertTrue(store.icon("Strava Run") === red)
     }
 
+    func testALaunchByNameFallsBackToTheCachedAppList() {
+        let noInstalledEditions: (String) -> Bool = { _ in false }
+        XCTAssertEqual(KnownApps.launchID("Bilibili", isInstalled: noInstalledEditions), "tv.danmaku.bilianime", "no app list yet: the known app's own id")
+        DynamicApps.set([.init(id: "com.bilibili.inter", name: "bilibili", user: true), strava])
+        XCTAssertEqual(KnownApps.launchID("哔哩哔哩", isInstalled: noInstalledEditions), "com.bilibili.inter", "the cached edition is international")
+        XCTAssertEqual(KnownApps.launchID("Strava"), "com.strava.stravaride")
+        XCTAssertEqual(KnownApps.launchID("com.strava.stravaride"), "com.strava.stravaride")
+        XCTAssertNil(KnownApps.launchID("Nonesuch"))
+    }
+
+    func testALaunchByNamePrefersTheInstalledEditionToTheCachedEdition() {
+        let mainland = "tv.danmaku.bilianime"
+        let international = "com.bilibili.inter"
+
+        for (cached, installed) in [(international, mainland), (mainland, international)] {
+            DynamicApps.set([.init(id: cached, name: "Bilibili", user: true)])
+            XCTAssertEqual(KnownApps.launchID("Bilibili", isInstalled: { $0 == installed }), installed)
+        }
+    }
+
+    func testAnExplicitBundleIDKeepsTheRequestedEdition() {
+        let mainland = "tv.danmaku.bilianime"
+        let international = "com.bilibili.inter"
+        DynamicApps.set([.init(id: international, name: "Bilibili", user: true)])
+        XCTAssertEqual(KnownApps.launchID(mainland), mainland)
+
+        DynamicApps.set([.init(id: mainland, name: "哔哩哔哩", user: true)])
+        XCTAssertEqual(KnownApps.launchID(international), international)
+    }
+
     func testANameWithDotsIsAnAppBeforeItIsAnID() {
         XCTAssertNil(AppIconStore.bundleID("A.B.C"), "initials with dots are not a bundle id")
         XCTAssertNil(AppIconStore.bundleID("U.S.A"))
@@ -151,5 +181,28 @@ final class DynamicAppsTests: XCTestCase {
         _ = InstalledApps()
         XCTAssertNil(AppIconStore.bundleID("Strava"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testInstalledLaunchIDResolvesDynamicAppsWithoutApplicationProxy() async throws {
+        let answer = Data(#"{"v":{"apps":[{"id":"com.apple.calculator","name":"计算器","type":"System"},{"id":"cn.12306.rails12306","name":"铁路12306","type":"User"},{"id":"com.strava.stravaride","name":"Strava","type":"User"}]}}"#.utf8)
+        let apps = InstalledApps()
+        apps.phone = { ["device_address": "10.7.0.1"] }
+        apps.call = { _ in answer }
+        defer { try? FileManager.default.removeItem(at: InstalledApps.cacheFile) }
+        _ = await apps.list()
+
+        XCTAssertEqual(KnownApps.installedLaunchID("com.apple.calculator"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("cn.12306.rails12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("计算器"), "com.apple.calculator")
+        XCTAssertEqual(KnownApps.installedLaunchID("铁路12306"), "cn.12306.rails12306")
+        XCTAssertEqual(KnownApps.installedLaunchID("Strava"), "com.strava.stravaride")
+        XCTAssertNil(KnownApps.installedLaunchID("tutti.ch"))
+        XCTAssertNil(KnownApps.installedLaunchID("com.example.notinstalled"))
+
+        // Reloading only the disk cache (without a live phone refresh) must not bypass launch preflight.
+        DynamicApps.set([])
+        _ = InstalledApps()
+        XCTAssertNil(KnownApps.installedLaunchID("com.apple.calculator"))
+        XCTAssertNil(KnownApps.installedLaunchID("Strava"))
     }
 }

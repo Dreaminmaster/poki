@@ -24,7 +24,7 @@ concurrency:
 jobs:
   duo:
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - name: Use the newest Xcode
@@ -41,6 +41,9 @@ jobs:
       - name: Read, tap, type and read back on the Duo
         if: always()
         run: POKI_CHECK_DUO=1 POKI_CHECK_OUT=out/field native/ios-app/scripts/inprocess-sim/check.sh
+      - name: Read, tap and type in an older app on the Duo cover
+        if: always()
+        run: POKI_CHECK_OUT=out/cover-compat native/ios-app/scripts/inprocess-sim/check.sh --duo-cover-compat /Applications/Xcode_27.0.app
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -171,12 +171,16 @@ private struct SettingsLabelIcon<Icon: View>: View {
 }
 
 private struct SettingsPageStyle: ViewModifier {
+    @Environment(\.startDesign) private var startDesign
     func body(content: Content) -> some View {
         content
             .labelStyle(SettingsLabelStyle())
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background { HomeBackdrop(home: true, working: false, frozen: true) }
+            .background {
+                if let startDesign { StartGround(design: startDesign) }
+                else { HomeBackdrop(home: true, working: false, frozen: true) }
+            }
     }
 }
 
@@ -257,5 +261,22 @@ struct SettingsChoiceCard: View {
         }
         .buttonStyle(PressedDimStyle())
         .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
+
+extension View {
+    func settingsHeader() -> some View { modifier(SettingsSectionWords(header: true)) }
+    func settingsFooter() -> some View { modifier(SettingsSectionWords(header: false)) }
+}
+
+private struct SettingsSectionWords: ViewModifier {
+    var header: Bool
+    @Environment(\.startDesign) private var startDesign
+
+    func body(content: Content) -> some View {
+        content
+            .font(header ? .headline : .footnote)
+            .foregroundStyle(startDesign == nil ? Color(.secondaryLabel) : header ? StartGround.ink : StartGround.quietInk)
     }
 }

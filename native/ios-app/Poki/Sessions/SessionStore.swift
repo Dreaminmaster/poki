@@ -6,7 +6,7 @@ import SwiftUI
 /// (its own look and do calls), or a task an outside agent handed to Poki (`ask_poki`).
 struct SavedSession: Codable, Identifiable, Equatable {
     enum Kind: String, Codable { case poki, agent, handoff, voice }
-    enum Outcome: String, Codable { case done, failed, stopped }
+    enum Outcome: String, Codable { case done, failed, stopped, interrupted }
 
     var id: String
     var kind: Kind
@@ -32,6 +32,30 @@ struct SavedSession: Codable, Identifiable, Equatable {
 
     /// Its age for the limit: the later of its last change and its return from the archive.
     var keptSince: Date { max(updated, unarchived ?? .distantPast) }
+
+    mutating func markInterruptedTask() {
+        guard live else { return }
+        live = false
+        outcome = .interrupted
+        guard kind == .poki || kind == .handoff,
+              let request = entries.lastIndex(where: {
+                  switch $0.kind { case .you, .request: return true; default: return false }
+              }) else { return }
+        let cards = entries[(request + 1)...].indices.filter {
+            if case .plan = entries[$0].kind { return true }
+            return false
+        }
+        if let card = cards.last(where: { entries[$0].ended == nil }) {
+            entries[card].ended = updated
+            entries[card].interrupted = true
+        } else if cards.isEmpty {
+            var card = ChatEntry(.plan([]))
+            card.at = entries[request].at
+            card.ended = updated
+            card.interrupted = true
+            entries.insert(card, at: request + 1)
+        }
+    }
 
     var continuationTask: String? {
         entries.reversed().compactMap { entry -> String? in
@@ -172,7 +196,7 @@ enum ChatContinuation {
             if named.count == 1 { return .resume(named[0]) }
         }
         guard isRequest(text) else { return .newTask }
-        let stopped = recent.filter { $0.outcome == .stopped || $0.live }
+        let stopped = recent.filter { $0.outcome == .stopped || $0.outcome == .interrupted || $0.live }
         let generic: Set<String> = [
             "继续", "繼續", "接着做", "接著做", "继续任务", "繼續任務", "继续刚才的任务", "繼續剛才的任務",
             "继续上次的任务",
@@ -395,7 +419,7 @@ final class SessionStore {
                             batchComplete = false
                             continue
                         }
-                        if session.live { session.live = false; session.outcome = .stopped }
+                        session.markInterruptedTask()
                         loaded.append(session)
                     }
                     return (loaded, batchComplete)
@@ -519,7 +543,7 @@ final class SessionStore {
             loaded.append(session)
         }
         // Nothing is live after a relaunch.
-        for i in loaded.indices where loaded[i].live { loaded[i].live = false; loaded[i].outcome = .stopped }
+        for i in loaded.indices { loaded[i].markInterruptedTask() }
         sessions = loaded.sorted { $0.updated > $1.updated }
         trim()
         return complete
@@ -907,8 +931,16 @@ final class SessionStore {
         writeQueue.async { failures.write(snapshots) }
     }
 
-    /// Writes changed sessions now, including previously failed writes still in memory.
-    func flush() {
+    /// Writes changed sessions now, including previously failed writes still in memory, or only the requested conversation.
+    func flush(sessionID: String? = nil) {
+        if let sessionID {
+            guard pendingWrites.remove(sessionID) != nil else { return }
+            let snapshots = session(sessionID).map { [(file(sessionID), $0)] } ?? []
+            guard !snapshots.isEmpty else { return }
+            let failures = writeFailures
+            writeQueue.sync { failures.write(snapshots) }
+            return
+        }
         writeTask?.cancel()
         writeTask = nil
         let snapshots = pendingWrites.compactMap { id in session(id).map { (file(id), $0) } }

@@ -1,4 +1,4 @@
-// Draws the launch screen's word and bear at 3x (see Poki/LaunchArt/README.md) and writes two PNGs.
+// Draws the launch screen's word at 3x and its bear at 2x (see Poki/LaunchArt/README.md) and writes two PNGs.
 //   swift make-launch-art.swift <Geist-SemiBold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Geist or a shadow itself: both are
 // drawn here, at build time, from the design's values.
@@ -29,9 +29,10 @@ enum Bear {
   /// Room round the bear for its shadow, on the sides and above; the picture is this much wider and
   /// taller than the bear, and the launch screen and `LaunchCurtain` place it by the bear.
   static let margin: CGFloat = 45
+  static let scale: CGFloat = 2
 }
 
-let scale: CGFloat = 3
+let wordScale: CGFloat = 3
 let args = CommandLine.arguments
 guard args.count == 5 else {
   FileHandle.standardError.write("usage: make-launch-art.swift Geist-SemiBold.ttf LaunchBear.png wordmark.png bear.png\n".data(using: .utf8)!); exit(2)
@@ -42,7 +43,7 @@ func colour(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
   CGColor(colorSpace: space, components: [CGFloat((hex >> 16) & 0xff) / 255, CGFloat((hex >> 8) & 0xff) / 255, CGFloat(hex & 0xff) / 255, alpha])!
 }
 
-func canvas(_ width: CGFloat, _ height: CGFloat) -> CGContext {
+func canvas(_ width: CGFloat, _ height: CGFloat, scale: CGFloat) -> CGContext {
   CGContext(data: nil, width: Int((width * scale).rounded(.up)), height: Int((height * scale).rounded(.up)), bitsPerComponent: 8, bytesPerRow: 0,
             space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
 }
@@ -71,8 +72,8 @@ do {
   ]))
   let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
   let side: CGFloat = 8
-  let context = canvas(advance + 2 * side, Word.lineHeight)
-  context.scaleBy(x: scale, y: scale)
+  let context = canvas(advance + 2 * side, Word.lineHeight, scale: wordScale)
+  context.scaleBy(x: wordScale, y: wordScale)
   let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
   context.textPosition = CGPoint(x: side, y: (Word.lineHeight - ascent - descent) / 2 + descent)
   CTLineDraw(line, context)
@@ -84,7 +85,8 @@ do {
   guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[2]) as CFURL, nil),
         let bear = CGImageSourceCreateImageAtIndex(source, 0, nil) else { FileHandle.standardError.write("cannot read \(args[2])\n".data(using: .utf8)!); exit(1) }
   let height = Bear.width * CGFloat(bear.height) / CGFloat(bear.width)
-  let context = canvas(Bear.width + 2 * Bear.margin, height + Bear.margin)
+  let scale = Bear.scale
+  let context = canvas(Bear.width + 2 * Bear.margin, height + Bear.margin, scale: scale)
   context.interpolationQuality = .high
   // Shadow offsets and blur are in pixels, not in the scaled points; y grows upwards here.
   context.setShadow(offset: CGSize(width: 0, height: Bear.shadowRise * scale), blur: Bear.shadowBlur * scale,

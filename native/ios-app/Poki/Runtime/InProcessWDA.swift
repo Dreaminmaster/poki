@@ -24,14 +24,26 @@ protocol InProcessAutomation: AnyObject, Sendable {
     func pauseAutomation() -> [String: Any]
     /// Seconds iOS has been asked to allow automation in the open under way; 0 while no open is there.
     func authorizationWaitSeconds() -> Double
+    func prepareForUnlock() -> Bool
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult
 }
 
 extension InProcessAutomation {
     func authorizationWaitSeconds() -> Double { 0 }
+    func prepareForUnlock() -> Bool { prepare()["ok"] as? Bool == true }
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult { .unavailable }
 }
 
 /// Thread-safe: its session state is behind locks, and every call blocks on its own.
-extension PKInProcess: InProcessAutomation, @unchecked Sendable {}
+extension PKInProcess: InProcessAutomation, @unchecked Sendable {
+    func submitUnlockPasscode(_ passcode: String, timeout: TimeInterval, allowed: @escaping () -> Bool) -> PKUnlockResult {
+        #if targetEnvironment(simulator)
+        return .unavailable
+        #else
+        return unlockPhone(withPasscode: passcode, timeout: timeout, allowed: allowed)
+        #endif
+    }
+}
 
 /// Poki's own automation session, once the launcher has mounted the disk image (ESP-152).
 enum InProcessSession: Equatable {
@@ -54,7 +66,7 @@ enum InProcessSession: Equatable {
         case .open: return .running
         case .opening: return .starting("opening the in-process session; it takes a few seconds the first time")
         case .waitingForPasscode:
-            return .awaitingAutomationAuthorization("waiting for the owner to enter the iPhone passcode on the phone: iOS asks for it before it allows automation, after Poki restarts and 8 hours after the last time. Only the owner can do this; the Live Activity asks them. Call again in about 10 s")
+            return .awaitingAutomationAuthorization("iOS is waiting for the owner to allow UI automation in the system prompt on the iPhone. The Live Activity asks them. Continue the task once automation is ready")
         case .passcodeMissed:
             return .automationAuthorizationDeclined("the owner did not enter the iPhone passcode when iOS asked for it to allow automation (cancelled, or a minute passed). Nothing was sent, and Poki does not ask again by itself: the owner turns Poki off and on to be asked again",
                            fix: "Turn Poki off and on, then enter the iPhone passcode when iOS asks for it to allow automation")
@@ -355,6 +367,8 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
             return (200, (["value": try route(body, element)] as JSON).data())
         } catch let r as Refusal {
             return refused(r.code == "invalid session id" ? 404 : 500, r.code, r.message)
+        } catch TransportError.other(let message) {
+            return (500, (["value": ["error": "unknown error", "message": .string(message), "delivery": "unknown"]] as JSON).data())
         } catch {
             return refused(500, "unknown error", "\(error)")
         }
@@ -377,6 +391,7 @@ final class InProcessWDA: HTTPTransport, @unchecked Sendable {
 
     private func done(_ failure: String?) throws -> JSON {
         guard let failure else { return .null }
+        if failure == "no_reply" || failure == "not_in_front" { throw TransportError.other(failure) }
         throw Refusal("unknown error", failure)
     }
 

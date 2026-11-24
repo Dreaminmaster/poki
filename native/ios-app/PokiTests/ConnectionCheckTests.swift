@@ -15,6 +15,7 @@ final class ModelServerStub: URLProtocol {
     private static let lock = NSLock()
     nonisolated(unsafe) static var answer: (status: Int, body: String)?
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest, Data) -> (status: Int, type: String, body: String))?
+    nonisolated(unsafe) static var additionalHosts: Set<String> = []
     nonisolated(unsafe) private static var recorded: [Sent] = []
 
     static var requests: [Sent] { lock.withLock { recorded } }
@@ -23,6 +24,7 @@ final class ModelServerStub: URLProtocol {
         lock.withLock {
             answer = nil
             responder = nil
+            additionalHosts = []
             recorded.removeAll()
         }
     }
@@ -30,6 +32,7 @@ final class ModelServerStub: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host() else { return false }
         return ["model-server.test", "openrouter.ai", "api.anthropic.com", "opencode.ai"].contains(host)
+            || lock.withLock { additionalHosts.contains(host) }
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

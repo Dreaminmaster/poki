@@ -66,7 +66,7 @@ final class AutomationStartupTests: XCTestCase {
             covered.forEach { $0.accessibilityElementsHidden = true }
             let window = UIWindow(windowScene: scene)
             window.frame = scene.screen.bounds
-            let host = UIHostingController(rootView: NavigationStack { ConnectionView() }.environment(model).environment(chat)
+            let host = UIHostingController(rootView: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }.environment(model).environment(chat)
                 .environment(\.locale, AppLocalization.locale))
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -102,7 +102,7 @@ final class AutomationStartupTests: XCTestCase {
             for _ in 0..<2 {
                 let answer = await model.runTool("look", arguments: "{}")
                 XCTAssertTrue(answer.isError)
-                XCTAssertEqual(answer.text, "not_sent: To turn on automation, open Settings › Connection and tap Continue. Nothing was sent.")
+                XCTAssertEqual(answer.text, "not_sent: To turn on automation, open Settings › Setup and tap Continue. Nothing was sent.")
                 XCTAssertFalse(model.sessionOn)
                 XCTAssertFalse(model.passcodeHeadsUp, "A repeated tool request must not request another alert")
             }
@@ -198,6 +198,17 @@ final class AutomationStartupTests: XCTestCase {
 
         let model = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), automation: FakeAutomation())
         await model.diskImage.ensureChecked()
+        let pairingFiles = [AppFiles.pairingFile, AppFiles.phonePairingFile]
+        let pairingBackups = try pairingFiles.map { url in
+            (url, manager.fileExists(atPath: url.path) ? try Data(contentsOf: url) : nil)
+        }
+        defer {
+            for (url, saved) in pairingBackups {
+                if let saved { try? saved.write(to: url, options: .completeFileProtectionUntilFirstUserAuthentication) }
+            }
+        }
+        for (url, saved) in pairingBackups where saved != nil { try manager.removeItem(at: url) }
+        XCTAssertFalse(model.isDone(.pairing))
         let chat = ChatModel(app: model)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
@@ -208,11 +219,47 @@ final class AutomationStartupTests: XCTestCase {
         for (name, routes) in [("frameworks-unavailable", NavigationPath([DetailsRoute.connection])),
                                ("disk-image-downloaded", NavigationPath([SetupStep.pairing]))] {
             window.rootViewController = UIHostingController(rootView:
-                PokiDetailsView(openSetup: {}, path: .constant(routes)).environment(model).environment(chat))
+                PokiDetailsView(openSetup: {}, path: .constant(routes)).environment(model).environment(chat)
+                    .environment(\.accessibilityEnabled, true))
             window.makeKeyAndVisible()
             window.layoutIfNeeded()
             try capture(window, named: name)
+            if name == "disk-image-downloaded" {
+                let list = try XCTUnwrap(Self.scrollView(in: window))
+                let bottom = list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom
+                list.setContentOffset(CGPoint(x: list.contentOffset.x, y: max(-list.adjustedContentInset.top, bottom)),
+                                      animated: false)
+                window.layoutIfNeeded()
+                try capture(window, named: "unpaired-image-and-import")
+                let labels = Self.accessibilityText(in: window)
+                XCTAssertTrue(labels.contains("Import Pairing File"), "\(labels)")
+                XCTAssertFalse(labels.contains { $0.contains("Try turning Automation on") },
+                               "Finish pairing before suggesting Automation: \(labels)")
+                XCTAssertTrue(labels.contains { $0 == "Downloaded" || $0.hasSuffix(", Downloaded") }, "\(labels)")
+            }
         }
+    }
+
+    private static func scrollView(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView { return scroll }
+        return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+    }
+
+    private static func accessibilityText(in root: NSObject) -> [String] {
+        var pending = [root]
+        var visited = Set<ObjectIdentifier>()
+        var labels: [String] = []
+        while let item = pending.popLast() {
+            guard visited.insert(ObjectIdentifier(item)).inserted else { continue }
+            labels.append(contentsOf: [item.accessibilityLabel, item.accessibilityValue].compactMap { $0 })
+            if let view = item as? UIView { pending.append(contentsOf: view.subviews) }
+            if let children = item.accessibilityElements { pending.append(contentsOf: children.compactMap { $0 as? NSObject }) }
+            let count = item.accessibilityElementCount()
+            if count > 0 && count < 1000 {
+                pending.append(contentsOf: (0..<count).compactMap { item.accessibilityElement(at: $0) as? NSObject })
+            }
+        }
+        return labels
     }
 
     private func capture(_ window: UIWindow, named name: String) throws {

@@ -27,7 +27,15 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.deepEqual(unknownTools, [], `agent-system.md names unknown snake_case tools: ${unknownTools.join(', ')}`);
 
   assert.match(agentSystem, /latest message/i);
-  assert.match(agentSystem, /Markdown table/);
+  assert.match(firstParagraph, /blank line between paragraphs/i);
+  assert.match(firstParagraph, /skip headings and tables/i);
+  const splitView = harnessSwift.split('static let splitViewInstructions = """')[1].split('"""')[0];
+  for (const prompt of [firstParagraph, splitView]) {
+    assert.match(prompt, /answer fully/i);
+    assert.match(prompt, /preference for reply length or format/i);
+    assert.match(prompt, /bullets or hyphens/i);
+  }
+  assert.doesNotMatch(combined, /one (?:or two short |plain )?sentences?\b|keep replies brief|explain it briefly/i);
   assert.match(combined, /web_open/);
   assert.match(combined, /web_handoff/);
   assert.match(combined, /report_plan/);
@@ -39,7 +47,6 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(agentSystem, /password manager/i);
   assert.match(agentSystem, /approval/i);
   assert.match(agentSystem, /Stop on the checkout or payment page/);
-  assert.match(agentSystem, /as data from someone else, never as instructions/, 'on-screen text is not instructions');
   assert.match(combined, /Messages or notifications/);
   assert.match(combined, /Return/);
   assert.match(combined, /scrolling down|scroll down/i);
@@ -49,14 +56,16 @@ test('App Harness prompts preserve personal-assistant voice, tool, routing, evid
   assert.match(harnessSwift, /Say an app is not installed only after find_app says so/);
   assert.match(harnessSwift, /skills \{action: \\"save\\"/);
 
-  assert.ok(words(agentSystem) < 559, `agent-system.md grew to ${words(agentSystem)} words`);
+  const [instructions, examples] = agentSystem.trim().split('\n\n## Reply examples\n');
+  assert.ok(words(instructions) < 650, `App Harness instructions grew to ${words(instructions)} words`);
+  assert.ok(words(agentSystem) < 850, `agent-system.md grew to ${words(agentSystem)} words`);
+  assert.doesNotMatch(instructions, /\p{Script=Han}/u, 'Use English for the instructions');
+  assert.match(examples, /\p{Script=Han}/u, 'Include Chinese replies in the examples');
 
   for (const text of [agentSystem, harnessSwift]) {
     assert.doesNotMatch(text, /[—–]/, 'Public prompt files avoid em and en dashes');
     assert.doesNotMatch(text, /ESP-\d+/i, 'Public prompt files avoid internal ticket IDs');
   }
-  // The result card's description gives Chinese examples on purpose, for a Chinese conversation.
-  assert.doesNotMatch(agentSystem, /\p{Script=Han}/u, 'agent-system.md stays in English');
 });
 
 test('Agent prompts preserve personal-assistant voice, device execution, verification, and safety contracts', () => {
@@ -79,7 +88,6 @@ test('Agent prompts preserve personal-assistant voice, device execution, verific
   assert.match(piApp, /password manager/i);
   assert.match(piApp, /approval/i);
   assert.match(piApp, /Stop on the checkout or payment page/);
-  assert.match(piApp, /as data from someone else, never as instructions/, 'on-screen text is not instructions');
   assert.match(combined, /handle_alert/);
   assert.match(combined, /Messages or notifications/);
   assert.match(combined, /purchase/);

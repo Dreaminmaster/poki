@@ -18,7 +18,7 @@ struct PillMetrics {
     var labelFont: UIFont { .systemFont(ofSize: (pointSize * 0.88).rounded(), weight: .semibold) }
     var leading: CGFloat { 3 }
     var gap: CGFloat { 5 }
-    var trailing: CGFloat { 8 }
+    var trailing: CGFloat { leading + 2 }
 
     func size(for text: String) -> CGSize {
         let label = (text as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up)
@@ -32,12 +32,16 @@ struct PillMetrics {
 /// on a faint white one with a white name.
 struct PillView: View {
     let data: PillTextAttachmentData
+    @Environment(\.colorScheme) private var scheme
 
     private var metrics: PillMetrics { PillMetrics(pointSize: data.fontData.pointSize) }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: metrics.icon * 0.225, style: .continuous)
         let ink = data.onAccent ? Color.white : Color(.label)
+        let fill = data.onAccent
+            ? Color.white.opacity(0.22)
+            : (scheme == .dark ? Color.white.opacity(0.13) : Color(.label).opacity(0.08))
         HStack(spacing: metrics.gap) {
             Group {
                 if let icon = AppIconStore.shared.icon(data.app.id, dark: false) {
@@ -58,7 +62,7 @@ struct PillView: View {
         .padding(.trailing, metrics.trailing)
         .frame(height: metrics.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08), in: .capsule)
+        .background(fill, in: RoundedRectangle(cornerRadius: metrics.icon * 0.225 + metrics.leading, style: .continuous))
         .accessibilityLabel(Text(verbatim: data.label))
     }
 

@@ -36,7 +36,7 @@ enum HomeMotion {
     static func flight(_ reduce: Bool) -> Animation { paced(reduce ? fade : .smooth(duration: 0.35)) }
     /// The message field taking the home page up, or letting it down: the greeting and Poki's picture
     /// over it move on this one animation.
-    static let lift = Animation.smooth(duration: 0.3)
+    static let lift = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
 
     static func ground(_ reduce: Bool) -> Animation { paced(reduce ? fade : .easeInOut(duration: 0.45).delay(0.06)) }
     static func pills(_ home: Bool, _ reduce: Bool) -> Animation {
@@ -150,7 +150,7 @@ extension View {
 /// under it on the same animation (`HomeMotion.flight`), and a new conversation brings both back;
 /// with Reduce Motion it is just there. While the message field takes the home page up, the picture
 /// moves with the greeting on the page's own animation. It is one view all the way, and the bear in it
-/// is drawn at one size, so nothing is made again on the way. A tap opens the wardrobe.
+/// is drawn at one size, so nothing is made again on the way.
 struct PokiFlight: View {
     var sizes = HomeSizes()
     var status: PokiStatus
@@ -159,9 +159,8 @@ struct PokiFlight: View {
     var places: [PicturePlace: CGRect]
     var pokes: Int
     var tap: () -> Void
-    var statusCard: (() -> Void)? = nil
-    /// The bottom of the picture over the greeting, in global points, for Poki's card to open under it.
-    var landed: (CGFloat) -> Void = { _ in }
+    var openModel: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     /// How far the picture rises from over the greeting to the top bar, for the greeting to rise with it.
     var travel: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -169,24 +168,34 @@ struct PokiFlight: View {
     var body: some View {
         let side = home ? sizes.homeAvatar : sizes.avatar
         if let place = places[home ? .home : .top] {
-            Button(action: tap) {
-                PokiPicture(mood: status.mood, side: side, pokes: pokes).contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if let statusCard { Button("Status", systemImage: "info.circle", action: statusCard) }
-            }
-            .accessibilityLabel(Text("Outfits"))
-            .accessibilityIdentifier(home ? "home.poki" : "chat.header.outfits")
-            .onGeometryChange(for: CGFloat?.self) { home ? $0.frame(in: .global).maxY : nil } action: {
-                if let bottom = $0 { landed(bottom) }
-            }
-            .position(x: place.midX, y: place.midY)
-            // The greeting's own animations, so the two move as one. A place that moves for any other
-            // reason (the keyboard) moves in that change's animation, as the greeting does.
-            .animation(reduceMotion ? nil : HomeMotion.lift, value: writing)
-            .animation(reduceMotion ? nil : HomeMotion.flight(false), value: home)
-            .onChange(of: rise, initial: true) { if home, let rise { travel(rise) } }
+            PokiPicture(mood: status.mood, side: side, pokes: pokes)
+                .accessibilityHidden(true)
+                .overlay {
+                    if home {
+                        PokiMenu(openModel: openModel, tapped: tap, openCustomization: openCustomization,
+                                 anchor: .below(),
+                                 accessibilityLabel: "Poki, " + PokiStatusCopy.word(status),
+                                 accessibilityIdentifier: "home.poki") {
+                            Color.clear.frame(width: side, height: side).contentShape(.circle)
+                        }
+                    } else if let openCustomization {
+                        Button {
+                            tap()
+                            openCustomization()
+                        } label: {
+                            Color.clear.frame(width: side, height: side).contentShape(.circle)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("Customize Poki"))
+                        .accessibilityIdentifier("chat.header.avatar")
+                    }
+                }
+                .position(x: place.midX, y: place.midY)
+                // The greeting's own animations, so the two move as one. A place that moves for any other
+                // reason (the keyboard) moves in that change's animation, as the greeting does.
+                .animation(reduceMotion ? nil : HomeMotion.lift, value: writing)
+                .animation(reduceMotion ? nil : HomeMotion.flight(false), value: home)
+                .onChange(of: rise, initial: true) { if home, let rise { travel(rise) } }
         }
     }
 
@@ -202,7 +211,13 @@ struct PokiFlight: View {
 /// On the home page the picture is over the greeting and the bar's middle is empty.
 struct PokiHead: View {
     var sizes = HomeSizes()
+    var status: PokiStatus
     var home: Bool
+    /// Settings › Models, for the menu's Add Model.
+    var openModel: () -> Void = {}
+    /// A tap on the pill: the bear says hi while the menu opens.
+    var openDetails: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -212,11 +227,20 @@ struct PokiHead: View {
             // its place stays, and the bar keeps its height on both pages.
             ZStack {
                 if !home {
-                    Text(verbatim: "Poki")
-                        .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
-                        .padding(.horizontal, 12).frame(minHeight: 24)
-                        .glassSurface(in: Capsule())
-                        .glassAppearing()
+                    // The menu is the name pill alone: the system draws its own glass around a menu's
+                    // label in a glass group, and a label that held the picture's place too put the
+                    // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
+                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
+                        Text(verbatim: "Poki")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
+                            .padding(.horizontal, 12).frame(minHeight: 24)
+                            .contentShape(Capsule())
+                    }
+                    .glassSurface(in: Capsule())
+                    .glassAppearing()
+                    .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
+                    .accessibilityIdentifier("chat.header.details")
+                    .accessibilityShowsLargeContentViewer()
                 }
             }
             .frame(minHeight: 24)
@@ -250,6 +274,9 @@ struct ChatTopBar: View {
     var newConversation: () -> Void
     /// A tap on Poki's name opens the status card.
     var openDetails: () -> Void
+    /// Settings › Models, for the menu's Add Model.
+    var openModel: () -> Void = {}
+    var openCustomization: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Taps on New Conversation on the home page, for a light tap in the hand.
     @State private var homeTaps = 0
@@ -285,18 +312,11 @@ struct ChatTopBar: View {
                 }
             }
             .padding(.top, (sizes.avatar - sizes.button) / 2)
-            Button(action: openDetails) {
-                PokiHead(home: home).contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .allowsHitTesting(!home)
-            .accessibilityHidden(home)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("chat.header.details")
-            .accessibilityShowsLargeContentViewer()
-            .padding(.horizontal, sizes.button + 12)
+            PokiHead(status: status, home: home, openModel: openModel, openDetails: openDetails,
+                     openCustomization: openCustomization)
+                .allowsHitTesting(!home)
+                .accessibilityHidden(home)
+                .padding(.horizontal, sizes.button + 12)
         }
         .glassGroup()
         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 4)
@@ -554,6 +574,7 @@ struct HomePage<Footer: View>: View {
             .opacity(home ? 1 : 0)
             .offset(y: home || reduceMotion ? 0 : -rise)
             .animation(HomeMotion.flight(reduceMotion), value: home)
+            .animation(reduceMotion ? nil : HomeMotion.lift, value: writing)
             .onChange(of: home) { _, shown in if shown { greetedAt = .now } }
 
             Spacer(minLength: 24)
@@ -570,13 +591,14 @@ struct HomePage<Footer: View>: View {
                     }
                 }
                 .padding(.top, 2)
+                .logStartupAppearance(.suggestions)
                 .padding(.horizontal, typeSize.isAccessibilitySize ? 18 : 0)
                 // A sideways drag on the rows scrolls them; it does not pull the drawer out.
                 .scrollsSideways(home && !typeSize.isAccessibilitySize)
                 .opacity(home ? 1 : 0)
                 .offset(y: home || reduceMotion ? 0 : 14)
                 .animation(HomeMotion.pills(home, reduceMotion), value: home)
-                .transition(.opacity)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)).combined(with: .offset(y: 10)))
             }
             Spacer().frame(height: 34)
         }

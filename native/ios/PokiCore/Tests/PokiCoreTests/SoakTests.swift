@@ -110,7 +110,7 @@ final class SoakTests: XCTestCase {
             ("do", ["actions": [["scroll_to": "Battery"]]]),
             ("do", ["actions": [["wait_until": "Wi-Fi"]]]),
             ("do", ["actions": [["key": "return"], ["button": "home"]]]),
-            ("do", ["actions": [["launch": "com.apple.Preferences"]]]),
+            ("do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]]),
             ("status", [:]),
         ]
         var slowest = 0.0, errors = 0

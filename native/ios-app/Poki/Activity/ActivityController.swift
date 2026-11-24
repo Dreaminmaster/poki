@@ -55,8 +55,6 @@ final class ActivityController {
     private var finishTimer: Task<Void, Never>?
     private var chatOwnsCompletion = false
     private var foldTimer: Task<Void, Never>?
-    /// Halfway to an approval's deadline the island is popped open once more (ESP-467).
-    private var approvalReminder: Task<Void, Never>?
     private var eventTimer: Task<Void, Never>?
     private var inStep = false
     private var runAnnounced = false
@@ -109,7 +107,7 @@ final class ActivityController {
     /// counts as having none, which keeps the banner.
     private static let dynamicIslandMinInset: CGFloat = 51
 
-    private static func hasDynamicIsland() -> Bool {
+    static func hasDynamicIsland() -> Bool {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return false }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         for scene in scenes {
@@ -197,7 +195,7 @@ final class ActivityController {
     func end(dismissalPolicy: ActivityUIDismissalPolicy? = nil) -> Task<Void, Never>? {
         wanted = nil
         chatOwnsCompletion = false
-        finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel(); approvalReminder?.cancel()
+        finishTimer?.cancel(); foldTimer?.cancel(); eventTimer?.cancel()
         if Self.runPhases.contains(state.phase) { logRun("cut off by ending the Live Activity") }
         worker?.cancel(); worker = nil; plainWaiting = false
         guard let activity else { return tail }
@@ -248,7 +246,6 @@ final class ActivityController {
         }
         attention = nil
         if state.handoff == nil, state.phase != .problem, old.handoff != nil || old.phase == .problem { AttentionNotice.clear() }
-        if let approval = state.approval, approval.id != old.approval?.id { remindHalfway(approval) }
         send(alert: alert, critical: Self.isCritical(state, after: old))
     }
     /// The hand-off or problem this change pops up for (`update` posts a banner when no activity runs).
@@ -267,9 +264,17 @@ final class ActivityController {
 
     /// Writes a thumbnail, at most about 160 points wide, to the App Group container for the widget.
     func setThumbnail(_ jpeg: Data?) {
-        guard let jpeg, let url = SharedContainer.thumbnailURL, let small = Self.shrink(jpeg, maxPixels: 260) else { return }
+        guard let jpeg else { clearThumbnail(); return }
+        guard let url = SharedContainer.thumbnailURL, let small = Self.shrink(jpeg, maxPixels: 260) else { return }
         try? small.write(to: url, options: .atomic)
         update { $0.thumbnailVersion += 1 }
+    }
+
+    func clearThumbnail() {
+        if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
+        if state.thumbnailVersion != 0 {
+            update { $0.thumbnailVersion = 0 }
+        }
     }
 
     // MARK: Transitions
@@ -291,6 +296,8 @@ final class ActivityController {
         let runPhases = Self.runPhases
         if state.phase == .working, !runPhases.contains(old.phase) {
             state.stepCount = 0; state.failedCount = 0; state.failedSteps = nil; state.endedAt = nil; state.previous = nil
+            state.thumbnailVersion = 0
+            if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
             // The app belongs to its run: a run that never reads the screen must not finish in the last run's app.
             if state.app == old.app { state.app = nil }
             tally = Tally()
@@ -331,9 +338,10 @@ final class ActivityController {
         }
         if state.approval == nil, let was = old.approval, state.phase != .stopped {
             state.decision = nil
-            let approved = state.headline == "Continuing"
-            let expired = !approved && was.expires <= now.addingTimeInterval(0.5)
-            setEvent(approved ? .approved : expired ? .expired : .denied, approved ? "Allowed" : expired ? "Timed out" : "Denied")
+            if state.headline != "Continuing" {
+                let expired = was.expires <= now.addingTimeInterval(0.5)
+                setEvent(expired ? .expired : .denied, expired ? "Timed out" : "Denied")
+            }
         }
         if state.phase == .problem, old.phase != .problem {
             setEvent(.problem, state.label ?? "Problem")
@@ -362,21 +370,6 @@ final class ActivityController {
     /// Updates that change what the person must do or know go out at once, ahead of plain progress.
     private static func isCritical(_ state: PokiState, after old: PokiState) -> Bool {
         state.phase != old.phase || state.approval?.id != old.approval?.id || state.decision != old.decision || state.pin != old.pin
-    }
-
-    /// iOS shows an alert's expanded island for a few seconds only. Halfway to the deadline, while the
-    /// same approval still waits, the update carries the alert once more: one reminder, never a loop.
-    /// The runner sends no input while an approval waits, so the expanded island is safe.
-    private func remindHalfway(_ approval: PendingApproval) {
-        approvalReminder?.cancel()
-        let half = approval.expires.timeIntervalSinceNow / 2
-        guard half > 5, let activityID = activity?.id else { return }
-        approvalReminder = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(half))
-            guard !Task.isCancelled, let self, self.activity?.id == activityID, self.state.phase == .approval, self.state.approval?.id == approval.id else { return }
-            AppLog.shared.add("activity", "approval \(approval.id) reminded halfway")
-            self.send(alert: self.critical(approval.question, ""), critical: true)
-        }
     }
 
     /// A run of steps counts as finished after `finishAfter` without a new one, for an agent that does
@@ -410,7 +403,6 @@ final class ActivityController {
         chatOwnsCompletion = false
         inStep = false
         planFinished = true
-        approvalReminder?.cancel()
         eventTimer?.cancel()
         update { state in
             state.phase = .stopped
@@ -421,6 +413,8 @@ final class ActivityController {
             state.event = nil
             state.previous = nil
             state.since = nil
+            state.thumbnailVersion = 0
+            if let url = SharedContainer.thumbnailURL { try? FileManager.default.removeItem(at: url) }
         }
         armFold()
     }
@@ -558,6 +552,10 @@ final class ActivityController {
         let queued = Date()
         tail = Task {
             await previous?.value
+            if alert != nil, content.state.phase == .approval,
+               self.state.phase != .approval || self.state.approval?.id != content.state.approval?.id {
+                return
+            }
             let began = Date()
             if let alert { await activity.update(content, alertConfiguration: alert) } else { await activity.update(content) }
             if self.activity?.id == activity.id { self.tally.answered += 1 }

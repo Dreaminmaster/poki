@@ -32,7 +32,7 @@ final class MessageMarkdownTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(rootView: NavigationStack {
-            ChatView(openDetails: { _ in }, openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
+            ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {})
         }.environment(app).environment(chat)
             .accessibilityElement(children: .contain).accessibilityIdentifier("markdown.conversation"))
         window.makeKeyAndVisible()
@@ -62,6 +62,24 @@ final class MessageMarkdownTests: XCTestCase {
         if UserDefaults.standard.bool(forKey: "markdownEvidence") {
             try await recordFormatsAndPerformance()
         }
+    }
+
+    func testReplyKeepsLineBreaksAndParagraphSpacing() {
+        func height(_ text: String) -> CGFloat {
+            let bubble = MessageBubble(direction: .incoming, text: text, tail: true)
+                .environment(\.dynamicTypeSize, .large)
+            return UIHostingController(rootView: bubble).sizeThatFits(in: CGSize(width: 390, height: 2_000)).height
+        }
+
+        let singleLine = height("First line. Second line.")
+        let lineBreak = height("First line.\nSecond line.")
+        let paragraphBreak = height("First line.\n\nSecond line.")
+        let lineHeight = lineBreak - singleLine
+
+        XCTAssertGreaterThan(lineHeight, 0, "A single LF must break the line")
+        XCTAssertEqual(paragraphBreak - lineBreak, lineHeight, accuracy: 1, "Two LFs must leave one blank line")
+        XCTAssertEqual(height("First line.\r\nSecond line."), lineBreak, accuracy: 1, "A single CRLF must break the line exactly once")
+        XCTAssertEqual(height("First line.\r\n\r\nSecond line."), paragraphBreak, accuracy: 1, "Two CRLFs must leave one blank line")
     }
 
     func testStreamingPrefixesDoNotExposeMarkersOrRestyleCompletedWords() async throws {

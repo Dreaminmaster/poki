@@ -62,10 +62,14 @@ enum WebTools {
         return nil
     }
 
-    @MainActor static func perform(_ name: String, arguments: String) async -> PokiCore.ToolAnswer {
+    @MainActor static func perform(_ name: String, arguments: String, onActionSucceeded: (() -> Void)? = nil) async -> PokiCore.ToolAnswer {
         let args = (arguments.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any] ?? [:]
         let browser = PokiBrowser.shared
-        guard await browser.waitForPoki() else { return answer("Task stopped. Action not executed.", error: true) }
+        let stopped = answer("Task stopped. Action not executed.", error: true)
+        guard await browser.waitForPoki(), !Task.isCancelled else { return stopped }
+        func send() -> Bool {
+            !Task.isCancelled && !browser.ownerHasIt
+        }
         let started = Date()
         let result: PokiCore.ToolAnswer
         switch name {
@@ -76,8 +80,9 @@ enum WebTools {
             if BrowserAddress.refusal(url) == .local {
                 return answer("Poki's browser opens public websites only. \(url.host(percentEncoded: false) ?? "That address") is on this iPhone or its local network, so it was not opened.", error: true)
             }
+            guard send() else { return stopped }
             let step = browser.begin(AppLocalization.text(LocalizedStringResource("Open \(url.host(percentEncoded: false) ?? url.absoluteString)")))
-            await browser.open(url)
+            await browser.open(url, onCommitted: onActionSucceeded)
             result = await page(browser, budget: 7000)
             browser.end(step, ok: !result.isError, started: started)
         case "web_read":
@@ -106,8 +111,13 @@ enum WebTools {
             case "privacy": AppLocalization.text(LocalizedStringResource("Dismissed \(site)’s privacy notice: “\(button)”"))
             default: AppLocalization.text(LocalizedStringResource("Tap “\(button)”"))
             }
+            guard send() else { return stopped }
             let step = browser.begin(title)
-            let tapped = await browser.act { (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any] }
+            let tapped = await browser.act {
+                let receipt = (try? await browser.call("return window.__pokiReader.click(ref)", ["ref": ref])) as? [String: Any]
+                if receipt?["ok"] as? Bool == true, !Task.isCancelled { onActionSucceeded?() }
+                return receipt
+            }
             result = await after(browser, tapped, ref: ref, did: notice.isEmpty ? "Tapped “\(label)”." : "Dismissed the notice with “\(label)”.")
             browser.end(step, ok: !result.isError, started: started)
         case "web_type":
@@ -115,9 +125,13 @@ enum WebTools {
                 return answer("web_type needs a ref and the text.", error: true)
             }
             let label = await label(browser, ref) ?? ref
+            let input: [String: Any] = ["ref": ref, "text": text, "submit": args["submit"] as? Bool ?? false]
+            guard send() else { return stopped }
             let step = browser.begin(AppLocalization.text(LocalizedStringResource("Type “\(short(text))” in “\(short(label))”")))
             let typed = await browser.act {
-                (try? await browser.call("return window.__pokiReader.type(ref, text, submit)", ["ref": ref, "text": text, "submit": args["submit"] as? Bool ?? false])) as? [String: Any]
+                let receipt = (try? await browser.call("return await window.__pokiReader.type(ref, text, submit)", input)) as? [String: Any]
+                if receipt?["ok"] as? Bool == true, !Task.isCancelled { onActionSucceeded?() }
+                return receipt
             }
             result = await after(browser, typed, ref: ref, did: "Typed into “\(label)”: \(typed?["value"] as? String ?? text).")
             browser.end(step, ok: !result.isError, started: started)
@@ -206,6 +220,7 @@ enum WebTools {
             switch result["error"] as? String {
             case "stale": return answer("[\(ref)] is not on the page any more. Read the page again and use a current ref.", error: true)
             case "disabled": return answer("[\(ref)] is disabled.", error: true)
+            case "input_not_applied": return answer("The page did not keep the requested input in [\(ref)]. Read the page again before retrying.", error: true)
             case "owner": return answer("That field is for the owner (a password, card or one-time code): call web_handoff.", error: true)
             case "ownerform": return answer("The text is typed, but this form also holds the owner's details, so it was not sent. Sending it is the owner's to do: call web_handoff.", error: true)
             case "option": return answer("No such option. The options are: \((result["options"] as? [String] ?? []).joined(separator: " | "))", error: true)

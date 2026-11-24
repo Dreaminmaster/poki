@@ -42,6 +42,7 @@ final class PokiBrowser: NSObject {
     /// The page under way has replaced the last one (its document is the one scripts see).
     @ObservationIgnored private var committed = true
     @ObservationIgnored private var activeNavigation: WKNavigation?
+    @ObservationIgnored private var pendingOpen: (WKNavigation, () -> Void)?
     @ObservationIgnored private let supersededNavigations = NSHashTable<WKNavigation>.weakObjects()
     @ObservationIgnored private var loadWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     @ObservationIgnored private var ownerWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
@@ -85,10 +86,13 @@ final class PokiBrowser: NSObject {
 
     // MARK: Page
 
-    func open(_ url: URL) async {
+    func open(_ url: URL, onCommitted: (() -> Void)? = nil) async {
         isOpen = true
-        trackNavigation(webView.load(URLRequest(url: url)))
+        let navigation = webView.load(URLRequest(url: url))
+        trackNavigation(navigation)
+        if let navigation, let onCommitted { pendingOpen = (navigation, onCommitted) }
         await waitForLoad()
+        if pendingOpen?.0 === navigation { pendingOpen = nil }
         _ = await settle()
     }
 
@@ -197,6 +201,7 @@ final class PokiBrowser: NSObject {
 
     /// The chat's Stop: whatever waits ends, loading stops, the page stays for the owner to see.
     func taskStopped() {
+        pendingOpen = nil
         webView.stopLoading()
         finishLoads()
         let waiters = ownerWaiters
@@ -234,6 +239,10 @@ extension PokiBrowser: WKNavigationDelegate, WKUIDelegate {
         committed = true
         url = webView.url
         title = webView.title ?? ""
+        if let (opened, notify) = pendingOpen, opened === navigation {
+            pendingOpen = nil
+            notify()
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

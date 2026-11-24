@@ -194,7 +194,7 @@ for _ in 0..<20 where (try? await owner.call("GET", "/wda/activeAppInfo", timeou
 }
 let asked = await call("look (the owner asks from Safari)", "look")
 check(asked.contains("app: Safari"), "Safari is in front when the task begins")
-await call("launch Settings", "do", ["actions": [["launch": "com.apple.Preferences"]]])
+await call("launch Settings", "do", ["actions": [["launch": ["bundle": "com.apple.Preferences"]]]])
 // Longer than an agent's thinking that must not move the phone (ESP-176: over 20 s).
 try? await Task.sleep(nanoseconds: 21_000_000_000)
 let thought = await call("look after 21 s of thinking", "look")
