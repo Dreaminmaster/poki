@@ -12,8 +12,8 @@ final class ResultCardLookTests: XCTestCase {
         return try decoder.decode(ResultCard.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
-    func testAppSpecificCardsAcceptRequiredFieldsAndNameAMissingField() throws {
-        let cases: [(String, String, [String: Any], String)] = [
+    private var dedicatedFixtures: [(kind: String, app: String, fields: [String: Any], required: String)] {
+        [
             (Ctrip.flights, Ctrip.app, ["depart": "17:30", "arrive": "13:00", "arrive_day": "+2", "price": "¥19,852"], "price"),
             (Ctrip.hotels, Ctrip.app, ["price": "¥1799", "rating": "4.4", "stars": "4钻"], "price"),
             (Ctrip.rooms, Ctrip.app, ["price": "¥1819", "beds": "1张1.8米特大床"], "price"),
@@ -22,7 +22,10 @@ final class ResultCardLookTests: XCTestCase {
             (Dianping.kind, Dianping.app, ["rating": "4.5", "reviews": "79条"], "rating"),
             (UberEats.kind, UberEats.app, ["price": "$8.79", "calories": "410 Cal."], "price"),
         ]
-        for (kind, app, fields, needed) in cases {
+    }
+
+    func testAppSpecificCardsAcceptRequiredFieldsAndNameAMissingField() throws {
+        for (kind, app, fields, needed) in dedicatedFixtures {
             let named: [[String: Any]] = [["id": "a", "title": "A"], ["id": "b", "title": "B"]]
             let whole = named.map { $0.merging(fields) { a, _ in a } }
             XCTAssertNil(try make(kind, app, whole).problem, kind)
@@ -94,6 +97,47 @@ final class ResultCardLookTests: XCTestCase {
         XCTAssertEqual(card.selected(nil).fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
         XCTAssertEqual(card.selected("twin").fill(card.primary.say), "Open Twin Room at Harbor Hotel for ¥800")
         XCTAssertEqual(card.selected("king").fill(card.primary.say), "Open King Room at Harbor Hotel for ¥700")
+    }
+
+    @MainActor
+    func testAdvertisedResultCardKindsHaveGuidanceAndRenderableFixtures() throws {
+        let fixtures = dedicatedFixtures.map { ($0.kind, $0.app, $0.fields) } + [
+            (RailwayTrains.kind, "cn.12306.rails12306", ["from": "北京南", "to": "上海虹桥", "depart": "07:00", "arrive": "11:29"]),
+            (RailwayTransfers.kind, "cn.12306.rails12306", ["legs": [
+                ["number": "G1", "from": "北京南", "to": "济南西", "depart": "07:00"],
+                ["number": "G3", "from": "济南西", "to": "上海虹桥", "arrive": "11:29"],
+            ]]),
+            (AnyAppList.kind, "example.app", ["detail": "Example result", "value": "25 min"]),
+        ]
+        let fullSchema = try cardSchema(for: .all)
+        let kindSchema = try XCTUnwrap(fullSchema.properties["kind"] as? [String: Any])
+        let kinds = try XCTUnwrap(kindSchema["enum"] as? [String])
+        XCTAssertEqual(Set(kinds), Set(ResultCardLooks.all.keys),
+                       "Advertised kinds and registered validators and renderers must match.")
+        XCTAssertEqual(Set(kinds), Set(fixtures.map { $0.0 }), "Add a fixture for each advertised kind.")
+
+        for (kind, app, fields) in fixtures {
+            let mode = Harness.ResultCardMode.genericList.including(app: app)
+            let schema = try cardSchema(for: mode)
+            let scopedKind = try XCTUnwrap(schema.properties["kind"] as? [String: Any])
+            XCTAssertTrue(try XCTUnwrap(scopedKind["enum"] as? [String]).contains(kind), kind)
+            XCTAssertTrue(schema.guidance.split(separator: "\n").contains { $0.hasPrefix(kind + " (") }, kind)
+
+            let items = try XCTUnwrap(schema.properties["items"] as? [String: Any])
+            let item = try XCTUnwrap(items["items"] as? [String: Any])
+            let itemFields = try XCTUnwrap(item["properties"] as? [String: Any])
+            let fixture = fields.merging(["id": "option", "title": "Example"]) { value, _ in value }
+            XCTAssertTrue(Set(fixture.keys).isSubset(of: Set(itemFields.keys)), kind)
+            let card = try make(kind, app, [fixture])
+            XCTAssertNil(card.problem, kind)
+            XCTAssertGreaterThan(try renderCard(card, width: 370).height, 0, kind)
+        }
+    }
+
+    private func cardSchema(for mode: Harness.ResultCardMode) throws -> (properties: [String: Any], guidance: String) {
+        let options = try XCTUnwrap(Harness.finishTask(resultCardMode: mode).schema["properties"] as? [String: Any])
+        let card = try XCTUnwrap(options["card"] as? [String: Any])
+        return (try XCTUnwrap(card["properties"] as? [String: Any]), try XCTUnwrap(card["description"] as? String))
     }
 
     func testFinishTaskAdvertisesCardKindsAndPictureSourceFields() throws {
