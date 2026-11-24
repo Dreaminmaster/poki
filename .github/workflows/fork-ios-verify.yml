@@ -26,7 +26,8 @@ jobs:
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
-    timeout-minutes: 90
+    # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,6 +133,11 @@ jobs:
           cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
           native/ios-app/scripts/make-assets.sh
           xcodegen generate --spec native/ios-app/project.yml
+      - name: Build pinned Codex Voice dependency separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          native/codex-voice/build.sh build aarch64-apple-ios-sim 2>&1 | tee out/codex-voice-build.log
       - name: Build actual PokiTests and preserve complete logs
         shell: bash
         run: |
