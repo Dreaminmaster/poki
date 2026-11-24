@@ -9,20 +9,21 @@ import UserNotifications
 @MainActor
 @Observable
 final class AppModel {
-    var setup = SetupState.load() { didSet { setup.save() } }
-    let identity = RelayIdentity()
+    let storage: PokiStorage
+    var setup: SetupState { didSet { setup.save(storage: storage) } }
+    let identity: RelayIdentity
     /// The person's own relay (Connect). Poki has no default relay and sends nothing until one is set.
-    private(set) var relayAddress = RelayAddress.saved
+    private(set) var relayAddress: RelayAddress?
     /// The relay on or off (Agents > MCP Relay). On by default, and turned on when an address is set;
     /// off, Poki makes no relay connection and only its own chat agent can use the phone.
-    private(set) var relayEnabled = PokiStorage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
+    private(set) var relayEnabled: Bool
     /// The relay Poki connects to: the address, while the relay is on.
     var activeRelay: RelayAddress? { relayEnabled ? relayAddress : nil }
 
     func setRelayEnabled(_ on: Bool) {
         guard on != relayEnabled, relayAddress != nil || !on else { return }
         relayEnabled = on
-        PokiStorage.defaults.set(on, forKey: "relayEnabled")
+        storage.defaults.set(on, forKey: "relayEnabled")
         log.add("relay", on ? "turned on" : "turned off")
         if !on { relayStatus = .off }
         guard sessionOn else { return }
@@ -77,16 +78,16 @@ final class AppModel {
     var approvalMode: ApprovalClassifier.Mode {
         get {
             access(keyPath: \.approvalMode)
-            return ApprovalClassifier.mode
+            return ApprovalClassifier.mode(in: storage)
         }
         set {
             withMutation(keyPath: \.approvalMode) {
                 // The first choice here saves the sensitivity Rules shows with it: beside a saved way of asking a
                 // sensitivity counts as chosen, and one left from 0.3.1 or 0.3.0 would move it behind the slider.
-                if ApprovalClassifier.Mode(rawValue: PokiStorage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                    PokiStorage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
+                if ApprovalClassifier.Mode(rawValue: storage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                    storage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey)
                 }
-                PokiStorage.defaults.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
+                storage.defaults.set(newValue.rawValue, forKey: ApprovalClassifier.modeKey)
             }
             log.add("approval", "ask before sensitive steps: \(newValue.rawValue)")
             for observer in approvalModeObservers { observer() }
@@ -99,27 +100,28 @@ final class AppModel {
     private var stopAskingObservers: [() -> Void] = []
     /// Called when Don’t Ask Again turned approvals off, for the chat to say so.
     func addStopAskingObserver(_ observer: @escaping () -> Void) { stopAskingObservers.append(observer) }
-    var classifierLevel: ApprovalClassifier.Level = ApprovalClassifier.Level.saved {
+    var classifierLevel: ApprovalClassifier.Level {
         didSet {
-            PokiStorage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
+            storage.defaults.set(classifierLevel.rawValue, forKey: ApprovalClassifier.levelKey); log.add("approval", "sensitivity: \(classifierLevel.rawValue)")
             // Likewise the way of asking Rules shows, so the sensitivity counts as chosen here.
-            if ApprovalClassifier.Mode(rawValue: PokiStorage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
-                PokiStorage.defaults.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
+            if ApprovalClassifier.Mode(rawValue: storage.defaults.string(forKey: ApprovalClassifier.modeKey) ?? "") == nil {
+                storage.defaults.set(approvalMode.rawValue, forKey: ApprovalClassifier.modeKey)
             }
         }
     }
     /// Lists ask_poki for outside agents. Testing only, off.
-    var askPokiTool: Bool = PokiStorage.defaults.bool(forKey: AskPoki.onKey) {
-        didSet { PokiStorage.defaults.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
+    var askPokiTool: Bool {
+        didSet { storage.defaults.set(askPokiTool, forKey: AskPoki.onKey); log.add("chat", "ask_poki tool: \(askPokiTool ? "on" : "off")"); AskPoki.refresh() }
     }
-    var idleStopSeconds: Int = UserDefaults.standard.object(forKey: "idleStopSeconds.v4") as? Int ?? 60 {
-        didSet { UserDefaults.standard.set(idleStopSeconds, forKey: "idleStopSeconds.v4"); log.add("runner", "idle stop set to \(idleStopSeconds) s") }
+    private static let idleStopDefaultsName = "idleStopSeconds.v4"
+    var idleStopSeconds: Int {
+        didSet { storage.defaults.set(idleStopSeconds, forKey: Self.idleStopDefaultsName); log.add("runner", "idle stop set to \(idleStopSeconds) s") }
     }
     /// Poki was on when it last ran; it turns itself on again at launch. Poki Setup's install turns it
     /// on the first time (see `init`).
     private(set) var wantsOn: Bool {
-        get { PokiStorage.defaults.bool(forKey: "wantsOn") }
-        set { PokiStorage.defaults.set(newValue, forKey: "wantsOn") }
+        get { storage.defaults.bool(forKey: "wantsOn") }
+        set { storage.defaults.set(newValue, forKey: "wantsOn") }
     }
     /// The setup step the Live Activity is guiding, if any.
     private(set) var guiding: SetupStep?
@@ -127,24 +129,24 @@ final class AppModel {
     /// when Poki is installed again, and a stored path then points at nothing.
     var pairingPath: String? {
         _ = pairingFileSeen
-        if FileManager.default.fileExists(atPath: AppFiles.phonePairingFile.path) { return AppFiles.phonePairingFile.path }
-        return FileManager.default.fileExists(atPath: AppFiles.pairingFile.path) ? AppFiles.pairingFile.path : nil
+        if FileManager.default.fileExists(atPath: storage.phonePairingFileURL.path) { return storage.phonePairingFileURL.path }
+        return FileManager.default.fileExists(atPath: storage.pairingFileURL.path) ? storage.pairingFileURL.path : nil
     }
     /// Whether the pairing file was there at the last look. Poki Setup on a computer writes it into
     /// Poki's container after an install, while Poki may be running: setting this redraws what depends
     /// on `pairingPath` (the file itself is not observed).
-    private var pairingFileSeen = FileManager.default.fileExists(atPath: AppFiles.pairingFile.path)
+    private var pairingFileSeen: Bool
     /// Looks for a pairing file Poki Setup put in the container (at launch, on coming to the front,
     /// and every few seconds on the pairing step).
     func lookForHandedPairing() {
-        let there = FileManager.default.fileExists(atPath: AppFiles.pairingFile.path)
+        let there = FileManager.default.fileExists(atPath: storage.pairingFileURL.path)
         guard there != pairingFileSeen else { return }
         pairingFileSeen = there
         // A pairing made here writes the same file just before it reports `paired`, which handles it.
         guard there, !pairingUnderWay else { return }
-        try? (AppFiles.pairingFile as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
-        setup.pairingFile = AppFiles.pairingFile.path
-        SetupVault.mirrorPairingFromContainer()
+        try? (storage.pairingFileURL as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
+        setup.pairingFile = storage.pairingFileURL.path
+        SetupVault.mirrorPairingFromContainer(storage: storage)
         pairingTrouble = nil; pairingVerifiedAt = nil
         log.add("pairing", "pairing file from Poki Setup found")
     }
@@ -161,7 +163,7 @@ final class AppModel {
     private(set) var passcodeHint = false
     /// Turning on now will probably bring up iOS's passcode screen (no automation has started since
     /// this iPhone last restarted, or ever): the owner is told first (`passcodeHeadsUp`).
-    var passcodeExpected: Bool { PokiStorage.defaults.double(forKey: Self.automationBootKey) != BootClock.current }
+    var passcodeExpected: Bool { storage.defaults.double(forKey: Self.automationBootKey) != BootClock.current }
     var passcodeHeadsUp = false
     private(set) var passcodeConfirmationPending = false
     static let passcodeConfirmationMessage: LocalizedStringResource = "To turn on automation, open Settings › Setup and tap Continue."
@@ -173,9 +175,9 @@ final class AppModel {
     /// Automation started in this boot: iOS will not ask again until the next restart.
     private func automationStarted() {
         InProcessWDA.gate.withLock { $0.startedThisBoot = true }
-        AutomationAllowance(boot: BootClock.current, at: Date()).save()
-        guard PokiStorage.defaults.double(forKey: Self.automationBootKey) != BootClock.current else { return }
-        PokiStorage.defaults.set(BootClock.current, forKey: Self.automationBootKey)
+        AutomationAllowance(boot: BootClock.current, at: Date()).save(in: storage)
+        guard storage.defaults.double(forKey: Self.automationBootKey) != BootClock.current else { return }
+        storage.defaults.set(BootClock.current, forKey: Self.automationBootKey)
     }
     /// Continue on the note: Poki turns on, and iOS's passcode screen comes next.
     func continueAfterPasscodeHeadsUp() {
@@ -358,7 +360,16 @@ final class AppModel {
          automation: InProcessAutomation = PKInProcess.shared(), transport: HTTPTransport? = nil,
          systemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion,
          requiresDiskImageCheck: Bool? = nil, imageMounted: @escaping () -> Bool = { AppModel.localDDIMounted },
-         localVPNAvailable: Bool? = nil) {
+         localVPNAvailable: Bool? = nil, storage: PokiStorage = .live) {
+        self.storage = storage
+        self.setup = SetupState.load(storage: storage)
+        self.identity = RelayIdentity(storage: storage)
+        self.relayAddress = RelayAddress.saved(in: storage)
+        self.relayEnabled = storage.defaults.object(forKey: "relayEnabled") as? Bool ?? true
+        self.classifierLevel = ApprovalClassifier.Level.saved(in: storage)
+        self.askPokiTool = storage.defaults.bool(forKey: AskPoki.onKey)
+        self.idleStopSeconds = storage.defaults.object(forKey: Self.idleStopDefaultsName) as? Int ?? 60
+        self.pairingFileSeen = FileManager.default.fileExists(atPath: storage.pairingFileURL.path)
         ActivityController.endAll()
         self.localVPNAvailableOverride = localVPNAvailable
         self.imageMounted = imageMounted
@@ -367,14 +378,14 @@ final class AppModel {
         self.idleSessionPolicy = .forSystem(systemVersion)
         // iOS 27 lets a relaunched Poki open automation without the passcode while the boot's allowance
         // lasts, so a phone step from the background (Poki Anytime, an agent) does not wait for Poki in front.
-        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved?.covers(boot: BootClock.current, at: Date()) == true {
+        if IdleSessionPolicy.forSystem(systemVersion) == .close, AutomationAllowance.saved(in: storage)?.covers(boot: BootClock.current, at: Date()) == true {
             InProcessWDA.gate.withLock { $0.startedThisBoot = true }
         }
         self.requiresDiskImageCheck = requiresDiskImageCheck ?? !Self.onSimulator
         // A reinstall emptied the container: the pairing file comes back from the Keychain (and the
         // setup state did the same in `SetupState.load`), so the owner is not sent through setup again.
-        if SetupVault.restorePairingIfMissing() { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
-        else { SetupVault.mirrorPairingFromContainer() }
+        if SetupVault.restorePairingIfMissing(storage: storage) { AppLog.shared.add("pairing", "pairing file restored from the Keychain after a reinstall") }
+        else { SetupVault.mirrorPairingFromContainer(storage: storage) }
         let core = LiveCore(host: host, transport: transport ?? (automationPath == .inProcess ? InProcessWDA() : URLSessionTransport()))
         self.core = core
         // Voice taps get the same rules and approval card as an agent's `do`.
@@ -396,7 +407,8 @@ final class AppModel {
                                }
                            },
                            holdMicrophone: { [background] on in on ? background.pauseAudio() : background.resumeAudio() },
-                           connection: VoiceModel.connection)
+                           connection: VoiceModel.connection,
+                           storage: storage)
         self.launcher = launcher
         self.pairer = pairer
         // inFront starts true before the first scene callback, including a background launch.
@@ -492,7 +504,7 @@ final class AppModel {
         }
         // Just installed by Poki Setup on a computer (its signing key still waits in the container, and
         // the owner never turned Poki on or off): Poki turns on by itself, so it does not stand at Off.
-        if PokiStorage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
+        if storage.defaults.object(forKey: "wantsOn") == nil, FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path) {
             wantsOn = true
             log.add("session", "installed by Poki Setup: Poki turns on by itself")
         }
@@ -504,7 +516,7 @@ final class AppModel {
         SessionStore.shared.connectorAgent = { [identity] hash in
             identity.secrets.first { $0.hash == hash }.map { $0.named ? $0.name : ($0.agent ?? $0.name) }
         }
-        if PokiStorage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
+        if storage.defaults.string(forKey: "pokiSample") != nil { loadSample() }
         NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.appWillTerminate() }
         }
@@ -513,7 +525,7 @@ final class AppModel {
         // step done while Turn on said this build has no local VPN.
         if setup.loopback == .builtIn, !isLocalVPNAvailable {
             setup.loopback = .proxy
-            setup.save()
+            setup.save(storage: storage)
             log.add("loopback", "this build has no built-in connection: the saved choice is now an external one")
         }
     }
@@ -831,7 +843,7 @@ final class AppModel {
         // A pairing file and disk image Poki Setup put in the container while Poki was running (or
         // since it last came to the front) count at once: mirrored to the Keychain, the disk image
         // checked again, and the pairing checked as soon as the loopback answers.
-        SetupVault.mirrorPairingFromContainer()
+        SetupVault.mirrorPairingFromContainer(storage: storage)
         lookForHandedPairing()
         handoffTick()
         diskImage.notice()
@@ -929,7 +941,7 @@ final class AppModel {
     /// session at work, C like one standing by (the loopback check stays live, so a simulator shows it
     /// off). A sample relay address (not saved) and, on a simulator, two agents are added when there are none.
     private func loadSample() {
-        let scene = PokiStorage.defaults.string(forKey: "pokiSample")?.uppercased() ?? "B"
+        let scene = storage.defaults.string(forKey: "pokiSample")?.uppercased() ?? "B"
         // PIN: setup's pairing page with a sample code, as if Settings had asked for one.
         if scene == "PIN" { pairing = .pin("482913"); return }
         let now = Date()
@@ -1166,7 +1178,7 @@ final class AppModel {
         #endif
         // The chat's own model loop needs no relay; agents on a computer do.
         let relay = activeRelay
-        guard relay != nil || ModelKeys.hasUsableKey else { problem = Self.noRelay; return nil }
+        guard relay != nil || ModelKeys.hasUsableKey(in: storage) else { problem = Self.noRelay; return nil }
         return (pairing, relay)
     }
 
@@ -2485,12 +2497,13 @@ final class AppModel {
     /// A pairing file as bytes: from Files, AirDrop, a `poki://pairing` link or Poki Setup on a computer.
     func importPairingFile(_ data: Data, how: String) throws {
         try Self.checkPairingFileFormat(data)
-        try data.write(to: AppFiles.pairingFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try FileManager.default.createDirectory(at: storage.pairingFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: storage.pairingFileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         // Chosen by hand: it replaces the phone's own pairing as well.
-        try? FileManager.default.removeItem(at: AppFiles.phonePairingFile)
+        try? FileManager.default.removeItem(at: storage.phonePairingFileURL)
         pairingFileSeen = true
-        SetupVault.storePairing(data)
-        setup.pairingFile = AppFiles.pairingFile.path
+        SetupVault.storePairing(data, storage: storage)
+        setup.pairingFile = storage.pairingFileURL.path
         pairingTrouble = nil; pairingVerifiedAt = nil
         pairingNote = AppLocalization.text(LocalizedStringResource("Pairing file received."))
         log.add("pairing", "pairing file \(how)")
@@ -2684,7 +2697,7 @@ final class AppModel {
         do { try pairingKeepAlive.start() }
         catch { log.add("pairing", "keep-alive did not start (\(error.localizedDescription)); iOS may stop the pairing while Settings is open") }
         do {
-            try pairer.start(hostName: "Poki", saveTo: AppFiles.pairingFile) { [weak self] event in
+            try pairer.start(hostName: "Poki", saveTo: storage.pairingFileURL) { [weak self] event in
                 Task { @MainActor in self?.pairingChanged(event) }
             }
         } catch { pairingChanged(.failed("\(error)")) }
@@ -2740,8 +2753,8 @@ final class AppModel {
             try? (url as NSURL).setResourceValue(URLFileProtection.completeUntilFirstUserAuthentication, forKey: .fileProtectionKey)
             setup.pairingFile = url.path
             if let data = try? Data(contentsOf: url) {
-                SetupVault.storePairing(data)
-                try? data.write(to: AppFiles.phonePairingFile, options: .completeFileProtectionUntilFirstUserAuthentication)
+                SetupVault.storePairing(data, storage: storage)
+                try? data.write(to: storage.phonePairingFileURL, options: .completeFileProtectionUntilFirstUserAuthentication)
             }
             pairingTrouble = nil; pairingVerifiedAt = nil
             log.add("pairing", "paired on the phone")
@@ -2900,13 +2913,13 @@ final class AppModel {
     func setRelay(_ text: String) -> Bool {
         guard let address = RelayAddress(text) else { return false }
         guard address != relayAddress else { return true }
-        RelayAddress.saved = address
+        RelayAddress.setSaved(address, in: storage)
         let first = relayAddress == nil
         relayAddress = address
         log.add("relay", "address set to \(address.origin.host() ?? "?")")
         if problem == Self.noRelay { problem = nil }
         // A relay just set is on.
-        if first || !relayEnabled { relayEnabled = true; PokiStorage.defaults.set(true, forKey: "relayEnabled") }
+        if first || !relayEnabled { relayEnabled = true; storage.defaults.set(true, forKey: "relayEnabled") }
         if sessionOn {
             core.stop()
             core.start(relay: address)
@@ -2991,10 +3004,12 @@ struct AutomationAllowance: Equatable {
         boot == current && now >= at && now.timeIntervalSince(at) < Self.lasts
     }
 
-    static var saved: AutomationAllowance? {
-        guard let pair = PokiStorage.defaults.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
+    static var saved: AutomationAllowance? { saved(in: .live) }
+
+    static func saved(in storage: PokiStorage = .live) -> AutomationAllowance? {
+        guard let pair = storage.defaults.array(forKey: key) as? [Double], pair.count == 2 else { return nil }
         return AutomationAllowance(boot: pair[0], at: Date(timeIntervalSince1970: pair[1]))
     }
 
-    func save() { PokiStorage.defaults.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
+    func save(in storage: PokiStorage = .live) { storage.defaults.set([boot, at.timeIntervalSince1970], forKey: Self.key) }
 }

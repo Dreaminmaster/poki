@@ -78,7 +78,7 @@ struct PokiMenu<Face: View>: View {
     @State private var showsAutoUnlockPasscode = false
 
     private var providers: [ModelProvider] {
-        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }
+        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0, storage: model.storage) && ModelAccounts.canChat($0) }
     }
 
     var body: some View {
@@ -109,12 +109,12 @@ struct PokiMenu<Face: View>: View {
         case .automatic:
             Menu {
                 Section {
-                    if ModelKeys.hasUsableKey {
+                    if ModelKeys.hasUsableKey(in: model.storage) {
                         Menu {
                             ForEach(providers) { provider in
-                                let choices = ModelCatalog.available(provider)
+                                let choices = ModelCatalog.available(provider, storage: model.storage)
                                 if provider == .custom {
-                                    ForEach(CustomProviders.all) { custom in
+                                    ForEach(CustomProviders.all(in: model.storage)) { custom in
                                         let models = choices.compactMap { choice -> ChatModelChoice? in
                                             guard let selection = CustomProviders.parse(choice.id),
                                                   selection.provider == custom.id else { return nil }
@@ -130,7 +130,7 @@ struct PokiMenu<Face: View>: View {
                             }
                         } label: {
                             Label("Model", systemImage: "sparkles")
-                            Text(verbatim: ModelKeys.selectedModelName)
+                            Text(verbatim: ModelKeys.selectedModelName(in: model.storage))
                         }
                         .accessibilityIdentifier("status.model")
                     } else {
@@ -196,12 +196,12 @@ struct PokiMenu<Face: View>: View {
         _ = modelVersion
 
         var primaryItems: [UIMenuElement] = []
-        if ModelKeys.hasUsableKey {
+        if ModelKeys.hasUsableKey(in: model.storage) {
             var providerMenus: [UIMenu] = []
             for provider in providers {
-                let choices = ModelCatalog.available(provider)
+                let choices = ModelCatalog.available(provider, storage: model.storage)
                 if provider == .custom {
-                    for custom in CustomProviders.all {
+                    for custom in CustomProviders.all(in: model.storage) {
                         let models = choices.compactMap { choice -> ChatModelChoice? in
                             guard let selection = CustomProviders.parse(choice.id),
                                   selection.provider == custom.id else { return nil }
@@ -217,7 +217,7 @@ struct PokiMenu<Face: View>: View {
             }
             let modelMenu = UIMenu(
                 title: AppLocalization.text("Model"),
-                subtitle: ModelKeys.selectedModelName,
+                subtitle: ModelKeys.selectedModelName(in: model.storage),
                 image: UIImage(systemName: "sparkles"),
                 children: providerMenus
             )
@@ -275,7 +275,7 @@ struct PokiMenu<Face: View>: View {
 
     private func nativeModelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> UIMenu {
         let actions = choices.map { choice in
-            let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
+            let chosen = ModelKeys.selectedProvider(in: model.storage) == provider && ModelKeys.selectedModel(in: model.storage) == choice.id
             return UIAction(title: choice.name, state: chosen ? .on : .off) { _ in
                 pick(provider, choice.id)
             }
@@ -297,7 +297,7 @@ struct PokiMenu<Face: View>: View {
     private func modelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
         Section {
             ForEach(choices) { choice in
-                let chosen = ModelKeys.selectedProvider == provider && ModelKeys.selectedModel == choice.id
+                let chosen = ModelKeys.selectedProvider(in: model.storage) == provider && ModelKeys.selectedModel(in: model.storage) == choice.id
                 Toggle(isOn: Binding(get: { chosen }, set: { on in if on { pick(provider, choice.id) } })) {
                     Text(verbatim: choice.name)
                 }
@@ -308,8 +308,8 @@ struct PokiMenu<Face: View>: View {
     }
 
     private func pick(_ provider: ModelProvider, _ id: String) {
-        ModelKeys.selectedProvider = provider
-        ModelKeys.selectedModel = id
+        ModelKeys.setSelectedProvider(provider, in: model.storage)
+        ModelKeys.setSelectedModel(id, in: model.storage)
         ModelKeys.saved += 1
     }
 }

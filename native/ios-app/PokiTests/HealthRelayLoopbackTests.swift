@@ -6,17 +6,17 @@ import XCTest
 
 @MainActor
 final class HealthRelayLoopbackTests: XCTestCase {
-    private var savedLanguage = AppLocalization.system
+    private var hostLocalization: HostLocalizationSnapshot!
     private var storage: IsolatedTestStorage!
 
     override func setUp() async throws {
-        savedLanguage = AppLocalization.shared.preference
+        hostLocalization = HostLocalizationSnapshot.capture()
         storage = try IsolatedTestStorage(prefix: "health-relay-loopback")
-        storage.activate()
     }
 
     override func tearDown() async throws {
-        AppLocalization.shared.preference = savedLanguage
+        hostLocalization.restore()
+        hostLocalization.assertUnchanged()
         if let storage {
             self.storage = nil
             try storage.tearDown()
@@ -29,14 +29,16 @@ final class HealthRelayLoopbackTests: XCTestCase {
 
     private func makeModel(
         imageMounted: @escaping () -> Bool = { false },
-        localVPNAvailable: Bool? = nil
+        localVPNAvailable: Bool? = nil,
+        storage: PokiStorage? = nil
     ) -> AppModel {
         let model = AppModel(
             launcher: FakeLauncher(),
             pairer: FakePairing(),
             automation: FakeAutomation(),
             imageMounted: imageMounted,
-            localVPNAvailable: localVPNAvailable
+            localVPNAvailable: localVPNAvailable,
+            storage: storage ?? self.storage.storage
         )
         model.setup.runnerInstalled = true
         model.setup.developerMode = true
@@ -48,7 +50,7 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// `Issue.current(model)`, `PokiDetailsView` ("需要处理"), and `SetupSettingsPage` without raw English.
     func testChineseUILocalizesNoRelayProblemInIssuesDetailsAndSetup() async throws {
         try resetIsolatedState()
-        XCTAssertFalse(ModelKeys.hasUsableKey, "test precondition: no usable model key")
+        XCTAssertFalse(ModelKeys.hasUsableKey(in: storage.storage), "test precondition: no usable model key")
 
         let model = makeModel()
         defer { model.stopSession() }
@@ -184,9 +186,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// must stop showing the stale loopback banner after recovery.
     func testWorkingLoopbackClearsStaleLoopbackProblemAndTunnelAttention() async throws {
         AppLocalization.shared.preference = "zh-Hans"
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
 
         let model = makeModel()
         defer { model.stopSession() }
@@ -260,9 +262,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
     /// `SetupSettingsPage`, or `SetupStepPage(step: .loopback)`.
     func testWorkingExternalLoopbackHidesStaleBuiltInTunnelErrorAndExternalBuildIssues() async throws {
         AppLocalization.shared.preference = "zh-Hans"
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
 
         // External build (`local VPN: unavailable`): stale `.builtIn` with working external proxy
         // must auto-migrate to `.proxy` and show clean Settings and Setup UI.
@@ -437,9 +439,9 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertFalse(refusedUnknown.contains("x509") || refusedUnknown.contains("mismatch") || refusedUnknown.contains("The phone refused"), refusedUnknown)
 
         // Pairing trouble surfaced through `Issue.current(model)` and `PokiDetailsView` must also hide raw English.
-        ModelKeys.customURL = "http://127.0.0.1:9/v1"
-        ModelKeys.customModel = "fake-model"
-        ModelKeys.selectedProvider = .custom
+        ModelKeys.setCustomURL("http://127.0.0.1:9/v1", in: storage.storage)
+        ModelKeys.setCustomModel("fake-model", in: storage.storage)
+        ModelKeys.setSelectedProvider(.custom, in: storage.storage)
         let model = makeModel()
         defer { model.stopSession() }
         model.setup.loopback = .proxy
@@ -477,32 +479,100 @@ final class HealthRelayLoopbackTests: XCTestCase {
         XCTAssertFalse(refusedCertHant.contains("invalid cert"), refusedCertHant)
     }
 
-    /// 6. Isolated test storage keeps a pre-configured host's real credentials and preferences intact
-    /// while establishing an empty `ModelKeys.hasUsableKey == false` precondition inside the nested test scope.
+    /// 6. Explicit isolated `PokiStorage` instances never inherit or mutate a pre-configured outer
+    /// storage's credentials (including the same OpenAI Keychain item and legacy Codex entries),
+    /// pairing file, language preferences, or originally absent keys.
     func testIsolatedStoragePreservesPreconfiguredHostCredentialsAndPreferences() throws {
-        // Seed the outer test scope as a simulated pre-configured host with real model-key.* and preferences.
-        try ModelKeys.save("test-host-openai-credential", for: .openai)
-        ModelKeys.selectedProvider = .openai
-        RelayAddress.saved = RelayAddress("https://host-relay.example")
-        XCTAssertTrue(ModelKeys.hasUsableKey)
+        let outer = storage.storage
+
+        // Seed outer storage like a pre-configured host: OpenAI key, selected provider, relay,
+        // localization, pairing.plist, and a legacy Codex Keychain entry.
+        try ModelKeys.save("test-host-openai-credential", for: .openai, storage: outer)
+        ModelKeys.setSelectedProvider(.openai, in: outer)
+        RelayAddress.setSaved(RelayAddress("https://host-relay.example"), in: outer)
+        let outerLocalization = AppLocalization(storage: outer)
+        outerLocalization.preference = "zh-Hans"
+        let hostPairingData = Data("host-pairing-record".utf8)
+        try hostPairingData.write(to: outer.pairingFileURL)
+        let outerLegacyCodexAccount = "cli|aaaaaaaaaaaaaaaa"
+        try storage.seedCodexCredential(
+            accessToken: "outer-legacy-codex-token",
+            refreshToken: "outer-legacy-refresh",
+            account: outerLegacyCodexAccount,
+            accessible: kSecAttrAccessibleWhenUnlocked
+        )
+
+        // Preconditions on outer storage: existing values present and untouched keys absent.
+        XCTAssertTrue(ModelKeys.hasUsableKey(in: outer))
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+        XCTAssertNil(ModelKeys.key(.chatgpt, storage: outer))
 
         let inner = try IsolatedTestStorage(prefix: "health-relay-inner")
-        defer { try? inner.tearDown() }
-        try PokiStorage.withScope(inner.scope) {
-            XCTAssertFalse(ModelKeys.hasUsableKey, "inner isolated scope must not inherit host model keys")
-            XCTAssertNil(RelayAddress.saved, "inner isolated scope must not inherit host relay address")
-            let model = makeModel()
+        do {
+            defer { try? inner.tearDown() }
+            let innerStorage = inner.storage
+
+            // S2: directly read the SAME OpenAI credential item and evaluate hasUsableKey with .openai selected.
+            XCTAssertNil(ModelKeys.key(.openai, storage: innerStorage), "inner storage must not read outer OpenAI credential")
+            ModelKeys.setSelectedProvider(.openai, in: innerStorage)
+            XCTAssertFalse(ModelKeys.hasUsableKey(in: innerStorage), "inner storage with .openai selected must still have no usable key")
+            inner.defaults.removeObject(forKey: "chat.provider")
+            XCTAssertFalse(ModelKeys.hasUsableKey(in: innerStorage), "inner isolated storage must not inherit outer model keys")
+            XCTAssertNil(RelayAddress.saved(in: innerStorage), "inner isolated storage must not inherit outer relay address")
+
+            // S2: Codex legacy fixture isolation boundary — outer legacy cli|* item must never migrate into inner storage.
+            XCTAssertEqual(CodexAccount.prepareStorage(storage: innerStorage), .empty)
+            XCTAssertNil(CodexAccount.readAccessToken(storage: innerStorage))
+            let innerLegacyAccount = "cli|bbbbbbbbbbbbbbbb"
+            try inner.seedCodexCredential(
+                accessToken: "inner-legacy-codex-token",
+                refreshToken: "inner-legacy-refresh",
+                account: innerLegacyAccount,
+                accessible: kSecAttrAccessibleWhenUnlocked
+            )
+            XCTAssertEqual(CodexAccount.prepareStorage(storage: innerStorage), .migrated)
+            XCTAssertEqual(CodexAccount.readAccessToken(storage: innerStorage), "inner-legacy-codex-token")
+            XCTAssertNil(try Keychain.read(innerLegacyAccount, service: innerStorage.codexService))
+
+            // P1: SetupState/AppModel pairing.plist isolation — building AppModel must not read or mirror outer/host pairing.plist.
+            let model = makeModel(storage: innerStorage)
             defer { model.stopSession() }
+            XCTAssertNil(model.pairingPath, "isolated AppModel must not see outer or host pairing.plist")
+            XCTAssertNil(try Keychain.read("setup.pairing", storage: innerStorage), "isolated AppModel must not mirror outer or host pairing.plist into Keychain")
             model.setup.loopback = .proxy
             model.loopback.simulate(.working(ms: 12))
             model.startSession()
             XCTAssertEqual(model.problem, AppModel.noRelay)
+
+            // P1: Mutate localization and keys that are absent in outer storage inside inner storage.
+            let innerLocalization = AppLocalization(storage: innerStorage)
+            innerLocalization.preference = "zh-Hant"
+            model.approvalMode = .off
+            try ModelKeys.save("inner-only-anthropic-key", for: .anthropic, storage: innerStorage)
+            XCTAssertEqual(innerStorage.defaults.string(forKey: AppLocalization.key), "zh-Hant")
+            XCTAssertEqual(innerStorage.appGroupDefaults.string(forKey: AppLocalization.effectiveKey), "zh-Hant")
         }
 
-        XCTAssertEqual(ModelKeys.key(.openai), "test-host-openai-credential")
-        XCTAssertEqual(ModelKeys.selectedProvider, .openai)
-        XCTAssertEqual(RelayAddress.saved?.origin.absoluteString, "https://host-relay.example")
-        XCTAssertTrue(ModelKeys.hasUsableKey)
+        // Verify outer storage's existing values remained completely intact.
+        XCTAssertEqual(ModelKeys.key(.openai, storage: outer), "test-host-openai-credential")
+        XCTAssertEqual(ModelKeys.selectedProvider(in: outer), .openai)
+        XCTAssertEqual(RelayAddress.saved(in: outer)?.origin.absoluteString, "https://host-relay.example")
+        XCTAssertTrue(ModelKeys.hasUsableKey(in: outer))
+        XCTAssertEqual(outer.defaults.string(forKey: AppLocalization.key), "zh-Hans")
+        XCTAssertEqual(outer.appGroupDefaults.string(forKey: AppLocalization.effectiveKey), "zh-Hans")
+        XCTAssertEqual(try Data(contentsOf: outer.pairingFileURL), hostPairingData)
+        XCTAssertNotNil(try Keychain.read(outerLegacyCodexAccount, service: outer.codexService), "outer legacy Codex entry must remain untouched by inner migration")
+        XCTAssertEqual(CodexAccount.prepareStorage(storage: outer), .migrated)
+        XCTAssertEqual(CodexAccount.readAccessToken(storage: outer), "outer-legacy-codex-token")
+
+        // Verify outer storage's originally absent keys remained absent.
+        XCTAssertNil(outer.defaults.object(forKey: ApprovalClassifier.modeKey))
+        XCTAssertNil(ModelKeys.key(.anthropic, storage: outer))
+        XCTAssertNil(ModelKeys.key(.chatgpt, storage: outer))
+
+        // Verify real host `.live` localization keys remained untouched (both existing values and missing-key absence).
+        hostLocalization.assertUnchanged()
     }
 
     // MARK: - Helpers

@@ -23,8 +23,16 @@ struct VoiceBridge: Equatable {
     var display: String { "\(base.host() ?? "")\(base.port.map { ":\($0)" } ?? "")" }
 
     static var saved: VoiceBridge? {
-        get { PokiStorage.defaults.string(forKey: "voiceBridge").flatMap(VoiceBridge.init) }
-        set { PokiStorage.defaults.set(newValue?.base.absoluteString, forKey: "voiceBridge") }
+        get { saved(in: .live) }
+        set { setSaved(newValue, in: .live) }
+    }
+
+    static func saved(in storage: PokiStorage = .live) -> VoiceBridge? {
+        storage.defaults.string(forKey: "voiceBridge").flatMap(VoiceBridge.init)
+    }
+
+    static func setSaved(_ bridge: VoiceBridge?, in storage: PokiStorage = .live) {
+        storage.defaults.set(bridge?.base.absoluteString, forKey: "voiceBridge")
     }
 
     struct Token: Decodable {
@@ -299,7 +307,7 @@ struct VoiceClock {
 @MainActor
 @Observable
 final class VoiceModel {
-    private(set) var bridge = VoiceBridge.saved
+    private(set) var bridge: VoiceBridge?
     private(set) var phase = VoicePhase.off
     private(set) var needsChatGPTSignIn = false
     private(set) var lines: [VoiceLine] = [] { didSet { saveTranscript() } }
@@ -535,6 +543,7 @@ final class VoiceModel {
     private let openingSpeech: OpeningSpeech
     private let recentAppAudio: @MainActor () async -> AppAudioContext?
     private let codex: any SubscriptionVoice
+    private let storage: PokiStorage
 
     init(clearTap: @escaping @MainActor (String, String?, String?) async -> TapClearance,
          phoneTool: @escaping @MainActor (String, String, PhoneOperationCancellation?) async -> PhoneAnswer,
@@ -544,7 +553,10 @@ final class VoiceModel {
          time: VoiceClock = VoiceClock(),
          openingSpeech: OpeningSpeech = .system,
          recentAppAudio: @escaping @MainActor () async -> AppAudioContext? = { await AppAudioContext.recent() },
-         codex: (any SubscriptionVoice)? = nil) {
+         codex: (any SubscriptionVoice)? = nil,
+         storage: PokiStorage = .live) {
+        self.storage = storage
+        self.bridge = VoiceBridge.saved(in: storage)
         self.clearTap = clearTap
         self.phoneTool = phoneTool
         self.holdMicrophone = holdMicrophone
@@ -593,13 +605,13 @@ final class VoiceModel {
 
     /// Voice can start: the OpenAI key on this iPhone (Realtime, no bridge), the Mac's voice bridge, or
     /// dictation into the chat with whichever model Poki uses.
-    var canTalk: Bool { usesChatGPTSubscription || VoiceDirect.apiKey != nil || bridge != nil || VoiceDirect.canDictate }
+    var canTalk: Bool { usesChatGPTSubscription || VoiceDirect.apiKey(in: storage) != nil || bridge != nil || VoiceDirect.canDictate(in: storage) }
 
     /// A live (Realtime) conversation can start: the OpenAI key on this iPhone or the voice bridge.
     /// Without one, voice is dictation into the message field, turn by turn.
-    var canTalkLive: Bool { usesChatGPTSubscription || VoiceDirect.apiKey != nil || bridge != nil || rehearsing }
+    var canTalkLive: Bool { usesChatGPTSubscription || VoiceDirect.apiKey(in: storage) != nil || bridge != nil || rehearsing }
 
-    var usesChatGPTSubscription: Bool { ModelKeys.selectedProvider == .chatgpt && ChatGPTAccount.signedIn }
+    var usesChatGPTSubscription: Bool { ModelKeys.selectedProvider(in: storage) == .chatgpt && ChatGPTAccount.isSignedIn(storage: storage) }
 
     /// Talk with Poki was asked for with no live voice (no OpenAI key, no voice bridge), from the message
     /// field's button, Poki's profile or `poki://voice`: the message field says what is missing, with
@@ -652,10 +664,10 @@ final class VoiceModel {
 
     /// How voice runs now, for the settings screen.
     var route: String {
-        if case .custom = VoiceDirect.account { return AppLocalization.text(LocalizedStringResource("\(VoiceDirect.settingsAccount.name), straight from this iPhone")) }
-        if VoiceDirect.apiKey != nil { return AppLocalization.text(LocalizedStringResource("Your OpenAI key, straight from this iPhone")) }
+        if case .custom = VoiceDirect.account(in: storage) { return AppLocalization.text(LocalizedStringResource("\(VoiceDirect.settingsAccount(in: storage).name(in: storage)), straight from this iPhone")) }
+        if VoiceDirect.apiKey(in: storage) != nil { return AppLocalization.text(LocalizedStringResource("Your OpenAI key, straight from this iPhone")) }
         if let bridge { return AppLocalization.text(LocalizedStringResource("Voice bridge at \(bridge.display)")) }
-        if VoiceDirect.canDictate { return AppLocalization.text(LocalizedStringResource("Dictation to \(ModelKeys.selectedModelName); Poki reads the answer aloud")) }
+        if VoiceDirect.canDictate(in: storage) { return AppLocalization.text(LocalizedStringResource("Dictation to \(ModelKeys.selectedModelName(in: storage)); Poki reads the answer aloud")) }
         return AppLocalization.text(LocalizedStringResource("Not set up"))
     }
 
@@ -664,16 +676,16 @@ final class VoiceModel {
     func setBridge(_ text: String) -> Bool {
         guard let bridge = VoiceBridge(text) else { return false }
         self.bridge = bridge
-        VoiceBridge.saved = bridge
+        VoiceBridge.setSaved(bridge, in: storage)
         return true
     }
 
     /// Takes the Mac voice bridge's address off this iPhone. A talk that runs through it ends first: its
     /// next step would go to the bridge.
     func removeBridge() {
-        if isLive || isConnecting, VoiceDirect.apiKey == nil { stop() }
+        if isLive || isConnecting, VoiceDirect.apiKey(in: storage) == nil { stop() }
         bridge = nil
-        VoiceBridge.saved = nil
+        VoiceBridge.setSaved(nil, in: storage)
     }
 
     /// `poki://voice` can come from any web page, message or app, so it only shows the Voice tab. A link

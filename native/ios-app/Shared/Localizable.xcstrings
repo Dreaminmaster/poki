@@ -34684,24 +34684,24 @@
         }
       }
     },
-    "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking." : {
+    "Payments, deletions in menus and confirmation dialogs (or when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、菜单和确认弹窗中的删除以及“钱包”操作始终需要你确认，其他敏感步骤直接进行。"
+            "value" : "付款、菜单和确认弹窗中的删除（以及缺少完整页面信息时，例如仅凭按钮名称发起语音操作的删除）和“钱包”操作始终需要你确认，其他敏感步骤直接进行。"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
+            "value" : "Payments, deletions in menus and confirmation dialogs (or when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "付款、選單和確認彈窗中的刪除以及「錢包」操作始終需要你確認，其他敏感步驟直接進行。"
+            "value" : "付款、選單和確認彈窗中的刪除（以及缺少完整頁面資訊時，例如僅憑按鈕名稱發起語音操作的刪除）和「錢包」操作始終需要你確認，其他敏感步驟直接進行。"
           }
         }
       }

@@ -72,13 +72,14 @@ final class CodexVoice: SubscriptionVoice {
     init(startBridge: ((String, @escaping @MainActor (String) -> Void) -> Bool)? = nil,
          sendBridge: ((String) -> Bool)? = nil,
          prepareStorage: (() -> CodexAccount.StorageState)? = nil,
-         codexService: String = CodexAccount.defaultService,
-         home: URL = CodexAccount.home) {
+         storage: PokiStorage? = nil,
+         codexService: String? = nil,
+         home: URL? = nil) {
         self.startBridge = startBridge
         self.sendBridge = sendBridge
         self.prepareStorageBridge = prepareStorage
-        self.codexService = codexService
-        self.codexHome = home
+        self.codexService = codexService ?? storage?.codexService ?? CodexAccount.defaultService
+        self.codexHome = home ?? storage?.codexHome ?? CodexAccount.home
     }
 
     private var homePath: String { codexHome.path(percentEncoded: false) }

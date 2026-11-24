@@ -142,10 +142,14 @@ private struct InUseCard: View {
 /// What a model account is and what it can power.
 enum ModelAccounts {
     static func isSetUp(_ provider: ModelProvider) -> Bool {
+        isSetUp(provider, storage: .live)
+    }
+
+    static func isSetUp(_ provider: ModelProvider, storage: PokiStorage) -> Bool {
         switch provider {
-        case .custom: !CustomProviders.all.isEmpty
-        case .chatgpt: ChatGPTAccount.signedIn
-        default: ModelKeys.hasKey(provider)
+        case .custom: !CustomProviders.all(in: storage).isEmpty
+        case .chatgpt: ChatGPTAccount.isSignedIn(storage: storage)
+        default: ModelKeys.hasKey(provider, storage: storage)
         }
     }
 

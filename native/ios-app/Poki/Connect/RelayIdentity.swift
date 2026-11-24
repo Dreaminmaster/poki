@@ -45,8 +45,12 @@ final class RelayIdentity {
     private(set) var secrets: [ConnectorSecret] = []
     private(set) var error: String?
     private var key: Curve25519.Signing.PrivateKey?
+    private let storage: PokiStorage
 
-    init() { load() }
+    init(storage: PokiStorage = .live) {
+        self.storage = storage
+        load()
+    }
 
     var publicKey: Data? { key?.publicKey.rawRepresentation }
     var signingKey: Curve25519.Signing.PrivateKey? { key }
@@ -104,14 +108,14 @@ final class RelayIdentity {
 
     private func load() {
         do {
-            if let raw = try Keychain.read(Self.keyAccount) {
+            if let raw = try Keychain.read(Self.keyAccount, storage: storage) {
                 key = try Curve25519.Signing.PrivateKey(rawRepresentation: raw)
             } else {
                 let made = Curve25519.Signing.PrivateKey()
-                try Keychain.write(made.rawRepresentation, account: Self.keyAccount)
+                try Keychain.write(made.rawRepresentation, account: Self.keyAccount, storage: storage)
                 key = made
             }
-            if let data = try Keychain.read(Self.secretsAccount) { secrets = (try? JSONDecoder().decode([ConnectorSecret].self, from: data)) ?? [] }
+            if let data = try Keychain.read(Self.secretsAccount, storage: storage) { secrets = (try? JSONDecoder().decode([ConnectorSecret].self, from: data)) ?? [] }
             label = base32(key!.publicKey.rawRepresentation)
         } catch {
             self.error = "\(error)"
@@ -119,73 +123,81 @@ final class RelayIdentity {
     }
 
     private func save() {
-        do { try Keychain.write(try JSONEncoder().encode(secrets), account: Self.secretsAccount) }
+        do { try Keychain.write(try JSONEncoder().encode(secrets), account: Self.secretsAccount, storage: storage) }
         catch { self.error = "\(error)" }
     }
 }
 
-enum PokiStorage {
-    struct Scope {
-        var defaults: UserDefaults
-        var keychainService: String
-        var codexService: String
-        var codexHome: URL
+/// Immutable storage boundary binding defaults, app-group defaults, Keychain services,
+/// Codex home directory, and pairing file location explicitly per instance.
+struct PokiStorage: @unchecked Sendable {
+    let defaults: UserDefaults
+    let appGroupDefaults: UserDefaults
+    let keychainService: String
+    let codexService: String
+    let codexHome: URL
+    let pairingFileURL: URL
+
+    var phonePairingFileURL: URL {
+        pairingFileURL.deletingLastPathComponent().appendingPathComponent("pairing-phone.plist")
     }
 
-    struct Token {
-        fileprivate let previous: Scope?
-    }
+    static let live = PokiStorage(
+        defaults: .standard,
+        appGroupDefaults: SharedContainer.defaults,
+        keychainService: Keychain.defaultServiceName,
+        codexService: CodexAccount.defaultServiceName,
+        codexHome: URL.applicationSupportDirectory.appending(path: "CodexVoice", directoryHint: .isDirectory),
+        pairingFileURL: AppFiles.pairingFile
+    )
+}
 
-    private static let lock = NSLock()
-    private nonisolated(unsafe) static var overrideScope: Scope?
-
-    static var defaults: UserDefaults {
-        lock.withLock { overrideScope?.defaults } ?? .standard
-    }
-
-    static var keychainService: String {
-        lock.withLock { overrideScope?.keychainService } ?? Keychain.defaultServiceName
-    }
-
-    static var codexService: String {
-        lock.withLock { overrideScope?.codexService } ?? CodexAccount.defaultServiceName
-    }
-
-    static var codexHome: URL? {
-        lock.withLock { overrideScope?.codexHome }
-    }
-
-    static func pushScope(_ scope: Scope) -> Token {
-        let previous = lock.withLock {
-            let old = overrideScope
-            overrideScope = scope
-            return old
-        }
-        return Token(previous: previous)
-    }
-
-    static func popScope(_ token: Token) {
-        lock.withLock {
-            overrideScope = token.previous
-        }
-    }
-
-    static func withScope<T>(_ scope: Scope, _ body: () throws -> T) rethrows -> T {
-        let token = pushScope(scope)
-        defer { popScope(token) }
-        return try body()
-    }
-
-    static func withScope<T>(_ scope: Scope, _ body: () async throws -> T) async rethrows -> T {
-        let token = pushScope(scope)
-        defer { popScope(token) }
-        return try await body()
+extension AppLocalization {
+    convenience init(storage: PokiStorage) {
+        self.init(defaults: storage.defaults, appGroupDefaults: storage.appGroupDefaults)
     }
 }
 
 enum Keychain {
     static let defaultServiceName = "nz.zheha.poki"
-    static var defaultService: String { PokiStorage.keychainService }
+    static let defaultService = defaultServiceName
+
+    static func read(_ account: String, storage: PokiStorage) throws -> Data? {
+        try read(account, service: storage.keychainService)
+    }
+
+    static func readWithAttributes(
+        _ account: String,
+        storage: PokiStorage
+    ) throws -> (data: Data, modified: Date?, accessible: String?)? {
+        try readWithAttributes(account, service: storage.keychainService)
+    }
+
+    static func readAll(
+        storage: PokiStorage
+    ) throws -> [(account: String, data: Data, modified: Date?, accessible: String?)] {
+        try readAll(service: storage.keychainService)
+    }
+
+    static func write(_ data: Data, account: String, storage: PokiStorage) throws {
+        try write(data, account: account, service: storage.keychainService)
+    }
+
+    static func updateAccessibility(
+        _ account: String,
+        storage: PokiStorage,
+        accessible: CFString
+    ) throws {
+        try updateAccessibility(account, service: storage.keychainService, accessible: accessible)
+    }
+
+    static func delete(_ account: String, storage: PokiStorage) {
+        delete(account, service: storage.keychainService)
+    }
+
+    static func remove(_ account: String, storage: PokiStorage) throws {
+        try remove(account, service: storage.keychainService)
+    }
 
     static func read(_ account: String, service name: String = defaultService) throws -> Data? {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: name, kSecAttrAccount as String: account, kSecReturnData as String: true]
@@ -295,8 +307,16 @@ enum Keychain {
 extension RelayAddress {
     /// The relay the person entered in Connect, kept across launches. Poki has no default relay.
     static var saved: RelayAddress? {
-        get { PokiStorage.defaults.string(forKey: "relayAddress").flatMap { RelayAddress($0) } }
-        set { PokiStorage.defaults.set(newValue?.origin.absoluteString, forKey: "relayAddress") }
+        get { saved(in: .live) }
+        set { setSaved(newValue, in: .live) }
+    }
+
+    static func saved(in storage: PokiStorage = .live) -> RelayAddress? {
+        storage.defaults.string(forKey: "relayAddress").flatMap { RelayAddress($0) }
+    }
+
+    static func setSaved(_ address: RelayAddress?, in storage: PokiStorage = .live) {
+        storage.defaults.set(address?.origin.absoluteString, forKey: "relayAddress")
     }
 }
 

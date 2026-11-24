@@ -90,31 +90,35 @@ enum CustomProviders {
     // MARK: Store
 
     static var all: [CustomProvider] {
-        get {
-            migrateIfNeeded()
-            guard let data = PokiStorage.defaults.data(forKey: storeKey),
-                  let providers = try? JSONDecoder().decode([CustomProvider].self, from: data) else { return [] }
-            return providers
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) { PokiStorage.defaults.set(data, forKey: storeKey) }
-        }
+        get { all(in: .live) }
+        set { setAll(newValue, in: .live) }
     }
 
-    static func provider(_ id: UUID) -> CustomProvider? { all.first { $0.id == id } }
+    static func all(in storage: PokiStorage = .live) -> [CustomProvider] {
+        migrateIfNeeded(in: storage)
+        guard let data = storage.defaults.data(forKey: storeKey),
+              let providers = try? JSONDecoder().decode([CustomProvider].self, from: data) else { return [] }
+        return providers
+    }
+
+    static func setAll(_ providers: [CustomProvider], in storage: PokiStorage = .live) {
+        if let data = try? JSONEncoder().encode(providers) { storage.defaults.set(data, forKey: storeKey) }
+    }
+
+    static func provider(_ id: UUID, storage: PokiStorage = .live) -> CustomProvider? { all(in: storage).first { $0.id == id } }
 
     /// The provider behind one of pi's models (`Model.provider`).
-    static func provider(piProvider: String) -> CustomProvider? {
+    static func provider(piProvider: String, storage: PokiStorage = .live) -> CustomProvider? {
         guard piProvider.hasPrefix(piPrefix), let id = UUID(uuidString: String(piProvider.dropFirst(piPrefix.count))) else { return nil }
-        return provider(id)
+        return provider(id, storage: storage)
     }
 
     /// Adds the provider, or replaces the one with its id. An address that changed forgets what
     /// Automatic found there and the model list read from it.
     @discardableResult
-    static func upsert(_ provider: CustomProvider) -> CustomProvider {
+    static func upsert(_ provider: CustomProvider, storage: PokiStorage = .live) -> CustomProvider {
         var provider = provider
-        var list = all
+        var list = all(in: storage)
         if let index = list.firstIndex(where: { $0.id == provider.id }) {
             let old = list[index]
             for i in provider.endpoints.indices {
@@ -123,67 +127,69 @@ enum CustomProviders {
                     provider.endpoints[i].found = nil
                 }
             }
-            if old.primary?.normalized != provider.primary?.normalized { ModelCatalog.invalidateCustom(provider.id) }
+            if old.primary?.normalized != provider.primary?.normalized { ModelCatalog.invalidateCustom(provider.id, storage: storage) }
             list[index] = provider
-            all = list
-            if old.model != provider.model, !old.model.isEmpty, !ModelCatalog.listedCustom(provider.id).contains(old.model) {
-                ModelCatalog.set(choiceID(provider.id, old.model), on: false, for: .custom, notify: false)
+            setAll(list, in: storage)
+            if old.model != provider.model, !old.model.isEmpty, !ModelCatalog.listedCustom(provider.id, storage: storage).contains(old.model) {
+                ModelCatalog.set(choiceID(provider.id, old.model), on: false, for: .custom, notify: false, storage: storage)
             }
         } else {
             list.append(provider)
-            all = list
+            setAll(list, in: storage)
         }
-        if !provider.model.isEmpty { ModelCatalog.set(choiceID(provider.id, provider.model), on: true, for: .custom, notify: false) }
+        if !provider.model.isEmpty { ModelCatalog.set(choiceID(provider.id, provider.model), on: true, for: .custom, notify: false, storage: storage) }
         ModelKeys.saved += 1
         return provider
     }
 
     /// Keeps what Automatic found at an address after a passing test.
-    static func record(found: CustomAPIStyle, endpoint: CustomEndpoint, provider id: UUID) {
-        var list = all
+    static func record(found: CustomAPIStyle, endpoint: CustomEndpoint, provider id: UUID, storage: PokiStorage = .live) {
+        var list = all(in: storage)
         guard endpoint.api == .automatic, let p = list.firstIndex(where: { $0.id == id }),
               let e = list[p].endpoints.firstIndex(where: {
                   $0.id == endpoint.id && $0.normalized == endpoint.normalized && $0.api == .automatic
               }), list[p].endpoints[e].found != found else { return }
         list[p].endpoints[e].found = found
-        all = list
+        setAll(list, in: storage)
         ModelKeys.saved += 1
     }
 
     @MainActor
-    static func testConnection(to endpoint: CustomEndpoint, key: String, draft: CustomProvider) async -> (result: ConnectionCheck.Result, api: CustomAPIStyle) {
+    static func testConnection(to endpoint: CustomEndpoint, key: String, draft: CustomProvider, storage: PokiStorage = .live) async -> (result: ConnectionCheck.Result, api: CustomAPIStyle) {
         let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
         let run = await ConnectionCheck.runCustom(url: endpoint.normalized, key: key, modelID: model,
                                                   api: endpoint.api, reasoning: draft.reasoning)
-        guard run.result.passed, endpoint.api == .automatic, let saved = provider(draft.id),
+        guard run.result.passed, endpoint.api == .automatic, let saved = provider(draft.id, storage: storage),
               saved.model == model, saved.reasoning == draft.reasoning else { return run }
-        let keyData = try? (Keychain.read(keyAccount(saved.id)) ?? Data())
+        let keyData = try? (Keychain.read(keyAccount(saved.id), storage: storage) ?? Data())
         let savedKey = keyData.flatMap { String(data: $0, encoding: .utf8) }
         guard savedKey?.trimmingCharacters(in: .whitespacesAndNewlines) == key.trimmingCharacters(in: .whitespacesAndNewlines) else { return run }
-        record(found: run.api, endpoint: endpoint, provider: saved.id)
+        record(found: run.api, endpoint: endpoint, provider: saved.id, storage: storage)
         return run
     }
 
     /// Removes the provider, its key, its model lists and its models from the chat's menu.
-    static func remove(_ id: UUID) {
-        let wasSelected = ModelKeys.selectedProvider == .custom && parse(ModelKeys.selectedModel)?.provider == id
-        removeKey(id)
-        ModelCatalog.invalidateCustom(id)
-        PokiStorage.defaults.removeObject(forKey: "models.listed.voice.custom.\(id.uuidString)")
-        all = all.filter { $0.id != id }
-        if PokiStorage.defaults.string(forKey: selectedKey) == id.uuidString { PokiStorage.defaults.removeObject(forKey: selectedKey) }
-        if wasSelected, let next = ModelCatalog.available(.custom).first {
-            ModelKeys.selectedModel = next.id
+    static func remove(_ id: UUID, storage: PokiStorage = .live) {
+        let wasSelected = ModelKeys.selectedProvider(in: storage) == .custom && parse(ModelKeys.selectedModel(in: storage))?.provider == id
+        removeKey(id, storage: storage)
+        ModelCatalog.invalidateCustom(id, storage: storage)
+        storage.defaults.removeObject(forKey: "models.listed.voice.custom.\(id.uuidString)")
+        setAll(all(in: storage).filter { $0.id != id }, in: storage)
+        if storage.defaults.string(forKey: selectedKey) == id.uuidString { storage.defaults.removeObject(forKey: selectedKey) }
+        if wasSelected, let next = ModelCatalog.available(.custom, storage: storage).first {
+            ModelKeys.setSelectedModel(next.id, in: storage)
         }
         ModelKeys.saved += 1
     }
 
     /// The provider the chat uses now: the one of the chosen custom model, else the last chosen, else
     /// the first.
-    static var current: CustomProvider? {
-        let list = all
-        if let chosen = parse(ModelKeys.model(for: .custom)), let match = list.first(where: { $0.id == chosen.provider }) { return match }
-        if let saved = PokiStorage.defaults.string(forKey: selectedKey).flatMap(UUID.init(uuidString:)),
+    static var current: CustomProvider? { current(in: .live) }
+
+    static func current(in storage: PokiStorage = .live) -> CustomProvider? {
+        let list = all(in: storage)
+        if let chosen = parse(ModelKeys.model(for: .custom, storage: storage)), let match = list.first(where: { $0.id == chosen.provider }) { return match }
+        if let saved = storage.defaults.string(forKey: selectedKey).flatMap(UUID.init(uuidString:)),
            let match = list.first(where: { $0.id == saved }) { return match }
         return list.first
     }
@@ -192,23 +198,23 @@ enum CustomProviders {
 
     private static func keyAccount(_ id: UUID) -> String { "model-key.custom.\(id.uuidString)" }
 
-    static func key(_ id: UUID) -> String? {
-        guard let data = try? Keychain.read(keyAccount(id)), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
+    static func key(_ id: UUID, storage: PokiStorage = .live) -> String? {
+        guard let data = try? Keychain.read(keyAccount(id), storage: storage), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
         return key
     }
 
-    static func saveKey(_ key: String, for id: UUID) throws {
+    static func saveKey(_ key: String, for id: UUID, storage: PokiStorage = .live) throws {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let changed = Self.key(id) != trimmed
-        try Keychain.write(Data(trimmed.utf8), account: keyAccount(id))
-        if changed { ModelCatalog.invalidateCustom(id) }
+        let changed = Self.key(id, storage: storage) != trimmed
+        try Keychain.write(Data(trimmed.utf8), account: keyAccount(id), storage: storage)
+        if changed { ModelCatalog.invalidateCustom(id, storage: storage) }
         ModelKeys.saved += 1
     }
 
-    static func removeKey(_ id: UUID) {
-        let had = key(id) != nil
-        Keychain.delete(keyAccount(id))
-        if had { ModelCatalog.invalidateCustom(id) }
+    static func removeKey(_ id: UUID, storage: PokiStorage = .live) {
+        let had = key(id, storage: storage) != nil
+        Keychain.delete(keyAccount(id), storage: storage)
+        if had { ModelCatalog.invalidateCustom(id, storage: storage) }
         ModelKeys.saved += 1
     }
 
@@ -238,8 +244,8 @@ enum CustomProviders {
     /// Before custom providers, one address, model and key lived in `chat.customURL`,
     /// `chat.customModel` and the keychain's `model-key.custom`. They become the first provider, with
     /// its model list, its switched-on models and the chat's choice carried over.
-    private static func migrateIfNeeded() {
-        let defaults = PokiStorage.defaults
+    private static func migrateIfNeeded(in storage: PokiStorage) {
+        let defaults = storage.defaults
         let stored = defaults.data(forKey: storeKey)
         let url = defaults.string(forKey: "chat.customURL") ?? ""
         let model = defaults.string(forKey: "chat.customModel") ?? ""
@@ -250,12 +256,12 @@ enum CustomProviders {
             let providers = try stored.map { try JSONDecoder().decode([CustomProvider].self, from: $0) } ?? []
             // Reuse the same ID if the app exits before cleaning up the old settings.
             if !providers.contains(where: { $0.id == id }) {
-                let key = try Keychain.read(legacyAccount)
+                let key = try Keychain.read(legacyAccount, storage: storage)
                 if let key, String(data: key, encoding: .utf8) == nil { return }
                 guard !url.isEmpty || !model.isEmpty || key?.isEmpty == false else { return }
                 let provider = CustomProvider(id: id, endpoints: url.isEmpty ? [] : [CustomEndpoint(url: url)], model: model)
                 let data = try JSONEncoder().encode([provider] + providers)
-                if let key, !key.isEmpty { try Keychain.write(key, account: keyAccount(id)) }
+                if let key, !key.isEmpty { try Keychain.write(key, account: keyAccount(id), storage: storage) }
 
                 let wrap = { (model: String) in parse(model) == nil ? choiceID(id, model) : model }
                 if let listed = defaults.stringArray(forKey: "models.listed.custom") {
@@ -271,7 +277,7 @@ enum CustomProviders {
         } catch {
             return
         }
-        Keychain.delete(legacyAccount)
+        Keychain.delete(legacyAccount, storage: storage)
         for old in ["chat.customURL", "chat.customModel", "models.listed.custom", "models.revision.custom"] {
             defaults.removeObject(forKey: old)
         }

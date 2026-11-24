@@ -35,6 +35,10 @@ enum ChatGPTAccount {
         try? JSONDecoder().decode(OAuthCredentials.self, from: Data(stored.utf8))
     }
 
+    static func save(_ credentials: OAuthCredentials, storage: PokiStorage) throws {
+        try save(credentials, service: storage.keychainService)
+    }
+
     static func save(_ credentials: OAuthCredentials, service: String = ModelKeys.defaultService) throws {
         let data = try JSONEncoder().encode(credentials)
         try ModelKeys.save(String(decoding: data, as: UTF8.self), for: .chatgpt, service: service)
@@ -42,6 +46,14 @@ enum ChatGPTAccount {
 
     static var signedIn: Bool {
         isSignedIn()
+    }
+
+    static func isSignedIn(storage: PokiStorage) -> Bool {
+        isSignedIn(
+            codexService: storage.codexService,
+            codexHome: storage.codexHome,
+            modelKeysService: storage.keychainService
+        )
     }
 
     static func isSignedIn(

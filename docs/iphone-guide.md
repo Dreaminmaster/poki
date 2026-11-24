@@ -68,7 +68,7 @@ Check the new note in Notes: the title must be "Poki Demo" and the body must con
 
 **No update shows up, for example on a network in mainland China. What now?** Poki looks for updates on GitHub, and some networks cannot reach it or hit GitHub's 403 and 429 limits. Try another network or proxy node, or update from the computer with Renew in Poki Setup. See [Update Poki](#update-poki).
 
-**Will Poki change things on my iPhone, and does it ask first?** Poki works in your real apps and does what you ask, including sending messages, and the screen contents go to the model service you set up. Payments, deletions in menus and confirmation dialogs, and actions in Wallet always need your confirmation. For other sensitive steps, such as sending a message or typing a password, you choose in `Settings > Approvals` how Poki asks, or whether it asks. See [Known issues](#known-issues).
+**Will Poki change things on my iPhone, and does it ask first?** Poki works in your real apps and does what you ask, including sending messages, and the screen contents go to the model service you set up. Payments, deletions in menus and confirmation dialogs, and actions in Wallet always need your confirmation. When full screen details are unavailable (for example, a voice tap using only a button name), matching deletions also ask for confirmation. For other sensitive steps, such as sending a message or typing a password, you choose in `Settings > Approvals` how Poki asks, or whether it asks. See [Known issues](#known-issues).
 
 ## Update Poki
 

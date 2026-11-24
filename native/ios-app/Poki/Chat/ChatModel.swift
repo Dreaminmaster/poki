@@ -156,6 +156,7 @@ final class ChatModel {
     let isSample = UserDefaults.standard.string(forKey: "pokiChat") != nil
     private let app: AppModel
     private let store: SessionStore
+    private let localization: AppLocalization
     /// The model's side of the conversation: pi's loop (ESP-177), or for Anthropic and OpenAI with
     /// `-chatEngine direct`, the provider's own API in its own form.
     private var loop: PiLoop?
@@ -214,10 +215,11 @@ final class ChatModel {
     /// or runner startup resets that history, but does not remove this ceiling.
     static let maxTurns = 500
 
-    init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil, store: SessionStore? = nil) {
+    init(app: AppModel, kind: SavedSession.Kind = .poki, requester: String? = nil, sessionID: String? = nil, store: SessionStore? = nil, localization: AppLocalization = .shared) {
         let store = store ?? .shared
         self.app = app
         self.store = store
+        self.localization = localization
         if let sessionID { self.sessionID = sessionID }
         self.kind = kind
         self.requester = requester
@@ -267,9 +269,9 @@ final class ChatModel {
 
     private var greeting: [ChatEntry] {
         [ChatEntry(.time(Date())),
-         ChatEntry(.poki(AppLocalization.text(LocalizedStringResource("Hi, I’m Poki. Tell me what to do on this iPhone.")))),
-         ChatEntry(.poki(app.asksBeforeSensitiveSteps ? AppLocalization.text(LocalizedStringResource("I’ll ask before anything you can’t undo."))
-                         : AppLocalization.text(LocalizedStringResource("Payments, deletions in menus and confirmation dialogs, and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
+         ChatEntry(.poki(localization.text(LocalizedStringResource("Hi, I’m Poki. Tell me what to do on this iPhone.")))),
+         ChatEntry(.poki(app.asksBeforeSensitiveSteps ? localization.text(LocalizedStringResource("I’ll ask before anything you can’t undo."))
+                         : localization.text(LocalizedStringResource("Payments, deletions in menus and confirmation dialogs (or when full screen details are unavailable, such as voice taps by button name), and Wallet actions always require your confirmation; other sensitive steps go ahead without asking."))))]
     }
 
     private var greetingIDs: [UUID] = []

@@ -102,12 +102,12 @@ struct AgentsView: View {
                 Section {
                     NavigationLink(value: AgentsRoute.accounts) {
                         LabeledContent {
-                            Text(ModelKeys.hasUsableKey ? ModelKeys.selectedModelName : AppLocalization.text(LocalizedStringResource("Add an Account"))).foregroundStyle(ModelKeys.hasUsableKey ? Color.secondary : Color.orange)
+                            Text(ModelKeys.hasUsableKey(in: model.storage) ? ModelKeys.selectedModelName(in: model.storage) : AppLocalization.text(LocalizedStringResource("Add an Account"))).foregroundStyle(ModelKeys.hasUsableKey(in: model.storage) ? Color.secondary : Color.orange)
                         } label: { Label("Accounts and Models", systemImage: "person.crop.circle") }
                     }
                     NavigationLink(value: AgentsRoute.voice) {
                         LabeledContent {
-                            Text(VoiceDirect.apiKey != nil ? VoiceDirect.model : AppLocalization.text(LocalizedStringResource("Dictation Only")))
+                            Text(VoiceDirect.apiKey(in: model.storage) != nil ? VoiceDirect.model(in: model.storage) : AppLocalization.text(LocalizedStringResource("Dictation Only")))
                         } label: { Label("Voice", systemImage: "waveform") }
                     }
                     NavigationLink(value: SettingsRoute.memory) {
