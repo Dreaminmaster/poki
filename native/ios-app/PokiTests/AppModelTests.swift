@@ -1038,6 +1038,39 @@ final class InProcessPasscodeTests: XCTestCase {
         XCTAssertEqual(hint?.target, .setup)
     }
 
+    func testLoopbackPageShowsFailedMountedImageSession() async throws {
+        let savedLanguage = AppLocalization.shared.preference
+        let savedLoopback = UserDefaults.standard.object(forKey: "pokiLoopback")
+        AppLocalization.shared.preference = "en"
+        UserDefaults.standard.set("noanswer", forKey: "pokiLoopback")
+        defer {
+            AppLocalization.shared.preference = savedLanguage
+            UserDefaults.standard.set(savedLoopback, forKey: "pokiLoopback")
+        }
+
+        await handOverToTheMountedImage()
+        session.answer(["ok": false, "code": "missing_framework"])
+        await waitFor("the local session failure") { self.model.localSessionTrouble != nil }
+        try await assertLoopbackPageShowsSessionTrouble(expected: "Poki could not open its own automation session (missing_framework)")
+
+        session.holdNextOpen()
+        model.runnerChanged(RunnerStatus(state: "running", code: "local_ddi"))
+        await waitFor("the next local open is under way") { self.session.isHoldingOpen }
+        session.answer(["ok": false, "code": "passcode_declined"])
+        await waitFor("the passcode failure") {
+            self.model.localSessionTrouble?.text.contains("not entered") == true
+        }
+        try await assertLoopbackPageShowsSessionTrouble(expected: "iOS asked for the iPhone passcode to allow automation, but it was not entered.")
+    }
+
+    private func assertLoopbackPageShowsSessionTrouble(expected: String) async throws {
+        XCTAssertEqual(model.runner.code, "local_ddi")
+        XCTAssertTrue(try XCTUnwrap(model.localSessionTrouble?.text).contains(expected))
+        let labels = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model, scanForm: true)
+        XCTAssertTrue(labels.contains { $0.contains(expected) }, "\(labels)")
+        XCTAssertFalse(labels.contains { $0.contains("Local automation ready") }, "\(labels)")
+    }
+
     func testDroppedHandshakeAndLocalOpenFailureReachHomeAndChat() async {
         let savedLanguage = AppLocalization.shared.preference
         AppLocalization.shared.preference = "en"
@@ -2439,10 +2472,47 @@ final class FrontendSubtractionTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.contains("Guide Me") }, "\(labels)")
     }
 
+    func testLoopbackPageShowsLocalAutomationWhenMountedImageCanTakeTasks() async throws {
+        let savedLanguage = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = savedLanguage }
+        let pairing = AppFiles.phonePairingFile
+        let savedPairing = try? Data(contentsOf: pairing)
+        let savedForced = UserDefaults.standard.object(forKey: "pokiLoopback")
+        defer {
+            if let savedPairing { try? savedPairing.write(to: pairing) }
+            else { try? FileManager.default.removeItem(at: pairing) }
+            UserDefaults.standard.set(savedForced, forKey: "pokiLoopback")
+        }
+        let record: [String: Any] = ["identifier": "test-host", "public_key": Data(repeating: 1, count: 32), "private_key": Data(repeating: 2, count: 32)]
+        try PropertyListSerialization.data(fromPropertyList: record, format: .xml, options: 0).write(to: pairing)
+        UserDefaults.standard.set("noanswer", forKey: "pokiLoopback")
+        let (model, restore) = try modelWithLoopbackChosen(launcher: FakeLauncher(), imageMounted: { true })
+        defer { restore() }
+        model.loopback.simulate(.noAnswer)
+        XCTAssertTrue(model.mountedImageStandsIn)
+        XCTAssertFalse(model.hasOpenInProcessSession)
+        model.setup.proxyApp = "localdevvpn"
+        let labels = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model, scanForm: true)
+        XCTAssertTrue(labels.contains { $0.contains("Local automation ready") }, "\(labels)")
+        XCTAssertFalse(labels.contains { $0.contains("Finish step 2 in LocalDevVPN") || $0.contains("with the loopback on") }, "\(labels)")
+
+        let lockdown: [String: Any] = ["HostID": "test-host", "SystemBUID": "test"]
+        try PropertyListSerialization.data(fromPropertyList: lockdown, format: .xml, options: 0).write(to: pairing)
+        XCTAssertFalse(model.mountedImageStandsIn)
+        let withoutPhonePairing = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model, scanForm: true)
+        XCTAssertFalse(withoutPhonePairing.contains { $0.contains("Local automation ready") }, "\(withoutPhonePairing)")
+        XCTAssertTrue(withoutPhonePairing.contains { $0.contains("Tunnel On, No Answer") }, "\(withoutPhonePairing)")
+        XCTAssertTrue(withoutPhonePairing.contains { $0.contains("Finish step 2 in LocalDevVPN") }, "\(withoutPhonePairing)")
+    }
+
     /// A task on the mounted image ends and the runner stands by, as after every chat or agent task:
     /// `local_ddi` is gone from the runner, but the next task is handed to the image again, so no
     /// screen asks to turn the loopback on. Only a pairing the hand-over cannot use keeps the prompt.
     func testAfterATaskOnTheMountedImageNoScreenAsksForTheLoopback() async throws {
+        let savedLanguage = AppLocalization.shared.preference
+        AppLocalization.shared.preference = "en"
+        defer { AppLocalization.shared.preference = savedLanguage }
         let pairing = AppFiles.phonePairingFile
         let saved = try? Data(contentsOf: pairing)
         defer { if let saved { try? saved.write(to: pairing) } else { try? FileManager.default.removeItem(at: pairing) } }
@@ -2471,9 +2541,9 @@ final class FrontendSubtractionTests: XCTestCase {
         let connection = try await renderedLabels(of: NavigationStack { SetupSettingsPage(path: .constant(NavigationPath())) }, model: model)
         XCTAssertFalse(connection.contains { $0 == "Next" || $0.hasSuffix(", Next") }, "Connection after the task: \(connection)")
         model.setup.proxyApp = "localdevvpn"
-        let page = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
+        let page = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model, scanForm: true)
         XCTAssertTrue(page.contains { $0.contains("Local automation ready") }, "the loopback page's status after the task: \(page)")
-        XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
+        XCTAssertFalse(page.contains { $0.contains("No Answer") || $0.contains("Finish step 2 in LocalDevVPN") || $0.contains("with the loopback on") }, "the loopback page after the task: \(page)")
         let chat = try await renderedLabels(
             of: NavigationStack { ChatView(openVoice: {}, openSetup: {}, openModel: {}, openThreads: {}) },
             model: model
@@ -2490,7 +2560,7 @@ final class FrontendSubtractionTests: XCTestCase {
         try PropertyListSerialization.data(fromPropertyList: lockdown, format: .xml, options: 0).write(to: pairing)
         XCTAssertEqual(SetupIssueHint.first(model: model)?.target, .step(.loopback), "a computer's pairing file")
         XCTAssertTrue(Issue.current(model).contains { $0.id == "loopback" }, "Settings issues, a computer's pairing file")
-        let refused = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model)
+        let refused = try await renderedLabels(of: NavigationStack { SetupStepPage(step: .loopback) }, model: model, scanForm: true)
         XCTAssertTrue(refused.contains { $0.contains("Tunnel On, No Answer") },
                       "The computer pairing must still require a working loopback: \(refused)")
         XCTAssertTrue(refused.contains { $0.contains("Finish step 2 in LocalDevVPN") },
@@ -2501,28 +2571,61 @@ final class FrontendSubtractionTests: XCTestCase {
         let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
         await fulfillment(of: [done], timeout: 5)
     }
+}
 
-    private func renderedLabels<Content: View>(of view: Content, model: AppModel) async throws -> [String] {
+@MainActor
+private extension XCTestCase {
+    func renderedLabels<Content: View>(of view: Content, model: AppModel, scanForm: Bool = false) async throws -> [String] {
         let chat = ChatModel(app: model)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = scene.screen.bounds
         window.rootViewController = UIHostingController(
-            rootView: view.environment(model).environment(chat).environment(\.accessibilityEnabled, true)
+            rootView: view.environment(model).environment(chat).environment(\.locale, Locale(identifier: "en")).environment(\.accessibilityEnabled, true)
         )
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
         window.layoutIfNeeded()
+        await waitForRenderedFrame()
+        guard scanForm else { return Self.collectLoopbackTestLabels(in: window) }
+
+        // Wait for the simulator's forced probe result before sampling the lazy form sections.
+        let deadline = ContinuousClock.now + .seconds(8)
+        while model.loopback.state != .noAnswer, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(model.loopback.state, .noAnswer)
+        await waitForRenderedFrame()
+        var labels = Set(Self.collectLoopbackTestLabels(in: window))
+        if let scroll = Self.formScrollView(in: window) {
+            let step = max(scroll.bounds.height / 2, 1)
+            let end = max(scroll.contentOffset.y, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+            while scroll.contentOffset.y < end - 1 {
+                let previous = scroll.contentOffset.y
+                scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: min(end, previous + step)), animated: false)
+                await waitForRenderedFrame()
+                labels.formUnion(Self.collectLoopbackTestLabels(in: window))
+                guard scroll.contentOffset.y > previous else { break }
+            }
+        }
+        return labels.sorted()
+    }
+
+    private func waitForRenderedFrame() async {
         let drawn = expectation(description: "rendered view")
         let frames = SessionEvidenceFrames { drawn.fulfill() }
         let display = CADisplayLink(target: frames, selector: #selector(SessionEvidenceFrames.tick))
         display.add(to: .main, forMode: .common)
         await fulfillment(of: [drawn], timeout: 5)
         display.invalidate()
-        return Self.collectLabels(in: window)
     }
 
-    private static func collectLabels(in root: NSObject) -> [String] {
+    private static func formScrollView(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height { return scroll }
+        return view.subviews.lazy.compactMap { formScrollView(in: $0) }.first
+    }
+
+    private static func collectLoopbackTestLabels(in root: NSObject) -> [String] {
         var labels: [String] = []
         var pending = [root]
         var visited = Set<ObjectIdentifier>()
