@@ -88,21 +88,20 @@ final class LoopbackMonitorTests: XCTestCase {
             if searches == 1 { return await withCheckedContinuation { browsing = $0 } }
             return ([], nil)
         }, observeNetwork: false)
-        var searchEnded = false
-        monitor.onPairingPortSearchEnded = { searchEnded = true }
         defer { monitor.pause(); browsing?.resume(returning: ([], nil)); RemotePairingPort.setSearching(false) }
         monitor.simulateSearchBudget(2)
         monitor.check()
         await yield { browsing != nil }
         XCTAssertNotNil(browsing)
+        XCTAssertTrue(RemotePairingPort.searching, "The launcher fallback remains suspended during the lookup")
         monitor.simulateNetworkChange(physical: false)
         let held = browsing
         browsing = nil
         held?.resume(returning: ([], nil))
         await yield { searches >= 2 }
         XCTAssertEqual(searches, 2, "The invalidated third search must be retried")
-        await yield { searchEnded }
-        XCTAssertTrue(searchEnded, "An exhausted retry must release the launcher fallback")
+        await yield { !RemotePairingPort.searching }
+        XCTAssertFalse(RemotePairingPort.searching, "An exhausted retry must release the launcher fallback")
     }
 
     /// A probe that takes longer than the 3 s timer is always overlapped by the next timer tick. That
