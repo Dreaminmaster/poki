@@ -14,10 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: installer-only
-            ref: 22785c27f1645814f48ce6c8dfe347a1d92e3a91
-          - label: installer-plus-notification
-            ref: 09f3fd7ed0fa7cab684171c5e0dc31e008da036b
+          - label: verified-fixes-integration
+            ref: 764fa721e610dc7b2bc159651cdd065f28379dfd
     name: Required npm test - ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
