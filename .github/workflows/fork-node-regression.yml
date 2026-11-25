@@ -7,43 +7,69 @@ on:
 permissions:
   contents: read
 jobs:
-  reduced-concurrency-control:
-    # Use the same toolchain and candidate as the previous full test.
+  installer-answer:
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: candidate
+            ref: 22785c27f1645814f48ce6c8dfe347a1d92e3a91
+            negative: false
+          - label: original-helper
+            ref: 62fa71d747febb21ceec95438c6e59fcefc7ee23
+            negative: true
+    name: Installer answer - ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d8d235038473a180b9c41a93e68a923f778a3c49
+          ref: ${{ matrix.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Verify exact source and compiler
-        shell: bash
+      - name: Verify source revision
+        env:
+          EXPECTED: ${{ matrix.ref }}
         run: |
-          set -euo pipefail
           mkdir -p out
           git rev-parse HEAD | tee out/source-revision.txt
-          test "$(git rev-parse HEAD)" = d8d235038473a180b9c41a93e68a923f778a3c49
-          XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
-          { sw_vers; xcodebuild -version; swiftc --version; node --version; sysctl -n hw.ncpu; } | tee out/environment.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
       - run: npm ci
-      - run: npm ci --prefix agent
-      - name: Controlled full-suite comparison at two workers
+      - name: Run both new regression tests and verify outcome
         shell: bash
+        env:
+          NEGATIVE: ${{ matrix.negative }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           set +e
-          node --test --test-concurrency=2 test/*.test.mjs 2>&1 | tee out/node-test-two-workers.log
+          node --test --test-concurrency=1 --test-name-pattern='^installer fixture (reports a failed simulated answer|waits for a late answer)' test/install-iphone.test.mjs 2>&1 | tee out/focused.log
           status=${PIPESTATUS[0]}
           set -e
-          printf '%s\n' "$status" > out/two-workers-status.txt
-          exit "$status"
+          printf '%s\n' "$status" > out/focused-status.txt
+          if [ "$NEGATIVE" = true ]; then
+            test "$status" = 1
+            grep -Fq '✖ installer fixture reports a failed simulated answer' out/focused.log
+            grep -Fq '✖ installer fixture waits for a late answer' out/focused.log
+            grep -Fq 'ℹ tests 2' out/focused.log
+            grep -Fq 'ℹ fail 2' out/focused.log
+          else
+            test "$status" = 0
+            grep -Fq '✔ installer fixture reports a failed simulated answer' out/focused.log
+            grep -Fq '✔ installer fixture waits for a late answer' out/focused.log
+            grep -Fq 'ℹ tests 2' out/focused.log
+            grep -Fq 'ℹ pass 2' out/focused.log
+          fi
+      - name: Run full installer test file without changing its time limits
+        if: matrix.negative == false
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 test/install-iphone.test.mjs 2>&1 | tee out/installer-test.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: node-two-worker-control-d8d2350
+          name: installer-answer-${{ matrix.label }}
           path: out/
           if-no-files-found: error
