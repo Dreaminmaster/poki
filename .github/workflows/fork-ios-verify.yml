@@ -140,7 +140,13 @@ jobs:
         run: |
           set -euo pipefail
           toolchain="$( { xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-version; rustc +stable -Vv; } | shasum -a 256 | cut -d' ' -f1)"
-          echo "key=codex-voice-sim-v1-$toolchain-${{ hashFiles('native/codex-voice/build.sh', 'native/codex-voice/Cargo.toml', 'native/codex-voice/src/**', 'native/codex-voice/poki_codex_voice.h') }}" >> "$GITHUB_OUTPUT"
+          # The checkout is pinned and verified above. Git's tree ID includes
+          # every tracked input under this directory without scanning the build
+          # output or invoking the runner's time-limited hashFiles glob.
+          git diff --quiet HEAD -- native/codex-voice
+          inputs="$(git rev-parse HEAD:native/codex-voice)"
+          test "$(git cat-file -t "$inputs")" = tree
+          echo "key=codex-voice-sim-v2-$toolchain-$inputs" >> "$GITHUB_OUTPUT"
       - name: Restore exact Codex Voice simulator library
         id: voice-restore
         uses: actions/cache/restore@v4
