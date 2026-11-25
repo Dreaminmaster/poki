@@ -48,6 +48,30 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertEqual(ChatView.transcriptEntries([greeting, otherGreeting], revealed: greeting.id).map(\.id), [greeting.id])
     }
 
+    func testReadOnlyPreviewRetainsGreetingAfterScrollWithoutChangingActiveSelection() {
+        let active = ConversationSearchJump(sessionID: "active", entryID: UUID())
+        let greeting = ChatEntry(.poki("Saved greeting"))
+        let unrelated = ChatEntry(.poki("Unrelated greeting"))
+        let user = ChatEntry(.you("First request", delivered: true))
+        let entries = [greeting, unrelated, user]
+        let preview = ConversationSearchJump(sessionID: "saved", entryID: greeting.id)
+        var navigation = ConversationSearchNavigation()
+        navigation.open(active, preview: false)
+        navigation.open(preview, preview: true)
+        let route = DetailsRoute.sessionPreview(preview.sessionID, entryID: preview.entryID)
+        navigation.consume(preview.requestID)
+
+        XCTAssertNil(navigation.pending)
+        XCTAssertEqual(navigation.revealedEntry(in: "active"), active.entryID)
+        XCTAssertNil(navigation.revealedEntry(in: "saved"))
+        guard case .sessionPreview(let id, let entryID) = route else {
+            return XCTFail("Expected a read-only conversation destination")
+        }
+        XCTAssertEqual(id, "saved")
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: entryID).map(\.id), [greeting.id, user.id])
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: nil).map(\.id), [user.id])
+    }
+
     func testFindsOlderMessageEvenWhenLastLineDoesNotMatch() {
         let old = ChatEntry(.you("明天下午去海港拍照", delivered: true))
         let newest = ChatEntry(.poki("Understood."))
