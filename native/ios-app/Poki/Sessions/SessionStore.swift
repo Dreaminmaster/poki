@@ -259,32 +259,55 @@ final class SessionStore {
     private var initialLoadWaiters: [() -> Void] = []
     private var fullLoadWaiters: [() -> Void] = []
     private let writeQueue = DispatchQueue(label: "nz.zheha.poki.session-writes", qos: .utility)
-    // Accessed only on writeQueue so flush sees failures from earlier queued writes.
+    // Writes remain serial. A small lock protects status reads without waiting for unrelated disk I/O.
     private let writeFailures = WriteFailures()
 
     private final class WriteFailures: @unchecked Sendable {
+        private let lock = NSLock()
         private var ids: Set<String> = []
+        private var queued: [String: Int] = [:]
+
+        func needsFlush(_ id: String) -> Bool {
+            lock.withLock { ids.contains(id) || queued[id] != nil }
+        }
+
+        // Register before dispatching: a scoped flush must also see work that has not started.
+        func enqueue(_ ids: [String]) {
+            lock.withLock { for id in ids { queued[id, default: 0] += 1 } }
+        }
+
+        func complete(_ ids: [String]) {
+            lock.withLock {
+                for id in ids {
+                    if let count = queued[id], count > 1 { queued[id] = count - 1 }
+                    else { queued.removeValue(forKey: id) }
+                }
+            }
+        }
 
         func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = [],
                    pruneMissingFailures: Bool = true) {
             let pending = Set(snapshots.map { $0.1.id })
-            let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
-            // A scoped flush passes only one current session, not the full store.
-            if pruneMissingFailures && !current.isEmpty {
-                ids.formIntersection(Set(current.map { $0.1.id }))
+            let retries = lock.withLock {
+                let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
+                // A scoped flush passes only one current session, not the full store.
+                if pruneMissingFailures && !current.isEmpty {
+                    ids.formIntersection(Set(current.map { $0.1.id }))
+                }
+                return retries
             }
             let encoder = JSONEncoder()
             for (url, session) in snapshots + retries {
                 do {
                     try encoder.encode(session).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    ids.remove(session.id)
+                    _ = lock.withLock { ids.remove(session.id) }
                 } catch {
-                    ids.insert(session.id)
+                    _ = lock.withLock { ids.insert(session.id) }
                 }
             }
         }
 
-        func forget(_ ids: Set<String>) { self.ids.subtract(ids) }
+        func forget(_ ids: Set<String>) { lock.withLock { self.ids.subtract(ids) } }
     }
     /// The outside agent sessions seen since launch: id → client name.
     /// Each MCP session's client name (its clientInfo at initialize), kept across launches: an agent
@@ -930,7 +953,12 @@ final class SessionStore {
         pendingWrites = []
         guard !snapshots.isEmpty else { return }
         let failures = writeFailures
-        writeQueue.async { failures.write(snapshots) }
+        let ids = snapshots.map { $0.1.id }
+        failures.enqueue(ids)
+        writeQueue.async {
+            defer { failures.complete(ids) }
+            failures.write(snapshots)
+        }
     }
 
     /// Writes changed sessions now, including previously failed writes still in memory, or only the requested conversation.
@@ -940,8 +968,9 @@ final class SessionStore {
             guard let saved = session(sessionID) else { return }
             let snapshots = [(file(sessionID), saved)]
             let failures = writeFailures
-            // Wait for queued writes, then retry this session even if its pending
-            // bit was already cleared. Keep failures for other sessions intact.
+            // Skip unrelated disk work if this session is already clean. If its own
+            // write is queued or failed, wait for that work and retry if necessary.
+            guard pending || failures.needsFlush(sessionID) else { return }
             writeQueue.sync {
                 failures.write(pending ? snapshots : [], retryingFrom: snapshots, pruneMissingFailures: false)
             }
