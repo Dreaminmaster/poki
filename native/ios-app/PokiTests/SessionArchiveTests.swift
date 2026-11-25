@@ -155,6 +155,34 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(launch().archivedSessions.map(\.id), ["keep"])
     }
 
+    func testScopedFlushRetriesOnlyRequestedFailedSave() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let ids = ["requested", "other"]
+        for id in ids { _ = try saveEarlier(id, lines: ["Conversation " + id]) }
+        let store = launch()
+        for id in ids {
+            let file = folder.appendingPathComponent(id + ".json")
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            store.archive(id)
+        }
+        // Both writes fail and leave the pending batch, but retain retry state.
+        store.flush()
+        for id in ids {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(id + ".json"))
+        }
+
+        store.flush(sessionID: "requested")
+        XCTAssertEqual(launch().archivedSessions.map(\.id), ["requested"],
+                       "An explicit scoped flush must retry an earlier failed write")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("other.json").path),
+                       "A scoped flush must not write another conversation")
+
+        store.flush()
+        XCTAssertEqual(Set(launch().archivedSessions.map(\.id)), Set(ids),
+                       "A scoped retry must not discard the other failed write")
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in
