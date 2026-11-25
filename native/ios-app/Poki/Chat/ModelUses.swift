@@ -555,8 +555,13 @@ struct ModelTickList: View {
     }
 
     private var stale: Bool {
-        guard case .account(let p) = provider else { return false }
-        return ModelCatalog.isStale(p) && !ModelCatalog.isBackingOff(p)
+        let list: ModelCatalog.ModelList
+        switch provider {
+        case .local: return false
+        case .account(let p): list = .provider(p)
+        case .custom(let id): list = .custom(id)
+        }
+        return ModelCatalog.isStale(list) && !ModelCatalog.isBackingOff(list)
     }
 
     private var listEmpty: Bool {

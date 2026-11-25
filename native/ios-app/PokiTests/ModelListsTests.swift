@@ -27,6 +27,15 @@ final class ModelListsTests: XCTestCase {
         XCTAssertTrue(ModelCatalog.all(.openrouter, storage: storage).map(\.id).contains("openai/gpt-6.2-sol"))
     }
 
+    func testPiSwiftsCatalogListsGPT62() {
+        // PiSwift v1.6.0 catalogues GPT-6.2, so the bundled setups only cover gateways and custom ids.
+        for (provider, id) in [("openai", "gpt-6.2-sol"), ("openai", "gpt-6.2-astra"),
+                               ("openai-codex", "gpt-6.2-sol"), ("openai-codex", "gpt-6.2-astra"),
+                               ("openrouter", "openai/gpt-6.2-sol"), ("openrouter", "openai/gpt-6.2-astra")] {
+            XCTAssertNotNil(getModel(provider: provider, modelId: id), "\(provider) \(id)")
+        }
+    }
+
     func testGPT62RunsWithItsOwnSetup() throws {
         let sol = try XCTUnwrap(ModelProvider.openai.piModel("gpt-6.2-sol", storage: storage))
         XCTAssertEqual(sol.id, "gpt-6.2-sol")
@@ -43,6 +52,11 @@ final class ModelListsTests: XCTestCase {
         // GPT-6.2 rejects reasoning effort none: no level maps to it.
         XCTAssertFalse((astra.thinkingLevelMap ?? [:]).values.contains { $0 == "none" })
         XCTAssertFalse((sol.thinkingLevelMap ?? [:]).values.contains { $0 == "none" })
+        // Off is listed as unsupported (mapped to nil), not missing, so pi never sends effort none.
+        for model in [sol, astra] {
+            let off = try XCTUnwrap(model.thinkingLevelMap?[.off], "\(model.id) lists off")
+            XCTAssertNil(off, model.id)
+        }
     }
 
     func testGPT62ThroughACodexSignInKeepsCodexsAPI() throws {
@@ -112,10 +126,14 @@ final class ModelListsTests: XCTestCase {
         XCTAssertEqual(sol.cost.input, 2)
         XCTAssertNotNil(sol.compat)
         let astra = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.2-astra", storage: storage))
-        XCTAssertEqual(astra.name, "GPT-6.2 Astra")
+        // OpenRouter's own catalog entry, named the way pi names OpenRouter models.
+        XCTAssertEqual(astra.name, "OpenAI: GPT-6.2 Astra")
         XCTAssertEqual(astra.cost.output, 40)
-        // GPT-6.1 Terra behind OpenRouter keeps the plain setup (ConnectionCheckTests).
-        XCTAssertNil(ModelProvider.knownModel(provider: "openrouter", id: "openai/gpt-6.1-terra"))
+        // GPT-6.1 Terra behind OpenRouter takes OpenRouter's catalog entry, never the plain OpenAI setup.
+        let terra = try XCTUnwrap(ModelProvider.knownModel(provider: "openrouter", id: "openai/gpt-6.1-terra"))
+        XCTAssertEqual(terra.name, "OpenAI: GPT-6.1 Terra")
+        XCTAssertEqual(terra.api, .openAICompletions)
+        XCTAssertEqual(terra.provider, "openrouter")
     }
 
     @MainActor
@@ -135,19 +153,63 @@ final class ModelListsTests: XCTestCase {
     func testFailedBackgroundReadsBackOffUpToADay() throws {
         try ModelKeys.save("sk-test", for: .openai, storage: storage)
         let now = Date()
-        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now, storage: storage), [.openai])
+        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now, storage: storage), [.provider(.openai)])
 
-        ModelCatalog.noteFailure(.openai, now: now, storage: storage)
+        ModelCatalog.noteFailure(.provider(.openai), now: now, storage: storage)
         XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now.addingTimeInterval(59 * 60), storage: storage), [])
-        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now.addingTimeInterval(61 * 60), storage: storage), [.openai])
+        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now.addingTimeInterval(61 * 60), storage: storage), [.provider(.openai)])
 
-        ModelCatalog.noteFailure(.openai, now: now, storage: storage)
+        ModelCatalog.noteFailure(.provider(.openai), now: now, storage: storage)
         XCTAssertTrue(ModelCatalog.isBackingOff(.openai, now: now.addingTimeInterval(119 * 60), storage: storage))
         XCTAssertFalse(ModelCatalog.isBackingOff(.openai, now: now.addingTimeInterval(121 * 60), storage: storage))
         XCTAssertEqual(ModelCatalog.backoff(failures: 40), ModelCatalog.listLifetime)
 
         ModelCatalog.clearFailures(.openai, storage: storage)
         XCTAssertFalse(ModelCatalog.isBackingOff(.openai, now: now, storage: storage))
+    }
+
+    func testEachCustomProviderKeepsItsOwnAgeAndWait() {
+        let near = CustomProviders.upsert(CustomProvider(name: "Near", endpoints: [CustomEndpoint(url: "https://near.example/v1")], model: "m"), storage: storage)
+        let far = CustomProviders.upsert(CustomProvider(name: "Far", endpoints: [CustomEndpoint(url: "http://10.0.0.9/v1")], model: "m"), storage: storage)
+        let now = Date()
+        storage.defaults.set(now.timeIntervalSince1970, forKey: "models.listedAt.custom.\(near.id.uuidString)")
+        ModelCatalog.noteFailure(.custom(far.id), now: now, storage: storage)
+
+        XCTAssertFalse(ModelCatalog.isStale(.custom(near.id), now: now, storage: storage))
+        XCTAssertTrue(ModelCatalog.isStale(.custom(far.id), now: now, storage: storage))
+        XCTAssertTrue(ModelCatalog.isBackingOff(.custom(far.id), now: now, storage: storage))
+        XCTAssertFalse(ModelCatalog.isBackingOff(.custom(near.id), now: now, storage: storage))
+        // One unreachable address does not make the other wait, and neither is due now.
+        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now, storage: storage), [])
+        XCTAssertEqual(ModelCatalog.dueForBackgroundRefresh(now: now.addingTimeInterval(61 * 60), storage: storage), [.custom(far.id)])
+
+        // A changed address forgets the list's age and its wait.
+        ModelCatalog.invalidateCustom(near.id, storage: storage)
+        XCTAssertEqual(storage.defaults.double(forKey: "models.listedAt.custom.\(near.id.uuidString)"), 0)
+        ModelCatalog.invalidateCustom(far.id, storage: storage)
+        XCTAssertFalse(ModelCatalog.isBackingOff(.custom(far.id), now: now, storage: storage))
+        XCTAssertEqual(Set(ModelCatalog.dueForBackgroundRefresh(now: now, storage: storage)), [.custom(near.id), .custom(far.id)])
+    }
+
+    func testACancelledReadIsNotAFailure() {
+        XCTAssertTrue(ModelCatalog.isCancellation(CancellationError()))
+        XCTAssertTrue(ModelCatalog.isCancellation(URLError(.cancelled)))
+        XCTAssertFalse(ModelCatalog.isCancellation(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(ModelCatalog.isCancellation(ModelCatalog.DiscoveryError.signIn))
+    }
+
+    func testCodexAskedAsTheCodexReleasePokiShips() throws {
+        // native/codex-voice/build.sh stamps the Codex release Poki builds; the list asks as that release.
+        let build = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("codex-voice/build.sh")
+        let script = try String(contentsOf: build, encoding: .utf8)
+        let line = try XCTUnwrap(script.split(separator: "\n").first { $0.hasPrefix("version = \"") })
+        XCTAssertEqual(line, "version = \"\(ModelCatalog.codexClientVersion)\"")
+    }
+
+    func testAWorkspaceTokenWithANullFedrampClaimStillNamesTheWorkspace() {
+        let token = Self.jwt(["https://api.openai.com/auth": ["chatgpt_account_id": "workspace-2", "chatgpt_account_is_fedramp": NSNull()], "exp": 4_102_444_800])
+        XCTAssertEqual(CodexAccount.chatGPTAccountID(token), "workspace-2")
     }
 
     private static func jwt(_ claims: [String: Any]) -> String {

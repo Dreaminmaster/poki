@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/xibbon/PiSwift.git",
       "state" : {
-        "revision" : "f8696524cf41ca0a7f42f5b230eafa443daececd"
+        "revision" : "13f157d78ec2eb1ed95d5623518ec92f8aaf7ef0"
       }
     },
     {
