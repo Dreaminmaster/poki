@@ -92,6 +92,11 @@ pub struct Portal<'a> {
 
 fn st<'a>(d: &'a plist::Dictionary, k: &str) -> String { d.get(k).and_then(|v| v.as_string()).unwrap_or("").to_string() }
 
+// Lockdown can omit DeviceName, but Apple requires a name when registering a device.
+fn device_registration_name(name: &str) -> &str {
+    if name.trim().is_empty() { "iOS Device" } else { name }
+}
+
 impl<'a> Portal<'a> {
     pub fn new(session: &'a Session, token: &'a AppToken, anisette: &'a mut super::anisette::Provider) -> Result<Self> {
         Ok(Portal { http: super::http_client()?, session, token, anisette })
@@ -174,7 +179,7 @@ impl<'a> Portal<'a> {
             return Ok(d);
         }
         let mut p = Self::team_params(team);
-        p.insert("name".into(), name.into());
+        p.insert("name".into(), device_registration_name(name).into());
         p.insert("deviceNumber".into(), udid.into());
         let v = self.call("ios/addDevice.action", p).await?;
         let d = v.get("device").and_then(|d| d.as_dictionary()).ok_or_else(|| Error::msg("Apple registered the phone but sent no record"))?;
@@ -355,6 +360,13 @@ fn portal_error(code: i64, text: String) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_registration_uses_a_fallback_for_blank_names() {
+        assert_eq!(device_registration_name(""), "iOS Device");
+        assert_eq!(device_registration_name(" \t"), "iOS Device");
+        assert_eq!(device_registration_name("My iPhone"), "My iPhone");
+    }
 
     #[test]
     fn expired_portal_session_reads_as_sign_in_again() {

@@ -197,6 +197,21 @@ ensure_patch(
     '    if !turn_context.code_mode_available\n        && requested_tool_mode == ToolMode::CodeMode\n        && !turn_context.config.code_mode.disable_in_process_fallback',
     '    if !turn_context.code_mode_available\n        && matches!(requested_tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)\n        && !turn_context.config.code_mode.disable_in_process_fallback',
 )
+# ChatGPT sign-in must use the Codex client's http loopback redirect URI. On iOS, the callback
+# server hands the browser back to Poki's ASWebAuthenticationSession after the token exchange,
+# so the sheet closes and Poki shows its own result instead of Codex's localhost pages.
+ensure_patch(
+    "login/src/success_page.rs",
+    'poki-chatgpt://signed-in',
+    ') -> LoginSuccessRedirect {\n    let token_claims = jwt_auth_claims(id_token);\n',
+    ') -> LoginSuccessRedirect {\n    if cfg!(target_os = "ios") {\n        return LoginSuccessRedirect::Hosted("poki-chatgpt://signed-in".to_string());\n    }\n    let token_claims = jwt_auth_claims(id_token);\n',
+)
+ensure_patch(
+    "login/src/server.rs",
+    'poki-chatgpt://signed-in?error=1',
+    '    let body = render_login_error_page(message, error_code, error_description);\n',
+    '    let body = if cfg!(target_os = "ios") {\n        br#"<!doctype html><meta name="color-scheme" content="light dark"><meta http-equiv="refresh" content="0;url=poki-chatgpt://signed-in?error=1">"#.to_vec()\n    } else {\n        render_login_error_page(message, error_code, error_description)\n    };\n',
+)
 PY
 mkdir -p "$workspace/poki-codex-voice/src"
 for file in Cargo.toml src/lib.rs; do

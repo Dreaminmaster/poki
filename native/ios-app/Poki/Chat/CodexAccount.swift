@@ -288,8 +288,14 @@ enum CodexAccount {
 
     /// The ChatGPT workspace an access token is for (its `chatgpt_account_id` claim), which Codex's
     /// requests name in their `chatgpt-account-id` header.
+    /// Reads only that claim, so a token the strict sign-in check turns down (for example a `null`
+    /// FedRAMP claim) still names its workspace for the model list.
     static func chatGPTAccountID(_ accessToken: String) -> String? {
-        guard let id = decodeIdClaims(from: accessToken)?.auth?.chatgptAccountId, !id.isEmpty else { return nil }
+        guard let payload = decodeJWTPayloadData(accessToken),
+              let claims = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              let auth = claims[IdClaims.CodingKeys.auth.rawValue] as? [String: Any],
+              let id = auth[AuthClaims.CodingKeys.chatgptAccountId.rawValue] as? String,
+              !id.isEmpty else { return nil }
         return id
     }
 
