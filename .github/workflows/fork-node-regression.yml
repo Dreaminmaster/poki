@@ -7,59 +7,71 @@ on:
 permissions:
   contents: read
 jobs:
-  test:
+  timing-control:
+    # Use the same toolchain and candidate as the previous full test.
     runs-on: xcode-27
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - candidate: upstream-newest-xcode
-            ref: 059388bd20766090344fe660078094e55726f6fe
-            agent_dependencies: true
-          - candidate: notification-fixture-newest-xcode
-            ref: d8d235038473a180b9c41a93e68a923f778a3c49
-            agent_dependencies: true
-    name: npm test - ${{ matrix.candidate }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.ref }}
+          ref: d8d235038473a180b9c41a93e68a923f778a3c49
           persist-credentials: false
-      - name: Verify exact source revision
-        env:
-          EXPECTED_SHA: ${{ matrix.ref }}
-        run: |
-          git rev-parse HEAD
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Select newest released Xcode
+      - name: Verify exact source and compiler
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p out
+          git rev-parse HEAD | tee out/source-revision.txt
+          test "$(git rev-parse HEAD)" = d8d235038473a180b9c41a93e68a923f778a3c49
           XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
           sudo xcode-select -s "$XCODE/Contents/Developer"
-          swiftc --version
-      - name: Verify macOS prerequisites
-        run: |
-          sw_vers
-          xcodebuild -version
-          command -v plutil
-          swift -e 'import CryptoKit; print("CryptoKit available")'
+          { sw_vers; xcodebuild -version; swiftc --version; node --version; sysctl -n hw.ncpu; } | tee out/environment.txt
       - run: npm ci
-      - name: Install Agent dependencies when selected
-        if: matrix.agent_dependencies == true
-        run: npm ci --prefix agent
-      - name: Required repository tests
+      - run: npm ci --prefix agent
+      - name: Repeat the two previously failing timing cases
         shell: bash
         run: |
-          set -o pipefail
-          npm test 2>&1 | tee node-test.log
+          set -uo pipefail
+          pattern='^(cancel during recording recovery preserves dispatched input and finishes cleanup before takeover|a person stop that nobody answers ends with exit 3 and a rerun resumes from that step)$'
+          failures=0
+          for attempt in 1 2 3 4 5; do
+            node --test --test-concurrency=1 --test-name-pattern="$pattern" test/coordination.test.mjs test/install-iphone.test.mjs 2>&1 | tee "out/isolated-$attempt.log"
+            status=${PIPESTATUS[0]}
+            printf '%s\t%s\n' "$attempt" "$status" >> out/isolated-status.tsv
+            if [ "$status" != 0 ]; then failures=$((failures + 1)); fi
+            if ! grep -Fq '✔ cancel during recording recovery preserves dispatched input and finishes cleanup before takeover' "out/isolated-$attempt.log" || ! grep -Fq '✔ a person stop that nobody answers ends with exit 3 and a rerun resumes from that step' "out/isolated-$attempt.log"; then
+              echo "Attempt $attempt did not prove both requested cases passed"
+              failures=$((failures + 1))
+            fi
+          done
+          test "$failures" = 0
+      - name: Repeat required full suite at default concurrency
+        id: full
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          test -d node_modules && test -d agent/node_modules || exit 1
+          npm test 2>&1 | tee out/node-test-default.log
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > out/default-status.txt
+          exit "$status"
+      - name: Controlled full-suite comparison at two workers
+        if: always() && steps.full.outcome == 'failure'
+        shell: bash
+        run: |
+          set -uo pipefail
+          test -f out/default-status.txt || exit 1
+          node --test --test-concurrency=2 test/*.test.mjs 2>&1 | tee out/node-test-two-workers.log
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > out/two-workers-status.txt
+          exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: node-test-${{ matrix.candidate }}
-          path: node-test.log
-          if-no-files-found: ignore
+          name: node-timing-control-d8d2350
+          path: out/
+          if-no-files-found: error
