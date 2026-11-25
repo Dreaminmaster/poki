@@ -29,6 +29,7 @@ function makeFixtureRepo(t) {
   const workspace = join(root, 'build', 'codex-voice', 'aarch64-apple-ios', revision, 'codex-rs');
   mkdirSync(join(workspace, 'http-client', 'src'), { recursive: true });
   mkdirSync(join(workspace, 'core', 'src', 'tools'), { recursive: true });
+  mkdirSync(join(workspace, 'login', 'src'), { recursive: true });
   writeFileSync(join(root, 'build', 'codex-voice', 'aarch64-apple-ios', revision, '.poki-prepared'), '');
   writeFileSync(join(workspace, 'Cargo.lock'), [
     'version = 4',
@@ -79,6 +80,15 @@ function makeFixtureRepo(t) {
     '// matches!(requested_tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)\n',
   );
 
+  writeFileSync(
+    join(workspace, 'login', 'src', 'success_page.rs'),
+    'fn compose_success_url(\n) -> LoginSuccessRedirect {\n    let token_claims = jwt_auth_claims(id_token);\n}\n',
+  );
+  writeFileSync(
+    join(workspace, 'login', 'src', 'server.rs'),
+    'fn login_error_response() {\n    let body = render_login_error_page(message, error_code, error_description);\n}\n',
+  );
+
   const cargoLog = join(root, 'cargo.log');
   writeFileSync(join(binDir, 'rustup'), [
     '#!/usr/bin/env bash',
@@ -93,11 +103,11 @@ function makeFixtureRepo(t) {
     'printf "fake-archive" > "$out/libpoki_codex_voice.a"',
   ].join('\n'), { mode: 0o755 });
 
-  return { root, binDir, adapterDir, adapterSrc, cargoLog };
+  return { root, binDir, adapterDir, adapterSrc, cargoLog, workspace };
 }
 
 test('codex-voice build.sh disables cross-crate ThinLTO by default and skips rebuilds on matching stamp', t => {
-  const { root, binDir, adapterDir, adapterSrc, cargoLog } = makeFixtureRepo(t);
+  const { root, binDir, adapterDir, adapterSrc, cargoLog, workspace } = makeFixtureRepo(t);
   const env = {
     PATH: `${binDir}:/usr/bin:/bin`,
     HOME: join(root, 'empty-home'),
@@ -116,6 +126,13 @@ test('codex-voice build.sh disables cross-crate ThinLTO by default and skips reb
   assert.match(firstLog[0], /OPT=s\b/);
   assert.match(firstLog[0], /CGU=8\b/);
   assert.match(firstLog[0], /DEBUG=0\b/);
+
+  // On iOS the Codex sign-in server hands the browser back to Poki instead of its localhost pages.
+  const successPage = readFileSync(join(workspace, 'login', 'src', 'success_page.rs'), 'utf8');
+  assert.match(successPage, /if cfg!\(target_os = "ios"\) \{\n        return LoginSuccessRedirect::Hosted\("poki-chatgpt:\/\/signed-in"/);
+  const server = readFileSync(join(workspace, 'login', 'src', 'server.rs'), 'utf8');
+  assert.match(server, /url=poki-chatgpt:\/\/signed-in\?error=1/);
+  assert.match(server, /render_login_error_page\(message, error_code, error_description\)/);
 
   // Second build with unchanged inputs must hit the stamp fast path without invoking cargo.
   const second = spawnSync('/bin/bash', [join(adapterDir, 'build.sh'), 'build', 'aarch64-apple-ios'], {

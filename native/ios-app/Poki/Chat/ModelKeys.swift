@@ -194,7 +194,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         let providers = ["openai", "anthropic", "google", "deepseek"] + getProviders().map(\.rawValue).sorted()
         let parts = trimmed.split(separator: "/").map(String.init)
         let unqualified = parts.last ?? trimmed
-        // Models newer than PiSwift's catalog take their bundled setup (see `knownModel`).
+        // A model the catalog lacks under this id takes its bundled setup (see `knownModel`).
         if let vendor = parts.dropLast().last,
            let model = knownModel(provider: vendor.lowercased(), id: unqualified) { return model }
         let ids = unqualified == trimmed ? [trimmed] : [trimmed, unqualified]
@@ -206,9 +206,8 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         return nil
     }
 
-    /// pi's catalog model, or for a model newer than the pinned catalog its bundled setup: a copy of the
-    /// model it is set up like, with its own id, name, prices and window (`BundledModelSetups`). Once the
-    /// catalog lists the model, the catalog's entry wins.
+    /// pi's catalog model, or for an id the catalog lacks its bundled setup: a copy of the model it is set
+    /// up like, with its own id, name, prices and window (`BundledModelSetups`). The catalog's entry wins.
     static func knownModel(provider: String, id: String) -> Model? {
         if let model = getModel(provider: provider, modelId: id) { return model }
         // A gateway names a vendor's model with the vendor first (OpenRouter's `openai/gpt-6.2-sol`); its
