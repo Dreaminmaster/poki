@@ -85,15 +85,22 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
             ChatModelChoice(id: "claude-opus-5-5", name: "Claude Opus 5.5"),
             ChatModelChoice(id: "claude-haiku-5-5", name: "Claude Haiku 5.5"),
         ]
-        // GPT-6.1 Terra first, the owner's choice for the chat (ESP-174); Sol stays selectable.
+        // GPT-6.1 Terra first, the owner's choice for the chat (ESP-174); GPT-6.2 Sol and Astra
+        // (developers.openai.com/api/docs/models, November 2026) and GPT-6.1 Sol stay selectable. This is
+        // only the fallback: the key's own model list adds newer models without a release.
         case .openai: [
             ChatModelChoice(id: "gpt-6.1-terra", name: "GPT-6.1 Terra"),
+            ChatModelChoice(id: "gpt-6.2-sol", name: "GPT-6.2 Sol"),
+            ChatModelChoice(id: "gpt-6.2-astra", name: "GPT-6.2 Astra"),
             ChatModelChoice(id: "gpt-6.1-sol", name: "GPT-6.1 Sol"),
         ]
-        // The ChatGPT plan's models on the OpenAI API; gpt-6.1-terra is also Poki
-        // Agent's default on the Mac (agent/model-config.mjs).
+        // The ChatGPT plan's models (GPT-6.2 is in Plus, Pro, Enterprise and Edu plans); gpt-6.1-terra is
+        // also Poki Agent's default on the Mac (agent/model-config.mjs). A Codex sign-in adds the plan's
+        // current list (`ModelCatalog.codexModelsRequest`).
         case .chatgpt: [
             ChatModelChoice(id: "gpt-6.1-terra", name: "ChatGPT GPT-6.1 Terra"),
+            ChatModelChoice(id: "gpt-6.2-sol", name: "ChatGPT GPT-6.2 Sol"),
+            ChatModelChoice(id: "gpt-6.2-astra", name: "ChatGPT GPT-6.2 Astra"),
             ChatModelChoice(id: "gpt-6.1-sol", name: "ChatGPT GPT-6.1 Sol"),
         ]
         // DeepSeek's current names (api-docs.deepseek.com, 2026-11-07); deepseek-chat is retired. V4 Pro
@@ -111,6 +118,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         case .openrouter: [
             ChatModelChoice(id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5 (OpenRouter)"),
             ChatModelChoice(id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5 (OpenRouter)"),
+            ChatModelChoice(id: "openai/gpt-6.2-sol", name: "GPT-6.2 Sol (OpenRouter)"),
             ChatModelChoice(id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol (OpenRouter)"),
             ChatModelChoice(id: "google/gemini-3.8-flash", name: "Gemini 3.8 Flash (OpenRouter)"),
         ]
@@ -185,17 +193,30 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
         let providers = ["openai", "anthropic", "google", "deepseek"] + getProviders().map(\.rawValue).sorted()
         let parts = trimmed.split(separator: "/").map(String.init)
         let unqualified = parts.last ?? trimmed
-        // GPT-6.1 Terra is missing from PiSwift's catalog; it has Sol's setup (see `piModel`).
-        func lookupID(_ id: String) -> String { id == "gpt-6.1-terra" ? "gpt-6.1-sol" : id }
+        // Models newer than PiSwift's catalog take their bundled setup (see `knownModel`).
         if let vendor = parts.dropLast().last,
-           let model = getModel(provider: vendor.lowercased(), modelId: lookupID(unqualified)) { return model }
+           let model = knownModel(provider: vendor.lowercased(), id: unqualified) { return model }
         let ids = unqualified == trimmed ? [trimmed] : [trimmed, unqualified]
         for candidate in ids {
             for provider in providers {
-                if let model = getModel(provider: provider, modelId: lookupID(candidate)) { return model }
+                if let model = knownModel(provider: provider, id: candidate) { return model }
             }
         }
         return nil
+    }
+
+    /// pi's catalog model, or for a model newer than the pinned catalog its bundled setup: a copy of the
+    /// model it is set up like, with its own id, name, prices and window (`BundledModelSetups`). Once the
+    /// catalog lists the model, the catalog's entry wins.
+    static func knownModel(provider: String, id: String) -> Model? {
+        if let model = getModel(provider: provider, modelId: id) { return model }
+        // A gateway names a vendor's model with the vendor first (OpenRouter's `openai/gpt-6.2-sol`); its
+        // template is the gateway's entry for the template model (`openai/gpt-6.1-sol`).
+        let parts = id.split(separator: "/", maxSplits: 1).map(String.init)
+        let vendor = parts.count == 2 ? parts[0] + "/" : ""
+        guard let setup = BundledModelSetups.all[parts.last ?? id], vendor.isEmpty || setup.onGateways,
+              let base = getModel(provider: provider, modelId: vendor + setup.template) else { return nil }
+        return BundledModelSetups.apply(setup, id: id, provider: provider, to: base)
     }
 
     /// pi's model for one of `models`. For a custom provider `id` is the chat's id (provider and model,
@@ -221,7 +242,7 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
             return Self.customModel(chosen.model, baseUrl: endpoint.normalized, api: endpoint.sent.piAPI,
                                     reasoning: provider.reasoning, piProvider: provider.piProvider)
         }
-        if let model = getModel(provider: piProvider, modelId: id) { return model }
+        if let model = Self.knownModel(provider: piProvider, id: id) { return model }
         // OpenRouter serves thousands of models its catalog lacks, and a built-in model's setup (Anthropic
         // thinking on the Messages API) is rejected by many of them. Take the plain chat setup, and add
         // reasoning only for a model OpenRouter's own list says supports it.
@@ -229,16 +250,10 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
             return unlistedModel(id, provider: piProvider, baseUrl: Self.openRouterBaseURL,
                                  reasoning: ModelCatalog.supportsReasoning(id, for: self, storage: resolvedStorage))
         }
-        // PiSwift's catalog (pi-mono, October 2026) lacks gpt-6.1-terra, which pi-ai 1.5.0 lists with the
-        // same API and inputs as gpt-6.1-sol.
         // A model from the provider's own list that pi's catalog lacks takes the shape of a built-in one of
         // the same provider (same API and inputs), with its own id.
-        let template = (self == .openai || self == .chatgpt) && id == "gpt-6.1-terra" ? "gpt-6.1-sol" : models(in: resolvedStorage).lazy.compactMap { getModel(provider: piProvider, modelId: $0.id) }.first?.id
-        guard let template, let base = getModel(provider: piProvider, modelId: template),
-              var json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(base))) as? [String: Any] else { return nil }
-        json["id"] = id
-        json["name"] = id == "gpt-6.1-terra" ? "GPT-6.1 Terra" : id
-        return (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(Model.self, from: $0) }
+        guard let base = models(in: resolvedStorage).lazy.compactMap({ getModel(provider: piProvider, modelId: $0.id) }).first else { return nil }
+        return BundledModelSetups.copy(base, id: id, name: id)
     }
 }
 
@@ -435,11 +450,20 @@ enum ModelKeys {
     }
 
     static func setSelectedModel(_ value: String, in storage: PokiStorage = .live) {
-        let provider = selectedProvider(in: storage)
+        saveModel(value, for: selectedProvider(in: storage), in: storage)
+    }
+
+    private static func saveModel(_ value: String, for provider: ModelProvider, in storage: PokiStorage) {
         storage.defaults.set(value, forKey: "chat.model.\(provider.rawValue)")
         if provider == .custom, let chosen = CustomProviders.parse(value) {
             storage.defaults.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
         }
+    }
+
+    static func choose(_ provider: ModelProvider, model id: String, in storage: PokiStorage) {
+        saveModel(id, for: provider, in: storage)
+        storage.defaults.set(provider.rawValue, forKey: "chat.provider")
+        saved += 1
     }
 
     /// The account the chat uses, as the owner reads it: the provider's name, or the custom service's.

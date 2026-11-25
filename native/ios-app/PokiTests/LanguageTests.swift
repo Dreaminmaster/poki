@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import XCTest
 import UserNotifications
 @testable import Poki
@@ -94,6 +96,56 @@ final class LanguageTests: XCTestCase {
         store.refresh(sessions: [], routines: [])
         XCTAssertNotEqual(store.shortcuts.map(\.text), english)
         XCTAssertTrue(store.shortcuts.contains { $0.text == "发消息" })
+    }
+
+    func testComposerNavigationTitlesFollowPokiLanguageInRetainedStacks() async throws {
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing())
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first(where: \.isKeyWindow)
+        let cases: [(AnyView, String, String, String)] = [
+            (AnyView(NavigationStack(path: .constant([true])) {
+                Text("Settings")
+                    .navigationDestination(for: Bool.self) { _ in ComposerSettingsView() }
+            }), "Input Field", "输入框", "輸入框"),
+            (AnyView(ComposerTaskSettings(kind: .model, approvalIconSize: 22, previewSelection: .constant(nil),
+                                         openModelSetup: {})), "Model", "模型", "模型"),
+        ]
+
+        for (screen, english, simplified, traditional) in cases {
+            AppLocalization.shared.preference = "zh-Hans"
+            let window = UIWindow(windowScene: scene)
+            // Keep the host locale English to exercise a language mismatch at the navigation bridge.
+            let host = UIHostingController(rootView: screen.environment(app).environment(\.locale, Locale(identifier: "en")))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                previousWindow?.makeKey()
+            }
+
+            await assertNavigationTitle(simplified, in: window, screen: english)
+            AppLocalization.shared.preference = "zh-Hant"
+            await assertNavigationTitle(traditional, in: window, screen: english)
+            AppLocalization.shared.preference = "en"
+            await assertNavigationTitle(english, in: window, screen: english)
+            XCTAssertTrue(window.rootViewController === host)
+        }
+    }
+
+    private func assertNavigationTitle(_ expected: String, in window: UIWindow, screen: String,
+                                       file: StaticString = #filePath, line: UInt = #line) async {
+        func navigationTitle(in view: UIView) -> String? {
+            if let bar = view as? UINavigationBar { return bar.topItem?.title }
+            return view.subviews.lazy.compactMap { navigationTitle(in: $0) }.first
+        }
+
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            window.layoutIfNeeded()
+            if navigationTitle(in: window) == expected { return }
+            try? await Task.sleep(for: .milliseconds(25))
+        } while Date() < deadline
+        XCTAssertEqual(navigationTitle(in: window), expected, screen, file: file, line: line)
     }
 
     func testLanguageSurvivesSettingsVaultRestoration() throws {

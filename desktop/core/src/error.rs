@@ -94,7 +94,7 @@ impl From<idevice::IdeviceError> for Error {
             E::UserDeniedPairing => Error::NeedsPerson("The iPhone said Don't Trust. Unplug it, plug it in again and tap Trust.".into()),
             E::PasswordProtected | E::DeviceLocked => Error::NeedsPerson("Unlock the iPhone and try again.".into()),
             E::DeviceNotFound => Error::Device("The iPhone is no longer connected.".into()),
-            E::InvalidHostID => Error::Device("This computer is not paired with the iPhone any more. Pair it again.".into()),
+            E::InvalidHostID => Error::NeedsPerson("The iPhone no longer trusts this computer. Plug it in with a cable, unlock it and tap Trust, then try again.".into()),
             E::Usbmuxd(_) => Error::DeviceService(usbmuxd_missing()),
             E::Socket(ref io) if matches!(io.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::PermissionDenied) => Error::DeviceService(usbmuxd_missing()),
             other => Error::Device(other.to_string()),
