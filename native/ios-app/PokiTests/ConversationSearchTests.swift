@@ -166,6 +166,27 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertTrue(ConversationSearchIndex.resolve(raw, in: [], query: "needle").isEmpty)
     }
 
+    func testLiveRefreshResolvesManyHitsInSnapshotOrder() {
+        let entries = (0..<200).map { ChatEntry(.poki("needle line \($0)")) }
+        let original = sample(entries: entries)
+        let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
+        XCTAssertEqual(raw.count, ConversationSearchIndex.displayLimit)
+        // Current-snapshot resolution must preserve the indexed excerpt and order.
+        let resolved = ConversationSearchIndex.resolve(raw, in: [original])
+        XCTAssertEqual(resolved.map(\.entryID), raw.map(\.entryID))
+        XCTAssertEqual(resolved.map(\.detail), raw.map(\.detail))
+
+        var changed = original
+        let removedID = entries[199].id
+        let editedID = entries[198].id
+        changed.entries.removeLast()
+        changed.entries[198].kind = .poki("needle revised")
+        let updated = ConversationSearchIndex.resolve(raw, in: [changed], query: "needle")
+        XCTAssertEqual(updated.map(\.entryID), raw.map(\.entryID).filter { $0 != removedID })
+        XCTAssertEqual(updated.first?.entryID, editedID)
+        XCTAssertEqual(updated.first?.detail, "needle revised")
+    }
+
     func testLiveRefreshRevalidatesRenamedTitleAndFallback() {
         let original = sample(name: "Needle title", entries: [ChatEntry(.you("Other message", delivered: true))])
         let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
