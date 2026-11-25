@@ -1860,6 +1860,9 @@ mod tests {
         let (first, reported) = tokio::sync::oneshot::channel();
         let first = std::sync::Mutex::new(Some(first));
         let pending = handle(json!({"op": "run", "continuous": true, "pairing_file": "/nonexistent/pairing.plist"}), move |line| {
+            if !line["event"].is_null() {
+                return;
+            }
             if let Some(first) = first.lock().unwrap().take() {
                 let _ = first.send(line);
             }
