@@ -19,11 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: live-search-refresh-recheck
-            device: iPhone
+          - pr: live-search-refresh-ipad
+            device: iPad
             ref: c039cfaf8e58d719b5860e3aff65162a1deed736
             tests: 'ConversationSearchTests:21 SessionArchiveTests:18'
-            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
+            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
             expected_baseline: false
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
