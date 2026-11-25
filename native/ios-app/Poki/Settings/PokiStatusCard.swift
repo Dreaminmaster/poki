@@ -308,9 +308,7 @@ struct PokiMenu<Face: View>: View {
     }
 
     private func pick(_ provider: ModelProvider, _ id: String) {
-        ModelKeys.setSelectedProvider(provider, in: model.storage)
-        ModelKeys.setSelectedModel(id, in: model.storage)
-        ModelKeys.saved += 1
+        ModelKeys.choose(provider, model: id, in: model.storage)
     }
 }
 
