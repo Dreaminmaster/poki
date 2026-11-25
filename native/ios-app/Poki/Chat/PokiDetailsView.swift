@@ -385,10 +385,32 @@ enum ConversationSearchIndex {
     /// message must not leave a result that cannot be opened.
     static func resolve(_ matches: [Match], in sessions: [SavedSession], query: String? = nil) -> [ConversationSearchHit] {
         let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
+        // Find all requested IDs in one traversal per conversation, not one
+        // traversal per hit. The display limit bounds the auxiliary dictionaries.
+        var wanted: [String: Set<UUID>] = [:]
+        for match in matches {
+            if let entryID = match.entryID { wanted[match.sessionID, default: []].insert(entryID) }
+        }
+        var targets: [String: [UUID: ChatEntry]] = [:]
+        for (sessionID, ids) in wanted {
+            guard let session = saved[sessionID] else { continue }
+            var remaining = ids
+            var entries: [UUID: ChatEntry] = [:]
+            for entry in session.entries {
+                if remaining.remove(entry.id) != nil { entries[entry.id] = entry }
+                if remaining.isEmpty { break }
+            }
+            targets[sessionID] = entries
+        }
+        let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines)
         return matches.compactMap { match in
             guard let session = saved[match.sessionID] else { return nil }
-            if let query { return validatedHit(match.entryID, in: session, query: query) }
-            guard hasTarget(match.entryID, in: session) else { return nil }
+            if let entryID = match.entryID {
+                guard let entry = targets[match.sessionID]?[entryID] else { return nil }
+                if let needle { return validatedMessageHit(entry, in: session, needle: needle) }
+            } else if let needle {
+                return validatedSessionHit(in: session, needle: needle)
+            }
             return ConversationSearchHit(session: session, entryID: match.entryID,
                                          detail: match.detail, author: match.author, at: match.at)
         }
@@ -399,11 +421,19 @@ enum ConversationSearchIndex {
     static func validatedHit(_ entryID: UUID?, in session: SavedSession, query: String) -> ConversationSearchHit? {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if let entryID {
-            guard !needle.isEmpty, let entry = session.entries.first(where: { $0.id == entryID }),
-                  let text = searchableText(entry), text.localizedStandardContains(needle) else { return nil }
-            return ConversationSearchHit(session: session, entryID: entryID,
-                                         detail: excerpt(text, around: needle), author: author(entry), at: entry.at)
+            guard let entry = session.entries.first(where: { $0.id == entryID }) else { return nil }
+            return validatedMessageHit(entry, in: session, needle: needle)
         }
+        return validatedSessionHit(in: session, needle: needle)
+    }
+
+    private static func validatedMessageHit(_ entry: ChatEntry, in session: SavedSession, needle: String) -> ConversationSearchHit? {
+        guard !needle.isEmpty, let text = searchableText(entry), text.localizedStandardContains(needle) else { return nil }
+        return ConversationSearchHit(session: session, entryID: entry.id,
+                                     detail: excerpt(text, around: needle), author: author(entry), at: entry.at)
+    }
+
+    private static func validatedSessionHit(in session: SavedSession, needle: String) -> ConversationSearchHit? {
         let metadata = [session.name, session.title, session.client ?? "", session.customName ?? "", session.autoName ?? ""]
         let titleMatches = needle.isEmpty || metadata.contains { $0.localizedStandardContains(needle) }
         if !titleMatches {
@@ -467,6 +497,7 @@ private struct ConversationsSettingsView: View {
     private var store: SessionStore { SessionStore.shared }
 
     @State private var matches: [ConversationSearchIndex.Match] = []
+    @State private var resolvedMatches: [ConversationSearchHit] = []
     @State private var cachedSnapshot: [ConversationSearchIndex.IndexedSession] = []
     @State private var cachedRevision: UInt64?
     @State private var cachedLocale: String?
@@ -494,6 +525,7 @@ private struct ConversationsSettingsView: View {
         guard !Task.isCancelled, request == searchKey.request else { return }
         guard !request.query.isEmpty else {
             matches = []
+            resolvedMatches = []
             publishedKey = searchKey
             return
         }
@@ -536,6 +568,10 @@ private struct ConversationsSettingsView: View {
             }
             guard !Task.isCancelled, request == searchKey.request else { return }
             matches = hits
+            // A current snapshot already contains the correct excerpts. Reuse
+            // resolved rows while its revision remains current; only revalidate
+            // the text of an older snapshot when the store actually changes.
+            resolvedMatches = key == searchKey ? ConversationSearchIndex.resolve(hits, in: store.sessions) : []
             publishedKey = key
             // Also catch changes coalesced before SwiftUI delivered onChange.
             if key != searchKey { signal.yield(()) }
@@ -559,8 +595,9 @@ private struct ConversationsSettingsView: View {
         let searching = publishedKey != key
         // While refreshing, show only still-valid hits for this exact query.
         // A deleted or edited message cannot be kept visible by an old snapshot.
-        let currentMatches = publishedKey?.request == key.request
-            ? ConversationSearchIndex.resolve(matches, in: store.sessions, query: key.query) : []
+        let currentMatches = publishedKey == key ? resolvedMatches :
+            (publishedKey?.request == key.request
+                ? ConversationSearchIndex.resolve(matches, in: store.sessions, query: key.query) : [])
         List {
             if key.query.isEmpty {
                 let archived = store.archivedSessions
