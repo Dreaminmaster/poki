@@ -265,10 +265,12 @@ final class SessionStore {
     private final class WriteFailures: @unchecked Sendable {
         private var ids: Set<String> = []
 
-        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = []) {
+        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = [],
+                   pruneMissingFailures: Bool = true) {
             let pending = Set(snapshots.map { $0.1.id })
             let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
-            if !current.isEmpty {
+            // A scoped flush passes only one current session, not the full store.
+            if pruneMissingFailures && !current.isEmpty {
                 ids.formIntersection(Set(current.map { $0.1.id }))
             }
             let encoder = JSONEncoder()
@@ -934,11 +936,15 @@ final class SessionStore {
     /// Writes changed sessions now, including previously failed writes still in memory, or only the requested conversation.
     func flush(sessionID: String? = nil) {
         if let sessionID {
-            guard pendingWrites.remove(sessionID) != nil else { return }
-            let snapshots = session(sessionID).map { [(file(sessionID), $0)] } ?? []
-            guard !snapshots.isEmpty else { return }
+            let pending = pendingWrites.remove(sessionID) != nil
+            guard let saved = session(sessionID) else { return }
+            let snapshots = [(file(sessionID), saved)]
             let failures = writeFailures
-            writeQueue.sync { failures.write(snapshots) }
+            // Wait for queued writes, then retry this session even if its pending
+            // bit was already cleared. Keep failures for other sessions intact.
+            writeQueue.sync {
+                failures.write(pending ? snapshots : [], retryingFrom: snapshots, pruneMissingFailures: false)
+            }
             return
         }
         writeTask?.cancel()
