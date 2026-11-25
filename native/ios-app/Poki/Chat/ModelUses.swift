@@ -72,7 +72,8 @@ enum ProviderRef: Hashable, Identifiable {
     var uses: [ModelUse] {
         switch self {
         case .local: [.decision, .senses]
-        case .custom: [.chat, .voice, .decision]
+        // Custom providers cannot decide yet (AccountDecisions.canDecide), so Decisions is not offered.
+        case .custom: [.chat, .voice]
         case .account(let provider):
             ModelUse.allCases.filter { use in
                 switch use {

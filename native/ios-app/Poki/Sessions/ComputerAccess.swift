@@ -83,8 +83,8 @@ struct ComputersSection: View {
             Section {
                 ForEach(access.computers) { known in
                     Toggle(isOn: Binding(get: { known.allowed == true }, set: { access.set(known.id, allowed: $0) })) {
-                        // The name, and Waiting until the owner decides; the switch says the rest.
-                        SettingsRow(title: LocalizedStringKey(stringLiteral: known.computer.name),
+                        // The name (shown as it is, never looked up as a key), and Waiting until the owner decides; the switch says the rest.
+                        SettingsRow(title: LocalizedStringKey("\(known.computer.name)"),
                                     caption: known.allowed == nil ? "Waiting" : nil,
                                     symbol: "laptopcomputer", warns: known.allowed == nil)
                     }

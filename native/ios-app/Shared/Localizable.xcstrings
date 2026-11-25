@@ -1,50 +1,50 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "Input Field": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "输入框"
+    "Input Field" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入框"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "輸入框"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入框"
           }
         }
       }
     },
-    "Quick Access": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "快捷入口"
+    "Quick Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快捷入口"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "快捷入口"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快捷入口"
           }
         }
       }
     },
-    "ChatGPT Subscription": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ChatGPT 订阅"
+    "ChatGPT Subscription" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT 订阅"
           }
         },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ChatGPT 訂閱"
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT 訂閱"
           }
         }
       }
@@ -48187,7 +48187,6 @@
       }
     },
     "Computers" : {
-      "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -48201,7 +48200,8 @@
             "value" : "電腦"
           }
         }
-      }
+      },
+      "extractionState" : "manual"
     },
     "External Connections ›" : {
       "extractionState" : "manual",
@@ -48260,6 +48260,502 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未分享"
+          }
+        }
+      }
+    },
+    "Approvals decide what Poki and agents may do without you. Screen History is also on the Senses page. The Activity Log keeps every step, approval and observing change." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作确认决定 Poki 和智能体无需你确认就能做什么。屏幕记录也在“感知”页面中。活动记录保存每一步操作、每次确认和每次屏幕理解变化。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作確認決定 Poki 和智慧體無需你確認就能做什麼。螢幕記錄也在「感知」頁面中。活動記錄保存每一步操作、每次確認和每次螢幕理解變化。"
+          }
+        }
+      }
+    },
+    "Forget This Computer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忘记这台电脑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忘記這台電腦"
+          }
+        }
+      }
+    },
+    "Computers with Poki MCP from Poki Setup. A new computer can’t act on this iPhone until you turn it on here. Turning one off stops it at its next step." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通过 Poki Setup 安装了 Poki MCP 的电脑。新电脑在你于此处开启前无法操作这台 iPhone。关闭后，它会在下一步时停止。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透過 Poki Setup 安裝了 Poki MCP 的電腦。新電腦在你於此處開啟前無法操作這台 iPhone。關閉後，它會在下一步時停止。"
+          }
+        }
+      }
+    },
+    "USB" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "USB"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "USB"
+          }
+        }
+      }
+    },
+    "Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无线局域网"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wi-Fi"
+          }
+        }
+      }
+    },
+    "Poki MCP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki MCP"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki MCP"
+          }
+        }
+      }
+    },
+    "Waiting for you, %@ over %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待你开启，%1$@ 通过 %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待你開啟，%1$@ 透過 %2$@"
+          }
+        }
+      }
+    },
+    "%@ over %@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 通过 %2$@，%3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 透過 %2$@，%3$@"
+          }
+        }
+      }
+    },
+    "Change how Screen History unlocks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改屏幕记录的解锁方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改螢幕記錄的解鎖方式"
+          }
+        }
+      }
+    },
+    "Set a Passcode First" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先设置密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請先設定密碼"
+          }
+        }
+      }
+    },
+    "Screen History opens with the iPhone’s Face ID, Touch ID or passcode. Set a passcode in Settings › Face ID & Passcode, then come back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕记录需要用 iPhone 的面容 ID、触控 ID 或密码打开。请在“设置 › 面容 ID 与密码”中设置密码后再回来。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕記錄需要用 iPhone 的 Face ID、Touch ID 或密碼打開。請在「設定 › Face ID 與密碼」中設定密碼後再回來。"
+          }
+        }
+      }
+    },
+    "Use Senses with the Passcode Only" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用密码使用感知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅用密碼使用感知"
+          }
+        }
+      }
+    },
+    "No Face ID or Touch ID" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置面容 ID 或触控 ID"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設定 Face ID 或 Touch ID"
+          }
+        }
+      }
+    },
+    "Senses keeps what was on your screen. Without Face ID or Touch ID set up, anyone who knows or sees your iPhone passcode can open it, and agents can be given it after a passcode alone. Set up Face ID or Touch ID in Settings to protect it properly." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知会保存你屏幕上显示过的内容。未设置面容 ID 或触控 ID 时，任何知道或看到你 iPhone 密码的人都能打开它，仅凭密码也能把它交给智能体。请在“设置”中设置面容 ID 或触控 ID 以妥善保护。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知會保存你螢幕上顯示過的內容。未設定 Face ID 或 Touch ID 時，任何知道或看到你 iPhone 密碼的人都能打開它，僅憑密碼也能把它交給智慧體。請在「設定」中設定 Face ID 或 Touch ID 以妥善保護。"
+          }
+        }
+      }
+    },
+    "Not Set Up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設定"
+          }
+        }
+      }
+    },
+    "Also Allow iPhone Passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时允许 iPhone 密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同時允許 iPhone 密碼"
+          }
+        }
+      }
+    },
+    "Without Face ID or Touch ID, the iPhone passcode opens Senses." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置面容 ID 或触控 ID 时，用 iPhone 密码打开感知。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設定 Face ID 或 Touch ID 時，用 iPhone 密碼打開感知。"
+          }
+        }
+      }
+    },
+    "Senses, clearing Screen History and these settings ask for %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开感知、清除屏幕记录和更改这些设置时需要验证%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開感知、清除螢幕記錄和更改這些設定時需要驗證%@。"
+          }
+        }
+      }
+    },
+    "%@ is off for Poki. Turn it on in Settings › Poki." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 的%@已关闭。请在“设置 › Poki”中开启。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 的%@已關閉。請在「設定 › Poki」中開啟。"
+          }
+        }
+      }
+    },
+    "%@ is not set up on this iPhone, so only the passcode guards Senses. Set it up in Settings › %@ & Passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone 未设置%1$@，因此只有密码保护感知。请在“设置 › %2$@与密码”中设置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台 iPhone 未設定%1$@，因此只有密碼保護感知。請在「設定 › %2$@與密碼」中設定。"
+          }
+        }
+      }
+    },
+    "Off, only %@ opens Senses. On, Enter Passcode is offered when %@ does not work." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭时，只能用%1$@打开感知。开启时，%2$@无法使用时会提供“输入密码”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉時，只能用%1$@打開感知。開啟時，%2$@無法使用時會提供「輸入密碼」。"
+          }
+        }
+      }
+    },
+    "Keeping" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留"
+          }
+        }
+      }
+    },
+    "Clearing cannot be undone. Poki asks for %@ before it clears." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除后无法撤销。清除前 Poki 会要求验证%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除後無法復原。清除前 Poki 會要求驗證%@。"
+          }
+        }
+      }
+    },
+    "your passcode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的密码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的密碼"
+          }
+        }
+      }
+    },
+    "Turn On Anyway" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍然开启"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍然開啟"
+          }
+        }
+      }
+    },
+    "What is cleared cannot be brought back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除的内容无法恢复。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除的內容無法復原。"
+          }
+        }
+      }
+    },
+    "Clear Screen History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除屏幕记录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除螢幕記錄"
+          }
+        }
+      }
+    },
+    "Show Observing Changes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示屏幕理解变化"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示螢幕理解變化"
+          }
+        }
+      }
+    },
+    "When Screen History was reading, paused or left an app out. They show after Face ID, Touch ID or your passcode." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕记录何时在读取、暂停或略过某个 App。需通过面容 ID、触控 ID 或密码验证后显示。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕記錄何時在讀取、暫停或略過某個 App。需透過 Face ID、Touch ID 或密碼驗證後顯示。"
+          }
+        }
+      }
+    },
+    "Save your passcode for Automatic Unlock" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存密码以用于自动解锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儲存密碼以用於自動解鎖"
+          }
+        }
+      }
+    },
+    "Enter your iPhone passcode as you type it on the lock screen, numbers or letters. Poki uses it only there." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按你在锁定屏幕上输入的方式输入 iPhone 密码，数字或字母均可。Poki 只在锁定屏幕上使用它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按你在鎖定畫面上輸入的方式輸入 iPhone 密碼，數字或字母皆可。Poki 只在鎖定畫面上使用它。"
           }
         }
       }
