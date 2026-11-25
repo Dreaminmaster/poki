@@ -51,6 +51,22 @@ final class SensesShareTests: XCTestCase {
         XCTAssertEqual(SensesShare.parse("Something else entirely.", entries: entries)?.apps.count, 0)
     }
 
+    /// Guards: when the answer names no app and two apps both have screen text, the card lists the one
+    /// whose text shares the most of the answer's words, and both only on a tie, in the order they were
+    /// used (review of #649). Fails if the shared-words fallback lists every app with any shared word,
+    /// or stops ordering the rows by first use.
+    func testSharedWordsPickTheAppWhoseScreenTextFitsBest() {
+        let start = Date().addingTimeInterval(-3600)
+        let entries = [
+            HistoryEntry(id: 1, at: start.addingTimeInterval(100), app: "com.apple.mobilenotes", title: "Groceries", text: "Milk, eggs, proof of purchase"),
+            HistoryEntry(id: 2, at: start.addingTimeInterval(3300), app: "com.reddit.Reddit", title: "r/math", text: "A short proof that primes never run out"),
+        ]
+        let best = SensesShare.parse("They read about primes and a short proof.", entries: entries)
+        XCTAssertEqual(best?.apps.map(\.app), ["com.reddit.Reddit"])
+        let tie = SensesShare.parse("Something about a proof.", entries: entries)
+        XCTAssertEqual(tie?.apps.map(\.app), ["com.apple.mobilenotes", "com.reddit.Reddit"])
+    }
+
     /// Guards: the ITEM line becomes the card's item and leaves the answer text. Fails if the ITEM
     /// prefix is no longer recognized or the line is kept in the answer.
     func testItemLineBecomesTheItem() {
