@@ -21,7 +21,7 @@ jobs:
         include:
           - pr: search-consistency
             device: iPhone
-            ref: 007850271e571009d1d1182a84b89fdc60a4f5f6
+            ref: 7f52c20a1743dca887310ad6acda0aaaed1ce8f7
             tests: 'ConversationSearchTests:17 SessionArchiveTests:18'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
@@ -133,6 +133,21 @@ jobs:
           cargo build --release --locked --target aarch64-apple-ios-sim --manifest-path native/launcher/Cargo.toml
           native/ios-app/scripts/make-assets.sh
           xcodegen generate --spec native/ios-app/project.yml
+      - name: Identify Codex Voice cache inputs
+        id: voice-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$( { xcodebuild -version; xcrun --sdk iphonesimulator --show-sdk-version; rustc +stable -Vv; } | shasum -a 256 | cut -d' ' -f1)"
+          echo "key=codex-voice-sim-v1-$toolchain-${{ hashFiles('native/codex-voice/build.sh', 'native/codex-voice/Cargo.toml', 'native/codex-voice/src/**', 'native/codex-voice/poki_codex_voice.h') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore exact Codex Voice simulator library
+        id: voice-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/codex-voice/aarch64-apple-ios-sim/target/aarch64-apple-ios-sim/release/libpoki_codex_voice.a
+            build/codex-voice/aarch64-apple-ios-sim/target/aarch64-apple-ios-sim/release/libpoki_codex_voice.a.sha256
+          key: ${{ steps.voice-cache.outputs.key }}
       - name: Build pinned Codex Voice dependency separately
         shell: bash
         run: |
@@ -147,6 +162,14 @@ jobs:
           test -s "$LIB.sha256"
           native/codex-voice/build.sh build aarch64-apple-ios-sim | tee out/codex-voice-stamp.log
           grep -F 'is up to date (cached).' out/codex-voice-stamp.log
+      - name: Save verified Codex Voice simulator library
+        if: steps.voice-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/codex-voice/aarch64-apple-ios-sim/target/aarch64-apple-ios-sim/release/libpoki_codex_voice.a
+            build/codex-voice/aarch64-apple-ios-sim/target/aarch64-apple-ios-sim/release/libpoki_codex_voice.a.sha256
+          key: ${{ steps.voice-cache.outputs.key }}
       - name: Build actual PokiTests and preserve complete logs
         shell: bash
         run: |
