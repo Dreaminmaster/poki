@@ -75,9 +75,8 @@ struct ModelSettingsSections: View {
                 }
             }
             ForEach(CustomProviders.all) { custom in
-                let usage = ProviderUseValue.summary(.custom(custom.id))
                 NavigationLink { CustomProviderDetail(id: custom.id) } label: {
-                    AccountRow(provider: .custom, name: custom.displayName, usage: usage)
+                    CustomAccountRow(provider: custom)
                 }
             }
             // The sheet and the redraw hang on this one row: on the sections they would repeat per row.
@@ -133,8 +132,8 @@ private struct AccountRow: View {
         HStack(spacing: 12) {
             ProviderTile(provider: provider)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: provider.name)
-                Text(verbatim: ProviderUseValue.summary(.account(provider))).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: name)
+                Text(verbatim: usage).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
             }
         }
     }

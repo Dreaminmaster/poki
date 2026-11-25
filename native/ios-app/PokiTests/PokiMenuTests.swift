@@ -180,6 +180,27 @@ final class PokiMenuTests: XCTestCase {
         XCTAssertTrue(modelActions.contains { $0.title == "poki-test-model" && $0.state == .on })
     }
 
+    func testModelChoiceKeepsIdenticallyNamedCustomModelsOnTheirOwnAccounts() throws {
+        let storage = storage.storage
+        let first = CustomProviders.upsert(CustomProvider(
+            endpoints: [CustomEndpoint(url: "http://127.0.0.1:8765/v1")], model: "shared-model"
+        ), storage: storage)
+        let second = CustomProviders.upsert(CustomProvider(
+            endpoints: [CustomEndpoint(url: "http://127.0.0.1:8766/v1")], model: "shared-model"
+        ), storage: storage)
+
+        let firstChoice = CustomProviders.choiceID(first.id, first.model)
+        let secondChoice = CustomProviders.choiceID(second.id, second.model)
+        ModelKeys.choose(.custom, model: secondChoice, in: storage)
+        XCTAssertEqual(ModelKeys.selectedProvider(in: storage), .custom)
+        XCTAssertEqual(ModelKeys.selectedModel(in: storage), secondChoice)
+        XCTAssertEqual(CustomProviders.current(in: storage)?.id, second.id)
+
+        ModelKeys.choose(.custom, model: firstChoice, in: storage)
+        XCTAssertEqual(ModelKeys.selectedModel(in: storage), firstChoice)
+        XCTAssertEqual(CustomProviders.current(in: storage)?.id, first.id)
+    }
+
     func testVoiceHeaderMenuAnchorsBelowAvatar() throws {
         let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
         let window = try show(

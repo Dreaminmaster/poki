@@ -286,6 +286,13 @@ enum CodexAccount {
         return ValidSignIn(accessToken: signIn.tokens.accessToken, lastRefresh: parsedLastRefresh)
     }
 
+    /// The ChatGPT workspace an access token is for (its `chatgpt_account_id` claim), which Codex's
+    /// requests name in their `chatgpt-account-id` header.
+    static func chatGPTAccountID(_ accessToken: String) -> String? {
+        guard let id = decodeIdClaims(from: accessToken)?.auth?.chatgptAccountId, !id.isEmpty else { return nil }
+        return id
+    }
+
     private static func decodeIdClaims(from token: String) -> IdClaims? {
         guard let payload = decodeJWTPayloadData(token) else { return nil }
         return try? JSONDecoder().decode(IdClaims.self, from: payload)
