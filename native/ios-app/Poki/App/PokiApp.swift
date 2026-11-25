@@ -301,7 +301,6 @@ struct RootView: View {
             openSession: { id, entryID in openRun(id, entryID: entryID) },
             searchJump: searchJump,
             onSearchJumpApplied: consumeSearchJump,
-            revealedSearchEntryID: { id in searchNavigation.revealedEntry(in: id) },
             sessionStore: sessionStore,
             path: $detailsPath
         )
@@ -578,7 +577,7 @@ struct RootView: View {
             detailsOpen = true
             searchNavigation.open(entryID.map { ConversationSearchJump(sessionID: id, entryID: $0) }, preview: true)
             // A preview is separate from the active chat; don't perturb its transcript selection.
-            detailsPath.append(DetailsRoute.sessionPreview(id))
+            detailsPath.append(DetailsRoute.sessionPreview(id, entryID: entryID))
             return
         }
         detailsOpen = false

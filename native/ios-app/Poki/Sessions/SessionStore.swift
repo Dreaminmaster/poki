@@ -241,7 +241,12 @@ final class SessionStore {
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
-    private(set) var sessions: [SavedSession] = []
+    /// In-memory invalidation for conversation search, separate from the user's
+    /// conversation timestamps. Includes in-place edits and load/delete/trim paths.
+    private(set) var searchRevision: UInt64 = 0
+    private(set) var sessions: [SavedSession] = [] {
+        didSet { searchRevision &+= 1 }
+    }
     private(set) var isInitialReady = false
     private(set) var isLoaded = false
     /// A conversation that just left the list, archived or deleted. The screen that still shows it
@@ -259,30 +264,55 @@ final class SessionStore {
     private var initialLoadWaiters: [() -> Void] = []
     private var fullLoadWaiters: [() -> Void] = []
     private let writeQueue = DispatchQueue(label: "nz.zheha.poki.session-writes", qos: .utility)
-    // Accessed only on writeQueue so flush sees failures from earlier queued writes.
+    // Writes remain serial. A small lock protects status reads without waiting for unrelated disk I/O.
     private let writeFailures = WriteFailures()
 
     private final class WriteFailures: @unchecked Sendable {
+        private let lock = NSLock()
         private var ids: Set<String> = []
+        private var queued: [String: Int] = [:]
 
-        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = []) {
+        func needsFlush(_ id: String) -> Bool {
+            lock.withLock { ids.contains(id) || queued[id] != nil }
+        }
+
+        // Register before dispatching: a scoped flush must also see work that has not started.
+        func enqueue(_ ids: [String]) {
+            lock.withLock { for id in ids { queued[id, default: 0] += 1 } }
+        }
+
+        func complete(_ ids: [String]) {
+            lock.withLock {
+                for id in ids {
+                    if let count = queued[id], count > 1 { queued[id] = count - 1 }
+                    else { queued.removeValue(forKey: id) }
+                }
+            }
+        }
+
+        func write(_ snapshots: [(URL, SavedSession)], retryingFrom current: [(URL, SavedSession)] = [],
+                   pruneMissingFailures: Bool = true) {
             let pending = Set(snapshots.map { $0.1.id })
-            let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
-            if !current.isEmpty {
-                ids.formIntersection(Set(current.map { $0.1.id }))
+            let retries = lock.withLock {
+                let retries = current.filter { ids.contains($0.1.id) && !pending.contains($0.1.id) }
+                // A scoped flush passes only one current session, not the full store.
+                if pruneMissingFailures && !current.isEmpty {
+                    ids.formIntersection(Set(current.map { $0.1.id }))
+                }
+                return retries
             }
             let encoder = JSONEncoder()
             for (url, session) in snapshots + retries {
                 do {
                     try encoder.encode(session).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-                    ids.remove(session.id)
+                    _ = lock.withLock { ids.remove(session.id) }
                 } catch {
-                    ids.insert(session.id)
+                    _ = lock.withLock { ids.insert(session.id) }
                 }
             }
         }
 
-        func forget(_ ids: Set<String>) { self.ids.subtract(ids) }
+        func forget(_ ids: Set<String>) { lock.withLock { self.ids.subtract(ids) } }
     }
     /// The outside agent sessions seen since launch: id → client name.
     /// Each MCP session's client name (its clientInfo at initialize), kept across launches: an agent
@@ -709,10 +739,10 @@ final class SessionStore {
         return [time] + lines.map { line in
             var entry: ChatEntry
             switch line.role {
-            case .you: entry = ChatEntry(.you(line.text, delivered: true))
-            case .poki: entry = ChatEntry(.poki(line.text))
-            case .tool: entry = ChatEntry(.step(line.text, ok: true))
-            case .note: entry = ChatEntry(.note(.problem(line.text)))
+            case .you: entry = ChatEntry(.you(line.text, delivered: true), id: line.id)
+            case .poki: entry = ChatEntry(.poki(line.text), id: line.id)
+            case .tool: entry = ChatEntry(.step(line.text, ok: true), id: line.id)
+            case .note: entry = ChatEntry(.note(.problem(line.text)), id: line.id)
             }
             entry.at = line.at
             return entry
@@ -928,17 +958,27 @@ final class SessionStore {
         pendingWrites = []
         guard !snapshots.isEmpty else { return }
         let failures = writeFailures
-        writeQueue.async { failures.write(snapshots) }
+        let ids = snapshots.map { $0.1.id }
+        failures.enqueue(ids)
+        writeQueue.async {
+            defer { failures.complete(ids) }
+            failures.write(snapshots)
+        }
     }
 
     /// Writes changed sessions now, including previously failed writes still in memory, or only the requested conversation.
     func flush(sessionID: String? = nil) {
         if let sessionID {
-            guard pendingWrites.remove(sessionID) != nil else { return }
-            let snapshots = session(sessionID).map { [(file(sessionID), $0)] } ?? []
-            guard !snapshots.isEmpty else { return }
+            let pending = pendingWrites.remove(sessionID) != nil
+            guard let saved = session(sessionID) else { return }
+            let snapshots = [(file(sessionID), saved)]
             let failures = writeFailures
-            writeQueue.sync { failures.write(snapshots) }
+            // Skip unrelated disk work if this session is already clean. If its own
+            // write is queued or failed, wait for that work and retry if necessary.
+            guard pending || failures.needsFlush(sessionID) else { return }
+            writeQueue.sync {
+                failures.write(pending ? snapshots : [], retryingFrom: snapshots, pruneMissingFailures: false)
+            }
             return
         }
         writeTask?.cancel()

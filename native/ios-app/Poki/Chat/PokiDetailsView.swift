@@ -20,7 +20,6 @@ struct PokiDetailsView: View {
     var openSession: (String, UUID?) -> Void = { _, _ in }
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
-    var revealedSearchEntryID: (String) -> UUID? = { _ in nil }
     var sessionStore: SessionStore = .shared
     @Binding var path: NavigationPath
     @ObservedObject private var historyLock = HistoryLock.shared
@@ -200,14 +199,14 @@ struct PokiDetailsView: View {
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
-                case .sessionPreview(let id):
+                case .sessionPreview(let id, let entryID):
                     SessionView(id: id,
                                 back: { if !path.isEmpty { path.removeLast() } },
                                 searchJump: searchJump?.sessionID == id ? searchJump : nil,
                                 onSearchJumpApplied: onSearchJumpApplied,
                                 sessionStore: sessionStore,
                                 readOnly: true,
-                                revealedSearchEntryID: revealedSearchEntryID(id))
+                                revealedSearchEntryID: entryID)
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .composer:
@@ -277,7 +276,8 @@ struct PokiDetailsView: View {
 
 enum DetailsRoute: Hashable {
     case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, composer, about
-    case sessionPreview(String)
+    // Keep the selected message with this read-only destination after its one-shot scroll.
+    case sessionPreview(String, entryID: UUID?)
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey, lockSettings
@@ -387,14 +387,71 @@ enum ConversationSearchIndex {
     }
 
     /// Reattach result IDs to current saved records after background search completes.
-    /// Both the live search view and tests use this resolver, so deleted sessions never appear.
-    static func resolve(_ matches: [Match], in sessions: [SavedSession]) -> [ConversationSearchHit] {
+    /// Both the live search view and tests use this resolver: a deleted session or replaced
+    /// message must not leave a result that cannot be opened.
+    static func resolve(_ matches: [Match], in sessions: [SavedSession], query: String? = nil) -> [ConversationSearchHit] {
         let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
+        // Find all requested IDs in one traversal per conversation, not one
+        // traversal per hit. The display limit bounds the auxiliary dictionaries.
+        var wanted: [String: Set<UUID>] = [:]
+        for match in matches {
+            if let entryID = match.entryID { wanted[match.sessionID, default: []].insert(entryID) }
+        }
+        var targets: [String: [UUID: ChatEntry]] = [:]
+        for (sessionID, ids) in wanted {
+            guard let session = saved[sessionID] else { continue }
+            var remaining = ids
+            var entries: [UUID: ChatEntry] = [:]
+            for entry in session.entries {
+                if remaining.remove(entry.id) != nil { entries[entry.id] = entry }
+                if remaining.isEmpty { break }
+            }
+            targets[sessionID] = entries
+        }
+        let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines)
         return matches.compactMap { match in
             guard let session = saved[match.sessionID] else { return nil }
+            if let entryID = match.entryID {
+                guard let entry = targets[match.sessionID]?[entryID] else { return nil }
+                if let needle { return validatedMessageHit(entry, in: session, needle: needle) }
+            } else if let needle {
+                return validatedSessionHit(in: session, needle: needle)
+            }
             return ConversationSearchHit(session: session, entryID: match.entryID,
                                          detail: match.detail, author: match.author, at: match.at)
         }
+    }
+
+    /// A snapshot can finish while the store changes. Re-read the actual text,
+    /// not just its ID: an in-place edit may retain the ID but remove the match.
+    static func validatedHit(_ entryID: UUID?, in session: SavedSession, query: String) -> ConversationSearchHit? {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let entryID {
+            guard let entry = session.entries.first(where: { $0.id == entryID }) else { return nil }
+            return validatedMessageHit(entry, in: session, needle: needle)
+        }
+        return validatedSessionHit(in: session, needle: needle)
+    }
+
+    private static func validatedMessageHit(_ entry: ChatEntry, in session: SavedSession, needle: String) -> ConversationSearchHit? {
+        guard !needle.isEmpty, let text = searchableText(entry), text.localizedStandardContains(needle) else { return nil }
+        return ConversationSearchHit(session: session, entryID: entry.id,
+                                     detail: excerpt(text, around: needle), author: author(entry), at: entry.at)
+    }
+
+    private static func validatedSessionHit(in session: SavedSession, needle: String) -> ConversationSearchHit? {
+        let metadata = [session.name, session.title, session.client ?? "", session.customName ?? "", session.autoName ?? ""]
+        let titleMatches = needle.isEmpty || metadata.contains { $0.localizedStandardContains(needle) }
+        if !titleMatches {
+            guard session.lastLine.localizedStandardContains(needle),
+                  !session.entries.contains(where: { searchableText($0)?.localizedStandardContains(needle) == true }) else { return nil }
+        }
+        return ConversationSearchHit(session: session, entryID: nil, detail: session.lastLine, author: nil, at: nil)
+    }
+
+    static func hasTarget(_ entryID: UUID?, in session: SavedSession) -> Bool {
+        guard let entryID else { return true }
+        return session.entries.contains { $0.id == entryID }
     }
 
     static func searchableText(_ entry: ChatEntry) -> String? {
@@ -445,73 +502,86 @@ private struct ConversationsSettingsView: View {
     @Environment(\.locale) private var viewLocale
     private var store: SessionStore { SessionStore.shared }
 
-    @State private var matches: [ConversationSearchHit] = []
+    @State private var matches: [ConversationSearchIndex.Match] = []
+    @State private var resolvedMatches: [ConversationSearchHit] = []
     @State private var cachedSnapshot: [ConversationSearchIndex.IndexedSession] = []
-    @State private var cachedRevision: Int?
+    @State private var cachedRevision: UInt64?
     @State private var cachedLocale: String?
-    @State private var searching = false
+    @State private var publishedKey: SearchKey?
+    @State private var refreshSignal: AsyncStream<Void>.Continuation?
 
-    private struct SearchKey: Equatable {
+    private struct SearchRequest: Equatable {
         let query: String
-        let revision: Int
         let locale: String
     }
 
-    /// Observing just a cheap fingerprint also notices archive/rename/new-message changes.
-    /// Do not read all message bodies every time SwiftUI evaluates the list.
-    private var historyRevision: Int {
-        var hasher = Hasher()
-        for session in store.sessions {
-            hasher.combine(session.id)
-            hasher.combine(session.updated)
-            hasher.combine(session.entries.count)
-            hasher.combine(session.entries.last?.id)
-            hasher.combine(session.name)
-            hasher.combine(session.archived)
-            hasher.combine(session.unarchived)
-        }
-        return hasher.finalize()
+    private struct SearchKey: Equatable {
+        let query: String
+        let revision: UInt64
+        let locale: String
+        var request: SearchRequest { SearchRequest(query: query, locale: locale) }
     }
 
-    @MainActor private func refreshMatches() async {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+    private var searchKey: SearchKey {
+        SearchKey(query: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                  revision: store.searchRevision, locale: viewLocale.identifier)
+    }
+
+    @MainActor private func refreshMatches(for request: SearchRequest) async {
+        guard !Task.isCancelled, request == searchKey.request else { return }
+        guard !request.query.isEmpty else {
             matches = []
-            searching = false
+            resolvedMatches = []
+            publishedKey = searchKey
             return
         }
-        searching = true
-        matches = []
-        let revision = historyRevision
-        if cachedRevision != revision || cachedLocale != viewLocale.identifier {
-            // Chunk the one-time main-actor snapshot across run-loop turns.
-            var updated: [ConversationSearchIndex.IndexedSession] = []
-            for (index, session) in store.ordered.enumerated() {
-                if Task.isCancelled { return }
-                updated.append(contentsOf: ConversationSearchIndex.snapshot(in: [session]))
-                if index % 8 == 7 { await Task.yield() }
-            }
-            guard !Task.isCancelled else { return }
-            cachedSnapshot = updated
-            cachedRevision = revision
-            cachedLocale = viewLocale.identifier
-        }
-        let source = cachedSnapshot
-        do { try await Task.sleep(for: .milliseconds(180)) }
-        catch { return }
-        guard !Task.isCancelled else { return }
 
-        let work = Task.detached(priority: .userInitiated) {
-            ConversationSearchIndex.search(source, query: text)
+        // Query/locale changes cancel this worker. Store revisions only enqueue a
+        // coalesced refresh, so continuous live saves cannot starve a fixed query.
+        let (updates, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        refreshSignal = signal
+        defer { signal.finish() }
+        signal.yield(())
+        for await _ in updates {
+            do { try await Task.sleep(for: .milliseconds(180)) }
+            catch { return }
+            guard !Task.isCancelled, request == searchKey.request else { return }
+            let key = searchKey
+            if publishedKey == key { continue }
+
+            if cachedRevision != key.revision || cachedLocale != key.locale {
+                // Capture an immutable array before yielding, never mix revisions.
+                let sessions = store.ordered
+                var updated: [ConversationSearchIndex.IndexedSession] = []
+                for (index, session) in sessions.enumerated() {
+                    guard !Task.isCancelled, request == searchKey.request else { return }
+                    updated.append(contentsOf: ConversationSearchIndex.snapshot(in: [session]))
+                    if index % 8 == 7 { await Task.yield() }
+                }
+                guard !Task.isCancelled, request == searchKey.request else { return }
+                cachedSnapshot = updated
+                cachedRevision = key.revision
+                cachedLocale = key.locale
+            }
+            let source = cachedSnapshot
+            let work = Task.detached(priority: .userInitiated) {
+                ConversationSearchIndex.search(source, query: request.query)
+            }
+            let hits = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
+            guard !Task.isCancelled, request == searchKey.request else { return }
+            matches = hits
+            // A current snapshot already contains the correct excerpts. Reuse
+            // resolved rows while its revision remains current; only revalidate
+            // the text of an older snapshot when the store actually changes.
+            resolvedMatches = key == searchKey ? ConversationSearchIndex.resolve(hits, in: store.sessions) : []
+            publishedKey = key
+            // Also catch changes coalesced before SwiftUI delivered onChange.
+            if key != searchKey { signal.yield(()) }
         }
-        let hits = await withTaskCancellationHandler {
-            await work.value
-        } onCancel: {
-            work.cancel()
-        }
-        guard !Task.isCancelled else { return }
-        matches = ConversationSearchIndex.resolve(hits, in: store.ordered)
-        searching = false
     }
 
     /// A static resource key lets SwiftUI resolve the current environment locale at render time.
@@ -527,8 +597,15 @@ private struct ConversationsSettingsView: View {
     }
 
     var body: some View {
+        let key = searchKey
+        let searching = publishedKey != key
+        // While refreshing, show only still-valid hits for this exact query.
+        // A deleted or edited message cannot be kept visible by an old snapshot.
+        let currentMatches = publishedKey == key ? resolvedMatches :
+            (publishedKey?.request == key.request
+                ? ConversationSearchIndex.resolve(matches, in: store.sessions, query: key.query) : [])
         List {
-            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if key.query.isEmpty {
                 let archived = store.archivedSessions
                 Section {
                     ForEach(archived) { session in
@@ -557,8 +634,13 @@ private struct ConversationsSettingsView: View {
                         .listRowBackground(Color.clear)
                 }
             } else {
-                ForEach(matches) { hit in
-                    Button { openSession(hit.session.id, hit.entryID) } label: {
+                ForEach(currentMatches) { hit in
+                    Button {
+                        guard key.request == searchKey.request, publishedKey?.request == key.request,
+                              let session = store.session(hit.session.id),
+                              ConversationSearchIndex.validatedHit(hit.entryID, in: session, query: key.query) != nil else { return }
+                        openSession(hit.session.id, hit.entryID)
+                    } label: {
                         HStack(alignment: .top, spacing: 12) {
                             SessionAvatar(session: hit.session, size: 36)
                             VStack(alignment: .leading, spacing: 4) {
@@ -591,10 +673,10 @@ private struct ConversationsSettingsView: View {
                         Text("Searching messages…", tableName: "ConversationSearch")
                     }
                     .frame(maxWidth: .infinity, minHeight: 64)
-                } else if matches.isEmpty {
+                } else if currentMatches.isEmpty {
                     ContentUnavailableView.search(text: query)
                 }
-                if !searching && matches.count == ConversationSearchIndex.displayLimit {
+                if !searching && currentMatches.count == ConversationSearchIndex.displayLimit {
                     Text("Showing the first 150 results. Refine the search to see more.",
                          tableName: "ConversationSearch")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -604,8 +686,9 @@ private struct ConversationsSettingsView: View {
         .navigationTitle(AppLocalization.text("Archived Conversations"))
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: Text("Search all messages", tableName: "ConversationSearch"))
-        .task(id: SearchKey(query: query, revision: historyRevision, locale: viewLocale.identifier)) {
-            await refreshMatches()
+        .onChange(of: key.revision) { _, _ in refreshSignal?.yield(()) }
+        .task(id: key.request) {
+            await refreshMatches(for: key.request)
         }
     }
 }
