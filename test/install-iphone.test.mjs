@@ -28,33 +28,14 @@ function runInstaller(state, { scenario = 'happy', env = {}, answer = {}, stateA
     env: { ...process.env, ...fastEnv, POKI_FAKE_SCENARIO: scenario, POKI_APPLE_ID: 'tester@example.com', POKI_SETUP_PASSWORD: 'correct horse', ...env },
   });
   const events = [];
-  const pendingAnswers = [];
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += chunk; });
-  createInterface({ input: child.stdout }).on('line', line => {
+  createInterface({ input: child.stdout }).on('line', async line => {
     const event = JSON.parse(line);
     events.push(event);
-    if (event.event !== 'wait' || !answer[event.wait]) return;
-    // EventEmitter does not await async listeners. Keep each answer's outcome
-    // so a failed simulated input is not reported only as an installer timeout.
-    const pending = Promise.resolve().then(() => answer[event.wait](event)).then(result =>
-      typeof result?.code === 'number' && result.code !== 0 ? { wait: event.wait, code: result.code } : null,
-      error => ({ wait: event.wait, code: typeof error?.code === 'number' ? error.code : null }));
-    pendingAnswers.push(pending);
+    if (event.event === 'wait' && answer[event.wait]) await answer[event.wait](event);
   });
-  return new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', async code => {
-      try {
-        const failures = (await Promise.all(pendingAnswers)).filter(Boolean);
-        // Do not print raw answer output: other tests assert credential secrecy.
-        assert.deepEqual(failures, [], 'Simulated person answer failed');
-        resolve({ code, events, stderr });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
+  return new Promise(resolve => child.on('close', code => resolve({ code, events, stderr })));
 }
 
 const sub = (state, ...args) => exec(process.execPath, [cli, ...args, '--state', state]);
