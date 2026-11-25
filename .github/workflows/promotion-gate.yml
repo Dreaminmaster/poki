@@ -63,6 +63,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: CHANGELOG.md has an entry for this version
+        if: needs.read.outputs.channel == 'beta' || needs.read.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/scripts/promotion.py changelog
       - name: Stable waits after its beta
         if: needs.read.outputs.channel == 'stable' && !contains(github.event.pull_request.labels.*.name, 'soak-override')
         env:

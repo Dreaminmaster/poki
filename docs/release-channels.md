@@ -64,19 +64,21 @@ testers on Alpha run the file that was tried on Pre-alpha, and Beta runs the fil
 3. **Beta, by PR.** Actions > Propose promotion > beta (`propose-promotion.yml`), with an alpha tag or
    empty for the current Alpha. The Poki Release Bot opens a PR that adds the promotion to
    `.github/channels.json` and moves `native/ios-app/VERSION` to the next patch version. The PR's
-   `promotion gate` check (`promotion-gate.yml`) runs the Gym on that commit and passes when neither
-   scorecard has more failures than the last beta's. Merging waits for approval in `beta`, then publishes `app-X.Y.Z-beta.K`
-   (`publish-promotion.yml`) with the scorecards attached, and creates `release/X.Y` on a version's
-   first beta.
+   `promotion gate` check (`promotion-gate.yml`) verifies that `CHANGELOG.md` has a dated entry for
+   this version, runs the Gym on that commit and passes when neither scorecard has more failures
+   than the last beta's. Merging waits for approval in `beta`, re-checks `CHANGELOG.md`, then
+   publishes `app-X.Y.Z-beta.K` (`publish-promotion.yml`) with that changelog section in its release
+   notes and the scorecards attached, and creates `release/X.Y` on a version's first beta.
 
    Promotions only move the patch version. To start a new minor version (0.3.x to 0.4.0), the
    repository owner merges a PR that sets `native/ios-app/VERSION` to it; the pre-alpha built from
    that merge is the first build of the new version, and later promotions bump its patch as above.
 4. **Stable, by PR.** Propose promotion > stable, with a beta tag or empty for the newest beta. The
-   gate passes once that beta has been out for `soak_days` (3, in `.github/channels.json`) and no
-   issue labelled `blocker` is open. To ship sooner, add the `soak-override` label to the PR, or give
-   a reason in the proposal's skip field (it is kept in `channels.json`). Merging publishes
-   `app-X.Y.Z` after approval in the `stable` environment.
+   gate verifies `CHANGELOG.md` has a dated entry for `X.Y.Z` and passes once that beta has been out
+   for `soak_days` (3, in `.github/channels.json`) and no issue labelled `blocker` is open. To ship
+   sooner, add the `soak-override` label to the PR, or give a reason in the proposal's skip field
+   (it is kept in `channels.json`). Merging publishes `app-X.Y.Z` with that changelog section after
+   approval in the `stable` environment.
 
 Every publish creates a draft first, checks its file count, then publishes. Releases carry
 `Poki-external-<name>.ipa`, `Poki-signing.zip`, `poki-relay-worker.js` (the relay Worker Poki Setup
