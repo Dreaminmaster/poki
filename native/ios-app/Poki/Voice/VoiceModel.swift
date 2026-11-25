@@ -1781,15 +1781,23 @@ final class VoiceModel {
         case "poki/backend/turnCompleted":
             clearCodexHandoff()
             codexBackendBusy = false
-            awaitingAnswer = false
             lastActivity = time.now()
             if params["status"] as? String == "failed" {
+                awaitingAnswer = false
                 let failure = CodexVoice.failure(in: params, fallback: .backendFailed)
                 let reason = failure.localizedDescription
                 if failure == .signIn { needsChatGPTSignIn = true }
                 closed("the ChatGPT voice backend failed", session: number, confirmed: true, lostMessage: reason, note: reason)
                 return
             }
+            if params["hasSpeech"] as? Bool == true {
+                awaitingAnswer = true
+                keepOpen()
+                if phase != .speaking && phase != .hearing { phase = .thinking }
+                watchForStall(session: number)
+                return
+            }
+            awaitingAnswer = false
             if phase == .thinking, !answerDue { phase = .listening }
             endIfDone()
         case "poki/backend/error":

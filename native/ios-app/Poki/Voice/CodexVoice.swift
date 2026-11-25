@@ -60,6 +60,10 @@ final class CodexVoice: SubscriptionVoice {
     @ObservationIgnored private var loginID: String?
     @ObservationIgnored private var thread: String?
     @ObservationIgnored private var sessionInstructions: String?
+    @ObservationIgnored private var activeTurnID: String?
+    @ObservationIgnored private var inFlightTools = 0
+    @ObservationIgnored private var pendingFinalSpeech: String?
+    @ObservationIgnored private var deferredTurnCompleted: JSON?
     @ObservationIgnored private var nextRequest = 0
     @ObservationIgnored private var onEvent: ((String, JSON) -> Void)?
     @ObservationIgnored private var onTool: ((String, String) async -> PhoneAnswer)?
@@ -87,31 +91,33 @@ final class CodexVoice: SubscriptionVoice {
     func prepare(onEvent: @escaping (String, JSON) -> Void, onTool: @escaping (String, String) async -> PhoneAnswer) async throws {
         let generation = UUID()
         active = generation
+        resetTurnSync()
         self.onEvent = onEvent
         self.onTool = onTool
         try await requireAccount(generation)
-        let instructions = VoiceDirect.realtimeInstructions
+        let backendInstructions = VoiceDirect.codexBackendInstructions
+        let frontendInstructions = VoiceDirect.codexFrontendInstructions
         let tools = VoiceDirect.codexTools
-        sessionInstructions = instructions
+        sessionInstructions = frontendInstructions
         let answer = try await request("thread/start", [
             "cwd": homePath, "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true,
-            "developerInstructions": instructions,
+            "developerInstructions": backendInstructions,
             "dynamicTools": tools,
         ])
         try check(generation)
         guard let thread = (answer["thread"] as? JSON)?["id"] as? String else { throw Failure.unavailable }
         self.thread = thread
-        AppLog.shared.add("voice", "Codex session prepared: \(tools.count) tools, developer instructions \(instructions.count) chars")
+        AppLog.shared.add("voice", "Codex session prepared: \(tools.count) tools, developer instructions \(backendInstructions.count) chars")
     }
 
     func start(offer: String) async throws -> String {
         guard let thread, let active else { throw Failure.ended }
         let answerKey = "sdp:\(thread)"
-        let instructions = sessionInstructions ?? VoiceDirect.realtimeInstructions
-        AppLog.shared.add("voice", "Codex realtime starting: prompt \(instructions.count) chars, startup context off")
+        let instructions = sessionInstructions ?? VoiceDirect.codexFrontendInstructions
+        AppLog.shared.add("voice", "Codex realtime starting: prompt \(instructions.count) chars, startup context off, client-managed handoffs on")
         try await request("thread/realtime/start", [
             "threadId": thread, "model": Self.model, "version": "v3", "outputModality": "audio",
-            "includeStartupContext": false, "prompt": instructions,
+            "includeStartupContext": false, "clientManagedHandoffs": true, "prompt": instructions,
             "voiceSessionId": active.uuidString,
             "transport": ["type": "webrtc", "sdp": offer],
         ])
@@ -125,6 +131,7 @@ final class CodexVoice: SubscriptionVoice {
     func stop() {
         active = nil
         sessionInstructions = nil
+        resetTurnSync()
         onEvent = nil
         onTool = nil
         cancelLogin()
@@ -134,6 +141,13 @@ final class CodexVoice: SubscriptionVoice {
             sendWithoutWaiting("thread/realtime/stop", ["threadId": thread])
         }
         completed.removeAll()
+    }
+
+    private func resetTurnSync() {
+        activeTurnID = nil
+        inFlightTools = 0
+        pendingFinalSpeech = nil
+        deferredTurnCompleted = nil
     }
 
     func signOut() async throws {
@@ -351,6 +365,7 @@ final class CodexVoice: SubscriptionVoice {
         if method == "poki/runtime/closed" {
             running = false
             needsAccountReload = false
+            resetTurnSync()
             if let stage = params["stage"] as? String {
                 AppLog.shared.add("voice", "Codex runtime stopped at \(stage)")
             }
@@ -396,7 +411,15 @@ final class CodexVoice: SubscriptionVoice {
                 }
                 argumentsText = String(decoding: bytes, as: UTF8.self)
             }
+            inFlightTools += 1
+            pendingFinalSpeech = nil
             Task {
+                defer {
+                    if self.active == active {
+                        self.inFlightTools = max(0, self.inFlightTools - 1)
+                        self.flushDeferredTurnCompletedIfReady()
+                    }
+                }
                 guard self.active == active else { reject("session ended"); return }
                 let answer = await onTool(name, argumentsText)
                 guard self.active == active else { reject("session ended"); return }
@@ -413,19 +436,39 @@ final class CodexVoice: SubscriptionVoice {
             }
             onEvent?(method, params)
         case "poki/backend/turnStarted":
+            activeTurnID = params["turnId"] as? String
+            pendingFinalSpeech = nil
+            deferredTurnCompleted = nil
             AppLog.shared.add("voice", "Codex backend turn started")
             onEvent?(method, params)
+        case "poki/backend/agentMessage":
+            if let messageTurnID = params["turnId"] as? String, let activeTurnID, messageTurnID != activeTurnID {
+                return
+            }
+            if params["phase"] as? String == "commentary" {
+                return
+            }
+            if let text = params["text"] as? String {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    pendingFinalSpeech = trimmed
+                }
+            }
         case "poki/backend/turnCompleted":
             let status = params["status"] as? String ?? "unknown"
-            let detail = Self.formatBackendDiagnostic(params)
-            AppLog.shared.add("voice", "Codex backend turn completed: \(status)\(detail)")
-            onEvent?(method, params)
+            if status == "completed", inFlightTools > 0 {
+                deferredTurnCompleted = params
+                return
+            }
+            deliverTurnCompleted(params)
         case "poki/backend/error":
             let code = params["code"] as? String ?? "unknown"
             let willRetry = params["willRetry"] as? Bool ?? false
             let detail = Self.formatBackendDiagnostic(params)
             AppLog.shared.add("voice", "Codex backend error: \(code), retry: \(willRetry)\(detail)")
             if !willRetry {
+                pendingFinalSpeech = nil
+                deferredTurnCompleted = nil
                 onEvent?(method, params)
             }
         case "poki/backend/warning":
@@ -439,6 +482,7 @@ final class CodexVoice: SubscriptionVoice {
         case "thread/realtime/sdp":
             finish("sdp:\(thread)", .success(params), retain: true)
         case "thread/realtime/error", "thread/realtime/closed":
+            resetTurnSync()
             if method == "thread/realtime/error", let diagnostic = params["diagnostic"] as? String {
                 AppLog.shared.add("voice", diagnostic)
             }
@@ -447,6 +491,36 @@ final class CodexVoice: SubscriptionVoice {
         default:
             onEvent?(method, params)
         }
+    }
+
+    private func flushDeferredTurnCompletedIfReady() {
+        guard inFlightTools == 0, let deferred = deferredTurnCompleted else { return }
+        deferredTurnCompleted = nil
+        deliverTurnCompleted(deferred)
+    }
+
+    private func deliverTurnCompleted(_ params: JSON) {
+        let status = params["status"] as? String ?? "unknown"
+        let detail = Self.formatBackendDiagnostic(params)
+        AppLog.shared.add("voice", "Codex backend turn completed: \(status)\(detail)")
+        let speech: String?
+        if status == "completed" {
+            let candidate = pendingFinalSpeech ?? (params["finalText"] as? String)
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            speech = trimmed.isEmpty ? nil : trimmed
+        } else {
+            speech = nil
+        }
+        pendingFinalSpeech = nil
+        deferredTurnCompleted = nil
+        var forwarded = params
+        if let speech, let thread {
+            sendWithoutWaiting("thread/realtime/appendSpeech", ["threadId": thread, "text": speech])
+            forwarded["hasSpeech"] = true
+        } else {
+            forwarded["hasSpeech"] = false
+        }
+        onEvent?("poki/backend/turnCompleted", forwarded)
     }
 
     static func failure(in params: JSON?, fallback: Failure) -> Failure {

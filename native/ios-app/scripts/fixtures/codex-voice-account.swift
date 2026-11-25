@@ -6,6 +6,8 @@ typealias PhoneAnswer = (text: String, failed: Bool, screen: Data?)
 enum VoiceDirect {
     static let localTools = ["get_ios_version", "look", "open_app", "do"]
     static let realtimeInstructions = "fixture-realtime-instructions"
+    static let codexFrontendInstructions = "fixture-codex-frontend-instructions"
+    static let codexBackendInstructions = "fixture-codex-backend-instructions"
     static let codexTools: [[String: Any]] = [
         ["type": "function", "name": "look", "description": "fixture", "inputSchema": ["type": "object"]],
     ]
