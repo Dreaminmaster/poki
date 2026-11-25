@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The `@` app mention overlay shown 8pt above the composer bar.
 /// Deep smoked Liquid Glass (26pt continuous radius), 280–340pt adaptive width, `#6CB0FF` matched-prefix highlight,
-/// 4.5-row viewport (~252pt max height) with 10pt bottom fade & 3pt scroll indicator, and compact empty state with B1 escape hatch.
+/// Fits its results up to 252pt, then scrolls with a bottom fade and a custom indicator.
 struct MentionPicker: View {
     var state: AppMentionState
     var composerWidth: CGFloat
@@ -12,14 +12,16 @@ struct MentionPicker: View {
 
     @Environment(\.colorScheme) private var scheme
     @State private var scrollOffset: CGFloat = 0
-    @State private var contentHeight: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
 
     private let cornerRadius: CGFloat = 26
     private let rowHeight: CGFloat = 46
     private let headerHeight: CGFloat = 34
+    private let listBottomPadding: CGFloat = 6
     private let maxTotalHeight: CGFloat = 252
-    private var maxListHeight: CGFloat { maxTotalHeight - headerHeight - 6 }
+
+    private var contentHeight: CGFloat { CGFloat(state.matches.count) * rowHeight + listBottomPadding }
+    private var listHeight: CGFloat { min(contentHeight, maxTotalHeight - headerHeight) }
+    private var isScrollable: Bool { contentHeight > listHeight }
 
     private var pickerWidth: CGFloat {
         MentionPickerLayout.width(for: composerWidth)
@@ -29,16 +31,8 @@ struct MentionPicker: View {
         MentionPickerLayout.horizontalOffset(caretX: caretX, pickerWidth: pickerWidth, composerWidth: composerWidth)
     }
 
-    private var isScrollable: Bool {
-        contentHeight > viewportHeight + 2 || CGFloat(state.matches.count) * rowHeight > maxListHeight
-    }
-
     private var showsBottomFade: Bool {
-        guard isScrollable else { return false }
-        if contentHeight <= 0 || viewportHeight <= 0 {
-            return CGFloat(state.matches.count) * rowHeight > maxListHeight
-        }
-        return scrollOffset + viewportHeight < contentHeight - 4
+        isScrollable && scrollOffset + listHeight < contentHeight - 4
     }
 
     var body: some View {
@@ -61,8 +55,7 @@ struct MentionPicker: View {
     }
 
     private var listContent: some View {
-        let listHeight = min(CGFloat(state.matches.count) * rowHeight, maxListHeight)
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack(spacing: 5) {
                 Text("@")
                     .font(.caption.weight(.bold))
@@ -89,13 +82,14 @@ struct MentionPicker: View {
                             .accessibilityIdentifier("mention.row.\(app.id)")
                         }
                     }
-                    .padding(.bottom, 6)
+                    .padding(.bottom, listBottomPadding)
                 }
                 .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: MentionScrollMetrics.self, of: MentionScrollMetrics.init) { _, metrics in
-                    scrollOffset = metrics.offset
-                    contentHeight = metrics.contentHeight
-                    viewportHeight = metrics.viewportHeight
+                .scrollBounceBehavior(.basedOnSize)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+                } action: { _, offset in
+                    scrollOffset = offset
                 }
                 .mask {
                     if showsBottomFade {
@@ -120,8 +114,8 @@ struct MentionPicker: View {
                 if isScrollable {
                     MentionScrollIndicator(
                         offset: scrollOffset,
-                        contentHeight: max(contentHeight, CGFloat(state.matches.count) * rowHeight + 6),
-                        viewportHeight: max(viewportHeight, listHeight),
+                        contentHeight: contentHeight,
+                        viewportHeight: listHeight,
                         scheme: scheme
                     )
                     .padding(.trailing, 5)
@@ -130,12 +124,11 @@ struct MentionPicker: View {
             }
             .frame(height: listHeight)
         }
-        .frame(maxHeight: maxTotalHeight)
     }
 
     private var countLabel: String {
         let count = state.matches.count
-        if CGFloat(count) * rowHeight > maxListHeight {
+        if isScrollable {
             return AppLocalization.text(LocalizedStringResource("\(count) matches, scroll"))
         }
         return AppLocalization.text(LocalizedStringResource("\(count) matches"))
@@ -236,18 +229,6 @@ private struct MentionRowStyle: ButtonStyle {
                     .padding(.horizontal, 6)
             }
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct MentionScrollMetrics: Equatable {
-    var offset: CGFloat
-    var contentHeight: CGFloat
-    var viewportHeight: CGFloat
-
-    init(_ geometry: ScrollGeometry) {
-        offset = max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-        contentHeight = geometry.contentSize.height
-        viewportHeight = geometry.containerSize.height
     }
 }
 
