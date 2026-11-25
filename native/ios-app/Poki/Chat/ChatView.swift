@@ -1433,7 +1433,8 @@ struct ComposerInputView: View {
     }
     private var shortcutsVisible: Bool { focused || taskSettings != nil || resumeEditing }
     private var expanded: Bool {
-        isSettingsPreview || (shortcutsVisible && showsModelShortcut) || typeSize >= .xxxLarge
+        // The Input Field preview shows the expanded field only while the model button is on, as writing does.
+        ((isSettingsPreview || shortcutsVisible) && showsModelShortcut) || typeSize >= .xxxLarge
     }
     private var expansionAnimation: Animation? { reduceMotion ? nil : .smooth(duration: 0.28) }
 
@@ -1812,7 +1813,7 @@ struct ComposerInputView: View {
         }
         .buttonStyle(.plain)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .accessibilityLabel(Text("Model"))
+        .accessibilityLabel(hasModel ? Text("Model") : Text("Add Model"))
         .accessibilityValue(name.map { Text(verbatim: $0) } ?? Text(verbatim: ""))
         .accessibilityIdentifier("\(controlIdentifierPrefix).settings.model")
         .accessibilityHidden(!visible)

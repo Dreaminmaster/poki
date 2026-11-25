@@ -74,4 +74,47 @@ final class ComposerTaskSettingsUITests: XCTestCase {
         addModel.tap()
         XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier IN %@", ["Models", "模型"])).firstMatch.waitForExistence(timeout: 5))
     }
+
+    func testModelButtonReadsAddModelWithoutAnAccount() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-pokiChat", "empty", "-pokiDraft", "Draft for Poki", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        let editor = app.textViews["capsule.field"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        editor.tap()
+        let model = app.buttons["composer.settings.model"]
+        XCTAssertTrue(model.waitForExistence(timeout: 5))
+        // The button names a model only when an account is set up; without one it says Add Model on screen.
+        if let name = model.value as? String, !name.isEmpty {
+            throw XCTSkip("This simulator has a model account (\(name)).")
+        }
+        XCTAssertEqual(model.label, "Add Model")
+    }
+
+    func testInputFieldPreviewStaysOnOneRowWithTheModelButtonOff() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-pokiScreen", "composer", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        let toggle = app.switches["composer.preference.model"]
+        let plus = app.buttons["composer.preview.plus"]
+        let main = app.buttons["composer.preview.main"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15))
+        XCTAssertTrue(plus.waitForExistence(timeout: 5))
+        if (toggle.value as? String) != "1" { toggle.switches.firstMatch.tap() }
+        wait(for: [expectation(for: NSPredicate(format: "value == '1'"), evaluatedWith: toggle)], timeout: 5)
+        let expandedHeight = main.frame.maxY - toggle.frame.maxY
+
+        toggle.switches.firstMatch.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == '0'"), evaluatedWith: toggle)], timeout: 5)
+        // With the model button off the preview is the one-row field: plus and the field share a row.
+        let collapsed = NSPredicate { _, _ in main.frame.maxY - toggle.frame.maxY < expandedHeight - 20 }
+        wait(for: [expectation(for: collapsed, evaluatedWith: nil)], timeout: 5)
+
+        toggle.switches.firstMatch.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == '1'"), evaluatedWith: toggle)], timeout: 5)
+    }
 }
