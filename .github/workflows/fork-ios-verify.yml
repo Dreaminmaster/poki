@@ -19,12 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Keep the live-refresh follow-up separate from the tested PR #759.
-          - pr: live-search-refresh
+          - pr: live-search-refresh-recheck
             device: iPhone
             ref: c039cfaf8e58d719b5860e3aff65162a1deed736
             tests: 'ConversationSearchTests:21 SessionArchiveTests:18'
-            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
+            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
             expected_baseline: false
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
@@ -260,6 +259,7 @@ jobs:
         run: |
           set -euo pipefail
           TIMEOUT=$(command -v timeout || command -v gtimeout)
+          failures=0
           for case_name in $UI_CASES; do
             set +e
             "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
@@ -271,16 +271,28 @@ jobs:
               2>&1 | tee "out/ui-$case_name.log"
             status=${PIPESTATUS[0]}
             set -e
-            xcrun xcresulttool get test-results summary --path "out/ui-$case_name.xcresult" | tee "out/ui-$case_name.json"
-            test "$status" = 0
-            python3 - "$case_name" <<'PY'
+            if [ "$status" = 0 ] && xcrun xcresulttool get test-results summary --path "out/ui-$case_name.xcresult" > "out/ui-$case_name.json" && python3 - "$case_name" <<'PY'
           import json, sys
           case = sys.argv[1]
           d = json.load(open(f"out/ui-{case}.json"))
           assert d["totalTestCount"] == 1, (case, d)
           assert d["passedTests"] == 1 and d["failedTests"] == 0 and d["skippedTests"] == 0, (case, d)
           PY
+            then
+              echo "$case_name: passed"
+            else
+              failures=$((failures + 1))
+              echo "::error::$case_name did not pass (xcodebuild status $status)"
+              if [ -d "out/ui-$case_name.xcresult" ]; then
+                xcrun xcresulttool get test-results summary --path "out/ui-$case_name.xcresult" > "out/ui-$case_name.json" || true
+              fi
+              xcrun simctl io "$UDID" screenshot "out/ui-$case_name-failure.png" || true
+              "$TIMEOUT" 120 xcrun simctl spawn "$UDID" log show --last 5m --style compact \
+                --predicate 'process == "Poki" OR process == "testmanagerd" OR process == "SpringBoard"' \
+                > "out/ui-$case_name-simulator.log" 2>&1 || true
+            fi
           done
+          test "$failures" = 0
       - name: Capture simulator diagnostics on any failure
         if: failure()
         shell: bash
