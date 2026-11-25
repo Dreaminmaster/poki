@@ -86,4 +86,14 @@ final class FirstRunDecisionTests: XCTestCase {
         FirstRun.finish(defaults: standard, version: FirstRun.version)
         XCTAssertFalse(PokiMenuTip.welcomeUp)
     }
+
+    /// The in-app tests and scripted launches keep TipKit off, so the hint never pops over the
+    /// screens and alerts they check. A person's own launch, or `-pokiResetTips`, shows it.
+    func testMenuHintIsHeldBackForScriptedLaunches() {
+        XCTAssertTrue(PokiMenuTip.heldBack(environment: ["XCTestBundlePath": "/tmp/PokiTests.xctest"], arguments: [:]))
+        XCTAssertTrue(PokiMenuTip.heldBack(environment: [:], arguments: ["pokiScreen": "home"]))
+        XCTAssertFalse(PokiMenuTip.heldBack(environment: [:], arguments: ["pokiScreen": "home", "pokiResetTips": "YES"]))
+        XCTAssertFalse(PokiMenuTip.heldBack(environment: [:], arguments: [:]))
+        XCTAssertFalse(PokiMenuTip.heldBack(environment: [:], arguments: ["AppleLanguages": "(en)"]))
+    }
 }

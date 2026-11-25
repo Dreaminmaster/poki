@@ -27,11 +27,23 @@ struct PokiMenuTip: Tip {
 
     /// Once at launch, before any tip view is drawn.
     static func configure(welcomeUp: Bool) {
+        Self.welcomeUp = welcomeUp
+        guard !heldBack() else { return }
         #if DEBUG
         // `-pokiResetTips` shows the hint again on this launch, for the Simulator and screenshots.
         if UserDefaults.standard.bool(forKey: "pokiResetTips") { try? Tips.resetDatastore() }
         #endif
         try? Tips.configure([.displayFrequency(.immediate)])
-        Self.welcomeUp = welcomeUp
+    }
+
+    /// Scripted launches (the in-app tests, the screenshot and check scripts, which all pass `-poki…`
+    /// arguments) have nobody to close the hint, so TipKit stays off for them, as the welcome does.
+    /// A popover over the home page would cover the screens and alerts they check. `-pokiResetTips`
+    /// asks for it.
+    nonisolated static func heldBack(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                     arguments: [String: Any] = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)) -> Bool {
+        if environment["XCTestBundlePath"] != nil { return true }
+        if (arguments["pokiResetTips"] as? String).map({ ["YES", "1", "true"].contains($0) }) == true { return false }
+        return arguments.keys.contains { $0.hasPrefix("poki") }
     }
 }
