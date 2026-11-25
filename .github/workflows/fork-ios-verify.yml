@@ -19,18 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Before: upstream f9fb969 with only the identical UI-test scroll helper.
-          - pr: search-baseline
-            device: iPhone
-            ref: e758d9f09b8506e1696a0b876a660f201ccc6952
-            tests: 'ConversationSearchTests:16'
-            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
-          # After: the exact PR head; the iPhone evidence is already in run 32.
-          - pr: search-consistency
+          # Test the iPad read-only preview correction on the exact candidate.
+          - pr: search-preview-retained
             device: iPad
-            ref: 7f52c20a1743dca887310ad6acda0aaaed1ce8f7
-            tests: 'ConversationSearchTests:17 SessionArchiveTests:18'
-            ui_tests: 'testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly'
+            ref: 896332ef85805629503e367ea0e21724806cc200
+            tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
+            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft'
+          # Independently test the scoped persistence fix without the search changes.
+          - pr: scoped-session-flush-retry
+            device: iPhone
+            ref: 73b6ce4bb7e17775510633a5445cd11c29ebbbad
+            tests: 'SessionArchiveTests:19'
+            ui_tests: ''
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
@@ -224,6 +224,7 @@ jobs:
           PY
           done
       - name: Verify actual conversation search and Memory source taps
+        if: matrix.ui_tests != ''
         shell: bash
         env:
           UI_CASES: ${{ matrix.ui_tests }}
