@@ -19,24 +19,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Exact merged-tree candidate, including latest upstream Composer settings.
-          - pr: search-main-integration
-            device: iPhone
-            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
-            tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
-            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
-          - pr: search-main-integration
+          # Run unchanged iPad integration after XCTest failed to attach to the visible app.
+          - pr: search-main-integration-ipad-recheck
             device: iPad
             ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
             tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
             ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft'
-          # The three scoped retry tests passed in run 34. Fix the existing archive
-          # disk assertion's queue race and test the isolated-write optimization.
-          - pr: scoped-flush-queue-isolation
+            expected_baseline: false
+          # Exact persistence candidate with all current upstream code.
+          - pr: scoped-flush-main-integration
             device: iPhone
-            ref: 31ad8e5c57ec329dad3413b54c0033cb4328f960
+            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
             tests: 'SessionArchiveTests:19'
             ui_tests: ''
+            expected_baseline: false
+          # Only the tests differ from upstream. Both retry assertions must fail.
+          - pr: scoped-flush-negative-baseline
+            device: iPhone
+            ref: 2fdaa2f4d8cc72f160c67a5635fdffb1b33bd751
+            tests: ''
+            ui_tests: ''
+            expected_baseline: true
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
@@ -193,6 +196,7 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
             2>&1 | tee out/build.log
       - name: Run required XCTest suites on exact revision
+        if: matrix.expected_baseline != true
         shell: bash
         env:
           TEST_SUITES: ${{ matrix.tests }}
@@ -229,6 +233,39 @@ jobs:
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
           done
+      - name: Confirm unpatched implementation fails the exact retry assertions
+        if: matrix.expected_baseline == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/history-review/Build/Products/Debug-iphonesimulator/Poki.app"
+          BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")"
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl privacy "$UDID" grant location-always "$BUNDLE"
+          TIMEOUT=$(command -v timeout || command -v gtimeout)
+          set +e
+          "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
+            -destination "id=$UDID" -derivedDataPath build/history-review \
+            -only-testing:PokiTests/SessionArchiveTests/testScopedFlushRetriesItsOwnFailedWrite \
+            -only-testing:PokiTests/SessionArchiveTests/testScopedFlushRetriesOnlyRequestedFailedSave \
+            -parallel-testing-enabled NO -resultBundlePath out/scoped-baseline.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            2>&1 | tee out/scoped-baseline.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" = 65
+          xcrun xcresulttool get test-results summary --path out/scoped-baseline.xcresult | tee out/scoped-baseline.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("out/scoped-baseline.json"))
+          log = open("out/scoped-baseline.log").read()
+          assert d["totalTestCount"] == 2 and d["failedTests"] == 2 and d["skippedTests"] == 0, d
+          for name in ("testScopedFlushRetriesItsOwnFailedWrite", "testScopedFlushRetriesOnlyRequestedFailedSave"):
+              assert name in json.dumps(d.get("testFailures", [])), d
+          assert "XCTUnwrap failed" in log, log[-4000:]
+          assert "An explicit scoped flush must retry an earlier failed write" in log, log[-4000:]
+          print("Both expected old-code assertion failures reproduced; this is a negative baseline, not passing application tests.")
+          PY
       - name: Verify actual conversation search and Memory source taps
         if: matrix.ui_tests != ''
         shell: bash
@@ -238,6 +275,7 @@ jobs:
           set -euo pipefail
           TIMEOUT=$(command -v timeout || command -v gtimeout)
           for case_name in $UI_CASES; do
+            set +e
             "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
               -destination "id=$UDID" -derivedDataPath build/history-review \
               -only-testing:PokiUITests/MemorySourceNavigationUITests/$case_name \
@@ -245,7 +283,10 @@ jobs:
               -resultBundlePath "out/ui-$case_name.xcresult" \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
               2>&1 | tee "out/ui-$case_name.log"
+            status=${PIPESTATUS[0]}
+            set -e
             xcrun xcresulttool get test-results summary --path "out/ui-$case_name.xcresult" | tee "out/ui-$case_name.json"
+            test "$status" = 0
             python3 - "$case_name" <<'PY'
           import json, sys
           case = sys.argv[1]
@@ -254,6 +295,17 @@ jobs:
           assert d["passedTests"] == 1 and d["failedTests"] == 0 and d["skippedTests"] == 0, (case, d)
           PY
           done
+      - name: Capture simulator diagnostics on any failure
+        if: failure()
+        shell: bash
+        run: |
+          if [ -n "${UDID:-}" ]; then
+            xcrun simctl io "$UDID" screenshot out/failure-screen.png || true
+            TIMEOUT=$(command -v timeout || command -v gtimeout)
+            "$TIMEOUT" 120 xcrun simctl spawn "$UDID" log show --last 10m --style compact \
+              --predicate 'process == "Poki" OR process == "testmanagerd" OR process == "SpringBoard"' \
+              > out/failure-simulator.log 2>&1 || true
+          fi
       - name: Preserve build and test evidence
         if: always()
         uses: actions/upload-artifact@v4
