@@ -215,7 +215,8 @@ private struct InterfaceSizePreview: View {
                 .accessibilityLabel(Text(verbatim: "Poki"))
         }
         .bottomBar(softEdge: true) {
-            ComposerInputView(input: .constant(""), focused: .constant(false), adding: .constant(false), running: false,
+            ComposerInputView(input: .constant(""), focused: .constant(false), adding: .constant(false),
+                              settingsPresented: .constant(false), running: false,
                               send: { _, _ in }, stop: {}, openVoice: {})
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)

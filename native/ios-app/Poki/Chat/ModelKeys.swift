@@ -435,11 +435,20 @@ enum ModelKeys {
     }
 
     static func setSelectedModel(_ value: String, in storage: PokiStorage = .live) {
-        let provider = selectedProvider(in: storage)
+        saveModel(value, for: selectedProvider(in: storage), in: storage)
+    }
+
+    private static func saveModel(_ value: String, for provider: ModelProvider, in storage: PokiStorage) {
         storage.defaults.set(value, forKey: "chat.model.\(provider.rawValue)")
         if provider == .custom, let chosen = CustomProviders.parse(value) {
             storage.defaults.set(chosen.provider.uuidString, forKey: CustomProviders.selectedKey)
         }
+    }
+
+    static func choose(_ provider: ModelProvider, model id: String, in storage: PokiStorage) {
+        saveModel(id, for: provider, in: storage)
+        storage.defaults.set(provider.rawValue, forKey: "chat.provider")
+        saved += 1
     }
 
     /// The account the chat uses, as the owner reads it: the provider's name, or the custom service's.

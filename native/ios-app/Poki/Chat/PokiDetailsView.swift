@@ -130,6 +130,10 @@ struct PokiDetailsView: View {
                         SettingsRow(title: "Interface Size", symbol: "textformat.size")
                     }
                     .accessibilityIdentifier("general.interfaceSize")
+                    NavigationLink(value: DetailsRoute.composer) {
+                        SettingsRow(title: "Input Field", symbol: "text.cursor")
+                    }
+                    .accessibilityIdentifier("general.composer")
                     NavigationLink(value: DetailsRoute.language) {
                         SettingsRow(title: "Language", symbol: "globe", value: LanguageSettingsView.selectionTitle)
                     }
@@ -206,6 +210,8 @@ struct PokiDetailsView: View {
                                 revealedSearchEntryID: revealedSearchEntryID(id))
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
+                case .composer:
+                    ComposerSettingsView()
                 case .language:
                     LanguageSettingsView()
                 case .about:
@@ -270,7 +276,7 @@ struct PokiDetailsView: View {
 }
 
 enum DetailsRoute: Hashable {
-    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, about
+    case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, composer, about
     case sessionPreview(String)
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
@@ -1331,5 +1337,30 @@ extension ModelProvider {
         case .openrouter: "Provider-openrouter"
         case .custom: nil
         }
+    }
+}
+
+struct ComposerSettingsView: View {
+    static let modelKey = "composer.showModelShortcut"
+
+    @AppStorage(Self.modelKey) private var showsModel = true
+
+    var body: some View {
+        List {
+            Section("Quick Access") {
+                Toggle("Model", isOn: $showsModel)
+                    .accessibilityIdentifier("composer.preference.model")
+            }
+
+            Section("Preview") {
+                ComposerInputView(input: .constant(""), focused: .constant(false), adding: .constant(false),
+                                  settingsPresented: .constant(false), running: false, isSettingsPreview: true,
+                                  send: { _, _ in }, stop: {}, openVoice: {})
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            }
+        }
+        .navigationTitle(AppLocalization.text("Input Field"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

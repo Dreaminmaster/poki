@@ -648,6 +648,8 @@ struct RootView: View {
             openDetails([SettingsRoute.memory])
         case "memoryRecent":
             openDetails([SettingsRoute.memory, SettingsRoute.memoryPage(.recent())])
+        case "composer":
+            openDetails([DetailsRoute.composer])
         case "interfaceSize":
             openDetails([DetailsRoute.interfaceSize])
         case "appearance":

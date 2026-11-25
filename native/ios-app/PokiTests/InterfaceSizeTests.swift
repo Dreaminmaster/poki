@@ -211,6 +211,24 @@ final class InterfaceSizeTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: Appearance.key), appearance)
     }
 
+    func testHiddenComposerShortcutsSurviveSettingsVaultRestoration() throws {
+        let defaults = UserDefaults.standard
+        let keys = [ComposerSettingsView.modelKey]
+        let originals = keys.map { defaults.object(forKey: $0) }
+        let backup = try Keychain.read("settings.v1")
+        defer {
+            for (key, original) in zip(keys, originals) { defaults.set(original, forKey: key) }
+            if let backup { try? Keychain.write(backup, account: "settings.v1") }
+            else { Keychain.delete("settings.v1") }
+        }
+
+        for key in keys { defaults.set(false, forKey: key) }
+        SettingsVault.save()
+        for key in keys { defaults.removeObject(forKey: key) }
+        SettingsVault.restore()
+        for key in keys { XCTAssertEqual(defaults.object(forKey: key) as? Bool, false) }
+    }
+
     func testMarkedTextDefersResizingAndKeepsDraftAndSelection() {
         let field = CapsuleTextView()
         field.updateFont(for: .large)
