@@ -569,10 +569,10 @@ enum ModelCatalog {
     }
 }
 
-/// Models newer than the pinned PiSwift catalog (f869652), set up as PiSwift's next catalog (17c490d)
-/// lists them: each copies a model the catalog has, with the same API, inputs and thinking levels (GPT-6.2
-/// rejects reasoning effort `none`, as GPT-6.1 Sol's setup already says), and changes what differs. A
-/// catalog that lists the model wins (`ModelProvider.knownModel`), so these fall away with the next bump.
+/// Setups for models under ids PiSwift's catalog does not list (a custom provider serving GPT-6.2, or a
+/// provider pi has no entry for), matching the catalog's own GPT-6.2 entries: each copies a model the
+/// catalog has, with the same API, inputs and thinking levels (GPT-6.2 rejects reasoning effort `none`),
+/// and changes what differs. A catalog that lists the model wins (`ModelProvider.knownModel`).
 enum BundledModelSetups {
     struct Setup: Sendable {
         var template: String
@@ -580,8 +580,8 @@ enum BundledModelSetups {
         var cost: ModelCost?
         /// Per pi provider, where the window differs from the template's.
         var contextWindow: [String: Int] = [:]
-        /// Also set up behind a gateway (`openai/<id>` on OpenRouter). GPT-6.1 Terra is not: OpenRouter
-        /// rejects the thinking Sol's setup would send it, so it keeps the plain unlisted setup.
+        /// Also set up behind a gateway (`openai/<id>`) the catalog lacks. GPT-6.1 Terra is not: a gateway
+        /// may reject the thinking Sol's setup would send it, so there it keeps the plain unlisted setup.
         var onGateways = false
     }
 

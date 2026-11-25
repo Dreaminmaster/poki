@@ -27,6 +27,15 @@ final class ModelListsTests: XCTestCase {
         XCTAssertTrue(ModelCatalog.all(.openrouter, storage: storage).map(\.id).contains("openai/gpt-6.2-sol"))
     }
 
+    func testPiSwiftsCatalogListsGPT62() {
+        // PiSwift v1.6.0 catalogues GPT-6.2, so the bundled setups only cover gateways and custom ids.
+        for (provider, id) in [("openai", "gpt-6.2-sol"), ("openai", "gpt-6.2-astra"),
+                               ("openai-codex", "gpt-6.2-sol"), ("openai-codex", "gpt-6.2-astra"),
+                               ("openrouter", "openai/gpt-6.2-sol"), ("openrouter", "openai/gpt-6.2-astra")] {
+            XCTAssertNotNil(getModel(provider: provider, modelId: id), "\(provider) \(id)")
+        }
+    }
+
     func testGPT62RunsWithItsOwnSetup() throws {
         let sol = try XCTUnwrap(ModelProvider.openai.piModel("gpt-6.2-sol", storage: storage))
         XCTAssertEqual(sol.id, "gpt-6.2-sol")
@@ -117,10 +126,14 @@ final class ModelListsTests: XCTestCase {
         XCTAssertEqual(sol.cost.input, 2)
         XCTAssertNotNil(sol.compat)
         let astra = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.2-astra", storage: storage))
-        XCTAssertEqual(astra.name, "GPT-6.2 Astra")
+        // OpenRouter's own catalog entry, named the way pi names OpenRouter models.
+        XCTAssertEqual(astra.name, "OpenAI: GPT-6.2 Astra")
         XCTAssertEqual(astra.cost.output, 40)
-        // GPT-6.1 Terra behind OpenRouter keeps the plain setup (ConnectionCheckTests).
-        XCTAssertNil(ModelProvider.knownModel(provider: "openrouter", id: "openai/gpt-6.1-terra"))
+        // GPT-6.1 Terra behind OpenRouter takes OpenRouter's catalog entry, never the plain OpenAI setup.
+        let terra = try XCTUnwrap(ModelProvider.knownModel(provider: "openrouter", id: "openai/gpt-6.1-terra"))
+        XCTAssertEqual(terra.name, "OpenAI: GPT-6.1 Terra")
+        XCTAssertEqual(terra.api, .openAICompletions)
+        XCTAssertEqual(terra.provider, "openrouter")
     }
 
     @MainActor

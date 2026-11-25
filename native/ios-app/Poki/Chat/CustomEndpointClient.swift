@@ -141,7 +141,8 @@ final class CustomEndpointClient: ProviderHTTPClient, @unchecked Sendable {
         guard !acceptsSessionCache(url: request.url) else { return request }
         var updated = request
         if let fields = updated.allHTTPHeaderFields {
-            let dropped: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+            // PiSwift's Responses provider names the session `session-id` (v1.6.0), Chat Completions `session_id`.
+            let dropped: Set<String> = ["session_id", "session-id", "x-client-request-id", "x-session-affinity"]
             for key in fields.keys where dropped.contains(key.lowercased()) {
                 updated.setValue(nil, forHTTPHeaderField: key)
             }

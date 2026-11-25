@@ -2813,7 +2813,7 @@ final class ChatHarnessTests: XCTestCase {
                 let urlString = request.url?.absoluteString ?? ""
                 let json = request.httpBody.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
                 let hasCacheKey = json["prompt_cache_key"] != nil
-                let trackedHeaders: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+                let trackedHeaders: Set<String> = ["session_id", "session-id", "x-client-request-id", "x-session-affinity"]
                 let routingHeaders = (request.allHTTPHeaderFields ?? [:]).keys
                     .map { $0.lowercased() }
                     .filter { trackedHeaders.contains($0) }
@@ -2896,7 +2896,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(attempts[0].url, "https://api.openai.com/v1/responses")
         XCTAssertEqual(attempts[0].statusCode, 503)
         XCTAssertTrue(attempts[0].hasPromptCacheKey, "Official api.openai.com primary should keep prompt_cache_key")
-        XCTAssertEqual(attempts[0].routingHeaders, ["session_id", "x-client-request-id"])
+        XCTAssertEqual(attempts[0].routingHeaders, ["session-id", "x-client-request-id"])
 
         XCTAssertEqual(attempts[1].url, "https://strict-backup.example/v1/responses")
         XCTAssertFalse(attempts[1].hasPromptCacheKey, "Third-party backup must not receive prompt_cache_key")
