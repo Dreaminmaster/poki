@@ -113,15 +113,15 @@ final class AppPickerTests: XCTestCase {
     }
 
     func testMentionPickerHeightFitsMatchesAndCapsLongLists() throws {
-        for (input, expectedHeight) in [("帮我看看 123", 86.0), ("帮我用 @m", 252.0)] {
-            let state = try XCTUnwrap(AppPickerCatalog.mentionState(
-                input: input, mentionReady: true, adding: false, recentIDs: [],
-                language: .simplifiedChinese, dynamicApps: []
-            ))
-            let picker = MentionPicker(state: state, composerWidth: 390, caretX: nil, pick: { _ in }, browseAll: {})
-            let size = UIHostingController(rootView: picker).sizeThatFits(in: CGSize(width: 390, height: 400))
-            XCTAssertEqual(size.height, expectedHeight, accuracy: 1, input)
+        let long = MentionSearch.matches("m", pending: false, explicit: true)
+        XCTAssertEqual(long.count, MentionSearch.most)
+        let one = try XCTUnwrap(MentionSearch.matches("Taob", pending: false, explicit: false).first)
+        func height(_ matches: [MentionMatch]) -> CGFloat {
+            UIHostingController(rootView: MentionPicker(matches: matches, pick: { _ in }, dismiss: {}))
+                .sizeThatFits(in: CGSize(width: 390, height: 800)).height
         }
+        XCTAssertEqual(height([one]), 44 + 12, accuracy: 1)
+        XCTAssertEqual(height(long), CGFloat(long.count) * 44 + 12, accuracy: 1)
     }
 
     func testPrefixHighlightAndBackfillInsertion() throws {
