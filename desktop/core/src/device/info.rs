@@ -36,12 +36,11 @@ fn string(v: &plist::Dictionary, key: &str) -> String {
 pub async fn read(phone: &Phone) -> Result<Facts> {
     let provider = phone.provider()?;
     let mut lockdown = LockdownClient::connect(&*provider).await?;
-    let record = super::pairing::saved(&phone.udid)?;
+    // The record the phone accepts, saved or usbmuxd's, which the steps after this then use.
+    let record = super::pairing::settle(phone).await.ok().flatten();
     let mut paired = false;
     if let Some(record) = &record {
         paired = lockdown.start_session(record).await.is_ok();
-    } else if let Ok(Some(record)) = super::mux_pairing_record(&phone.udid).await {
-        paired = lockdown.start_session(&record).await.is_ok();
     }
     let all = lockdown.get_value(None, None).await?;
     let dict = all.as_dictionary().cloned().unwrap_or_default();
