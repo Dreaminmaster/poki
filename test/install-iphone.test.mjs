@@ -37,11 +37,9 @@ function runInstaller(state, { scenario = 'happy', env = {}, answer = {}, stateA
     if (event.event !== 'wait' || !answer[event.wait]) return;
     // EventEmitter does not await async listeners. Keep each answer's outcome
     // so a failed simulated input is not reported only as an installer timeout.
-    const pending = Promise.resolve().then(() => answer[event.wait](event)).then(result => {
-      if (typeof result?.code === 'number') assert.equal(result.code, 0);
-      return null;
-    }, error => ({ wait: event.wait, code: typeof error?.code === 'number' ? error.code : null }))
-      .catch(error => ({ wait: event.wait, code: typeof error?.actual === 'number' ? error.actual : null }));
+    const pending = Promise.resolve().then(() => answer[event.wait](event)).then(result =>
+      typeof result?.code === 'number' && result.code !== 0 ? { wait: event.wait, code: result.code } : null,
+      error => ({ wait: event.wait, code: typeof error?.code === 'number' ? error.code : null }));
     pendingAnswers.push(pending);
   });
   return new Promise((resolve, reject) => {
@@ -74,6 +72,22 @@ test('installer fixture reports a failed simulated answer instead of just a wait
       return true;
     },
   );
+});
+
+test('installer fixture waits for a late answer before temporary state cleanup', async t => {
+  const state = await stateDir(t);
+  let completed = false;
+  const result = await runInstaller(state, {
+    env: { POKI_INSTALL_WAIT_MS: '150' },
+    answer: { apple_code: async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+      await writeFile(join(state, 'late-answer-marker'), 'finished');
+      completed = true;
+    } },
+  });
+  assert.equal(result.code, 3, result.stderr);
+  assert.equal(completed, true, 'all answer callbacks must finish before test cleanup');
+  assert.equal(await readFile(join(state, 'late-answer-marker'), 'utf8'), 'finished');
 });
 
 test('update-only refuses configuration changes before contacting the phone', async t => {
