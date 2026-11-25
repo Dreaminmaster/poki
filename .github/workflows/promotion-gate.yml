@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: promotion-gate-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event.action != 'labeled' && github.event.action != 'unlabeled' }}
 
 permissions:
   contents: read
@@ -25,24 +25,34 @@ jobs:
     outputs:
       channel: ${{ steps.r.outputs.channel }}
       sha: ${{ steps.r.outputs.sha }}
+      gym_run: ${{ steps.r.outputs.gym_run }}
     steps:
       - uses: actions/checkout@v4
       - id: r
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          EVENT_ACTION: ${{ github.event.action }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           rec="$(python3 .github/scripts/promotion.py pending)"
           echo "$rec"
-          echo "channel=$(echo "$rec" | jq -r '.channel // empty')" >> "$GITHUB_OUTPUT"
-          echo "sha=$(echo "$rec" | jq -r '.sha // empty')" >> "$GITHUB_OUTPUT"
+          channel="$(echo "$rec" | jq -r '.channel // empty')"
+          sha="$(echo "$rec" | jq -r '.sha // empty')"
+          gym_run=""
+          if [ "$channel" = beta ] && { [ "$EVENT_ACTION" = labeled ] || [ "$EVENT_ACTION" = unlabeled ]; }; then
+            gym_run="$(python3 .github/scripts/promotion.py gym-run "$HEAD_SHA" "$GITHUB_RUN_ID")"
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "gym_run=$gym_run" >> "$GITHUB_OUTPUT"
 
   gym:
     needs: read
-    # A label added or removed does not change the build, so it does not run the Gym again; the
-    # verdict then reads the scorecards of the last run on the same commit.
-    if: needs.read.outputs.channel == 'beta' && github.event.action != 'labeled' && github.event.action != 'unlabeled'
+    # Label events skip the Gym only when a completed gate run on this commit already produced
+    # scorecards; otherwise the Gym runs so first-time or cancelled-run betas are not blocked.
+    if: needs.read.outputs.channel == 'beta' && ((github.event.action != 'labeled' && github.event.action != 'unlabeled') || needs.read.outputs.gym_run == '')
     uses: ./.github/workflows/ios-gym.yml
     with:
       ref: ${{ needs.read.outputs.sha }}
@@ -76,13 +86,15 @@ jobs:
           GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GYM: ${{ needs.gym.result }}
+          GYM_RUN: ${{ needs.read.outputs.gym_run }}
         run: |
           set -euo pipefail
           mkdir -p new
           if [ "$GYM" = skipped ]; then
-            # A label event: the newest earlier gate run on this commit that ran the Gym.
-            run="$(gh run list --workflow promotion-gate.yml --commit "$HEAD_SHA" --json databaseId,status --jq '[.[] | select(.status == "completed")] | .[].databaseId' | while read -r id; do
-              gh api "repos/$GH_REPO/actions/runs/$id/artifacts" --jq '.artifacts[].name' | grep -qx gym-scorecard && { echo "$id"; break; }; done)"
+            run="${GYM_RUN:-}"
+            if [ -z "$run" ]; then
+              run="$(python3 .github/scripts/promotion.py gym-run "$HEAD_SHA" "$GITHUB_RUN_ID")"
+            fi
           else
             run="$GITHUB_RUN_ID"
           fi

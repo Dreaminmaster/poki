@@ -481,7 +481,10 @@ struct ModelTickList: View {
         .navigationTitle(Text(use.title))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .task { if refreshes, listEmpty { refresh() } }
+        .task {
+            // A list that is missing or a day old is read again, so the provider's new models show up.
+            if refreshes, listEmpty || stale { refresh() }
+        }
         .alert("Add Model", isPresented: $adding) {
             TextField("Model ID", text: $typed).textInputAutocapitalization(.never).autocorrectionDisabled()
             Button("Cancel", role: .cancel) {}
@@ -544,9 +547,15 @@ struct ModelTickList: View {
     private var refreshes: Bool {
         switch provider {
         case .local: false
-        case .account(let p): p != .chatgpt && use != .decision
+        // A ChatGPT sign-in has a model list only through Codex.
+        case .account(let p): (p != .chatgpt || ModelCatalog.listable().contains(.chatgpt)) && use != .decision
         case .custom: use != .decision
         }
+    }
+
+    private var stale: Bool {
+        guard case .account(let p) = provider else { return false }
+        return ModelCatalog.isStale(p) && !ModelCatalog.isBackingOff(p)
     }
 
     private var listEmpty: Bool {

@@ -12,11 +12,20 @@
 
 static NSArray<XCUIScreen *> *panels;
 static long long capturedDisplayID;
+static void (^onScreenCapture)(void);
 
 @implementation XCUIScreen
 + (NSArray *)screens { return panels; }
 + (instancetype)mainScreen { return panels.firstObject; }
-- (instancetype)screenshot { capturedDisplayID = self.displayID; return self; }
+- (instancetype)screenshot {
+    capturedDisplayID = self.displayID;
+    if (onScreenCapture) {
+        void (^hook)(void) = onScreenCapture;
+        onScreenCapture = nil;
+        hook();
+    }
+    return self;
+}
 - (NSData *)PNGRepresentation { return self.pixels; }
 @end
 
@@ -48,6 +57,10 @@ static long long capturedDisplayID;
 
 @interface ReadySession : SRNativeSession
 @property(nonatomic, strong) XCSynthesizedEventRecord *gesture;
+@property(nonatomic) NSInteger reportedOrientation;
+@property(nonatomic) BOOL omitOrientationRPC;
+@property(nonatomic, copy) NSString *launchedBundle;
+@property(nonatomic, copy) void (^onLaunch)(NSString *bundle);
 @property(nonatomic, copy) void (^activate)(NSString *bundle);
 @end
 @implementation ReadySession
@@ -55,7 +68,16 @@ static long long capturedDisplayID;
 - (uint64_t)generation { return 1; }
 - (BOOL)isCurrent:(id)session generation:(uint64_t)generation { return session == self && generation == 1; }
 - (id)daemonProxy { return self; }
+- (BOOL)respondsToSelector:(SEL)aSelector {
+    if (aSelector == @selector(getInterfaceOrientationWithReply:) && self.omitOrientationRPC) return NO;
+    return [super respondsToSelector:aSelector];
+}
+- (void)getInterfaceOrientationWithReply:(void (^)(NSInteger, NSError *))reply {
+    reply(self.reportedOrientation ?: UIInterfaceOrientationPortrait, nil);
+}
 - (void)_XCT_launchApplicationWithBundleID:(NSString *)bundle arguments:(NSArray *)arguments environment:(NSDictionary *)environment completion:(void (^)(NSError *))completion {
+    self.launchedBundle = bundle;
+    if (self.onLaunch) self.onLaunch(bundle);
     if (self.activate) self.activate(bundle);
     completion(nil);
 }
@@ -403,6 +425,201 @@ static BOOL checkCompanionBindingRetry(PKDisplayGeometry scene, CGSize crop) {
     return checkShot(runner, 2, crop, 255, @"first read retries the startup binding", YES);
 }
 
+@interface CoverWeChatFixture : PKInProcess
+@property(nonatomic) PKDisplayGeometry scene;
+@property(nonatomic) BOOL pokiVisible;
+@property(nonatomic, strong) AXNode *wechat;
+@property(nonatomic, strong) AXNode *springBoard;
+@property(nonatomic, strong) AXNode *wechatSnapshot;
+@property(nonatomic, strong) AXNode *springBoardSnapshot;
+@property(nonatomic, copy) NSArray<AXNode *> *activeApps;
+@property(nonatomic) NSInteger wechatSnapshotCalls;
+@end
+@implementation CoverWeChatFixture
+- (PKDisplayGeometry)sceneDisplayGeometry { return self.scene; }
+- (BOOL)isPokiSceneVisible { return self.pokiVisible; }
+- (NSData *)daemonJPEGForScreen:(id)screen { return nil; }
+- (id)current:(uint64_t *)generation outcome:(PKOutcome **)outcome {
+    if (generation) *generation = 1;
+    return [self valueForKey:@"sessions"];
+}
+- (id)accessibilityFor:(uint64_t)generation { return self; }
+- (NSString *)bundleForPID:(int)pid session:(id)session {
+    if (pid == self.wechat.processIdentifier) return @"com.tencent.xin";
+    if (pid == self.springBoard.processIdentifier) return @"com.apple.springboard";
+    return pid == getpid() ? @"local.poki" : @"";
+}
+- (NSArray *)activeApplications { return self.activeApps ?: (self.wechat ? @[self.wechat] : @[]); }
+- (id)systemApplication { return self.springBoard; }
+- (id)requestSnapshotForElement:(id)element attributes:(NSArray *)attributes parameters:(NSDictionary *)parameters error:(NSError **)error {
+    if (element == self.wechat) {
+        self.wechatSnapshotCalls++;
+        return self.wechatSnapshot;
+    }
+    if (element == self.springBoard) return self.springBoardSnapshot;
+    return nil;
+}
+@end
+
+static CoverWeChatFixture *coverWeChat(PKDisplayGeometry scene) {
+    CoverWeChatFixture *runner = [CoverWeChatFixture new];
+    ReadySession *session = [ReadySession new];
+    session.reportedOrientation = UIInterfaceOrientationPortrait;
+    [runner setValue:session forKey:@"sessions"];
+    runner.scene = scene;
+    runner.wechat = [AXNode new];
+    runner.wechat.processIdentifier = getpid() + 10;
+    runner.springBoard = [AXNode new];
+    runner.springBoard.processIdentifier = getpid() + 11;
+    AXNode *sbRoot = [AXNode new];
+    sbRoot.elementType = 2;
+    sbRoot.frame = CGRectMake(0, 0, 466, 678);
+    runner.springBoardSnapshot = sbRoot;
+    return runner;
+}
+
+static BOOL checkCoverWeChatUnavailableAXFallback(PKDisplayGeometry coverScene, CGSize coverPixels) {
+    CoverWeChatFixture *runner = coverWeChat(coverScene);
+    runner.pokiVisible = NO;
+    // Simulate WeChat answering kAXErrorServerNotFound (nil snapshot) right after launch.
+    runner.wechatSnapshot = nil;
+    PKDisplayGeometry geometry = [runner readDisplayGeometry];
+    if (!CGRectEqualToRect(geometry.bounds, CGRectMake(0, 0, 466, 678))) {
+        printf("FAIL cover WeChat nil-AX fallback: readDisplayGeometry bounds=%s\n", NSStringFromCGRect(geometry.bounds).UTF8String);
+        return NO;
+    }
+    if (!checkShot(runner, 1, coverPixels, 0, @"cover WeChat nil-AX SpringBoard fallback", NO)) return NO;
+    ReadySession *session = [runner valueForKey:@"sessions"];
+    PKOutcome *tap = [runner touch:@[@[[PKTouchPoint at:CGPointMake(120, 240) offset:0], [PKTouchPoint at:CGPointMake(120, 240) offset:0.05]]]
+                           timeout:1 geometry:runner.displayGeometry];
+    if (tap.delivery != PKDeliverySent || session.gesture.displayID != 1) {
+        printf("FAIL cover WeChat nil-AX fallback tap: delivery=%ld code=%s display=%llu\n",
+               (long)tap.delivery, tap.code.UTF8String ?: "", session.gesture.displayID);
+        return NO;
+    }
+    // Safety guard: a partial non-full window snapshot (root != nil) must STILL be refused.
+    AXNode *sheet = [AXNode new];
+    sheet.elementType = 4;
+    sheet.frame = CGRectMake(20, 40, 280, 380);
+    AXNode *root = [AXNode new];
+    root.elementType = 2;
+    root.frame = CGRectMake(0, 0, 466, 678);
+    root.children = @[sheet];
+    runner.wechatSnapshot = root;
+    NSString *reason = nil;
+    if ([runner screenshot:&reason refreshViewport:NO] != nil) {
+        printf("FAIL partial non-full window on cover was not refused\n");
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL checkCoverCompatKeyboardAndLeadingOffset(PKDisplayGeometry coverScene, CGSize coverPixels) {
+    CoverWeChatFixture *runner = coverWeChat(coverScene);
+    runner.pokiVisible = NO;
+    AXNode *compat = [AXNode new];
+    compat.elementType = 4;
+    compat.frame = CGRectMake(0, 0, 386, 678);
+    AXNode *fullRootCompatOnly = [AXNode new];
+    fullRootCompatOnly.elementType = 2;
+    fullRootCompatOnly.frame = CGRectMake(0, 0, 466, 678);
+    fullRootCompatOnly.children = @[compat];
+    runner.wechatSnapshot = fullRootCompatOnly;
+    if (!checkShot(runner, 1, coverPixels, 0, @"cover compat full-root + 386x678 window", NO)) return NO;
+
+    AXNode *keyboard = [AXNode new];
+    keyboard.elementType = 4;
+    keyboard.frame = CGRectMake(0, 0, 466, 678);
+    AXNode *root = [AXNode new];
+    root.elementType = 2;
+    root.frame = CGRectMake(0, 0, 386, 678);
+    root.children = @[compat, keyboard];
+    runner.wechatSnapshot = root;
+    if (!checkShot(runner, 1, coverPixels, 0, @"cover compat 386x678 root + keyboard window", NO)) return NO;
+
+    AXNode *leading = [AXNode new];
+    leading.elementType = 4;
+    leading.frame = CGRectMake(80, 0, 386, 678);
+    AXNode *leadingRoot = [AXNode new];
+    leadingRoot.elementType = 2;
+    leadingRoot.frame = CGRectMake(80, 0, 386, 678);
+    leadingRoot.children = @[leading];
+    runner.wechatSnapshot = leadingRoot;
+    return checkShot(runner, 1, coverPixels, 0, @"cover compat leading 80pt status area", NO);
+}
+
+static BOOL checkCoverPortraitOrientationPNGFallback(PKDisplayGeometry coverScene, CGSize coverPixels) {
+    CoverWeChatFixture *runner = coverWeChat(coverScene);
+    runner.pokiVisible = NO;
+    ReadySession *session = [runner valueForKey:@"sessions"];
+    session.omitOrientationRPC = YES;
+    AXNode *compat = [AXNode new];
+    compat.elementType = 4;
+    compat.frame = CGRectMake(0, 0, 386, 678);
+    AXNode *root = [AXNode new];
+    root.elementType = 2;
+    root.frame = CGRectMake(0, 0, 386, 678);
+    root.children = @[compat];
+    runner.wechatSnapshot = root;
+    return checkShot(runner, 1, coverPixels, 0, @"cover portrait PNG orientation fallback", NO);
+}
+
+static BOOL checkCoverLaunchSkipsAXSnapshotAndIgnoresTransientLandscape(PKDisplayGeometry coverScene) {
+    BOOL ok = YES;
+    PKDisplayGeometry transient = coverScene;
+    transient.orientation = UIInterfaceOrientationLandscapeLeft;
+    CoverWeChatFixture *transientRunner = coverWeChat(transient);
+    transientRunner.pokiVisible = YES;
+    if (![transientRunner.duoPlacement isEqualToString:@"fullscreen"] || transientRunner.hasDuoCompanion) {
+        printf("FAIL cover with transient landscape orientation misclassified: placement=%s hasCompanion=%d\n",
+               transientRunner.duoPlacement.UTF8String ?: "(nil)", transientRunner.hasDuoCompanion);
+        ok = NO;
+    }
+
+    CoverWeChatFixture *runner = coverWeChat(coverScene);
+    runner.pokiVisible = YES;
+    AXNode *own = [AXNode new];
+    own.processIdentifier = getpid();
+    runner.activeApps = @[own];
+    ReadySession *session = [runner valueForKey:@"sessions"];
+    __weak CoverWeChatFixture *weakRunner = runner;
+    session.onLaunch = ^(NSString *bundle) {
+        if ([bundle isEqualToString:@"com.tencent.xin"]) weakRunner.activeApps = @[weakRunner.wechat];
+    };
+    NSString *launchError = [runner app:@"com.tencent.xin" action:@"activate"];
+    if (launchError || ![session.launchedBundle isEqualToString:@"com.tencent.xin"] || runner.wechatSnapshotCalls != 0) {
+        printf("FAIL cover WeChat launch: err=%s launched=%s snapshotCalls=%ld\n",
+               launchError.UTF8String ?: "(nil)", session.launchedBundle.UTF8String ?: "(nil)", (long)runner.wechatSnapshotCalls);
+        ok = NO;
+    }
+    return ok;
+}
+
+static BOOL checkCoverSceneToBackgroundHandoffDuringScreenshot(PKDisplayGeometry coverScene, CGSize coverPixels) {
+    CoverWeChatFixture *runner = coverWeChat(coverScene);
+    runner.pokiVisible = YES;
+    AXNode *compat = [AXNode new];
+    compat.elementType = 4;
+    compat.frame = CGRectMake(0, 0, 386, 678);
+    AXNode *root = [AXNode new];
+    root.elementType = 2;
+    root.frame = CGRectMake(0, 0, 386, 678);
+    root.children = @[compat];
+    runner.wechatSnapshot = root;
+    __weak CoverWeChatFixture *weakRunner = runner;
+    onScreenCapture = ^{ weakRunner.pokiVisible = NO; };
+    if (!checkShot(runner, 1, coverPixels, 0, @"cover scene->background handoff mid-screenshot", NO)) return NO;
+    ReadySession *session = [runner valueForKey:@"sessions"];
+    PKOutcome *tap = [runner touch:@[@[[PKTouchPoint at:CGPointMake(120, 240) offset:0], [PKTouchPoint at:CGPointMake(120, 240) offset:0.05]]]
+                           timeout:1 geometry:runner.displayGeometry];
+    if (tap.delivery != PKDeliverySent || session.gesture.displayID != 1) {
+        printf("FAIL cover handoff tap: delivery=%ld code=%s display=%llu\n",
+               (long)tap.delivery, tap.code.UTF8String ?: "", session.gesture.displayID);
+        return NO;
+    }
+    return YES;
+}
+
 static BOOL checkCompanionTaskHeldPicture(PKDisplayGeometry scene, CGSize crop) {
     CompanionFixture *runner = companion(scene);
     if (![runner beginDuoCompanionTask] || ![runner bindDuoCompanionTarget]) return NO;
@@ -474,7 +691,22 @@ int main(void) {
         BOOL switchBeforeRead = checkCompanionAfterSwitch(geometry, crop, YES);
         BOOL bindingRetry = checkCompanionBindingRetry(geometry, crop);
         BOOL heldTaskPicture = checkCompanionTaskHeldPicture(geometry, crop);
-        return launchPlacement && recoveredEdge && picture && inset && activation && opensCalculator && afterSwitch && switchBeforeRead &&
-            bindingRetry && heldTaskPicture ? 0 : 1;
+        PKDisplayGeometry coverGeometry = {.bounds = CGRectMake(0, 0, 466, 678),
+            .peer = CGRectNull, .nativeSize = cover, .toFixed = CGAffineTransformIdentity,
+            .orientation = UIInterfaceOrientationPortrait, .routesDisplay = YES};
+        __block BOOL coverFallback = NO, coverCompatLayout = NO, coverPortraitPNG = NO, coverLaunch = NO, coverHandoff = NO;
+        dispatch_semaphore_t coverDone = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_queue_create("duo.cover.test", DISPATCH_QUEUE_SERIAL), ^{
+            coverFallback = checkCoverWeChatUnavailableAXFallback(coverGeometry, cover);
+            coverCompatLayout = checkCoverCompatKeyboardAndLeadingOffset(coverGeometry, cover);
+            coverPortraitPNG = checkCoverPortraitOrientationPNGFallback(coverGeometry, cover);
+            coverLaunch = checkCoverLaunchSkipsAXSnapshotAndIgnoresTransientLandscape(coverGeometry);
+            coverHandoff = checkCoverSceneToBackgroundHandoffDuringScreenshot(coverGeometry, cover);
+            dispatch_semaphore_signal(coverDone);
+        });
+        dispatch_semaphore_wait(coverDone, DISPATCH_TIME_FOREVER);
+        return launchPlacement && recoveredEdge && picture && inset && activation && opensCalculator && afterSwitch &&
+            switchBeforeRead && bindingRetry && heldTaskPicture && coverFallback && coverCompatLayout &&
+            coverPortraitPNG && coverLaunch && coverHandoff ? 0 : 1;
     }
 }

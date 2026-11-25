@@ -10,6 +10,7 @@ PR (gate) and published when it merges into main (publish-promotion.yml).
   promotion.py propose <beta|stable> [from-tag] [override reason]   edits channels.json (+ VERSION)
   promotion.py pending                                              the record not yet published, as JSON
   promotion.py soak                                                 exit 1 if a stable's beta is too new
+  promotion.py gym-run <head sha> [exclude run id]                  newest completed gate run with scorecards
   promotion.py gym <baseline dir> <new dir>                         exit 1 if the Gym got worse
 
 Needs gh (GH_TOKEN, GH_REPO). Prints GitHub Actions outputs as key=value lines on stdout.
@@ -173,6 +174,39 @@ def soak():
         sys.exit("Open blocker issues: " + ", ".join("#" + n for n in blockers) + ". Close them, or add the soak-override label to ship anyway.")
 
 
+SCORECARD_ARTIFACTS = ("gym-scorecard", "gym-scorecard-inprocess")
+
+
+def gym_run(head_sha, exclude_run_id=None):
+    if not re.fullmatch(r"[0-9a-f]{40}", head_sha or ""):
+        sys.exit(f"head sha {head_sha!r} is not a 40-character commit SHA")
+    runs = gh_json(
+        "run", "list",
+        "--workflow", "promotion-gate.yml",
+        "--commit", head_sha,
+        "--limit", "50",
+        "--json", "databaseId,status,conclusion",
+    ) or []
+    exclude = str(exclude_run_id) if exclude_run_id else None
+    partial = None
+    for run in runs:
+        if run.get("status") != "completed":
+            continue
+        run_id = str(run.get("databaseId", ""))
+        if not run_id or run_id == exclude:
+            continue
+        payload = gh_json("api", f"repos/{os.environ['GH_REPO']}/actions/runs/{run_id}/artifacts?per_page=100") or {}
+        names = {a.get("name") for a in payload.get("artifacts", []) if not a.get("expired", False)}
+        if all(name in names for name in SCORECARD_ARTIFACTS):
+            print(run_id)
+            return run_id
+        if partial is None and any(name in names for name in SCORECARD_ARTIFACTS):
+            partial = run_id
+    if partial:
+        print(partial)
+    return partial
+
+
 def failures(path):
     m = re.search(r"failures: (\d+)\s*$", Path(path).read_text(), re.M) if Path(path).exists() else None
     return int(m.group(1)) if m else None
@@ -200,6 +234,8 @@ if __name__ == "__main__":
         pending()
     elif cmd == "soak":
         soak()
+    elif cmd == "gym-run":
+        gym_run(rest[0] if rest else "", rest[1] if len(rest) > 1 and rest[1] else None)
     elif cmd == "gym":
         gym(*rest)
     else:
