@@ -9,15 +9,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - candidate: search-main-integration
-            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
-          - candidate: scoped-flush-main-integration
-            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
+          # Control: same source baseline and same root-only install as the failed runs.
+          - candidate: upstream-linux-control
+            ref: d6c4e92fdb3257c727884e9fce5bac232bf70d2b
+            agent_dependencies: false
+          # Diagnose the separate Agent dependency omission without modifying application code.
+          - candidate: upstream-linux-with-agent
+            ref: d6c4e92fdb3257c727884e9fce5bac232bf70d2b
+            agent_dependencies: true
     name: npm test - ${{ matrix.candidate }}
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +38,9 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci
+      - name: Install Agent dependencies when selected
+        if: matrix.agent_dependencies == true
+        run: npm ci --prefix agent
       - name: Required repository tests
         shell: bash
         run: |
