@@ -374,8 +374,8 @@ fn due(waited: Duration, waits: &Waits, hint: &Hint) -> Option<Why> {
         // The screen drew since the last round while the notice still names the app it left: a
         // notice may have been missed, so the look is kept at the short safety pace (review of
         // #624: a visit from 500 s to 900 s was lost at the half hour pace).
-        (Shown::Home | Shown::LeftOut, Some(_)) => after(waits.safety.min(SAFETY_MAX), Why::Safety),
-        (Shown::Home | Shown::LeftOut, None) => after(waits.safety, Why::Safety),
+        // Without frame counts a missed notice can't be told apart, so the short safety pace holds too.
+        (Shown::Home | Shown::LeftOut, _) => after(waits.safety.min(SAFETY_MAX), Why::Safety),
         // No app can have come to the front on a screen that drew nothing: the one the last
         // round found is still there, and is read again only when it drew since it was read.
         (Shown::Unknown, Some(moves)) if moves.unstirred => {
@@ -1739,6 +1739,11 @@ mod tests {
         // The same in a left-out app whose notice was missed.
         let left = |t: u64| Hint { shown: Shown::LeftOut, ..at(t) };
         assert_eq!((0..=1800).find(|&t| due(seconds(t), &waits, &left(t)).is_some()), Some(600));
+        // And when the frame counts are unavailable, on the Home Screen or in a left-out app.
+        for shown in [Shown::Home, Shown::LeftOut] {
+            let blind = Hint { shown, changed: None, moves: None };
+            assert_eq!((0..=1800).find(|&t| due(seconds(t), &waits, &blind).is_some()), Some(600));
+        }
         // Without the miss, a screen that drew nothing is still left alone for the half hour.
         let quiet = Hint { shown: Shown::Home, changed: None, moves: Some(Moves { still: true, unstirred: true, woke: None, moving: false }) };
         assert_eq!((0..=1800).find(|&t| due(seconds(t), &waits, &quiet).is_some()), Some(1800));
