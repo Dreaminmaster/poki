@@ -183,6 +183,51 @@ final class SessionArchiveTests: XCTestCase {
                        "A scoped retry must not discard the other failed write")
     }
 
+    func testScopedFlushRetriesItsOwnFailedWrite() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let saved = try saveEarlier("chat", lines: ["Keep this message"])
+        let store = launch()
+        let file = folder.appendingPathComponent("chat.json")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        store.rename("chat", to: "Recovered conversation")
+
+        store.flush(sessionID: "chat")
+        try FileManager.default.removeItem(at: file)
+        store.flush(sessionID: "chat")
+
+        let recovered = try XCTUnwrap(launch().session("chat"))
+        XCTAssertEqual(recovered.name, "Recovered conversation")
+        XCTAssertEqual(recovered.entries, saved.entries)
+    }
+
+    func testScopedFlushKeepsLatestEditAndDoesNotResurrectDeletedSession() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        for id in ["keep", "gone"] { _ = try saveEarlier(id, lines: ["Conversation " + id]) }
+        let store = launch()
+        for id in ["keep", "gone"] {
+            let file = folder.appendingPathComponent(id + ".json")
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            store.rename(id, to: "Earlier failed edit")
+        }
+        store.flush()
+        for id in ["keep", "gone"] {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(id + ".json"))
+        }
+
+        store.rename("keep", to: "Latest edit")
+        store.flush(sessionID: "keep")
+        store.delete("gone")
+        store.flush(sessionID: "gone")
+        store.flush()
+
+        let reloaded = launch()
+        XCTAssertEqual(reloaded.session("keep")?.name, "Latest edit")
+        XCTAssertNil(reloaded.session("gone"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("gone.json").path))
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in
