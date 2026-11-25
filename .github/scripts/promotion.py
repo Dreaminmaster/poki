@@ -192,8 +192,6 @@ def _heading_priority(match, channel, version, base_version):
             return 0
         if target_beta == 1 and h_kind == "beta_generic":
             return 1
-        if target_beta == 1 and h_kind == "base":
-            return 2
         return None
     if channel == "stable":
         if version != base_version:
