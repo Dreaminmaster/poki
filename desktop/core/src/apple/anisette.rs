@@ -611,11 +611,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_server_that_does_not_answer_is_skipped_for_the_next_fallback() {
-        // Three local ports nothing listens on: each connection is refused at once.
+        // Three local ports held bound but never listening, so each connection is refused at once and
+        // no other test's server can take the port while this one runs.
+        let mut held = Vec::new();
         let mut urls = Vec::new();
         for _ in 0..3 {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            urls.push(format!("http://127.0.0.1:{}", l.local_addr().unwrap().port()));
+            let s = tokio::net::TcpSocket::new_v4().unwrap();
+            s.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+            urls.push(format!("http://127.0.0.1:{}", s.local_addr().unwrap().port()));
+            held.push(s);
         }
         let mut p = Provider::new(Source::Remote { url: urls[0].clone() });
         p.fallbacks = urls.clone();
