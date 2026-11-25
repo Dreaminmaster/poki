@@ -112,4 +112,42 @@ final class ScreenHistoryCheckTests: XCTestCase {
         XCTAssertFalse(approved.isError)
         XCTAssertTrue(approved.text.contains("passport"))
     }
+
+    /// History turned off or access changed while the check or the owner's answer was awaited: the
+    /// text read before is not handed out, even when the owner then approves.
+    func testAccessChangedDuringTheWaitSharesNothing() async {
+        let revision = Revision()
+        func source(_ verdict: ScreenHistoryVerdict, revokeInCheck: Bool) -> ScreenHistorySource {
+            ScreenHistorySource(
+                isEnabled: { true },
+                accessRevision: { revision.value },
+                entries: { _, _ in [ScreenHistoryEntry(at: Date().addingTimeInterval(-60), app: "Notes", bundleID: "com.apple.mobilenotes", title: "Trip", text: "Pack the passport")] },
+                check: { _, _ in
+                    if revokeInCheck { revision.value += 1 }
+                    return verdict
+                })
+        }
+        let shared = await makeCore { $0.screenHistory = source(.share, revokeInCheck: true) }.0.call("screen_history", [:])
+        XCTAssertTrue(shared.isError)
+        XCTAssertFalse(shared.text.contains("passport"), shared.text)
+
+        let c = makeCore { $0.approvalWait = 5; $0.screenHistory = source(.ask(reason: "private"), revokeInCheck: false) }.0
+        Task {
+            while c.pendingApproval == nil { try? await Task.sleep(nanoseconds: 20_000_000) }
+            revision.value += 1
+            c.resolveApproval(id: c.pendingApproval!.id, approved: true)
+        }
+        let approved = await c.call("screen_history", [:])
+        XCTAssertTrue(approved.isError)
+        XCTAssertFalse(approved.text.contains("passport"), approved.text)
+    }
+}
+
+private final class Revision: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: UInt64 = 0
+    var value: UInt64 {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
 }

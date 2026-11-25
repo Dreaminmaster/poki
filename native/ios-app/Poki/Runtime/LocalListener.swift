@@ -16,6 +16,8 @@ final class LocalListener: @unchecked Sendable {
     static let service = "_poki._tcp"
 
     private let queue = DispatchQueue(label: "poki.local-listener")
+    private let lock = NSLock()
+    /// Guarded by `lock`: `start` and `stop` run on the caller's thread, a failure on `queue`.
     private var listener: NWListener?
     private let serve: @Sendable (WebSocketConnection, LocalTransport) async -> Void
     private let log: @Sendable (String) -> Void
@@ -27,7 +29,7 @@ final class LocalListener: @unchecked Sendable {
 
     /// Starts listening; `name` is the Bonjour name computers see (the phone's name).
     func start(name: String) {
-        guard listener == nil else { return }
+        guard lock.withLock({ listener == nil }) else { return }
         do {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
@@ -35,31 +37,61 @@ final class LocalListener: @unchecked Sendable {
             let listener = try NWListener(using: parameters, on: Self.port)
             listener.service = NWListener.Service(name: String(name.prefix(60)), type: Self.service)
             listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-            listener.stateUpdateHandler = { [log] state in
+            listener.stateUpdateHandler = { [weak self, weak listener, log] state in
                 switch state {
                 case .ready: log("listening for computers on port \(Self.port.rawValue)")
-                case .failed(let error): log("local listener failed: \(error)")
+                case .failed(let error):
+                    log("local listener failed: \(error)")
+                    // A failed listener never listens again: it is let go so the next start makes a new one.
+                    listener?.cancel()
+                    self?.forget(listener)
                 default: break
                 }
             }
+            lock.withLock { self.listener = listener }
             listener.start(queue: queue)
-            self.listener = listener
         } catch {
             log("local listener could not start: \(error)")
         }
     }
 
     func stop() {
-        listener?.cancel()
-        listener = nil
+        let stopped = lock.withLock { () -> NWListener? in
+            defer { listener = nil }
+            return listener
+        }
+        stopped?.cancel()
+    }
+
+    /// Lets go of `failed` if it is still the current listener (a newer one is kept).
+    func forget(_ failed: NWListener?) {
+        lock.withLock { if let failed, listener === failed { listener = nil } }
     }
 
     private func accept(_ connection: NWConnection) {
+        // The path is known only once the connection is ready; read before, it is nil and Wi-Fi would
+        // be taken for USB (and the computer's hello, signed for Wi-Fi, refused).
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self, let connection else { return }
+            switch state {
+            case .ready:
+                connection.stateUpdateHandler = nil
+                let transport = Self.transport(of: connection.currentPath)
+                self.log("a computer connected over \(transport.rawValue)")
+                let framed = LineConnection(connection)
+                Task { [serve] in await serve(framed, transport) }
+            case .failed, .cancelled:
+                connection.stateUpdateHandler = nil
+                connection.cancel()
+            default: break
+            }
+        }
         connection.start(queue: queue)
-        let framed = LineConnection(connection)
-        let transport: LocalTransport = connection.currentPath?.usesInterfaceType(.wifi) == true ? .wifi : .usb
-        log("a computer connected over \(transport.rawValue)")
-        Task { [serve] in await serve(framed, transport) }
+    }
+
+    /// The transport a ready connection came over: Wi-Fi when its path uses Wi-Fi, otherwise USB.
+    static func transport(of path: NWPath?) -> LocalTransport {
+        path?.usesInterfaceType(.wifi) == true ? .wifi : .usb
     }
 }
 

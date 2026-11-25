@@ -62,6 +62,8 @@ struct MemoryView: View {
         List {
             if library.items.isEmpty {
                 Section { MemoryEmptyCard(title: "No Memories Yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
+                // Senses' provisional memories wait for a yes even before the first note is kept.
+                SensesMemorySection()
             } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 MemorySearchResults(query: query, page: page)
             } else {
