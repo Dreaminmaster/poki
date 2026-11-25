@@ -1,4 +1,4 @@
-name: Fork Node regression verification
+name: Fork macOS Node regression verification
 on:
   push:
     branches: [ci/search-consistency]
@@ -8,19 +8,17 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Control: same source baseline and same root-only install as the failed runs.
-          - candidate: upstream-linux-control
-            ref: d6c4e92fdb3257c727884e9fce5bac232bf70d2b
-            agent_dependencies: false
-          # Diagnose the separate Agent dependency omission without modifying application code.
-          - candidate: upstream-linux-with-agent
-            ref: d6c4e92fdb3257c727884e9fce5bac232bf70d2b
+          - candidate: search-main-integration
+            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
+            agent_dependencies: true
+          - candidate: scoped-flush-main-integration
+            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
             agent_dependencies: true
     name: npm test - ${{ matrix.candidate }}
     steps:
@@ -37,6 +35,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Verify macOS prerequisites
+        run: |
+          sw_vers
+          xcodebuild -version
+          command -v plutil
+          swift -e 'import CryptoKit; print("CryptoKit available")'
       - run: npm ci
       - name: Install Agent dependencies when selected
         if: matrix.agent_dependencies == true
