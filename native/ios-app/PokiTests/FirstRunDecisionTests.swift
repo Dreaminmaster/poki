@@ -67,4 +67,23 @@ final class FirstRunDecisionTests: XCTestCase {
         launch()
         XCTAssertEqual(FirstRun.pending(defaults: defaults, version: "0.4.7"), .update("0.4.7"))
     }
+
+    /// Closing the welcome lets the hint on Poki's picture show, but only for the app's own records: a
+    /// test's defaults leave the shared tip state alone.
+    func testFinishReleasesTheMenuHintOnlyForTheAppsOwnRecords() {
+        let standard = UserDefaults.standard
+        let saved = (standard.object(forKey: FirstRun.key), standard.object(forKey: FirstRun.versionKey))
+        defer {
+            standard.set(saved.0, forKey: FirstRun.key)
+            standard.set(saved.1, forKey: FirstRun.versionKey)
+            PokiMenuTip.welcomeUp = false
+        }
+
+        PokiMenuTip.welcomeUp = true
+        FirstRun.finish(defaults: defaults, version: "0.5.1")
+        XCTAssertTrue(PokiMenuTip.welcomeUp)
+
+        FirstRun.finish(defaults: standard, version: FirstRun.version)
+        XCTAssertFalse(PokiMenuTip.welcomeUp)
+    }
 }

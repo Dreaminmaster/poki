@@ -254,7 +254,7 @@ struct PokiHead: View {
                     }
                     .glassSurface(in: Capsule())
                     .glassAppearing()
-                    .accessibilityShowsLargeContentViewer()
+                    .accessibilityShowsLargeContentViewer { Text(verbatim: "Poki") }
                 }
             }
             .frame(minHeight: 24)

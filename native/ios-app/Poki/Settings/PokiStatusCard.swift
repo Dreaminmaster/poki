@@ -49,11 +49,11 @@ extension PowerTile {
     }
 }
 
-/// Where `PokiMenu` opens relative to its control. `.automatic` uses SwiftUI's `Menu` in place
-/// (the chat top bar's Liquid Glass capsule already sits below the bear); `.below` anchors a native
-/// `UIButton` below the control's bottom edge so the menu opens downward clear of the bear's face.
+/// Where `PokiMenu` opens relative to its control: `.below` anchors a native `UIButton` below the
+/// control's bottom edge, so the menu opens downward clear of the bear's face, and its opening is seen
+/// (`onOpen`), which a SwiftUI `Menu`'s tap is not on iOS 27. Every call site uses it, the home picture,
+/// the conversation's name pill and the voice header.
 enum PokiMenuAnchor: Equatable {
-    case automatic
     case below(spacing: CGFloat = 10)
 }
 
@@ -68,7 +68,7 @@ struct PokiMenu<Face: View>: View {
     /// The tap that opens the menu, for the bear to answer.
     var tapped: () -> Void = {}
     var openCustomization: (() -> Void)? = nil
-    var anchor: PokiMenuAnchor = .automatic
+    var anchor: PokiMenuAnchor = .below()
     var accessibilityLabel: String? = nil
     var accessibilityIdentifier: String? = nil
     @ViewBuilder var face: () -> Face
@@ -112,76 +112,6 @@ struct PokiMenu<Face: View>: View {
 
     @ViewBuilder private var menuTrigger: some View {
         switch anchor {
-        case .automatic:
-            Menu {
-                Section {
-                    if ModelKeys.hasUsableKey(in: model.storage) {
-                        Menu {
-                            ForEach(providers) { provider in
-                                let choices = ModelCatalog.available(provider, storage: model.storage)
-                                if provider == .custom {
-                                    ForEach(CustomProviders.all(in: model.storage)) { custom in
-                                        let models = choices.compactMap { choice -> ChatModelChoice? in
-                                            guard let selection = CustomProviders.parse(choice.id),
-                                                  selection.provider == custom.id else { return nil }
-                                            return ChatModelChoice(id: choice.id, name: selection.model)
-                                        }
-                                        if !models.isEmpty {
-                                            modelGroup(custom.displayName, provider: provider, choices: models)
-                                        }
-                                    }
-                                } else {
-                                    modelGroup(provider.name, provider: provider, choices: choices)
-                                }
-                            }
-                        } label: {
-                            Label("Model", systemImage: "sparkles")
-                            Text(verbatim: ModelKeys.selectedModelName(in: model.storage))
-                        }
-                        .accessibilityIdentifier("status.model")
-                    } else {
-                        Button(action: openModel) { Label("Add Model", systemImage: "plus") }
-                            .accessibilityIdentifier("status.addModel")
-                    }
-                    Menu {
-                        Section {
-                            ForEach(ApprovalClassifier.Mode.allCases) { mode in
-                                Toggle(isOn: Binding(
-                                    get: { model.approvalMode == mode },
-                                    set: { on in if on { model.approvalMode = mode } }
-                                )) {
-                                    Text(verbatim: mode.title)
-                                }
-                            }
-                        } header: {
-                            Text(ApprovalCopy.alwaysConfirm)
-                        }
-                    } label: {
-                        Label("Approval", systemImage: "checkmark.shield")
-                        Text(verbatim: model.approvalMode.title)
-                    }
-                    .accessibilityIdentifier("status.approvals")
-                    if let openCustomization {
-                        Button(action: openCustomization) {
-                            Label("Outfits", systemImage: "hanger")
-                            Text(verbatim: outfitName)
-                        }
-                        .accessibilityIdentifier("status.customizePoki")
-                    }
-                }
-                .id(modelVersion)
-                if model.supportsAutoUnlock {
-                    Button { showsAutoUnlock = true } label: {
-                        Label("Automatic Unlock", systemImage: "lock.open")
-                    }
-                    .accessibilityIdentifier("status.autoUnlock")
-                }
-            } label: {
-                face()
-            }
-            .menuOrder(.fixed)
-            .buttonStyle(.plain)
-            .simultaneousGesture(TapGesture().onEnded { opened() })
         case .below(let spacing):
             face()
                 .accessibilityHidden(true)
@@ -298,19 +228,6 @@ struct PokiMenu<Face: View>: View {
             worn[slot].map { AppLocalization.text($0.piece(slot).name) }
         }
         return pieces.isEmpty ? AppLocalization.text("None") : ListFormatter.localizedString(byJoining: pieces)
-    }
-
-    private func modelGroup(_ title: String, provider: ModelProvider, choices: [ChatModelChoice]) -> some View {
-        Section {
-            ForEach(choices) { choice in
-                let chosen = ModelKeys.selectedProvider(in: model.storage) == provider && ModelKeys.selectedModel(in: model.storage) == choice.id
-                Toggle(isOn: Binding(get: { chosen }, set: { on in if on { pick(provider, choice.id) } })) {
-                    Text(verbatim: choice.name)
-                }
-            }
-        } header: {
-            Text(verbatim: title)
-        }
     }
 
     private func pick(_ provider: ModelProvider, _ id: String) {

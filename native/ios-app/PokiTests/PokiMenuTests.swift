@@ -225,6 +225,34 @@ final class PokiMenuTests: XCTestCase {
         XCTAssertTrue(hasAccessibilityIdentifier("chat.header.details", in: window))
     }
 
+    /// The name pill in a conversation opens Poki's menu through the native button, whose opening is
+    /// seen, so opening it there retires the hint on the home page as the picture does (a SwiftUI
+    /// `Menu`'s tap gesture never fired on iOS 27.3).
+    func testChatNamePillOpeningRunsTheMenusOpenAction() throws {
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: storage.storage)
+        var opened = 0
+        let window = try show(
+            PokiHead(
+                status: PokiStatus(.ready),
+                home: false,
+                openModel: {},
+                openDetails: { opened += 1 },
+                openCustomization: {}
+            )
+            .environment(app)
+        )
+
+        settle { self.menuButton(in: window, identifier: "chat.header.details") != nil }
+        let button = try XCTUnwrap(
+            menuButton(in: window, identifier: "chat.header.details"),
+            "The name pill must host the native menu button, whose opening calls onOpen."
+        )
+        XCTAssertNotNil(button.menu)
+        let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil, actionProvider: nil)
+        button.contextMenuInteraction(UIContextMenuInteraction(delegate: button), willDisplayMenuFor: configuration, animator: nil)
+        XCTAssertEqual(opened, 1)
+    }
+
     private func show(_ view: some View) throws -> UIWindow {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)

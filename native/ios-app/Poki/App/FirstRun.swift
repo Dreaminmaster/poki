@@ -78,8 +78,9 @@ enum FirstRun {
     static func finish(defaults: UserDefaults = .standard, version: String = FirstRun.version) {
         defaults.set(Record.done.rawValue, forKey: key)
         if !version.isEmpty { defaults.set(version, forKey: versionKey) }
-        // The welcome is closed: the hint on Poki's picture may show now.
-        PokiMenuTip.welcomeUp = false
+        // The welcome is closed: the hint on Poki's picture may show now. Only the app's own records
+        // say so; a test's defaults leave the tip alone.
+        if defaults === UserDefaults.standard { PokiMenuTip.welcomeUp = false }
     }
 }
 
