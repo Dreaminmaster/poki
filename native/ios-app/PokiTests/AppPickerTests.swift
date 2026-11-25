@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Poki
 
@@ -109,6 +110,18 @@ final class AppPickerTests: XCTestCase {
         XCTAssertEqual(implicitMei?.triggerLength, 3)
         XCTAssertTrue(implicitMei?.matches.contains { $0.id == "com.meituan.itakeaway" } ?? false)
         XCTAssertNil(AppPickerCatalog.mentionState(input: "xyz", mentionReady: true, adding: false, language: .simplifiedChinese, dynamicApps: []))
+    }
+
+    func testMentionPickerHeightFitsMatchesAndCapsLongLists() throws {
+        for (input, expectedHeight) in [("帮我看看 123", 86.0), ("帮我用 @m", 252.0)] {
+            let state = try XCTUnwrap(AppPickerCatalog.mentionState(
+                input: input, mentionReady: true, adding: false, recentIDs: [],
+                language: .simplifiedChinese, dynamicApps: []
+            ))
+            let picker = MentionPicker(state: state, composerWidth: 390, caretX: nil, pick: { _ in }, browseAll: {})
+            let size = UIHostingController(rootView: picker).sizeThatFits(in: CGSize(width: 390, height: 400))
+            XCTAssertEqual(size.height, expectedHeight, accuracy: 1, input)
+        }
     }
 
     func testPrefixHighlightAndBackfillInsertion() throws {

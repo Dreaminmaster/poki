@@ -238,24 +238,24 @@ final class ConnectionCheckTests: XCTestCase {
     }
 
     func testUncataloguedOpenRouterModelOmitsThinkingParameters() async throws {
-        let modelID = "openai/gpt-6.1-terra"
+        let modelID = "vendor/new-chat"
         UserDefaults.standard.set([modelID], forKey: "models.listed.openrouter")
         ModelCatalog.set(modelID, on: true, for: .openrouter)
         ModelKeys.selectedProvider = .openrouter
         ModelKeys.selectedModel = modelID
         XCTAssertEqual(ModelKeys.model(for: .openrouter), modelID)
 
-        let sse = #"data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"openai/gpt-6.1-terra-20261026","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"
+        let sse = #"data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"vendor/new-chat-20261026","choices":[{"index":0,"delta":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"# + "\n\ndata: [DONE]\n\n"
         ModelServerStub.responder = { _, body in
             let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
             if json["thinking"] != nil || json["reasoning"] != nil || json["reasoning_effort"] != nil || json["output_config"] != nil {
-                return (400, "application/json", #"{"error":{"message":"Thinking.block_binding is not supported on openai/gpt-6.1-terra-20261026","code":400}}"#)
+                return (400, "application/json", #"{"error":{"message":"Thinking.block_binding is not supported on vendor/new-chat-20261026","code":400}}"#)
             }
             return (200, "text/event-stream", sse)
         }
 
         let checkResult = await ConnectionCheck.run(.openrouter, key: key)
-        XCTAssertEqual(checkResult, .works(model: "openai/gpt-6.1-terra-20261026"))
+        XCTAssertEqual(checkResult, .works(model: "vendor/new-chat-20261026"))
         let first = try XCTUnwrap(ModelServerStub.requests.first)
         XCTAssertEqual(first.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
         XCTAssertEqual(first.json["model"] as? String, modelID)
@@ -283,7 +283,7 @@ final class ConnectionCheckTests: XCTestCase {
         try ModelKeys.save(key, for: .openrouter)
         let catalogJSON = #"""
         {"data":[
-          {"id":"openai/gpt-6.1-terra","supported_parameters":["max_completion_tokens","reasoning","reasoning_effort","tools"]},
+          {"id":"vendor/reasoning-chat","supported_parameters":["max_completion_tokens","reasoning","reasoning_effort","tools"]},
           {"id":"vendor/plain-chat","supported_parameters":["max_tokens","temperature","tools"]}
         ]}
         """#
@@ -313,15 +313,15 @@ final class ConnectionCheckTests: XCTestCase {
         XCTAssertNil(plainSent.json["thinking"])
 
         ModelServerStub.recordedReset()
-        ModelCatalog.set("openai/gpt-6.1-terra", on: true, for: .openrouter)
-        ModelKeys.selectedModel = "openai/gpt-6.1-terra"
+        ModelCatalog.set("vendor/reasoning-chat", on: true, for: .openrouter)
+        ModelKeys.selectedModel = "vendor/reasoning-chat"
         let checkResult = await ConnectionCheck.run(.openrouter, key: key)
         XCTAssertEqual(checkResult, .works(model: "served"))
         let checkSent = try XCTUnwrap(ModelServerStub.requests.first)
         XCTAssertNil(checkSent.json["reasoning"])
         XCTAssertNil(checkSent.json["thinking"])
 
-        let reasoningModel = try XCTUnwrap(ModelProvider.openrouter.piModel("openai/gpt-6.1-terra"))
+        let reasoningModel = try XCTUnwrap(ModelProvider.openrouter.piModel("vendor/reasoning-chat"))
         let reasoningLoop = PiLoop(provider: .openrouter, model: reasoningModel, sessionID: UUID().uuidString, tools: []) { _ in
             .init(text: "", jpeg: nil, isError: false)
         }

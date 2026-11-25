@@ -48679,6 +48679,23 @@
           }
         }
       }
+    },
+    "Sign in to ChatGPT again to read its model list." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请重新登录 ChatGPT 以读取模型列表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請重新登入 ChatGPT 以讀取模型列表。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
