@@ -77,7 +77,26 @@ final class MemorySourceNavigationUITests: XCTestCase {
                                 "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         let conversations = app.descendants(matching: .any)["details.searchConversations"]
-        XCTAssertTrue(conversations.waitForExistence(timeout: 20), "Settings must show Conversations")
+        // Settings gained more rows in 0.5.0. SwiftUI's lazy list may not
+        // expose Archived Conversations until the owner scrolls it into view.
+        guard app.navigationBars["Settings"].waitForExistence(timeout: 20) else {
+            screenshot(app, name: "Settings failed to open")
+            XCTFail("Settings must open before searching")
+            return app
+        }
+        for _ in 0..<6 {
+            if conversations.exists && conversations.isHittable { break }
+            // Scroll within the presented Settings content, not the underlying
+            // conversations collection view (which is also in the accessibility tree).
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        screenshot(app, name: "Settings Archived Conversations entry")
+        guard conversations.exists && conversations.isHittable else {
+            XCTFail("Archived Conversations must be reachable by scrolling Settings")
+            return app
+        }
         conversations.tap()
         // On iPhone the native SwiftUI .searchable control can start collapsed.
         // Exercise the owner's pull-to-reveal gesture before treating it as absent.
