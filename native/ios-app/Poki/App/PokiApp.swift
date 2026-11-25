@@ -418,6 +418,8 @@ struct RootView: View {
                 model.becameActive()
                 HistoryCapture.shared.appDidBecomeActive()
                 AskPoki.refresh()
+                // New models a provider adds show up without a Poki release (lists a day old are read again).
+                Task { await ModelCatalog.refreshStale() }
                 model.startSigner()
                 model.signer.maintain()
                 Task { await model.verifyPairing() }

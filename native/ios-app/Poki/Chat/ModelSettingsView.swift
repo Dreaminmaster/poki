@@ -346,7 +346,7 @@ struct TextChatFeature: View {
                         }
                     }
                 }
-                if provider != .chatgpt {
+                if lists {
                     Button(loading ? "Reading the Model List…" : "Refresh Model List") { refresh() }.disabled(loading)
                 }
             } header: {
@@ -363,10 +363,14 @@ struct TextChatFeature: View {
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
         .task {
+            // A list that is missing or a day old is read again, so the provider's new models show up.
             let empty = custom.map { ModelCatalog.listedCustom($0).isEmpty } ?? ModelCatalog.listed(provider).isEmpty
-            if empty, provider != .chatgpt { refresh() }
+            if lists, empty || ModelCatalog.isStale(provider) && !ModelCatalog.isBackingOff(provider) { refresh() }
         }
     }
+
+    /// A ChatGPT sign-in has a model list only through Codex.
+    private var lists: Bool { provider != .chatgpt || ModelCatalog.listable().contains(.chatgpt) }
 
     private var accountName: String { custom.flatMap { CustomProviders.provider($0) }?.displayName ?? provider.name }
 
