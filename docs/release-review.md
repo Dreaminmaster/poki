@@ -29,11 +29,13 @@ phone checklist still require device evidence. The original findings below are h
 | 8 | Unsigned IPAs: AltStore signs with the person's Apple ID. A free Apple ID cannot sign a packet tunnel or (on some iOS versions) app groups, and is limited to 3 apps. | Medium | Setup says plainly: the built-in tunnel needs a paid developer account. With a free account, use a proxy app's loopback instead. Poki and Poki Runner count as 2 of the 3 app slots. |
 | 9 | The relay URL, the DDI mirror and the version are not shown together anywhere a person can copy. | Low | Poki's Debug screen: the app version and build, the runner's version and build, the relay host, and the iOS version, in the copied log's header. |
 
-## Release steps (for the workflow to follow)
+## Release steps (historical proposal)
+
+The steps below are from the 2026-11-06 review and are superseded by [Release channels](release-channels.md) (`prealpha.yml`, `promote-alpha.yml`, `propose-promotion.yml`, `promotion-gate.yml`, and `publish-promotion.yml`).
 
 1. Tag `vX.Y.Z` on the branch to release.
 2. CI: tests (PokiCore, including the soak tests; launcher, including soak), then the device-SDK builds of Poki and Poki Runner, stamped as in finding 2.
 3. Package: `Poki-X.Y.Z-N.ipa`, `PokiRunner-X.Y.Z-N.ipa`, `SHA256SUMS`.
 4. GitHub Release `vX.Y.Z`, with the CHANGELOG section as its notes and the three files.
 5. Update source.json (version entry, size, date, URLs) and publish it.
-6. Device checklist on the owner's phone before the release is announced; the result goes into the changelog's "Device checks".
+6. Run [Device test checklist](device-test-checklist.md) on a physical iPhone when verifying a release, and record the result in PR or test evidence. `CHANGELOG.md` no longer has a Device checks section. It contains only dated user-visible release notes, which `promotion-gate.yml` and `publish-promotion.yml` verify and publish via `.github/scripts/promotion.py changelog` alongside `promote-alpha.yml` tests, Beta Gym scorecards, Stable soak checks, and owner approval in the `alpha`, `beta`, and `stable` environments.
