@@ -8,17 +8,17 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - candidate: search-main-integration
-            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
+          - candidate: upstream-newest-xcode
+            ref: 059388bd20766090344fe660078094e55726f6fe
             agent_dependencies: true
-          - candidate: scoped-flush-main-integration
-            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
+          - candidate: notification-fixture-newest-xcode
+            ref: d8d235038473a180b9c41a93e68a923f778a3c49
             agent_dependencies: true
     name: npm test - ${{ matrix.candidate }}
     steps:
@@ -35,6 +35,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Select newest released Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          swiftc --version
       - name: Verify macOS prerequisites
         run: |
           sw_vers
