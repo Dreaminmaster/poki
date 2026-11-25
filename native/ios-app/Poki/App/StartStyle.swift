@@ -85,20 +85,32 @@ struct StartButtons: View {
     var secondaryAction: () -> Void = {}
     var primaryID = "firstRun.next"
     var secondaryID = "firstRun.finishLater"
+    /// The page's own action is on the page (a form's Sign In), so the bar's only button is the
+    /// secondary kind and never outshines it.
+    var quiet = false
     @Environment(\.startPrimaryDisabled) private var primaryDisabled
 
     var body: some View {
         VStack(spacing: 8) {
-            Button(action: action) {
-                // Poki blue on a white button: the prominent glass takes the white tint on the blue ground.
-                Text(primary).font(.allo(.body, .semibold)).foregroundStyle(StartGround.blue).frame(maxWidth: .infinity)
+            if quiet {
+                Button(action: action) {
+                    Text(primary).font(.allo(.body)).foregroundStyle(StartGround.ink).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderless)
+                .disabled(primaryDisabled)
+                .accessibilityIdentifier(primaryID)
+            } else {
+                Button(action: action) {
+                    // Poki blue on a white button: the prominent glass takes the white tint on the blue ground.
+                    Text(primary).font(.allo(.body, .semibold)).foregroundStyle(StartGround.blue).frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .buttonBorderShape(.capsule)
+                .glassButton(prominent: true)
+                .tint(.white)
+                .disabled(primaryDisabled)
+                .accessibilityIdentifier(primaryID)
             }
-            .controlSize(.large)
-            .buttonBorderShape(.capsule)
-            .glassButton(prominent: true)
-            .tint(.white)
-            .disabled(primaryDisabled)
-            .accessibilityIdentifier(primaryID)
             if let secondary {
                 Button(action: secondaryAction) {
                     Text(secondary).font(.allo(.body)).foregroundStyle(StartGround.ink).frame(maxWidth: .infinity, minHeight: 44)

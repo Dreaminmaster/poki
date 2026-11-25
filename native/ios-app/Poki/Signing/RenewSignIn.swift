@@ -57,7 +57,7 @@ struct StartAppleAccountPage: View {
         RenewSignInForm()
             .bottomBar(softEdge: true) {
                 // Before the sign-in, the form's Sign In is the action, so the bar offers only to go on without it.
-                StartButtons(primary: done ? "Continue" : "Set Up Later", action: goOn)
+                StartButtons(primary: done ? "Continue" : "Set Up Later", action: goOn, quiet: !done)
             }
             .accessibilityIdentifier("firstRun.appleAccount")
     }
@@ -73,7 +73,7 @@ struct RenewSignInSheet: View {
         NavigationStack {
             RenewSignInForm()
                 .bottomBar(softEdge: true) {
-                    StartButtons(primary: done ? "Continue" : "Not Now", action: { dismiss() })
+                    StartButtons(primary: done ? "Continue" : "Not Now", action: { dismiss() }, quiet: !done)
                 }
         }
         .environment(\.startDesign, StartDesign.current)

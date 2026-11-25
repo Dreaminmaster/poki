@@ -54,7 +54,11 @@ struct AccountPage: View {
                 .settingsFooter()
             }
             .task { if signer.teams.isEmpty, signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
-            Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
+            Section {
+                Button(role: .destructive) { Task { await signer.signOut() } } label: {
+                    Text("Sign Out").frame(maxWidth: .infinity)
+                }
+            }
         } else {
             if signer.needsReauth, signer.lastError != SelfSigner.reauthMessage {
                 Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(Tint.amberInk) }
@@ -66,7 +70,7 @@ struct AccountPage: View {
                     .task { if signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
             }
             Section {
-                TextField("Apple ID", text: $appleID)
+                TextField("Apple Account", text: $appleID)
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -95,7 +99,11 @@ struct AccountPage: View {
             }
             // The account is still stored, so it can be signed out here as when its sign-in works.
             if signer.sessionExpired, signer.signedIn {
-                Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
+                Section {
+                    Button(role: .destructive) { Task { await signer.signOut() } } label: {
+                        Text("Sign Out").frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
         SignerActivityRows(signer: signer, offersSignIn: false)
