@@ -155,6 +155,79 @@ final class SessionArchiveTests: XCTestCase {
         XCTAssertEqual(launch().archivedSessions.map(\.id), ["keep"])
     }
 
+    func testScopedFlushRetriesOnlyRequestedFailedSave() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let ids = ["requested", "other"]
+        for id in ids { _ = try saveEarlier(id, lines: ["Conversation " + id]) }
+        let store = launch()
+        for id in ids {
+            let file = folder.appendingPathComponent(id + ".json")
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            store.archive(id)
+        }
+        // Both writes fail and leave the pending batch, but retain retry state.
+        store.flush()
+        for id in ids {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(id + ".json"))
+        }
+
+        store.flush(sessionID: "requested")
+        XCTAssertEqual(launch().archivedSessions.map(\.id), ["requested"],
+                       "An explicit scoped flush must retry an earlier failed write")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("other.json").path),
+                       "A scoped flush must not write another conversation")
+
+        store.flush()
+        XCTAssertEqual(Set(launch().archivedSessions.map(\.id)), Set(ids),
+                       "A scoped retry must not discard the other failed write")
+    }
+
+    func testScopedFlushRetriesItsOwnFailedWrite() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let saved = try saveEarlier("chat", lines: ["Keep this message"])
+        let store = launch()
+        let file = folder.appendingPathComponent("chat.json")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        store.rename("chat", to: "Recovered conversation")
+
+        store.flush(sessionID: "chat")
+        try FileManager.default.removeItem(at: file)
+        store.flush(sessionID: "chat")
+
+        let recovered = try XCTUnwrap(launch().session("chat"))
+        XCTAssertEqual(recovered.name, "Recovered conversation")
+        XCTAssertEqual(recovered.entries, saved.entries)
+    }
+
+    func testScopedFlushKeepsLatestEditAndDoesNotResurrectDeletedSession() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        for id in ["keep", "gone"] { _ = try saveEarlier(id, lines: ["Conversation " + id]) }
+        let store = launch()
+        for id in ["keep", "gone"] {
+            let file = folder.appendingPathComponent(id + ".json")
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            store.rename(id, to: "Earlier failed edit")
+        }
+        store.flush()
+        for id in ["keep", "gone"] {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(id + ".json"))
+        }
+
+        store.rename("keep", to: "Latest edit")
+        store.flush(sessionID: "keep")
+        store.delete("gone")
+        store.flush(sessionID: "gone")
+        store.flush()
+
+        let reloaded = launch()
+        XCTAssertEqual(reloaded.session("keep")?.name, "Latest edit")
+        XCTAssertNil(reloaded.session("gone"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("gone.json").path))
+    }
+
     func testRestoredModelContextIsBoundedAndRetainsNewestEvidence() {
         let old = String(repeating: "old transcript filler ", count: 280)
         let entries = (0..<60).map { index in
@@ -269,9 +342,12 @@ final class SessionArchiveTests: XCTestCase {
         let store = launch()
         XCTAssertEqual(store.listed.count, SessionStore.limit)
         XCTAssertNil(store.session("listed-0"), "the oldest listed conversation is the one over the limit")
+        // The in-memory row is removed immediately; file deletion runs on the serial write queue.
+        store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("listed-0.json").path))
         XCTAssertEqual(Set(store.archivedSessions.map(\.id)), Set(archived.map(\.id)), "no archived conversation is taken")
         let relaunched = launch()
+        XCTAssertNil(relaunched.session("listed-0"), "the evicted conversation must not return after reload")
         for session in archived { XCTAssertEqual(relaunched.session(session.id)?.entries, session.entries) }
     }
 
