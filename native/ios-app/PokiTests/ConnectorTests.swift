@@ -1,7 +1,20 @@
+import PiSwiftMCP
 import XCTest
 @testable import Poki
 
 final class ConnectorTests: XCTestCase {
+    // MARK: Retrying a tool call
+
+    /// A tool call is sent again only when the server ended the session (it never ran). A timeout, a
+    /// server error or a cancel may come after the tool ran, so those are not sent twice.
+    func testOnlyAnEndedSessionSendsAToolCallAgain() {
+        XCTAssertTrue(MCPSessions.retriesOnFreshSession(McpSessionExpiredError(body: "")))
+        XCTAssertFalse(MCPSessions.retriesOnFreshSession(CancellationError()))
+        XCTAssertFalse(MCPSessions.retriesOnFreshSession(URLError(.timedOut)))
+        XCTAssertFalse(MCPSessions.retriesOnFreshSession(McpHTTPError(status: 500, body: "", message: "boom")))
+        XCTAssertFalse(MCPSessions.retriesOnFreshSession(McpTransportError.responseStreamFailed("cut")))
+    }
+
     // MARK: The live check's parsing
 
     func testResourceMetadataComesFromA401() {

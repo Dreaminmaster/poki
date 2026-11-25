@@ -490,7 +490,13 @@ extension PokiCore {
             return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
         }
         guard !matched.isEmpty, let check = source.check else { return ToolResult(text: text, jpeg: nil, isError: false) }
-        switch await check(text, args.serialized()) {
+        // The check and the owner's answer take time: access is read again after each wait, so text
+        // gathered before a revoke, a lock or a cleared history is never handed out.
+        let decision = await check(text, args.serialized())
+        guard accessStillValid() else {
+            return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+        }
+        switch decision {
         case .share:
             return ToolResult(text: text, jpeg: nil, isError: false)
         case .refuse(let why):
@@ -502,7 +508,12 @@ extension PokiCore {
             if let pending = approvals.pending { approvals.withdraw(id: pending.id) }
             let approval = approvals.request(app: "Screen History", summary: "Share Screen History", reason: reason.isEmpty ? "reading Screen History" : reason,
                                              scope: ApprovalScope(actions: "history:\(UUID().uuidString)"))
-            switch await approvals.wait(id: approval.id, seconds: hold) {
+            let answer = await approvals.wait(id: approval.id, seconds: hold)
+            guard accessStillValid() else {
+                if answer == nil { approvals.withdraw(id: approval.id) }
+                return ToolResult(text: Self.screenHistoryRevokedMessage, jpeg: nil, isError: true)
+            }
+            switch answer {
             case .approved?:
                 _ = approvals.consumeGrant(scope: approval.scope)
                 return ToolResult(text: text, jpeg: nil, isError: false)
