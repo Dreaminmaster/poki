@@ -57,16 +57,135 @@ pub fn saved_bytes(udid: &str) -> Result<Option<Vec<u8>>> {
     read_record(&record_path(udid)?)
 }
 
-/// Whether the saved record still opens a session with the phone.
-pub async fn verify(phone: &Phone) -> Result<bool> {
-    let Some(record) = saved(&phone.udid)? else { return Ok(false) };
+// Settling on one record.
+//
+// Two records can speak for this computer: the one Poki Setup saved (`record_path`) and the one
+// usbmuxd keeps (Finder on the Mac, Apple Devices on Windows). They drift apart when the phone
+// forgets one (Reset Location & Privacy, an erase, an update), when another app pairs again, or
+// when usbmuxd did not take the record Poki Setup gave it. Pairing used to check only the saved
+// record while every service over the cable used usbmuxd's, so setup failed with "not paired"
+// at the profiles or remote pairing step right after pairing worked (#421). `settle` finds the
+// record the phone accepts, keeps it in both places, and the USB provider uses it.
+
+/// Where a record came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Saved,
+    Mux,
+}
+
+/// What [`settle`] does once it knows which records the phone accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Plan {
+    /// The record to use from now on.
+    keep: Source,
+    /// Save it as this computer's record (it came from usbmuxd).
+    write_saved: bool,
+    /// Give it to usbmuxd, whose record is missing or no longer accepted.
+    write_mux: bool,
+}
+
+/// `saved` and `mux` are `None` when there is no such record, else whether the phone accepts it.
+/// `None` back means the phone accepts neither: it has to be trusted again.
+fn plan(saved: Option<bool>, mux: Option<bool>) -> Option<Plan> {
+    match (saved, mux) {
+        (Some(true), mux) => Some(Plan { keep: Source::Saved, write_saved: false, write_mux: mux != Some(true) }),
+        (_, Some(true)) => Some(Plan { keep: Source::Mux, write_saved: true, write_mux: false }),
+        _ => None,
+    }
+}
+
+/// The record each phone last accepted in this run, which the USB provider opens sessions with.
+static SETTLED: std::sync::Mutex<Option<std::collections::HashMap<String, PairingFile>>> = std::sync::Mutex::new(None);
+
+/// The record the phone last accepted from this computer in this run, if any.
+pub fn settled(udid: &str) -> Option<PairingFile> {
+    SETTLED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(udid).cloned())
+}
+
+fn remember(udid: &str, record: Option<&PairingFile>) {
+    let mut map = SETTLED.lock().unwrap_or_else(|e| e.into_inner());
+    let map = map.get_or_insert_with(Default::default);
+    match record {
+        Some(r) => map.insert(udid.to_string(), r.clone()),
+        None => map.remove(udid),
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn remember_for_test(udid: &str, host_id: Option<&str>) {
+    remember(udid, host_id.map(settle_tests::fake_record).as_ref());
+}
+
+/// Whether the phone opens a lockdown session with `record`. A record it does not know is `false`;
+/// any other failure (the phone went away, usbmuxd stopped) is an error.
+async fn accepts(phone: &Phone, record: &PairingFile) -> Result<bool> {
     let provider = phone.provider()?;
     let mut lockdown = LockdownClient::connect(&*provider).await?;
-    match lockdown.start_session(&record).await {
+    match lockdown.start_session(record).await {
         Ok(_) => Ok(true),
         Err(idevice::IdeviceError::InvalidHostID) => Ok(false),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Finds the record the phone accepts (the saved one, else usbmuxd's), saves it on this computer,
+/// gives it to usbmuxd when usbmuxd's is missing or stale, and has the USB provider use it.
+/// `None` when the phone trusts neither: the person has to tap Trust again ([`pair`]).
+pub async fn settle(phone: &Phone) -> Result<Option<PairingFile>> {
+    let saved = match saved(&phone.udid) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("the saved pairing record does not read, trying usbmuxd's: {e}");
+            None
+        }
+    };
+    let through_mux = !matches!(phone.link, super::Link::Wifi { .. });
+    let mux = if through_mux { super::mux_pairing_record(&phone.udid).await.ok().flatten() } else { None };
+
+    let saved_ok = match &saved {
+        Some(r) => Some(accepts(phone, r).await?),
+        None => None,
+    };
+    let mux_ok = match (&mux, &saved) {
+        (Some(m), Some(s)) if m.host_id == s.host_id => saved_ok,
+        (Some(m), _) => Some(accepts(phone, m).await?),
+        (None, _) => None,
+    };
+
+    let Some(plan) = plan(saved_ok, mux_ok) else {
+        remember(&phone.udid, None);
+        return Ok(None);
+    };
+    let mut record = match plan.keep {
+        Source::Saved => saved.expect("plan keeps a saved record only when there is one"),
+        Source::Mux => mux.expect("plan keeps usbmuxd's record only when there is one"),
+    };
+    record.udid = Some(phone.udid.clone());
+    if plan.write_saved || plan.write_mux {
+        let bytes = record.clone().serialize()?;
+        if plan.write_saved {
+            write_record(&record_path(&phone.udid)?, &bytes)?;
+            tracing::info!("the iPhone trusts usbmuxd's pairing record, not the one saved here; saved usbmuxd's");
+        }
+        if plan.write_mux && through_mux {
+            match UsbmuxdConnection::default().await {
+                Ok(mut mux) => match mux.save_pair_record(&phone.udid, bytes).await {
+                    Ok(()) => tracing::info!("gave usbmuxd the pairing record the iPhone trusts"),
+                    Err(e) => tracing::warn!("usbmuxd did not take the pairing record the iPhone trusts: {e}"),
+                },
+                Err(e) => tracing::warn!("could not reach usbmuxd to give it the pairing record: {e}"),
+            }
+        }
+    }
+    remember(&phone.udid, Some(&record));
+    Ok(Some(record))
+}
+
+/// Whether the phone still trusts this computer, through the saved record or usbmuxd's. A record
+/// that works is settled on ([`settle`]), so the steps after this use it.
+pub async fn verify(phone: &Phone) -> Result<bool> {
+    Ok(settle(phone).await?.is_some())
 }
 
 /// Pairs over USB. Waits for the person to tap Trust and enter the passcode (up to `wait`), then
@@ -76,35 +195,19 @@ pub async fn pair(phone: &Phone, reporter: &Reporter, wait: Duration) -> Result<
         return Err(Error::device("Pairing needs the cable. Plug the iPhone in with a data cable."));
     }
     reporter.step("pair", "Pairing with the iPhone");
+
+    // A record this computer or usbmuxd already holds is kept when it still works: the phone then
+    // shows no dialog, and Poki keeps the identity it knows.
+    if settle(phone).await?.is_some() {
+        reporter.note("pair", "This iPhone already trusts this computer.");
+        reporter.done("pair", None);
+        return saved_bytes(&phone.udid)?.ok_or_else(|| Error::msg("The pairing record went missing while it was in use."));
+    }
+
     let mut mux = UsbmuxdConnection::default().await?;
     let buid = mux.get_buid().await?;
     let provider = phone.provider()?;
     let mut lockdown = LockdownClient::connect(&*provider).await?;
-
-    // A record this computer or usbmuxd already holds is kept when it still works: the phone then
-    // shows no dialog, and Poki keeps the identity it knows.
-    if let Some(existing) = saved(&phone.udid)? {
-        if lockdown.start_session(&existing).await.is_ok() {
-            reporter.note("pair", "This iPhone already trusts this computer.");
-            reporter.done("pair", None);
-            return saved_bytes(&phone.udid)?.ok_or_else(|| Error::msg("The pairing record went missing while it was in use."));
-        }
-        let mut lockdown2 = LockdownClient::connect(&*provider).await?;
-        std::mem::swap(&mut lockdown, &mut lockdown2);
-    } else if let Ok(Some(existing)) = super::mux_pairing_record(&phone.udid).await {
-        if lockdown.start_session(&existing).await.is_ok() {
-            let mut existing = existing;
-            existing.udid = Some(phone.udid.clone());
-            let bytes = existing.serialize()?;
-            write_record(&record_path(&phone.udid)?, &bytes)?;
-            reporter.note("pair", "Using the trust this computer already has with the iPhone.");
-            reporter.done("pair", None);
-            return Ok(bytes);
-        }
-        let mut lockdown2 = LockdownClient::connect(&*provider).await?;
-        std::mem::swap(&mut lockdown, &mut lockdown2);
-    }
-
     let host_id = uuid::Uuid::new_v4().to_string().to_uppercase();
     reporter.waiting("pair", "On the iPhone: tap Trust, then enter the passcode.");
     let pairing = tokio::time::timeout(wait, lockdown.pair(host_id, buid, Some(HOST_NAME)))
@@ -122,6 +225,7 @@ pub async fn pair(phone: &Phone, reporter: &Reporter, wait: Duration) -> Result<
     if let Err(e) = mux.save_pair_record(&phone.udid, bytes.clone()).await {
         tracing::warn!("usbmuxd did not keep the pairing record: {e}");
     }
+    remember(&phone.udid, Some(&record));
     reporter.done("pair", Some("Paired.".into()));
     reporter.emit(Progress::Note { id: "pair".into(), text: format!("Record saved for {}.", phone.udid) });
     Ok(bytes)
@@ -135,6 +239,7 @@ pub async fn unpair(phone: &Phone) -> Result<()> {
         let _ = lockdown.start_session(&record).await;
         let _ = lockdown.unpair(record.host_id.clone()).await;
     }
+    remember(&phone.udid, None);
     let path = record_path(&phone.udid)?;
     if path.exists() {
         std::fs::remove_file(path)?;
@@ -251,6 +356,61 @@ fn with_sending_host(bytes: &[u8], host: &str) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     plist::to_writer_xml(&mut out, &dict).map_err(|e| Error::msg(format!("RPPairing record: {e}")))?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod settle_tests {
+    use super::*;
+
+    /// A record with made-up keys: enough for the provider and the plan, never sent to a phone.
+    pub(crate) fn fake_record(host_id: &str) -> PairingFile {
+        PairingFile {
+            device_certificate: vec![1].into(),
+            host_private_key: vec![2],
+            host_certificate: vec![3].into(),
+            root_private_key: vec![4],
+            root_certificate: vec![5].into(),
+            system_buid: "BUID".into(),
+            host_id: host_id.into(),
+            escrow_bag: None,
+            wifi_mac_address: "00:00:00:00:00:00".into(),
+            udid: None,
+        }
+    }
+
+    #[test]
+    fn a_working_saved_record_repairs_a_stale_usbmuxd_record() {
+        // #421: the phone trusts Poki Setup's record, but Apple Devices keeps one it forgot.
+        assert_eq!(plan(Some(true), Some(false)), Some(Plan { keep: Source::Saved, write_saved: false, write_mux: true }));
+        assert_eq!(plan(Some(true), None), Some(Plan { keep: Source::Saved, write_saved: false, write_mux: true }));
+        assert_eq!(plan(Some(true), Some(true)), Some(Plan { keep: Source::Saved, write_saved: false, write_mux: false }));
+    }
+
+    #[test]
+    fn a_working_usbmuxd_record_replaces_a_stale_saved_one_without_a_trust_dialog() {
+        // The person trusted the computer again in Finder or Apple Devices after the phone forgot it.
+        assert_eq!(plan(Some(false), Some(true)), Some(Plan { keep: Source::Mux, write_saved: true, write_mux: false }));
+        assert_eq!(plan(None, Some(true)), Some(Plan { keep: Source::Mux, write_saved: true, write_mux: false }));
+    }
+
+    #[test]
+    fn no_working_record_means_trust_again() {
+        assert_eq!(plan(Some(false), Some(false)), None);
+        assert_eq!(plan(None, Some(false)), None);
+        assert_eq!(plan(Some(false), None), None);
+        assert_eq!(plan(None, None), None);
+    }
+
+    #[test]
+    fn the_settled_record_is_remembered_per_phone_and_forgotten() {
+        remember("SETTLE-A", Some(&fake_record("HOST-A")));
+        remember("SETTLE-B", Some(&fake_record("HOST-B")));
+        assert_eq!(settled("SETTLE-A").map(|r| r.host_id), Some("HOST-A".into()));
+        assert_eq!(settled("SETTLE-B").map(|r| r.host_id), Some("HOST-B".into()));
+        remember("SETTLE-A", None);
+        assert!(settled("SETTLE-A").is_none());
+        assert!(settled("SETTLE-B").is_some());
+    }
 }
 
 #[cfg(test)]

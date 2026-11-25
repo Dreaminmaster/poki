@@ -1465,13 +1465,18 @@ final class ChatHarnessTests: XCTestCase {
         for ending in Ending.allCases {
             var actions: [[String: Any]] = [["run": ["name": name, "step_memory_ids": ["1": [opening.id]]]]]
             let needsApproval = ending == .declined || ending == .stopped
-            if needsApproval { actions.append(["tap": 1, "used_memory_ids": [followUp.id]]) }
             if ending == .failed { actions.append(["wait": -1, "used_memory_ids": [followUp.id]]) }
+            // A tap chained after the run would be judged on the screen it lands on and handed back
+            // unsent, so the follow-up that needs the owner goes in its own do, on the fresh screen.
+            var dos = [FakeCompletions.tool("do", ["actions": actions])]
+            if needsApproval {
+                dos.append(FakeCompletions.tool("do", ["actions": [["tap": 1, "used_memory_ids": [followUp.id]]]]))
+            }
             let server = try FakeCompletions(replies: [
                 FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Finish the check"], "currentStep": 2]),
                 FakeCompletions.tool("look", ["full": true]),
                 FakeCompletions.tool("skills", ["action": "list"]),
-                FakeCompletions.tool("do", ["actions": actions]),
+            ] + dos + [
                 FakeCompletions.tool("finish_task", [
                     "success": ending == .completed, "summary": "Settings check ended.",
                     "details": [], "answer": ["kind": "action"],
@@ -1480,7 +1485,9 @@ final class ChatHarnessTests: XCTestCase {
             ])
             let automation = FakeAutomation()
             _ = automation.prepare()
-            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Delete" }),
+            // A Pay button asks wherever it is. A lone Delete asks only inside a menu or a dialog
+            // (main's rules, kept for 0.5.1), and a chained tap is judged on the screen it lands on.
+            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Pay" }),
                             automation: automation)
             let session = chat.sessionID
             let app = try XCTUnwrap(app)
@@ -1526,7 +1533,8 @@ final class ChatHarnessTests: XCTestCase {
                 XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
                 if ending == .declined {
                     XCTAssertEqual(result.success, false, result.text)
-                    XCTAssertTrue(answer.contains("not_sent from action 2: the owner declined on the phone"), answer)
+                    let declined = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(5).first))
+                    XCTAssertTrue(declined.contains("not_sent from action 1: the owner declined on the phone"), declined)
                     XCTAssertTrue(chat.entries.contains {
                         if case .note(.approval(let note)) = $0.kind { return note.state == .refused && !note.byModel }
                         return false

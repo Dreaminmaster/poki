@@ -83,7 +83,8 @@ struct ComputersSection: View {
             Section {
                 ForEach(access.computers) { known in
                     Toggle(isOn: Binding(get: { known.allowed == true }, set: { access.set(known.id, allowed: $0) })) {
-                        SettingsRow(title: LocalizedStringKey(stringLiteral: known.computer.name), caption: caption(known),
+                        // The computer names itself: its name is shown as it is, never looked up as a key.
+                        SettingsRow(title: LocalizedStringKey("\(known.computer.name)"), caption: caption(known),
                                     symbol: "laptopcomputer", warns: known.allowed == nil)
                     }
                     .accessibilityIdentifier("agents.computer")
@@ -112,9 +113,9 @@ struct ComputersSection: View {
         }
         let agent = known.computer.agent.map(AgentName.pretty) ?? AppLocalization.text("Poki MCP")
         if known.allowed == nil {
-            return LocalizedStringKey(stringLiteral: AppLocalization.text(LocalizedStringResource("Waiting for you, \(agent) over \(way)")))
+            return LocalizedStringKey("\(AppLocalization.text(LocalizedStringResource("Waiting for you, \(agent) over \(way)")))")
         }
-        return LocalizedStringKey(stringLiteral: AppLocalization.text(LocalizedStringResource("\(agent) over \(way), \(ChatTime.row(known.lastSeen))")))
+        return LocalizedStringKey("\(AppLocalization.text(LocalizedStringResource("\(agent) over \(way), \(ChatTime.row(known.lastSeen))")))")
     }
 
     private typealias Known = ComputerAccess.Known
