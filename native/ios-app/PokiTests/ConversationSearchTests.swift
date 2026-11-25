@@ -15,7 +15,7 @@ final class ConversationSearchTests: XCTestCase {
                       limit: Int = ConversationSearchIndex.displayLimit) -> [ConversationSearchHit] {
         let snapshot = ConversationSearchIndex.snapshot(in: sessions)
         let matched = ConversationSearchIndex.search(snapshot, query: query, limit: limit)
-        return ConversationSearchIndex.resolve(matched, in: sessions)
+        return ConversationSearchIndex.resolve(matched, in: sessions, query: query)
     }
 
     func testGreetingRemainsInTranscriptAfterScrollRequestIsConsumed() {
@@ -146,6 +146,39 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertFalse(ConversationSearchIndex.hasTarget(replaced.id, in: current))
         XCTAssertTrue(ConversationSearchIndex.hasTarget(retained.id, in: current))
         XCTAssertTrue(ConversationSearchIndex.hasTarget(nil, in: current))
+    }
+
+    func testLiveRefreshRevalidatesSameIdentityAndUpdatesExcerpt() {
+        let removed = ChatEntry(.poki("needle will disappear"))
+        let edited = ChatEntry(.poki("needle old wording"))
+        let stable = ChatEntry(.you("needle stable", delivered: true))
+        let original = sample(entries: [removed, edited, stable])
+        let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
+        var current = original
+        current.entries[0].kind = .poki("Different text")
+        current.entries[1].kind = .poki("needle new wording")
+
+        let resolved = ConversationSearchIndex.resolve(raw, in: [current], query: "needle")
+        XCTAssertEqual(resolved.map(\.entryID), [stable.id, edited.id])
+        XCTAssertEqual(resolved.last?.detail, "needle new wording")
+        XCTAssertNil(ConversationSearchIndex.validatedHit(removed.id, in: current, query: "needle"))
+        XCTAssertNil(ConversationSearchIndex.validatedHit(edited.id, in: current, query: "unrelated"))
+        XCTAssertTrue(ConversationSearchIndex.resolve(raw, in: [], query: "needle").isEmpty)
+    }
+
+    func testLiveRefreshRevalidatesRenamedTitleAndFallback() {
+        let original = sample(name: "Needle title", entries: [ChatEntry(.you("Other message", delivered: true))])
+        let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
+        XCTAssertEqual(raw.count, 1)
+        var renamed = original
+        renamed.title = "New title"
+        XCTAssertTrue(ConversationSearchIndex.resolve(raw, in: [renamed], query: "needle").isEmpty)
+        XCTAssertNil(ConversationSearchIndex.validatedHit(nil, in: renamed, query: "needle"))
+
+        let fallback = sample(entries: [ChatEntry(.note(.waiting))])
+        let query = String(fallback.lastLine.prefix(5))
+        let matches = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [fallback]), query: query)
+        XCTAssertEqual(ConversationSearchIndex.resolve(matches, in: [fallback], query: query).count, 1)
     }
 
     func testCancellationClearsPendingSearchWithoutReportingOldHits() async {
