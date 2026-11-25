@@ -19,11 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: search-consistency
+          # Before: upstream f9fb969 with only the identical UI-test scroll helper.
+          - pr: search-baseline
             device: iPhone
+            ref: e758d9f09b8506e1696a0b876a660f201ccc6952
+            tests: 'ConversationSearchTests:16'
+            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
+          # After: the exact PR head; the iPhone evidence is already in run 32.
+          - pr: search-consistency
+            device: iPad
             ref: 7f52c20a1743dca887310ad6acda0aaaed1ce8f7
             tests: 'ConversationSearchTests:17 SessionArchiveTests:18'
-            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
+            ui_tests: 'testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchOpensNormalMessageAtExactHit testConversationSearchRevealsSelectedGreetingOnly'
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
@@ -94,7 +101,7 @@ jobs:
                   if phones:
                       phones.sort(key=lambda item: ('Pro' not in item[0], 'Max' in item[0], item[0]))
                       return phones[0][1], identifier
-              raise ValueError(f'No compatible available iPhone simulator for SDK {sdk_text}')
+              raise ValueError(f'No compatible available {sys.argv[2]} simulator for SDK {sdk_text}')
           
           if __name__ == '__main__':
               info = json.load(sys.stdin)
