@@ -60,7 +60,7 @@ struct ChatView: View {
     /// The message field has the keyboard.
     @State private var writing = false
     @State private var composerSettingsPresented = false
-    /// Plus's sheet is up: photos, files, mentions and how the chat runs.
+    /// Plus's sheet is up: apps, photos, files and connectors.
     @State private var adding = false
     @State private var scrollReplyQuestion: UUID?
     @State private var standaloneDraft = ""

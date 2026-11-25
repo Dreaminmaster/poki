@@ -5,7 +5,7 @@ import UIKit
 
 /// Plus in the message field: a sheet that rises from the bottom, with no title and no headers.
 /// The apps used most as a row of large icons with More for every app, first (the owner, Nov 21 2026),
-/// then three plain ways to add something (Photos, Camera, Files), the connectors, and how this chat runs (the model and approvals).
+/// then three plain ways to add something (Photos, Camera, Files), and the connectors. The model and approvals are under the model button.
 struct ComposerAddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -22,7 +22,6 @@ struct ComposerAddSheet: View {
     var mentionedIDs: Set<String> = []
 
     @State private var connectors = MCPConnectors.shared
-    @State private var modelVersion = 0
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -53,9 +52,6 @@ struct ComposerAddSheet: View {
                         SettingsRow(title: connected.isEmpty ? "Add Connectors" : "Manage Connectors", symbol: "puzzlepiece.extension")
                     }
                 }
-
-                Section { modelPicker; approvalPicker }
-                    .id(modelVersion)
             }
             .listStyle(.insetGrouped)
             .contentMargins(.top, 4, for: .scrollContent)
@@ -75,7 +71,6 @@ struct ComposerAddSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in modelVersion += 1 }
     }
 
     // MARK: Apps and connectors
@@ -151,61 +146,6 @@ struct ComposerAddSheet: View {
             .padding(.vertical, 4)
         }
         .scrollIndicators(.hidden)
-    }
-
-    // MARK: How this chat runs
-
-    private var providers: [ModelProvider] {
-        ModelProvider.allCases.filter { ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }
-    }
-
-    /// "provider|model", the one that answers.
-    private var modelSelection: Binding<String> {
-        Binding(get: { "\(ModelKeys.selectedProvider.rawValue)|\(ModelKeys.selectedModel)" }, set: { value in
-            let parts = value.split(separator: "|", maxSplits: 1).map(String.init)
-            guard parts.count == 2, let provider = ModelProvider(rawValue: parts[0]) else { return }
-            ModelKeys.selectedProvider = provider
-            ModelKeys.selectedModel = parts[1]
-            ModelKeys.saved += 1
-        })
-    }
-
-    @ViewBuilder private var modelPicker: some View {
-        if ModelKeys.hasUsableKey {
-            Picker(selection: modelSelection) {
-                ForEach(providers) { provider in
-                    if provider == .custom {
-                        ForEach(CustomProviders.all) { custom in
-                            Section(custom.displayName) {
-                                ForEach(ModelCatalog.available(.custom).filter { CustomProviders.parse($0.id)?.provider == custom.id }) { choice in
-                                    Text(verbatim: CustomProviders.parse(choice.id)?.model ?? choice.name).tag("\(provider.rawValue)|\(choice.id)")
-                                }
-                            }
-                        }
-                    } else {
-                        Section(provider.name) {
-                            ForEach(ModelCatalog.available(provider)) { choice in
-                                Text(verbatim: choice.name).tag("\(provider.rawValue)|\(choice.id)")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                SettingsLabel("Model", systemImage: "sparkles")
-            }
-            .pickerStyle(.menu)
-            .accessibilityIdentifier("composer.model")
-        }
-    }
-
-    private var approvalPicker: some View {
-        Picker(selection: Binding(get: { model.approvalMode }, set: { model.approvalMode = $0 })) {
-            ForEach(ApprovalClassifier.Mode.allCases) { Text(verbatim: $0.title).tag($0) }
-        } label: {
-            SettingsLabel("Approvals", systemImage: "checkmark.shield")
-        }
-        .pickerStyle(.menu)
-        .accessibilityIdentifier("composer.approvals")
     }
 }
 
