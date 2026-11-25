@@ -116,13 +116,14 @@ enum ModelCatalog {
         }
         let request: URLRequest?
         if provider == .chatgpt {
-            request = await ChatGPTAccount.codexAccessToken().flatMap(codexModelsRequest)
+            request = await ChatGPTAccount.codexAccessToken(service: storage.codexService, home: storage.codexHome).flatMap(codexModelsRequest)
         } else {
             request = self.request(provider, storage: storage)
         }
-        guard let request else { throw DiscoveryError.authentication }
+        guard let request else { throw provider == .chatgpt ? DiscoveryError.signIn : DiscoveryError.authentication }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if provider == .chatgpt, status == 401 || status == 403 { throw DiscoveryError.signIn }
         guard (200..<300).contains(status) else { throw URLError(.badServerResponse) }
         return try store(data, for: provider, storage: storage)
     }
@@ -186,16 +187,37 @@ enum ModelCatalog {
         }
     }
 
-    /// The list is missing or older than `listLifetime`.
-    static func isStale(_ provider: ModelProvider, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
-        if provider == .custom {
-            return CustomProviders.all(in: storage).contains { custom in
-                let at = storage.defaults.double(forKey: "models.listedAt.custom.\(custom.id.uuidString)")
-                return at == 0 || now.timeIntervalSince1970 - at > listLifetime
+    /// One model list Poki keeps: a provider's, or one custom provider's (each has its own age and its
+    /// own wait after a failure, so one unreachable address does not hold back the others).
+    enum ModelList: Hashable, Sendable {
+        case provider(ModelProvider)
+        case custom(UUID)
+
+        var storeSuffix: String {
+            switch self {
+            case .provider(let provider): provider.rawValue
+            case .custom(let id): "custom.\(id.uuidString)"
             }
         }
-        let at = storage.defaults.double(forKey: "models.listedAt.\(provider.rawValue)")
+    }
+
+    /// Every list Poki reads for the owner (`listable`, with each custom provider on its own).
+    static func lists(storage: PokiStorage = .live) -> [ModelList] {
+        listable(storage: storage).flatMap { provider -> [ModelList] in
+            provider == .custom ? CustomProviders.all(in: storage).map { .custom($0.id) } : [.provider(provider)]
+        }
+    }
+
+    /// The list is missing or older than `listLifetime`.
+    static func isStale(_ list: ModelList, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
+        let at = storage.defaults.double(forKey: "models.listedAt.\(list.storeSuffix)")
         return at == 0 || now.timeIntervalSince1970 - at > listLifetime
+    }
+
+    /// For custom providers, any of them.
+    static func isStale(_ provider: ModelProvider, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
+        guard provider == .custom else { return isStale(.provider(provider), now: now, storage: storage) }
+        return CustomProviders.all(in: storage).contains { isStale(.custom($0.id), now: now, storage: storage) }
     }
 
     /// After a failed background read, how long Poki waits before trying again by itself: an hour, then
@@ -206,43 +228,80 @@ enum ModelCatalog {
     }
 
     /// A background read failed a short while ago (offline, a refused key, a sign-in to renew).
-    static func isBackingOff(_ provider: ModelProvider, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
-        let failures = storage.defaults.integer(forKey: "models.failures.\(provider.rawValue)")
-        let at = storage.defaults.double(forKey: "models.failedAt.\(provider.rawValue)")
+    static func isBackingOff(_ list: ModelList, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
+        let failures = storage.defaults.integer(forKey: "models.failures.\(list.storeSuffix)")
+        let at = storage.defaults.double(forKey: "models.failedAt.\(list.storeSuffix)")
         return failures > 0 && now.timeIntervalSince1970 - at < backoff(failures: failures)
     }
 
-    static func noteFailure(_ provider: ModelProvider, now: Date = Date(), storage: PokiStorage = .live) {
-        let key = "models.failures.\(provider.rawValue)"
+    /// For custom providers, all of them (none is due by itself).
+    static func isBackingOff(_ provider: ModelProvider, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
+        guard provider == .custom else { return isBackingOff(.provider(provider), now: now, storage: storage) }
+        let all = CustomProviders.all(in: storage)
+        return !all.isEmpty && all.allSatisfy { isBackingOff(.custom($0.id), now: now, storage: storage) }
+    }
+
+    static func noteFailure(_ list: ModelList, now: Date = Date(), storage: PokiStorage = .live) {
+        let key = "models.failures.\(list.storeSuffix)"
         storage.defaults.set(storage.defaults.integer(forKey: key) + 1, forKey: key)
-        storage.defaults.set(now.timeIntervalSince1970, forKey: "models.failedAt.\(provider.rawValue)")
+        storage.defaults.set(now.timeIntervalSince1970, forKey: "models.failedAt.\(list.storeSuffix)")
     }
 
+    static func clearFailures(_ list: ModelList, storage: PokiStorage = .live) {
+        storage.defaults.removeObject(forKey: "models.failures.\(list.storeSuffix)")
+        storage.defaults.removeObject(forKey: "models.failedAt.\(list.storeSuffix)")
+    }
+
+    /// A new key or sign-in is worth reading at once: forget the failures of the old one.
     static func clearFailures(_ provider: ModelProvider, storage: PokiStorage = .live) {
-        storage.defaults.removeObject(forKey: "models.failures.\(provider.rawValue)")
-        storage.defaults.removeObject(forKey: "models.failedAt.\(provider.rawValue)")
+        if provider == .custom {
+            for custom in CustomProviders.all(in: storage) { clearFailures(.custom(custom.id), storage: storage) }
+        } else {
+            clearFailures(.provider(provider), storage: storage)
+        }
     }
 
-    @MainActor private static var refreshing: Set<ModelProvider> = []
+    @MainActor private static var refreshing: Set<ModelList> = []
 
     /// The lists `refreshStale` reads now: missing or a day old, and not backing off after a failure.
-    static func dueForBackgroundRefresh(now: Date = Date(), storage: PokiStorage = .live) -> [ModelProvider] {
-        listable(storage: storage).filter { isStale($0, now: now, storage: storage) && !isBackingOff($0, now: now, storage: storage) }
+    static func dueForBackgroundRefresh(now: Date = Date(), storage: PokiStorage = .live) -> [ModelList] {
+        lists(storage: storage).filter { isDue($0, now: now, storage: storage) }
     }
 
-    /// Reads again every list that is missing or a day old, so models a provider adds show up without a
-    /// Poki release. A failure keeps the last list (the bundled models always stay) and backs off.
+    static func isDue(_ list: ModelList, now: Date = Date(), storage: PokiStorage = .live) -> Bool {
+        isStale(list, now: now, storage: storage) && !isBackingOff(list, now: now, storage: storage)
+    }
+
+    /// A read that ended because it was cancelled (the app went away, the account changed), not a failure.
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let error = error as? URLError, error.code == .cancelled { return true }
+        return false
+    }
+
+    /// Reads again, side by side, every list that is missing or a day old, so models a provider adds show
+    /// up without a Poki release. A failure keeps the last list (the bundled models always stay) and
+    /// backs off. Each list is checked again just before it is read, in case another read got there first.
     @MainActor
     static func refreshStale(storage: PokiStorage = .live) async {
-        for provider in dueForBackgroundRefresh(storage: storage) where !refreshing.contains(provider) {
-            refreshing.insert(provider)
-            defer { refreshing.remove(provider) }
-            do {
-                _ = try await refresh(provider, storage: storage)
-                clearFailures(provider, storage: storage)
-            } catch is CancellationError {
-            } catch {
-                noteFailure(provider, storage: storage)
+        await withTaskGroup(of: Void.self) { group in
+            for list in dueForBackgroundRefresh(storage: storage) {
+                group.addTask { @MainActor in
+                    guard !ModelCatalog.refreshing.contains(list), ModelCatalog.isDue(list, storage: storage) else { return }
+                    ModelCatalog.refreshing.insert(list)
+                    defer { ModelCatalog.refreshing.remove(list) }
+                    do {
+                        switch list {
+                        case .provider(let provider): _ = try await ModelCatalog.refresh(provider, storage: storage)
+                        case .custom(let id): _ = try await ModelCatalog.refresh(custom: id, storage: storage)
+                        }
+                        ModelCatalog.clearFailures(list, storage: storage)
+                    } catch let error where ModelCatalog.isCancellation(error) {
+                        // Cancelled, not failed: no wait before the next read.
+                    } catch {
+                        ModelCatalog.noteFailure(list, storage: storage)
+                    }
+                }
             }
         }
     }
@@ -273,6 +332,7 @@ enum ModelCatalog {
         let ids = chatIDs(raw)
         storage.defaults.set(ids, forKey: "models.listed.custom.\(id.uuidString)")
         storage.defaults.set(Date().timeIntervalSince1970, forKey: "models.listedAt.custom.\(id.uuidString)")
+        clearFailures(.custom(id), storage: storage)
         storage.defaults.set(voiceIDs(raw), forKey: "models.listed.voice.custom.\(id.uuidString)")
         ModelKeys.saved += 1
         return ids.count
@@ -332,7 +392,7 @@ enum ModelCatalog {
 
     /// The Codex client version Poki's list request names; Codex answers with the models that version
     /// can run.
-    static let codexClientVersion = "0.162.0"
+    static let codexClientVersion = "0.164.0"
 
     /// The ChatGPT plan's model list, as the Codex CLI reads it (sent only to chatgpt.com).
     static func codexModelsRequest(accessToken: String) -> URLRequest? {
@@ -352,6 +412,8 @@ enum ModelCatalog {
 
     enum DiscoveryError: Error, Equatable {
         case invalidAddress, authentication, permission, unsupported, rateLimited, server, malformed, network
+        /// The ChatGPT sign-in has expired or was refused: no key to check, a sign-in to do again.
+        case signIn
 
         var message: String {
             switch self {
@@ -363,6 +425,7 @@ enum ModelCatalog {
             case .server: AppLocalization.text("The service could not return its model list. Try again later.")
             case .malformed: AppLocalization.text("The service returned an invalid model list.")
             case .network: AppLocalization.text("Could not reach the service. Check the connection and try again.")
+            case .signIn: AppLocalization.text("Sign in to ChatGPT again to read its model list.")
             }
         }
     }
@@ -428,6 +491,8 @@ enum ModelCatalog {
     /// address changed away and back again.
     static func invalidateCustom(_ id: UUID, storage: PokiStorage = .live) {
         storage.defaults.removeObject(forKey: "models.listed.custom.\(id.uuidString)")
+        storage.defaults.removeObject(forKey: "models.listedAt.custom.\(id.uuidString)")
+        clearFailures(.custom(id), storage: storage)
         storage.defaults.set(UUID().uuidString, forKey: "models.revision.custom.\(id.uuidString)")
     }
 

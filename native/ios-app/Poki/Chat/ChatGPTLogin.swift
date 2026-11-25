@@ -194,6 +194,9 @@ struct ChatGPTSignIn: View {
                 guard CodexAccount.accessToken != nil else { throw CodexVoice.Failure.signIn }
                 try? ChatGPTAccount.signOut()
                 ModelKeys.selectedProvider = .chatgpt
+                // The plan's model list is read now, not after a failed read's wait.
+                ModelCatalog.clearFailures(.chatgpt)
+                Task { await ModelCatalog.refreshStale() }
                 closeBrowser()
                 onSignedIn()
                 dismiss()
