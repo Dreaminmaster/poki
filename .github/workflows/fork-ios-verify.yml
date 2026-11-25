@@ -19,27 +19,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Run unchanged iPad integration after XCTest failed to attach to the visible app.
-          - pr: search-main-integration-ipad-recheck
-            device: iPad
-            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
-            tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
-            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft'
-            expected_baseline: false
-          # Exact persistence candidate with all current upstream code.
-          - pr: scoped-flush-main-integration
+          # Keep the live-refresh follow-up separate from the tested PR #759.
+          - pr: live-search-refresh
             device: iPhone
-            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
-            tests: 'SessionArchiveTests:19'
-            ui_tests: ''
+            ref: c039cfaf8e58d719b5860e3aff65162a1deed736
+            tests: 'ConversationSearchTests:21 SessionArchiveTests:18'
+            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
             expected_baseline: false
-          # Only the tests differ from upstream. Both retry assertions must fail.
-          - pr: scoped-flush-negative-baseline
-            device: iPhone
-            ref: 2fdaa2f4d8cc72f160c67a5635fdffb1b33bd751
-            tests: ''
-            ui_tests: ''
-            expected_baseline: true
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
