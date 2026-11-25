@@ -1,0 +1,47 @@
+name: Fork Node regression verification
+on:
+  push:
+    branches: [ci/search-consistency]
+    paths: [.github/workflows/fork-node-regression.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - candidate: search-main-integration
+            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
+          - candidate: scoped-flush-main-integration
+            ref: bc2ee92e18d4af1f131b2df617341af9cd54f774
+    name: npm test - ${{ matrix.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - name: Verify exact source revision
+        env:
+          EXPECTED_SHA: ${{ matrix.ref }}
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Required repository tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee node-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: node-test-${{ matrix.candidate }}
+          path: node-test.log
+          if-no-files-found: ignore
