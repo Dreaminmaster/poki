@@ -19,16 +19,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Test the iPad read-only preview correction on the exact candidate.
-          - pr: search-preview-retained
+          # Exact merged-tree candidate, including latest upstream Composer settings.
+          - pr: search-main-integration
+            device: iPhone
+            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
+            tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
+            ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft'
+          - pr: search-main-integration
             device: iPad
-            ref: 896332ef85805629503e367ea0e21724806cc200
+            ref: 751d0eda4c6da9742850283c540dc59e0b6377ea
             tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
             ui_tests: 'testConversationSearchRevealsSelectedGreetingOnly testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft'
-          # Independently test the scoped persistence fix without the search changes.
-          - pr: scoped-session-flush-retry
+          # The three scoped retry tests passed in run 34. Fix the existing archive
+          # disk assertion's queue race and test the isolated-write optimization.
+          - pr: scoped-flush-queue-isolation
             device: iPhone
-            ref: 73b6ce4bb7e17775510633a5445cd11c29ebbbad
+            ref: 31ad8e5c57ec329dad3413b54c0033cb4328f960
             tests: 'SessionArchiveTests:19'
             ui_tests: ''
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
