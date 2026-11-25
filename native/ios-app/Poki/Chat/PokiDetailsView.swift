@@ -386,8 +386,9 @@ enum ConversationSearchIndex {
     static func resolve(_ matches: [Match], in sessions: [SavedSession], query: String? = nil) -> [ConversationSearchHit] {
         let saved = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { current, _ in current })
         return matches.compactMap { match in
-            guard let session = saved[match.sessionID], hasTarget(match.entryID, in: session) else { return nil }
+            guard let session = saved[match.sessionID] else { return nil }
             if let query { return validatedHit(match.entryID, in: session, query: query) }
+            guard hasTarget(match.entryID, in: session) else { return nil }
             return ConversationSearchHit(session: session, entryID: match.entryID,
                                          detail: match.detail, author: match.author, at: match.at)
         }
@@ -405,9 +406,10 @@ enum ConversationSearchIndex {
         }
         let metadata = [session.name, session.title, session.client ?? "", session.customName ?? "", session.autoName ?? ""]
         let titleMatches = needle.isEmpty || metadata.contains { $0.localizedStandardContains(needle) }
-        let lastLineMatches = !needle.isEmpty && session.lastLine.localizedStandardContains(needle)
-            && !session.entries.contains { searchableText($0)?.localizedStandardContains(needle) == true }
-        guard titleMatches || lastLineMatches else { return nil }
+        if !titleMatches {
+            guard session.lastLine.localizedStandardContains(needle),
+                  !session.entries.contains(where: { searchableText($0)?.localizedStandardContains(needle) == true }) else { return nil }
+        }
         return ConversationSearchHit(session: session, entryID: nil, detail: session.lastLine, author: nil, at: nil)
     }
 
