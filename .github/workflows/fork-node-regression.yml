@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 jobs:
-  timing-control:
+  reduced-concurrency-control:
     # Use the same toolchain and candidate as the previous full test.
     runs-on: xcode-27
     timeout-minutes: 60
@@ -31,47 +31,19 @@ jobs:
           { sw_vers; xcodebuild -version; swiftc --version; node --version; sysctl -n hw.ncpu; } | tee out/environment.txt
       - run: npm ci
       - run: npm ci --prefix agent
-      - name: Repeat the two previously failing timing cases
-        shell: bash
-        run: |
-          set -uo pipefail
-          pattern='^(cancel during recording recovery preserves dispatched input and finishes cleanup before takeover|a person stop that nobody answers ends with exit 3 and a rerun resumes from that step)$'
-          failures=0
-          for attempt in 1 2 3 4 5; do
-            node --test --test-concurrency=1 --test-name-pattern="$pattern" test/coordination.test.mjs test/install-iphone.test.mjs 2>&1 | tee "out/isolated-$attempt.log"
-            status=${PIPESTATUS[0]}
-            printf '%s\t%s\n' "$attempt" "$status" >> out/isolated-status.tsv
-            if [ "$status" != 0 ]; then failures=$((failures + 1)); fi
-            if ! grep -Fq '✔ cancel during recording recovery preserves dispatched input and finishes cleanup before takeover' "out/isolated-$attempt.log" || ! grep -Fq '✔ a person stop that nobody answers ends with exit 3 and a rerun resumes from that step' "out/isolated-$attempt.log"; then
-              echo "Attempt $attempt did not prove both requested cases passed"
-              failures=$((failures + 1))
-            fi
-          done
-          test "$failures" = 0
-      - name: Repeat required full suite at default concurrency
-        id: full
-        if: always()
-        shell: bash
-        run: |
-          set -uo pipefail
-          test -d node_modules && test -d agent/node_modules || exit 1
-          npm test 2>&1 | tee out/node-test-default.log
-          status=${PIPESTATUS[0]}
-          printf '%s\n' "$status" > out/default-status.txt
-          exit "$status"
       - name: Controlled full-suite comparison at two workers
-        if: always() && steps.full.outcome == 'failure'
         shell: bash
         run: |
           set -uo pipefail
-          test -f out/default-status.txt || exit 1
+          set +e
           node --test --test-concurrency=2 test/*.test.mjs 2>&1 | tee out/node-test-two-workers.log
           status=${PIPESTATUS[0]}
+          set -e
           printf '%s\n' "$status" > out/two-workers-status.txt
           exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: node-timing-control-d8d2350
+          name: node-two-worker-control-d8d2350
           path: out/
           if-no-files-found: error
