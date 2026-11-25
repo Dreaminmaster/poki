@@ -20,7 +20,6 @@ struct PokiDetailsView: View {
     var openSession: (String, UUID?) -> Void = { _, _ in }
     var searchJump: ConversationSearchJump? = nil
     var onSearchJumpApplied: (UUID) -> Void = { _ in }
-    var revealedSearchEntryID: (String) -> UUID? = { _ in nil }
     var sessionStore: SessionStore = .shared
     @Binding var path: NavigationPath
     @ObservedObject private var historyLock = HistoryLock.shared
@@ -196,14 +195,14 @@ struct PokiDetailsView: View {
                     ApprovalsSettingsView()
                 case .appearance:
                     AppearanceView()
-                case .sessionPreview(let id):
+                case .sessionPreview(let id, let entryID):
                     SessionView(id: id,
                                 back: { if !path.isEmpty { path.removeLast() } },
                                 searchJump: searchJump?.sessionID == id ? searchJump : nil,
                                 onSearchJumpApplied: onSearchJumpApplied,
                                 sessionStore: sessionStore,
                                 readOnly: true,
-                                revealedSearchEntryID: revealedSearchEntryID(id))
+                                revealedSearchEntryID: entryID)
                 case .interfaceSize:
                     InterfaceSizeSettingsView()
                 case .language:
@@ -271,7 +270,8 @@ struct PokiDetailsView: View {
 
 enum DetailsRoute: Hashable {
     case model, history, conversations, screenHistory, voice, connection, advanced, agents, updates, approvals, appearance, language, interfaceSize, about
-    case sessionPreview(String)
+    // Keep the selected message with this read-only destination after its one-shot scroll.
+    case sessionPreview(String, entryID: UUID?)
     /// Models, with the OpenAI key's form open (or Live Voice, when the key is there but turned off):
     /// where Talk with Poki without a key leads.
     case voiceKey, lockSettings
