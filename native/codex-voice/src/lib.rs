@@ -232,7 +232,17 @@ async fn serve_with_overrides(
                     }
                     continue;
                 }
-                if !matches!(method, "account/read" | "account/login/start" | "account/login/cancel" | "account/logout" | "thread/start" | "thread/realtime/start" | "thread/realtime/stop")
+                if !matches!(
+                    method,
+                    "account/read"
+                        | "account/login/start"
+                        | "account/login/cancel"
+                        | "account/logout"
+                        | "thread/start"
+                        | "thread/realtime/start"
+                        | "thread/realtime/appendSpeech"
+                        | "thread/realtime/stop"
+                )
                     || method == "account/login/start" && !matches!(
                         message.pointer("/params/type").and_then(Value::as_str),
                         Some("chatgpt" | "chatgptDeviceCode")
@@ -373,33 +383,113 @@ fn extract_codex_error_fields(error: Option<&Value>) -> (&str, Option<u16>, Opti
     (code, http_status, kind, diagnostic)
 }
 
+fn extract_final_agent_message(items: Option<&Value>) -> Option<String> {
+    let items = items?.as_array()?;
+    for item in items.iter().rev() {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if item_type == "agentMessage" {
+            let phase = item.get("phase").and_then(Value::as_str);
+            if matches!(phase, Some("final_answer") | None)
+                && let Some(text) = item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            {
+                return Some(text.to_owned());
+            }
+            continue;
+        }
+        if matches!(
+            item_type,
+            "dynamicToolCall"
+                | "mcpToolCall"
+                | "commandExecution"
+                | "fileChange"
+                | "collabAgentToolCall"
+        ) {
+            break;
+        }
+    }
+    None
+}
+
 fn backend_diagnostic_notification(method: &str, value: &Value) -> Option<Value> {
     let thread_id = value.pointer("/params/threadId").and_then(Value::as_str)?;
     match method {
-        "turn/started" => Some(json!({
-            "method": "poki/backend/turnStarted",
-            "params": { "threadId": thread_id }
-        })),
+        "turn/started" => {
+            let mut params = json!({ "threadId": thread_id });
+            if let (Some(turn_id), Some(obj)) = (
+                value.pointer("/params/turn/id").and_then(Value::as_str),
+                params.as_object_mut(),
+            ) {
+                obj.insert("turnId".into(), json!(turn_id));
+            }
+            Some(json!({
+                "method": "poki/backend/turnStarted",
+                "params": params
+            }))
+        }
+        "item/completed" => {
+            let item = value.pointer("/params/item")?;
+            if item.get("type").and_then(Value::as_str) != Some("agentMessage") {
+                return None;
+            }
+            let text = item.get("text").and_then(Value::as_str)?.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let mut params = json!({
+                "threadId": thread_id,
+                "text": text,
+            });
+            if let Some(obj) = params.as_object_mut() {
+                if let Some(turn_id) = value.pointer("/params/turnId").and_then(Value::as_str) {
+                    obj.insert("turnId".into(), json!(turn_id));
+                }
+                if let Some(item_id) = item.get("id").and_then(Value::as_str) {
+                    obj.insert("itemId".into(), json!(item_id));
+                }
+                if let Some(phase) = item.get("phase").and_then(Value::as_str) {
+                    obj.insert("phase".into(), json!(phase));
+                }
+            }
+            Some(json!({
+                "method": "poki/backend/agentMessage",
+                "params": params
+            }))
+        }
         "turn/completed" => {
             let status = value
                 .pointer("/params/turn/status")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown");
             let mut params = json!({ "threadId": thread_id, "status": status });
-            if let (Some(turn_error), Some(obj)) =
-                (value.pointer("/params/turn/error").filter(|v| !v.is_null()), params.as_object_mut())
-            {
-                let (code, http_status, kind, diagnostic) =
-                    extract_codex_error_fields(Some(turn_error));
-                obj.insert("code".into(), json!(code));
-                if let Some(http_status) = http_status {
-                    obj.insert("httpStatusCode".into(), json!(http_status));
+            if let Some(obj) = params.as_object_mut() {
+                if let Some(turn_id) = value.pointer("/params/turn/id").and_then(Value::as_str) {
+                    obj.insert("turnId".into(), json!(turn_id));
                 }
-                if let Some(kind) = kind {
-                    obj.insert("kind".into(), json!(kind));
+                if status == "completed"
+                    && let Some(final_text) =
+                        extract_final_agent_message(value.pointer("/params/turn/items"))
+                {
+                    obj.insert("finalText".into(), json!(final_text));
                 }
-                if let Some(diagnostic) = diagnostic {
-                    obj.insert("diagnostic".into(), json!(diagnostic));
+                if let Some(turn_error) =
+                    value.pointer("/params/turn/error").filter(|v| !v.is_null())
+                {
+                    let (code, http_status, kind, diagnostic) =
+                        extract_codex_error_fields(Some(turn_error));
+                    obj.insert("code".into(), json!(code));
+                    if let Some(http_status) = http_status {
+                        obj.insert("httpStatusCode".into(), json!(http_status));
+                    }
+                    if let Some(kind) = kind {
+                        obj.insert("kind".into(), json!(kind));
+                    }
+                    if let Some(diagnostic) = diagnostic {
+                        obj.insert("diagnostic".into(), json!(diagnostic));
+                    }
                 }
             }
             Some(json!({
@@ -1429,6 +1519,182 @@ mod tests {
                 reloaded.pointer("/result/account/email").and_then(Value::as_str),
                 Some("test@example.com"),
                 "expected email from reloaded id_token, got {reloaded}"
+            );
+
+            drop(req_tx);
+            let _ = tokio::time::timeout(Duration::from_secs(10), server_task).await;
+            let _ = std::fs::remove_dir_all(&home);
+        });
+        runtime.block_on(handle).expect("test task");
+    }
+
+    #[test]
+    fn backend_agent_message_and_append_speech_sync_contract() {
+        let commentary_item = json!({
+            "params": {
+                "threadId": "thr_sync",
+                "turnId": "turn_1",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg_commentary",
+                    "phase": "commentary",
+                    "text": "Opening 12306 now."
+                }
+            }
+        });
+        let commentary = backend_diagnostic_notification("item/completed", &commentary_item)
+            .expect("commentary agentMessage must be forwarded for client-managed sync");
+        assert_eq!(commentary["method"], "poki/backend/agentMessage");
+        assert_eq!(commentary["params"]["threadId"], "thr_sync");
+        assert_eq!(commentary["params"]["turnId"], "turn_1");
+        assert_eq!(commentary["params"]["itemId"], "msg_commentary");
+        assert_eq!(commentary["params"]["phase"], "commentary");
+        assert_eq!(commentary["params"]["text"], "Opening 12306 now.");
+
+        let final_item = json!({
+            "params": {
+                "threadId": "thr_sync",
+                "turnId": "turn_1",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg_final",
+                    "phase": "final_answer",
+                    "text": "Sent the departure time to File Transfer."
+                }
+            }
+        });
+        let final_msg = backend_diagnostic_notification("item/completed", &final_item)
+            .expect("final agentMessage must be forwarded");
+        assert_eq!(final_msg["method"], "poki/backend/agentMessage");
+        assert_eq!(final_msg["params"]["phase"], "final_answer");
+        assert_eq!(
+            final_msg["params"]["text"],
+            "Sent the departure time to File Transfer."
+        );
+
+        let completed_turn = json!({
+            "params": {
+                "threadId": "thr_sync",
+                "turn": {
+                    "id": "turn_1",
+                    "status": "completed",
+                    "items": [
+                        {
+                            "type": "agentMessage",
+                            "id": "msg_commentary",
+                            "phase": "commentary",
+                            "text": "Opening WeChat..."
+                        },
+                        {
+                            "type": "agentMessage",
+                            "id": "msg_final",
+                            "phase": "final_answer",
+                            "text": "Sent the departure time to File Transfer."
+                        }
+                    ]
+                }
+            }
+        });
+        let turn_done = backend_diagnostic_notification("turn/completed", &completed_turn)
+            .expect("turn/completed summary");
+        assert_eq!(turn_done["method"], "poki/backend/turnCompleted");
+        assert_eq!(turn_done["params"]["turnId"], "turn_1");
+        assert_eq!(
+            turn_done["params"]["finalText"],
+            "Sent the departure time to File Transfer."
+        );
+
+        let interrupted_turn = json!({
+            "params": {
+                "threadId": "thr_sync",
+                "turn": {
+                    "id": "turn_2",
+                    "status": "interrupted",
+                    "items": [
+                        {
+                            "type": "agentMessage",
+                            "id": "msg_interrupted",
+                            "phase": "final_answer",
+                            "text": "Should not be spoken."
+                        }
+                    ]
+                }
+            }
+        });
+        let interrupted_done = backend_diagnostic_notification("turn/completed", &interrupted_turn)
+            .expect("interrupted turn/completed summary");
+        assert_eq!(interrupted_done["params"]["status"], "interrupted");
+        assert!(
+            interrupted_done["params"].get("finalText").is_none(),
+            "non-completed turn must never carry finalText: {interrupted_done}"
+        );
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .thread_stack_size(16 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let handle = runtime.spawn(async {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let home = std::env::temp_dir().join(format!(
+                "poki-codex-voice-sync-test-{}-{unique}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&home).expect("create temp home");
+
+            let mut overrides = codex_overrides();
+            for (key, value) in &mut overrides {
+                if key == "cli_auth_credentials_store" {
+                    *value = toml::Value::String("file".into());
+                }
+            }
+
+            let (req_tx, req_rx) = mpsc::channel(16);
+            let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+            let server_home = home.clone();
+            let server_task = tokio::spawn(async move {
+                serve_with_overrides(
+                    server_home,
+                    overrides,
+                    req_rx,
+                    Arc::new(move |value| {
+                        let _ = out_tx.send(value);
+                    }),
+                )
+                .await
+            });
+
+            req_tx
+                .send(json!({
+                    "id": 77,
+                    "method": "thread/realtime/appendSpeech",
+                    "params": {
+                        "threadId": "019eb97d-8e9a-7ff3-94b0-ea019babd5d7",
+                        "text": "Done after action completed."
+                    }
+                }))
+                .await
+                .expect("send appendSpeech");
+
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+            let reply = loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                let msg = tokio::time::timeout(remaining, out_rx.recv())
+                    .await
+                    .expect("timed out waiting for appendSpeech reply")
+                    .expect("output channel closed");
+                if msg.get("id").and_then(Value::as_i64) == Some(77) {
+                    break msg;
+                }
+            };
+            assert_ne!(
+                reply.pointer("/error/code").and_then(Value::as_i64),
+                Some(-32601),
+                "thread/realtime/appendSpeech must be allowed by poki-codex-voice, got {reply}"
             );
 
             drop(req_tx);

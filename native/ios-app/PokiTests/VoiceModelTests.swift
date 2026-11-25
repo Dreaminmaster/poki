@@ -1873,7 +1873,6 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertNotNil(try Keychain.read(legacyAccount, service: chatGPTStorage.codexService), "legacy entry must be present before bridge startup")
             XCTAssertNil(try Keychain.read(currentAccount, service: chatGPTStorage.codexService), "current entry must not exist before bridge prepareStorage runs")
 
-            let expectedInstructions = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["instructions"] as? String)
             let expectedTools = try XCTUnwrap(VoiceDirect.session(in: chatGPTStorage)["tools"] as? [[String: Any]])
             var sent: [[String: Any]] = []
             var emit: (@MainActor (String) -> Void)?
@@ -1935,7 +1934,7 @@ final class VoiceModelTests: XCTestCase {
 
             let threadStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/start" })
             let threadParams = try XCTUnwrap(threadStart["params"] as? [String: Any])
-            XCTAssertEqual(threadParams["developerInstructions"] as? String, expectedInstructions)
+            XCTAssertEqual(threadParams["developerInstructions"] as? String, VoiceDirect.codexBackendInstructions)
 
             let dynamicTools = try XCTUnwrap(threadParams["dynamicTools"] as? [[String: Any]])
             XCTAssertEqual(dynamicTools.count, expectedTools.count)
@@ -1950,8 +1949,9 @@ final class VoiceModelTests: XCTestCase {
 
             let realtimeStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/realtime/start" })
             let realtimeParams = try XCTUnwrap(realtimeStart["params"] as? [String: Any])
-            XCTAssertEqual(realtimeParams["prompt"] as? String, expectedInstructions)
+            XCTAssertEqual(realtimeParams["prompt"] as? String, VoiceDirect.codexFrontendInstructions)
             XCTAssertEqual(realtimeParams["includeStartupContext"] as? Bool, false)
+            XCTAssertEqual(realtimeParams["clientManagedHandoffs"] as? Bool, true)
 
             push(["id": 901, "method": "item/tool/call", "params": [
                 "threadId": "fixture-thread", "tool": "open_app",
@@ -1985,7 +1985,8 @@ final class VoiceModelTests: XCTestCase {
 
             let logs = newLogs()
             XCTAssertTrue(logs.contains("\(expectedTools.count) tools"), logs)
-            XCTAssertTrue(logs.contains("\(expectedInstructions.count) chars"), logs)
+            XCTAssertTrue(logs.contains("\(VoiceDirect.codexBackendInstructions.count) chars"), logs)
+            XCTAssertTrue(logs.contains("\(VoiceDirect.codexFrontendInstructions.count) chars"), logs)
             XCTAssertTrue(logs.contains("Codex tool requested: open_app"), logs)
             XCTAssertTrue(logs.contains("Codex tool executed: open_app"), logs)
             XCTAssertTrue(logs.contains("Codex tool rejected: disallowed (disallowed tool)"), logs)
@@ -2825,6 +2826,200 @@ final class VoiceModelTests: XCTestCase {
             XCTAssertFalse(h.voice.isOn)
             XCTAssertTrue(link.closed)
             XCTAssertEqual(h.microphone, [true, false])
+        }
+    }
+
+    /// Regression for premature spoken completion during ChatGPT (Codex) voice sessions:
+    /// completion speech must be client-managed and gated on both tool completion and turn completion,
+    /// while pre-tool narration, commentary, and failed/interrupted turns never speak early.
+    func testCodexVoiceSynchronizesSpokenReplyWithActionAndTurnCompletion() async throws {
+        try await withChatGPTSelected { chatGPTStorage in
+            var sent: [[String: Any]] = []
+            var emit: (@MainActor (String) -> Void)?
+            func push(_ payload: [String: Any]) {
+                guard let bytes = try? JSONSerialization.data(withJSONObject: payload) else { return }
+                let text = String(decoding: bytes, as: UTF8.self)
+                Task { @MainActor in emit?(text) }
+            }
+            let codex = CodexVoice(
+                startBridge: { _, next in
+                    emit = next
+                    return true
+                },
+                sendBridge: { text in
+                    guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return false }
+                    sent.append(object)
+                    guard let method = object["method"] as? String, let id = object["id"] else { return true }
+                    switch method {
+                    case "account/read":
+                        push(["id": id, "result": ["account": ["type": "chatgpt"]]])
+                    case "thread/start":
+                        push(["id": id, "result": ["thread": ["id": "sync-thread"]]])
+                    case "thread/realtime/start":
+                        push(["id": id, "result": [:]])
+                        push(["method": "thread/realtime/sdp", "params": ["threadId": "sync-thread", "sdp": "fixture-sdp-answer"]])
+                    default:
+                        push(["id": id, "result": [:]])
+                    }
+                    return true
+                },
+                storage: chatGPTStorage
+            )
+            func speechAppends() -> [String] {
+                sent.compactMap { msg in
+                    guard msg["method"] as? String == "thread/realtime/appendSpeech",
+                          let params = msg["params"] as? [String: Any],
+                          let text = params["text"] as? String else { return nil }
+                    return text
+                }
+            }
+
+            var toolGates: [AsyncStream<Void>.Continuation] = []
+            let h = Harness(codex: codex, storage: chatGPTStorage, phoneTool: { name, _ in
+                let (stream, continuation) = AsyncStream<Void>.makeStream()
+                toolGates.append(continuation)
+                for await _ in stream { break }
+                return ("Finished \(name)", false, nil)
+            })
+            defer {
+                for gate in toolGates { gate.finish() }
+                h.voice.stop()
+            }
+            await h.connect()
+            let link = try XCTUnwrap(h.links.last)
+
+            // 1. Session configuration separates frontend voice delegation prompt from backend executor prompt
+            //    and enables clientManagedHandoffs so codex-rs cannot stream unverified text to speech.
+            let threadStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/start" })
+            let threadParams = try XCTUnwrap(threadStart["params"] as? [String: Any])
+            let backendPrompt = try XCTUnwrap(threadParams["developerInstructions"] as? String)
+            XCTAssertFalse(
+                backendPrompt.contains("Before using tools for a new task, say one short sentence"),
+                "Backend Codex executor must not emit pre-tool narration before running phone actions"
+            )
+
+            let realtimeStart = try XCTUnwrap(sent.first { $0["method"] as? String == "thread/realtime/start" })
+            let realtimeParams = try XCTUnwrap(realtimeStart["params"] as? [String: Any])
+            XCTAssertEqual(
+                realtimeParams["clientManagedHandoffs"] as? Bool,
+                true,
+                "Codex realtime V3 must use clientManagedHandoffs so replies sync with action completion"
+            )
+            let frontendPrompt = try XCTUnwrap(realtimeParams["prompt"] as? String)
+            XCTAssertNotEqual(frontendPrompt, backendPrompt, "Frontend voice model and backend executor must use role-specific instructions")
+            XCTAssertTrue(
+                frontendPrompt.localizedCaseInsensitiveContains("never claim")
+                    || frontendPrompt.localizedCaseInsensitiveContains("wait for the backend"),
+                "Frontend prompt must forbid claiming completion before backend confirmation: \(frontendPrompt)"
+            )
+
+            // 2. Turn 1: Commentary and pre-tool messages emitted before/during a running phone action
+            //    must never trigger appendSpeech; final reply speaks only after both tool and turn complete.
+            push(["method": "thread/realtime/itemAdded", "params": [
+                "threadId": "sync-thread", "item": ["type": "handoff_request"],
+            ]])
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "sync-thread", "turnId": "turn-1"]])
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-1", "itemId": "m1",
+                "phase": "commentary", "text": "Opening 12306 now.",
+            ]])
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-1", "itemId": "m2",
+                "text": "Premature claim before tool starts.",
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(speechAppends(), [], "Pre-tool messages must not be spoken before turn completion")
+
+            push(["id": 501, "method": "item/tool/call", "params": [
+                "threadId": "sync-thread", "tool": "open_app", "arguments": ["app": "12306"],
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(toolGates.count, 1)
+            XCTAssertEqual(speechAppends(), [], "No speech while phone action is still running")
+
+            // Complete tool -> emit commentary -> emit final answer -> complete turn.
+            toolGates[0].finish()
+            await h.time.settle()
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-1", "itemId": "m3",
+                "phase": "commentary", "text": "Intermediate status.",
+            ]])
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-1", "itemId": "m4",
+                "phase": "final_answer", "text": "G1026 departs at 06:30 and the message has been sent.",
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(speechAppends(), [], "Final message must wait for turnCompleted confirmation")
+
+            push(["method": "poki/backend/turnCompleted", "params": [
+                "threadId": "sync-thread", "turnId": "turn-1", "status": "completed",
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(
+                speechAppends(),
+                ["G1026 departs at 06:30 and the message has been sent."],
+                "Confirmed final reply must be delivered once after action and turn complete"
+            )
+            XCTAssertEqual(h.voice.phase, .thinking, "Voice must remain working until remote playback begins")
+
+            // Remote speech begins and finishes.
+            link.remoteSpeech = true
+            await h.time.advance(0.2)
+            XCTAssertEqual(h.voice.phase, .speaking)
+            link.remoteSpeech = false
+            for _ in 0..<3 { await h.time.advance(0.2) }
+            XCTAssertEqual(h.voice.phase, .listening)
+
+            // 3. Turn 2 (out-of-order race): turnCompleted arrives while a phone action is still running.
+            //    Speech must remain held until the in-flight action completes and returns its tool result.
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "sync-thread", "turnId": "turn-2"]])
+            push(["id": 502, "method": "item/tool/call", "params": [
+                "threadId": "sync-thread", "tool": "do", "arguments": ["actions": [["tap": 1]]],
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(toolGates.count, 2)
+
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-2", "itemId": "m5",
+                "phase": "final_answer", "text": "Departure time sent to File Transfer.",
+            ]])
+            push(["method": "poki/backend/turnCompleted", "params": [
+                "threadId": "sync-thread", "turnId": "turn-2", "status": "completed",
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(
+                speechAppends().count,
+                1,
+                "Speech must not fire while an in-flight phone tool has not finished"
+            )
+            XCTAssertTrue(h.voice.midTurn)
+
+            toolGates[1].finish()
+            await h.time.settle()
+            XCTAssertEqual(
+                speechAppends(),
+                [
+                    "G1026 departs at 06:30 and the message has been sent.",
+                    "Departure time sent to File Transfer.",
+                ],
+                "Held completion speech must flush immediately once the last in-flight tool returns"
+            )
+
+            // 4. Turn 3 (interrupted/failed turn): buffered text must be discarded and never spoken.
+            push(["method": "poki/backend/turnStarted", "params": ["threadId": "sync-thread", "turnId": "turn-3"]])
+            push(["method": "poki/backend/agentMessage", "params": [
+                "threadId": "sync-thread", "turnId": "turn-3", "itemId": "m6",
+                "phase": "final_answer", "text": "Should never be spoken after interruption.",
+            ]])
+            push(["method": "poki/backend/turnCompleted", "params": [
+                "threadId": "sync-thread", "turnId": "turn-3", "status": "interrupted",
+            ]])
+            await h.time.settle()
+            XCTAssertEqual(
+                speechAppends().count,
+                2,
+                "Interrupted or failed turns must discard buffered speech without calling appendSpeech"
+            )
         }
     }
 

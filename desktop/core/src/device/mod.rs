@@ -19,7 +19,7 @@ use idevice::{
     usbmuxd::{Connection, UsbmuxdAddr, UsbmuxdConnection},
 };
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{future::Future, net::IpAddr, pin::Pin};
 
 pub const LABEL: &str = "poki-setup";
 
@@ -99,16 +99,20 @@ impl Phone {
         Phone { udid: udid.into(), link: Link::Wifi { address }, mux_id: None }
     }
 
-    /// idevice's connection factory for this phone. Over USB it is usbmuxd's; over Wi-Fi it needs
-    /// the pairing record from [`pairing::saved`].
+    /// idevice's connection factory for this phone. Over USB it connects through usbmuxd and opens
+    /// every session with the record [`pairing::settle`] last saw the phone accept, so that each
+    /// step uses the same trust (see [`SettledUsb`]); over Wi-Fi it needs the pairing record from
+    /// [`pairing::saved`].
     pub fn provider(&self) -> Result<Box<dyn IdeviceProvider>> {
         match &self.link {
-            Link::Usb | Link::Muxed { .. } => Ok(Box::new(UsbmuxdProvider {
-                addr: UsbmuxdAddr::from_env_var().unwrap_or_default(),
-                tag: 1,
-                udid: self.udid.clone(),
-                device_id: self.mux_id.unwrap_or(0),
-                label: LABEL.into(),
+            Link::Usb | Link::Muxed { .. } => Ok(Box::new(SettledUsb {
+                mux: UsbmuxdProvider {
+                    addr: UsbmuxdAddr::from_env_var().unwrap_or_default(),
+                    tag: 1,
+                    udid: self.udid.clone(),
+                    device_id: self.mux_id.unwrap_or(0),
+                    label: LABEL.into(),
+                },
             })),
             Link::Wifi { address } => {
                 let pairing_file = pairing::saved(&self.udid)?
@@ -119,6 +123,37 @@ impl Phone {
     }
 
     pub fn is_usb(&self) -> bool { matches!(self.link, Link::Usb) }
+}
+
+/// usbmuxd's connection factory, with one change: sessions open with the record the phone last
+/// accepted from this computer ([`pairing::settle`]) instead of whatever record usbmuxd holds.
+///
+/// usbmuxd's record and the one Poki Setup saved can drift apart: Apple Devices on Windows or
+/// Finder on the Mac may keep an old record the phone forgot (after Reset Location & Privacy, an
+/// erase or an update), or may not take the record Poki Setup gave it. Pairing then checked one
+/// record and every later step (profiles, install, remote pairing) used the other, and failed
+/// with "not paired" right after pairing worked (#421). Only when nothing was settled in this run
+/// is usbmuxd's record used, as before.
+#[derive(Debug)]
+pub struct SettledUsb {
+    mux: UsbmuxdProvider,
+}
+
+impl IdeviceProvider for SettledUsb {
+    fn connect(&self, port: u16) -> Pin<Box<dyn Future<Output = std::result::Result<idevice::Idevice, idevice::IdeviceError>> + Send>> {
+        self.mux.connect(port)
+    }
+
+    fn label(&self) -> &str {
+        self.mux.label()
+    }
+
+    fn get_pairing_file(&self) -> Pin<Box<dyn Future<Output = std::result::Result<PairingFile, idevice::IdeviceError>> + Send>> {
+        match pairing::settled(&self.mux.udid) {
+            Some(record) => Box::pin(async move { Ok(record) }),
+            None => self.mux.get_pairing_file(),
+        }
+    }
 }
 
 /// The pairing record usbmuxd holds for a UDID (macOS and Windows keep one per trusted phone).
@@ -134,6 +169,25 @@ pub async fn mux_pairing_record(udid: &str) -> Result<Option<PairingFile>> {
 #[cfg(test)]
 mod list_tests {
     use super::*;
+
+    /// usbmuxd here is a port nobody listens on, so a provider that asks usbmuxd for its record
+    /// fails, as it did with a stale Apple Devices record: every step after pairing must use the
+    /// record the phone accepted instead (#421).
+    #[tokio::test]
+    async fn usb_sessions_use_the_record_the_phone_accepted_not_usbmuxds() {
+        let phone = Phone { udid: "SETTLED-USB".into(), link: Link::Usb, mux_id: Some(1) };
+        let unreachable = UsbmuxdProvider { addr: UsbmuxdAddr::TcpSocket("127.0.0.1:1".parse().unwrap()), tag: 1, udid: phone.udid.clone(), device_id: 1, label: LABEL.into() };
+        assert!(unreachable.get_pairing_file().await.is_err(), "usbmuxd's record is out of reach in this test");
+
+        pairing::remember_for_test(&phone.udid, Some("HOST-ACCEPTED"));
+        let provider = SettledUsb { mux: unreachable };
+        let record = provider.get_pairing_file().await.expect("the settled record, without asking usbmuxd");
+        assert_eq!(record.host_id, "HOST-ACCEPTED");
+
+        pairing::remember_for_test(&phone.udid, None);
+        assert!(provider.get_pairing_file().await.is_err(), "nothing settled: usbmuxd's record, as before");
+        assert!(matches!(phone.provider(), Ok(_)));
+    }
 
     #[test]
     fn a_phone_on_cable_and_wifi_is_listed_once_by_cable() {
