@@ -63,11 +63,21 @@ actor MCPSessions {
               signal: CancellationToken?) async throws -> McpToolResult {
         do {
             return try await client(for: account, connector: connector).callTool(name: tool, arguments: arguments, signal: signal)
-        } catch {
-            // Once more on a fresh connection: the server may have ended the session.
+        } catch where Self.retriesOnFreshSession(error) {
+            // Once more on a fresh connection: the server ended the session, so the call never ran.
             clients[account.id] = nil
             return try await client(for: account, connector: connector).callTool(name: tool, arguments: arguments, signal: signal)
+        } catch {
+            // A timeout, a server error or a cancel may come after the tool ran: sending it again could
+            // write twice. The connection is dropped so the next call starts clean.
+            if !(error is CancellationError) { clients[account.id] = nil }
+            throw error
         }
+    }
+
+    /// Only an ended session (HTTP 404 on a known session) means the server never ran the call.
+    nonisolated static func retriesOnFreshSession(_ error: Error) -> Bool {
+        error is McpSessionExpiredError
     }
 
     func close(_ account: UUID) async {

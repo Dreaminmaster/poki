@@ -368,7 +368,8 @@ async fn send_on(phone: &Phone, body: &Value) -> std::result::Result<(Value, Opt
             let http = reqwest::Client::builder().timeout(CALL_TIMEOUT).build().map_err(|e| (false, e.into()))?;
             let mut req = http.post(url).bearer_auth(token).body(body.to_string());
             for (k, v) in &headers { req = req.header(k.as_str(), v.as_str()); }
-            let res = req.send().await.map_err(|e| (e.is_connect(), Error::from(e)))?;
+            // A failed connect never reached the phone; any other error may have (a timeout after the send).
+            let res = req.send().await.map_err(|e| (!e.is_connect(), Error::from(e)))?;
             let session = res.headers().get("mcp-session-id").and_then(|v| v.to_str().ok()).map(String::from);
             let status = res.status().as_u16();
             // The relay's own 503 (phone offline) means nothing reached the phone.
@@ -427,6 +428,18 @@ mod tests {
         assert_eq!(look["result"]["isError"], true);
         assert!(look["result"]["content"][0]["text"].as_str().unwrap().contains("Nothing was sent"));
         assert!(server.handle(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_relay_that_cannot_be_reached_reports_nothing_sent() {
+        let relay = |url: String| Phone { way: Arc::new(Way::Relay { url, token: "t".into() }), session: None, tools: vec![], instructions: None };
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call"});
+        // Nothing listens on this port: the connect fails, so the call never reached the phone and may be retried.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let refused = send_on(&relay(format!("http://127.0.0.1:{port}/mcp")), &body).await;
+        assert!(matches!(refused, Err((false, _))), "a refused connect is never sent");
     }
 
     #[test]

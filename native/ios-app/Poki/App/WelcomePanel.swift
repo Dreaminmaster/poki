@@ -40,8 +40,6 @@ struct SetupSections: View {
     @Binding var path: NavigationPath
     /// On the Setup page: Guide Me under the card, which walks the list one page at a time.
     var guideMe = false
-    /// Settings › Setup hides the optional groups that already live on the Settings home page.
-    var includeOptionalGroups = true
 
     @State private var hasModel = ModelKeys.hasUsableKey
     @State private var modelName = ModelKeys.selectedModelName
