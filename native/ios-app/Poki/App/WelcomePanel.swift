@@ -13,10 +13,15 @@ enum SetupItem: Hashable {
     case models
     /// Screen History, Memory, Dictation, Notifications and Agents, all optional.
     case features
+    /// The Apple Account, last, when a free Apple Account signed Poki (7-day signing): signed in
+    /// here, Poki renews itself before it stops opening (issue #740).
+    case appleAccount
 
-    static var all: [SetupItem] {
+    static var all: [SetupItem] { all(freeSigning: SelfSigner.installedFreeSigning) }
+
+    static func all(freeSigning: Bool) -> [SetupItem] {
         SetupStep.shown.flatMap { $0 == .loopback ? [SetupItem.step($0), .shortcut] : [SetupItem.step($0)] }
-            + [.models, .features]
+            + [.models, .features] + (freeSigning ? [.appleAccount] : [])
     }
 
     /// Still to do: Guide Me starts at the first of these. The features are optional, never open.
@@ -26,6 +31,7 @@ enum SetupItem: Hashable {
         case .shortcut: !HistoryReconnect.shared.isSetUp
         case .models: !ModelKeys.hasUsableKey
         case .features: false
+        case .appleAccount: model.signer.needsAppleAccountForRenewal
         }
     }
 
@@ -92,6 +98,8 @@ struct SetupSections: View {
 
         WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
 
+        if model.signer.freeSigning { appleAccountSection }
+
         Section {
             NavigationLink(value: DetailsRoute.agents) {
                 SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
@@ -108,6 +116,30 @@ struct SetupSections: View {
         } footer: {
             Group {
                 Text("Let Claude, ChatGPT and other agents use this iPhone")
+            }
+            .settingsFooter()
+        }
+    }
+
+    /// A free Apple Account's install: the sign-in that lets Poki renew itself.
+    private var appleAccountSection: some View {
+        let needs = model.signer.needsAppleAccountForRenewal
+        return Section {
+            // Settings' own page, in the system's look, as the steps open from this list.
+            NavigationLink { AppleAccountPage().outsideStartFlow() } label: {
+                SettingsRow(title: "Apple Account", caption: needs ? "Sign in so Poki keeps opening" : nil,
+                            symbol: "person.crop.circle", value: needs ? nil : model.signer.status?.apple_id,
+                            warns: needs, accessory: needs ? nil : .done)
+            }
+            .accessibilityIdentifier("firstRun.appleAccount")
+        } header: {
+            Group {
+                SettingsHeader("Signing & Updates")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("A free Apple Account signs Poki for 7 days. Signed in here, Poki renews itself.")
             }
             .settingsFooter()
         }

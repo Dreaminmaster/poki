@@ -139,6 +139,16 @@ struct RootView: View {
     private var welcoming: Bool { welcome != nil }
     /// A setup step a link opened while the first run is up: it opens there.
     @State private var welcomeLink: SetupStep?
+    /// The Apple Account sign-in for a free account's install, as a sheet after setup (`RenewSignIn`).
+    /// `-pokiScreen renewSignIn` opens it at launch for screenshots.
+    @State private var renewAsk = UserDefaults.standard.string(forKey: "pokiScreen") == "renewSignIn"
+    /// The welcome closed at this launch, or Poki Setup put Poki here just before it.
+    @State private var afterSetup = false
+    private var renewDue: Bool {
+        RenewSignIn.shouldAsk(freeSigning: model.signer.freeSigning, needsAccount: model.signer.needsAppleAccountForRenewal,
+                              statusKnown: model.signer.status != nil, afterSetup: afterSetup && !welcoming && !curtain && !whatsNewOpen,
+                              expiry: model.signer.expiry, askedFor: RenewSignIn.askedFor())
+    }
     /// The post-update What's New card, presented after Home has appeared.
     @State private var whatsNewOpen = false
     @State private var whatsNewGate = WhatsNewLaunchGate()
@@ -408,7 +418,12 @@ struct RootView: View {
             Text("The update is almost in. Poki will close to finish it. Open Poki again afterwards.")
         }
         .modifier(AutomationNotices(enabled: !detailsOpen))
-        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && model.signer.installMessage == nil))
+        .modifier(LoopbackPrompt(enabled: !detailsOpen && !welcoming && !renewAsk && model.signer.installMessage == nil))
+        .sheet(isPresented: $renewAsk) { RenewSignInSheet() }
+        .onChange(of: welcoming) { was, now in if was, !now { afterSetup = true } }
+        .onChange(of: renewDue, initial: true) { _, due in if due { renewAsk = true } }
+        .onChange(of: renewAsk) { _, up in if !up { scheduleWhatsNewIfDue() } }
+        .task { if model.signer.handedAtLaunch { afterSetup = true } }
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .active {
                 sceneHasBeenActive = true
@@ -687,7 +702,8 @@ struct RootView: View {
             firstFrameDisplayed: firstFrameDisplayed,
             curtainUp: curtain,
             sceneActive: sceneHasBeenActive && scenePhase == .active,
-            welcoming: welcoming,
+            // The Apple Account sign-in after setup holds What's New back like the welcome does.
+            welcoming: welcoming || renewAsk,
             detailsOpen: detailsOpen,
             installMessageActive: model.signer.installMessage != nil,
             pairingUnderWay: model.pairingUnderWay,
