@@ -242,6 +242,132 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
     }
 
+    func testMaximumAccessibilityDynamicTypeWrapsActionAndWarningValuesWhileKeepingModelsSingleLine() throws {
+        AppLocalization.shared.preference = "en"
+        let locale = AppLocalization.locale
+        let rowWidth: CGFloat = 295
+
+        let shortActionWindow = try show(
+            SettingsRow(title: "Setup", symbol: "checklist", value: "On", valueIsAction: true)
+                .frame(width: rowWidth)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle { self.accessibilityFrame(label: "On", in: shortActionWindow) != nil }
+        let singleLineActionFrame = try XCTUnwrap(accessibilityFrame(label: "On", in: shortActionWindow))
+
+        let finishSetupWindow = try show(
+            SettingsRow(title: "Setup", symbol: "checklist", value: "Finish Setup", valueIsAction: true)
+                .frame(width: rowWidth)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle { self.accessibilityFrame(label: "Finish Setup", in: finishSetupWindow) != nil }
+        let finishSetupFrame = try XCTUnwrap(accessibilityFrame(label: "Finish Setup", in: finishSetupWindow))
+        let finishSetupRowMaxX = (finishSetupWindow.bounds.width + rowWidth) / 2
+        XCTAssertLessThanOrEqual(
+            finishSetupFrame.maxX,
+            finishSetupRowMaxX + 1,
+            "Finish Setup must stay within row bounds at maximum Dynamic Type (\(finishSetupFrame.maxX) > \(finishSetupRowMaxX))"
+        )
+        XCTAssertGreaterThanOrEqual(
+            finishSetupFrame.height,
+            singleLineActionFrame.height * 1.5,
+            "Finish Setup must wrap onto multiple lines instead of truncating at maximum Dynamic Type (\(finishSetupFrame.height) vs single-line \(singleLineActionFrame.height))"
+        )
+
+        let shortWarningWindow = try show(
+            SettingsRow(title: "Signing & Updates", symbol: "signature", value: "On", warns: true)
+                .frame(width: rowWidth)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle { self.accessibilityFrame(label: "On", in: shortWarningWindow) != nil }
+        let singleLineWarningFrame = try XCTUnwrap(accessibilityFrame(label: "On", in: shortWarningWindow))
+
+        let warningWindow = try show(
+            SettingsRow(title: "Signing & Updates", symbol: "signature", value: "Sign In Again", warns: true)
+                .frame(width: rowWidth)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle { self.accessibilityFrame(label: "Sign In Again", in: warningWindow) != nil }
+        let warningFrame = try XCTUnwrap(accessibilityFrame(label: "Sign In Again", in: warningWindow))
+        let warningRowMaxX = (warningWindow.bounds.width + rowWidth) / 2
+        XCTAssertLessThanOrEqual(
+            warningFrame.maxX,
+            warningRowMaxX + 1,
+            "Warning value must stay within row bounds at maximum Dynamic Type (\(warningFrame.maxX) > \(warningRowMaxX))"
+        )
+        XCTAssertGreaterThanOrEqual(
+            warningFrame.height,
+            singleLineWarningFrame.height * 1.5,
+            "Warning value must wrap instead of truncating at maximum Dynamic Type (\(warningFrame.height) vs single-line \(singleLineWarningFrame.height))"
+        )
+
+        let rawModel = "workbuddy/deepseek-v4.1-flash"
+        let modelsWindow = try show(
+            SettingsRow(title: "Models", symbol: "sparkles", value: rawModel)
+                .frame(width: rowWidth)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle { self.accessibilityFrame(label: rawModel, in: modelsWindow) != nil }
+        let modelsValueFrame = try XCTUnwrap(accessibilityFrame(label: rawModel, in: modelsWindow))
+        let modelsRowMaxX = (modelsWindow.bounds.width + rowWidth) / 2
+        XCTAssertLessThanOrEqual(
+            modelsValueFrame.maxX,
+            modelsRowMaxX + 1,
+            "Models value must stay within row bounds at maximum Dynamic Type (\(modelsValueFrame.maxX) > \(modelsRowMaxX))"
+        )
+        XCTAssertLessThanOrEqual(
+            modelsValueFrame.height,
+            singleLineActionFrame.height + 1,
+            "Models value must remain single-line at maximum Dynamic Type (\(modelsValueFrame.height) vs single-line \(singleLineActionFrame.height))"
+        )
+
+        let store = storage.storage
+        let workbuddy = CustomProviders.upsert(
+            CustomProvider(
+                name: "WorkBuddy",
+                endpoints: [CustomEndpoint(url: "http://127.0.0.1:8767/v1")],
+                model: rawModel
+            ),
+            storage: store
+        )
+        ModelKeys.choose(.custom, model: CustomProviders.choiceID(workbuddy.id, rawModel), in: store)
+
+        let app = AppModel(launcher: FakeLauncher(), pairer: FakePairing(), storage: store)
+        let chat = ChatModel(app: app)
+        defer { app.stopSession() }
+
+        let detailsWindow = try show(
+            PokiDetailsView(openSetup: {}, path: .constant(NavigationPath()))
+                .environment(app)
+                .environment(chat)
+                .environment(\.locale, locale)
+                .environment(\.dynamicTypeSize, .accessibility5)
+        )
+        settle {
+            self.accessibilityElement(identifier: "details.hands", in: detailsWindow) != nil
+                && self.accessibilityElement(identifier: "details.accountsAndModels", in: detailsWindow) != nil
+        }
+
+        let liveSetupRow = try XCTUnwrap(accessibilityElement(identifier: "details.hands", in: detailsWindow))
+        let liveModelsRow = try XCTUnwrap(accessibilityElement(identifier: "details.accountsAndModels", in: detailsWindow))
+        let setupTexts = visibleTexts(in: liveSetupRow)
+        let modelTexts = visibleTexts(in: liveModelsRow)
+        XCTAssertTrue(setupTexts.contains { $0.contains("Setup") }, "Expected Setup title, got: \(setupTexts)")
+        XCTAssertTrue(setupTexts.contains { $0.contains("Finish Setup") }, "Expected Finish Setup action, got: \(setupTexts)")
+        XCTAssertTrue(modelTexts.contains { $0.contains("Models") }, "Expected Models title, got: \(modelTexts)")
+        XCTAssertTrue(modelTexts.contains { $0.contains(rawModel) }, "Expected raw model name, got: \(modelTexts)")
+        XCTAssertGreaterThanOrEqual(
+            liveSetupRow.accessibilityFrame.height,
+            liveModelsRow.accessibilityFrame.height + 20,
+            "Setup row must grow to wrap Finish Setup while Models stays one-line at maximum Dynamic Type (setup=\(liveSetupRow.accessibilityFrame.height), models=\(liveModelsRow.accessibilityFrame.height))"
+        )
+    }
+
     private func show(_ view: some View) throws -> UIWindow {
         window?.isHidden = true
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
