@@ -36091,18 +36091,18 @@
         }
       }
     },
-    "Poki is off. Agents can’t connect to this iPhone until you turn it on." : {
+    "Poki is off. Send a task in Poki before connecting an agent." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 已关闭，开启前智能体无法连接此 iPhone。"
+            "value" : "Poki 已关闭。先在 Poki 中发送一个任务，再连接智能体。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 已關閉，開啟前智慧體無法連線此 iPhone。"
+            "value" : "Poki 已關閉。先在 Poki 中傳送一項任務，再連接智慧體。"
           }
         }
       }
@@ -46795,38 +46795,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟本機通道"
-          }
-        }
-      }
-    },
-    "Approvals are off. Turn them back on in [Settings › Security](poki://approvals)." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已关闭操作确认，可以在 [设置 › 安全](poki://approvals) 里重新打开"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已關閉操作確認，可以在 [設定 › 安全](poki://approvals) 裡重新開啟"
-          }
-        }
-      }
-    },
-    "Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Security." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "默认关闭。ask_poki 允许外部智能体将重复性任务交给 Poki 内置智能体。下次启动生效。确认严格度位于“设置 › 安全”。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "預設關閉。ask_poki 允許外部智慧體將重複性任務交給 Poki 內建智慧體。下次啟動生效。確認嚴格度位於「設定 › 安全」。"
           }
         }
       }

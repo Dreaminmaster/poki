@@ -704,9 +704,7 @@ struct SetupSettingsPage: View {
     @Binding var path: NavigationPath
     @State private var showsAutoUnlockPasscode = false
 
-    /// Why Poki could not start, as it would have shown under a switch. Poki has none here (the owner,
-    /// Nov 21 2026: it starts by itself for a task or an agent's request, and the switch asked for the
-    /// passcode and left the automation banner up when turned back on).
+    /// Why Poki could not start. A local task can start it; an outside agent can connect only once it is on.
     private var failure: Text? {
         if let failure = model.developerToolsFailure { return Text(failure).foregroundStyle(.red) }
         guard !model.sessionOn, !model.sessionStarting else { return nil }
