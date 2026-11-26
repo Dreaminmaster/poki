@@ -46,6 +46,12 @@ jobs:
           channel="$(echo "$rec" | jq -r '.channel // empty')"
           case "$channel" in beta|stable|'') ;; *) echo "unknown channel: $channel" >&2; exit 1 ;; esac
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+      - name: CHANGELOG.md has an entry for this version
+        if: steps.r.outputs.channel == 'beta' || steps.r.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 .github/scripts/promotion.py changelog
 
   verify-r2:
     if: github.event_name == 'workflow_dispatch' && inputs.verify_r2 == true
@@ -101,11 +107,12 @@ jobs:
       - uses: actions/checkout@v4
         with: { ref: "${{ fromJSON(needs.read.outputs.rec).sha }}", fetch-depth: 0, filter: 'tree:0' }
       - uses: actions/checkout@v4
-        if: env.CHANNEL == 'beta'
         with:
           ref: ${{ github.sha }}
           path: pipeline
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            CHANGELOG.md
           persist-credentials: false
       - name: The promoted build's files
         run: |
@@ -172,8 +179,12 @@ jobs:
       - name: Notes
         run: |
           set -euo pipefail
+          changelog_notes="$(python3 pipeline/.github/scripts/promotion.py changelog --version "$LABEL" --base-version "$BASE" --channel "$CHANNEL" --file pipeline/CHANGELOG.md --extract)"
           prev="$(git tag --list 'app-[0-9]*' 'ios-v*' --sort=-creatordate | grep -Ev -- '-(pre)?alpha\.' | grep -vx "$TAG" | head -1 || true)"
           {
+            printf '%s\n\n' "$changelog_notes"
+            echo "## Install"
+            echo
             if [ "$CHANNEL" = beta ]; then
               n="${LABEL##*beta.}"
               echo "Beta $n of Poki $BASE, for the Beta channel in Poki Setup. It is Alpha build $BUILD (\`$SOURCE\`), unchanged, after the Poki Gym."
@@ -182,10 +193,14 @@ jobs:
             fi
             echo
             echo "Install Poki-external with Poki Setup, or sign it with your own tool (entitlements in Poki-signing.zip). See native/ios-app/README.md."
-            echo
             if [ -n "$prev" ] && git merge-base --is-ancestor "$prev" HEAD 2>/dev/null; then
+              echo
+              echo "<details><summary>Full changelog</summary>"
+              echo
               echo "### Changes since $prev"
               git log --no-merges --max-count=80 --format='- %s (%h)' "$prev..HEAD"
+              echo
+              echo "</details>"
             fi
           } > notes.md
           cat notes.md

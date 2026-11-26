@@ -77,10 +77,12 @@ jobs:
             echo "Promotes \`${SOURCE}\` (${SHA}) to **${channel^}** as \`${TAG}\`. The same IPA is published under the new name; nothing is rebuilt."
             echo
             if [ "$channel" = beta ]; then
+              echo "- Gate: CHANGELOG.md has a dated entry for this version (promotion-gate.yml)."
               echo "- Gate: the Gym on this commit, with no more failures than the last beta (promotion-gate.yml)."
               echo "- Also moves \`native/ios-app/VERSION\` on (see the diff), so later alphas sort above this beta in Poki Setup."
               echo "- Merging publishes the prerelease and creates \`release/X.Y\` on the first beta of a version."
             else
+              echo "- Gate: CHANGELOG.md has a dated entry for this version (promotion-gate.yml)."
               echo "- Gate: the beta has been out for the wait in \`.github/channels.json\` (\`soak_days\`). Add the \`soak-override\` label to skip it."
               [ -n "$SKIP" ] && echo "- The wait was skipped when proposing: $SKIP"
               echo "- Merging publishes the full release (not marked Latest, which stays on Poki MCP's v* release), after approval in the \`stable\` environment."
