@@ -34,26 +34,48 @@ public struct Element: Equatable, Sendable {
     public var identifier: String?
     public var frame: Rect
     public var depth: Int
-    public var isDisabled: Bool
     /// The element's place in the tree, in document order, and the last place inside it: an element
     /// whose `node` is in `node+1...end` is inside this one.
     public var node = 0
     public var end = 0
     /// Not in the tree: text read from the screenshot.
     public var fromPicture = false
+    /// Greyed out: a tap does nothing. Only a tree that says so sets it (the in-process XML writes
+    /// enabled="false"); a tree that does not report it leaves every element enabled.
+    public var enabled = true
+    /// The picked tab, segment or row.
+    public var selected = false
 
-    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false, isDisabled: Bool = false) {
+    public init(type: String, label: String?, value: String?, identifier: String?, frame: Rect, depth: Int, node: Int = 0, end: Int = 0, fromPicture: Bool = false, enabled: Bool = true, selected: Bool = false, isDisabled: Bool = false) {
         self.type = type
         self.label = label
         self.value = value
         self.identifier = identifier
         self.frame = frame
         self.depth = depth
-        self.isDisabled = isDisabled
         self.node = node
         self.end = end
         self.fromPicture = fromPicture
+        self.enabled = enabled && !isDisabled
+        self.selected = selected
     }
+
+    /// Greyed out (main's name for `!enabled`).
+    public var isDisabled: Bool { !enabled }
+
+    /// Controls `adjust` sets by value.
+    static let adjustableTypes: Set<String> = ["Slider", "PickerWheel", "Adjustable"]
+    /// What a label does not say: disabled, selected, adjustable (issue #609: an agent could not tell a
+    /// greyed-out Undo from a live one, or that a control was a slider).
+    public var states: [String] {
+        var s: [String] = []
+        if !enabled { s.append("disabled") }
+        if selected { s.append("selected") }
+        if Self.adjustableTypes.contains(type) { s.append("adjustable") }
+        return s
+    }
+    /// The states as a listing shows them, " (disabled, selected)", or "".
+    public var stateMark: String { states.isEmpty ? "" : " (\(states.joined(separator: ", ")))" }
 
     func contains(_ other: Element) -> Bool { node < other.node && other.node <= end }
 
@@ -129,9 +151,9 @@ func flatten(_ root: JSON) -> [Element] {
             let type = (node["type"]?.string ?? "Other").replacingOccurrences(of: "XCUIElementType", with: "")
             let name = node["name"]?.text
             index = out.count
-            let enabled = (node["isEnabled"] ?? node["enabled"])?.text
+            let enabledRaw = node["isEnabled"] ?? node["enabled"]
             out.append(Element(type: type, label: node["label"]?.text ?? name, value: node["value"]?.text, identifier: name, frame: frame, depth: depth, node: place, end: place,
-                               isDisabled: reportsDisabled(enabled)))
+                               enabled: (enabledRaw?.bool ?? true) && !reportsDisabled(enabledRaw?.text), selected: (node["isSelected"] ?? node["selected"])?.bool ?? false))
         }
         for child in node["children"]?.array ?? [] { walk(child, depth + 1) }
         if let index { out[index].end = counter }
@@ -164,7 +186,7 @@ func flattenXML(_ data: Data) -> (elements: [Element], root: (label: String?, na
                 let id = attributes["name"]
                 index = out.count
                 out.append(Element(type: type, label: attributes["label"] ?? id, value: attributes["value"], identifier: id, frame: frame, depth: depth, node: place, end: place,
-                                   isDisabled: reportsDisabled(attributes["enabled"])))
+                                   enabled: !reportsDisabled(attributes["enabled"]), selected: attributes["selected"] == "true"))
             }
             open.append(index)
         }

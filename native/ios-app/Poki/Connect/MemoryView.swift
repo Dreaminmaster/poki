@@ -37,9 +37,19 @@ struct MemoryDestination: View {
 /// Memory's first page.
 struct MemoryView: View {
     var back: () -> Void
+    /// The ask bar's words, when a caller holds them; otherwise the page keeps its own. The bar at the
+    /// page's foot searches the page as it is typed in, and sending asks Poki. It is the page's only
+    /// search (it replaced the system's search field, so there are not two).
+    var asked: Binding<String>? = nil
     private var library: MemoryLibrary { .shared }
     @State private var page = MemoryPageState()
-    @State private var query = ""
+    @State private var typed = ""
+    private var query: String { asked?.wrappedValue ?? typed }
+
+    init(back: @escaping () -> Void, query: Binding<String>? = nil) {
+        self.back = back
+        self.asked = query
+    }
     @State private var importing = false
     @State private var confirmClear = false
     @State private var exportURL: URL?
@@ -50,22 +60,25 @@ struct MemoryView: View {
         let about = library.about
         let apps = library.apps
         List {
-            if library.items.isEmpty, page.editing != "" {
-                Section { MemoryEmptyCard(title: "No memories yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
+            if library.items.isEmpty {
+                Section { MemoryEmptyCard(title: "No Memories Yet", message: "The preferences and habits Poki notes will appear here.", bear: true, add: startAdding) }
+                // Senses' provisional memories wait for a yes even before the first note is kept.
+                SensesMemorySection()
             } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 MemorySearchResults(query: query, page: page)
             } else {
                 Section {
-                    ForEach(about.prefix(Self.preview)) { item in
-                        MemoryItemRow(item: item, page: page).memorySwipes(item, page: page, library: library)
-                    }
+                    if !about.isEmpty { MemoryPageCard(app: nil, limit: Self.preview, page: page) }
                     if about.count > Self.preview {
                         NavigationLink(value: SettingsRoute.memoryPage(.about())) { Text("All \(about.count)") }
                             .accessibilityIdentifier("memory.about.all")
                     }
                     adding
                 } header: {
-                    MemoryHeader("About You")
+                    Group {
+                        MemoryHeader("About You")
+                    }
+                    .settingsHeader()
                 }
                 if !apps.isEmpty || !library.other.isEmpty {
                     Section {
@@ -78,37 +91,44 @@ struct MemoryView: View {
                                 .accessibilityIdentifier("memory.app.other")
                         }
                     } header: {
-                        MemoryHeader("Apps")
+                        Group {
+                            MemoryHeader("Apps")
+                        }
+                        .settingsHeader()
                     }
                 }
+                // Provisional memories Senses made from Screen History, apart from notes.
+                SensesMemorySection()
                 if let message = library.message {
-                    Section { Text(verbatim: message).font(.footnote).foregroundStyle(Color(.secondaryLabel)) }
+                    Section { Text(verbatim: message).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)) }
                 }
             }
         }
-        .navigationTitle(AppLocalization.text("Memory Library"))
+        .navigationTitle(AppLocalization.text("Memory"))
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(MemorySearch(query: $query, shown: apps.count > 8))
-        .headerlessTop(library.items.isEmpty && page.editing != "")
+        .headerlessTop(library.items.isEmpty)
         .toolbar {
+            // Recent Updates is an icon (the owner, Nov 20 2026): words pushed the title off the centre,
+            // and the dot sits on the icon's corner. On iOS 26 it shares one glass group with More.
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: SettingsRoute.memoryPage(.recent())) {
-                    // No padding of its own: with the dot, a wider pill pushed the title off the centre.
-                    // In English the page's whole name is too wide for that too, so the pill is "Recent".
-                    HStack(spacing: 5) {
-                        Text("Recent Updates button", comment: "The Memory page's button to Recent Updates: short, so the title stays centred")
-                            .font(.subheadline.weight(.semibold)).fixedSize()
-                        if library.unread { Circle().fill(Tint.blueText).frame(width: 7, height: 7) }
-                    }
+                    Image(systemName: "clock.arrow.circlepath")
+                        .overlay(alignment: .topTrailing) {
+                            if library.unread {
+                                Circle().fill(Tint.blueText).frame(width: 7, height: 7).offset(x: 3, y: -2)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                 }
                 .accessibilityLabel(Text("Recent Updates"))
+                .accessibilityValue(library.unread ? Text("New") : Text(verbatim: ""))
                 .accessibilityIdentifier("memory.recent")
             }
-            // Two shapes, as the design draws them: the Recent Updates capsule and the More circle.
-            if #available(iOS 26.0, *) { ToolbarSpacer(.fixed, placement: .topBarTrailing) }
             ToolbarItem(placement: .topBarTrailing) { more }
         }
+        .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
+        .bottomBar(softEdge: true) { PokiAskBar(text: asked ?? $typed, scope: .memory) }
         .environment(library)
         .onAppear { library.reload(); exportURL = library.exportFile() }
         .onChange(of: library.items) { exportURL = library.exportFile() }
@@ -123,24 +143,13 @@ struct MemoryView: View {
         }
     }
 
-    /// Add Memory, or the editor while a memory is being written.
+    /// Add Memory, and changing memory by telling Poki in the chat.
     @ViewBuilder private var adding: some View {
-        if page.editing == "" {
-            MemoryEditor(page: page, placeholder: "e.g., Mom is “Mama” in Contacts", onSave: {
-                library.add(page.draft, app: page.draftApp)
-                page.editing = nil
-            }, onCancel: { page.editing = nil })
-        } else {
-            MemoryAddRow(action: startAdding)
-        }
+        MemoryAddRow(action: startAdding)
+        MemoryChatRow(app: nil)
     }
 
-    private func startAdding() {
-        page.draft = ""
-        page.draftApp = nil
-        page.open = nil
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = "" }
-    }
+    private func startAdding() { page.start(nil) }
 
     /// Export, Import and Clear: the earlier page's own section, now one menu.
     private var more: some View {
@@ -170,9 +179,9 @@ struct MemoryHeader: View {
     init(verbatim title: String) { self.title = Text(verbatim: title) }
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            title.font(.body.weight(.semibold))
+            title.font(.allo(.body, .semibold))
             Spacer()
-            trailing?.font(.footnote)
+            trailing?.font(.allo(.footnote))
         }
         .foregroundStyle(Color(.secondaryLabel))
         .textCase(nil)
@@ -189,11 +198,11 @@ struct MemoryAppRow: View {
             if let app { AppIconView(app: app, size: 38) } else { OtherTile(size: 38) }
             VStack(alignment: .leading, spacing: 2) {
                 if let app {
-                    Text(verbatim: MemoryFormat.appName(app)).font(.body).foregroundStyle(Color(.label))
+                    Text(verbatim: MemoryFormat.appName(app)).font(.allo(.body)).foregroundStyle(Color(.label))
                 } else {
-                    Text("Other").font(.body).foregroundStyle(Color(.label))
+                    Text("Other").font(.allo(.body)).foregroundStyle(Color(.label))
                 }
-                Text(counts).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(counts).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             }
         }
     }
@@ -229,7 +238,10 @@ struct MemorySearchResults: View {
                         MemoryItemRow(item: item, showsApp: true, page: page).memorySwipes(item, page: page, library: library)
                     }
                 } header: {
-                    MemoryHeader(MemoryScope.title(kind), trailing: Text(MemoryScope.count(items.count, kind)))
+                    Group {
+                        MemoryHeader(MemoryScope.title(kind), trailing: Text(MemoryScope.count(items.count, kind)))
+                    }
+                    .settingsHeader()
                 }
             }
         }
@@ -281,13 +293,13 @@ struct MemoryScopeView: View {
         List {
             switch scope {
             case .about:
-                let about = library.about
                 Section {
-                    ForEach(about) { item in MemoryItemRow(item: item, lines: 3, page: page).memorySwipes(item, page: page, library: library) }
+                    if !library.about.isEmpty { MemoryPageCard(app: nil, page: page) }
                     adding(app: nil)
+                    MemoryPageEditRow(app: nil)
                 }
             case .app(let app):
-                if app != nil { group(app, .memory) }
+                if let app { pageGroup(app) }
                 group(app, .habit)
                 group(app, .skill)
             case .all(let app, let kind):
@@ -301,6 +313,7 @@ struct MemoryScopeView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { title }
         }
+        .memoryEditorSheet(page)
         .safeAreaInset(edge: .bottom) { MemoryUndoToast() }
         .environment(library)
         .onAppear { if let open, page.open == nil { page.open = open } }
@@ -309,19 +322,34 @@ struct MemoryScopeView: View {
     @ViewBuilder private var title: some View {
         switch scope {
         case .about:
-            Text("About You").font(.headline)
+            Text("About You").font(.allo(.headline))
         case .app(let app), .all(let app, _):
             HStack(spacing: 7) {
                 if let app {
                     AppIconView(app: app, size: 24)
-                    Text(verbatim: MemoryFormat.appName(app)).font(.headline).lineLimit(1)
+                    Text(verbatim: MemoryFormat.appName(app)).font(.allo(.headline)).lineLimit(1)
                 } else {
-                    Text("Other").font(.headline)
+                    Text("Other").font(.allo(.headline))
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
         }
+    }
+
+    /// An app's memories as its page, with Add Memory, Tell Poki in Chat and Edit Page under it.
+    @ViewBuilder private func pageGroup(_ app: String) -> some View {
+        Section {
+            if !library.pageLines(app).isEmpty { MemoryPageCard(app: app, page: page) }
+            adding(app: app)
+            MemoryPageEditRow(app: app)
+        } header: {
+            Group {
+                MemoryHeader("Memory")
+            }
+            .settingsHeader()
+        }
+        .accessibilityIdentifier("memory.group.memory")
     }
 
     /// One kind's group: nothing at all when it is empty (no blank block).
@@ -335,26 +363,18 @@ struct MemoryScopeView: View {
                 }
                 if kind == .memory { adding(app: app) }
             } header: {
-                MemoryHeader(MemoryScope.title(kind))
+                Group {
+                    MemoryHeader(MemoryScope.title(kind))
+                }
+                .settingsHeader()
             }
             .accessibilityIdentifier("memory.group.\(kind.rawValue)")
         }
     }
 
     @ViewBuilder private func adding(app: String?) -> some View {
-        if page.editing == "" {
-            MemoryEditor(page: page, placeholder: "e.g., Mom is “Mama” in Contacts", onSave: {
-                library.add(page.draft, app: page.draftApp)
-                page.editing = nil
-            }, onCancel: { page.editing = nil })
-        } else {
-            MemoryAddRow {
-                page.draft = ""
-                page.draftApp = app
-                page.open = nil
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = "" }
-            }
-        }
+        MemoryAddRow { page.start(nil, app: app) }
+        MemoryChatRow(app: app)
     }
 }
 
@@ -376,7 +396,10 @@ struct MemoryRecentView: View {
                     Section {
                         ForEach(changes) { change in line(change) }
                     } header: {
-                        MemoryHeader(verbatim: day)
+                        Group {
+                            MemoryHeader(verbatim: day)
+                        }
+                        .settingsHeader()
                     }
                 }
             }
@@ -442,11 +465,7 @@ extension View {
     func memorySwipes(_ item: MemoryItem, page: MemoryPageState, library: MemoryLibrary) -> some View {
         swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button(role: .destructive) { MemoryForget.run(item.id, library: library) } label: { Label("Forget", systemImage: "trash") }
-            Button {
-                page.draft = item.text
-                page.draftApp = item.app
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.editing = item.id }
-            } label: { Label("Edit", systemImage: "pencil") }
+            Button { page.start(item) } label: { Label("Edit", systemImage: "pencil") }
                 .tint(Color(.systemGray))
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -455,24 +474,6 @@ extension View {
             }
             .tint(Tint.blue)
         }
-    }
-}
-
-/// The search field, only past 8 apps (the design's rule): with fewer, the system's drawer would show
-/// it whenever the page comes back into view.
-private struct MemorySearch: ViewModifier {
-    @Binding var query: String
-    var shown: Bool
-
-    func body(content: Content) -> some View {
-        Group {
-            if shown {
-                content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
-            } else {
-                content
-            }
-        }
-        .onChange(of: shown) { _, now in if !now { query = "" } }
     }
 }
 

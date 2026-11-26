@@ -145,11 +145,12 @@ enum ModelProvider: String, CaseIterable, Identifiable, Sendable {
 
     /// Each custom provider's own model, as the chat names it.
     static func customChoices(_ providers: [CustomProvider]) -> [ChatModelChoice] {
-        providers.compactMap { provider in
-            let model = provider.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !model.isEmpty, provider.primary != nil else { return nil }
-            return ChatModelChoice(id: CustomProviders.choiceID(provider.id, model),
-                                   name: CustomProviders.choiceName(provider, model, among: providers.count))
+        providers.flatMap { provider -> [ChatModelChoice] in
+            guard provider.primary != nil else { return [] }
+            let models = ([provider.model] + (provider.added ?? [])).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return models.map {
+                ChatModelChoice(id: CustomProviders.choiceID(provider.id, $0), name: CustomProviders.choiceName(provider, $0, among: providers.count))
+            }
         }
     }
 

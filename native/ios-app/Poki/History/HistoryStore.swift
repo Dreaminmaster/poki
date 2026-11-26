@@ -10,6 +10,9 @@ struct HistoryEntry: Identifiable, Hashable {
     let app: String
     let title: String
     let text: String
+    /// Who did it. nil: the owner, read off the screen. "": Poki, for its own chat. Otherwise the
+    /// outside agent Poki worked for (BacktapeActivity).
+    var by: String? = nil
 }
 
 /// One line of the observing record: when reading was on, paused, blocked or left an app out.
@@ -212,6 +215,22 @@ final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Every app id that has a read, for `HistoryCapture.tidy`.
+    func everyApp() async -> [String] {
+        await fetch { self.rows("SELECT DISTINCT app FROM entries") { Self.string($0, 0) } }
+    }
+
+    /// Removes the reads of `processes`, kept before they were left out, and gives the reads of a
+    /// web page's own process to `browser`, kept before a page was counted as its app.
+    func tidy(processes: [String], web: [String], browser: String) {
+        guard !processes.isEmpty || !web.isEmpty else { return }
+        queue.async {
+            self.generation = UUID()
+            for app in processes { self.run("DELETE FROM entries WHERE app = ?", [.text(app)]) }
+            for app in web { self.run("UPDATE entries SET app = ? WHERE app = ?", [.text(browser), .text(app)]) }
+        }
+    }
+
     private func any(_ sql: String) -> Bool {
         !rows(sql) { _ in true }.isEmpty
     }
@@ -283,6 +302,16 @@ final class HistoryStore: @unchecked Sendable {
     func entries(from start: Date, to end: Date) async -> [HistoryEntry] {
         await fetch {
             self.rows("SELECT id, at, app, title, text FROM entries WHERE at >= ? AND at < ? ORDER BY at", [.real(start.timeIntervalSince1970), .real(end.timeIntervalSince1970)], Self.entry)
+        }
+    }
+
+    /// When each read since `start` was kept and which app it was, nothing else: what Senses counts
+    /// habits from (SensesMemories). No screen text or title is read.
+    func sightings(since start: Date) async -> [SensesSighting] {
+        await fetch {
+            self.rows("SELECT at, app FROM entries WHERE at >= ? ORDER BY at", [.real(start.timeIntervalSince1970)]) {
+                SensesSighting(at: Date(timeIntervalSince1970: sqlite3_column_double($0, 0)), app: Self.string($0, 1))
+            }
         }
     }
 
@@ -372,7 +401,9 @@ final class HistoryStore: @unchecked Sendable {
                     )
                 }
             }
-        }
+        },
+        // Every answer goes through the check on this iPhone first (SensesContext.checkOutside).
+        check: { answer, arguments in await SensesContext.checkOutside(answer, arguments: arguments) }
     )
 
     @MainActor

@@ -196,6 +196,58 @@ async fn check_connector(url: &str, parts: Parts) -> Result<Check> {
     Ok(Check { at, ok: true, relay_ok: true, phone_online: true, tools, detail })
 }
 
+/// An access token for a connector link, by the same sign-in a Claude connector does (register,
+/// authorize with PKCE, token). The phone may ask its owner the first time. poki-mcp uses it for the
+/// relay when no cable or Wi-Fi reaches the phone (issue #609).
+pub async fn access_token(url: &str, client_name: &str) -> Result<String> {
+    use base64::Engine;
+    use rand::RngCore;
+    use sha2::Digest;
+    let parts = parse(url)?;
+    let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).redirect(reqwest::redirect::Policy::none()).build()?;
+    let base = format!("{}/v1/{}/{}", parts.origin, parts.label, parts.secret);
+    let redirect = "http://127.0.0.1/poki-mcp";
+    let reg = http
+        .post(format!("{base}/register"))
+        .json(&serde_json::json!({ "client_name": client_name, "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }))
+        .send()
+        .await?;
+    if !reg.status().is_success() {
+        return Err(Error::msg(format!("The relay refused to register poki-mcp (HTTP {}).", reg.status())));
+    }
+    let reg: serde_json::Value = reg.json().await?;
+    let client_id = reg["client_id"].as_str().unwrap_or("").to_string();
+    let mut v = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut v);
+    let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(verifier.as_bytes()));
+    let auth = http
+        .get(format!("{base}/authorize"))
+        .timeout(std::time::Duration::from_secs(105))
+        .query(&[("response_type", "code"), ("client_id", client_id.as_str()), ("redirect_uri", redirect), ("code_challenge", challenge.as_str()), ("code_challenge_method", "S256"), ("state", "x")])
+        .send()
+        .await?;
+    let code = match auth.status().as_u16() {
+        302 | 303 | 307 => {
+            let loc = auth.headers().get("location").and_then(|l| l.to_str().ok()).unwrap_or("").to_string();
+            reqwest::Url::parse(&loc).ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "code").map(|(_, v)| v.to_string()))
+                .ok_or_else(|| Error::NeedsPerson("The phone did not allow poki-mcp through the relay. Open Poki and approve the connection when it asks.".into()))?
+        }
+        503 => return Err(Error::msg("The relay is up, but the phone is not connected to it. Open Poki on the iPhone.")),
+        s => return Err(Error::msg(format!("The relay's sign-in answered HTTP {s}."))),
+    };
+    let tok = http
+        .post(format!("{base}/token"))
+        .form(&[("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", redirect), ("client_id", client_id.as_str()), ("code_verifier", verifier.as_str())])
+        .send()
+        .await?;
+    if !tok.status().is_success() {
+        return Err(Error::msg(format!("The relay's token step failed (HTTP {}).", tok.status())));
+    }
+    let tok: serde_json::Value = tok.json().await?;
+    tok["access_token"].as_str().map(String::from).filter(|t| !t.is_empty()).ok_or_else(|| Error::msg("The relay gave no access token."))
+}
+
 pub fn record_check(url: &str, check: &Check) -> Result<()> {
     let mut list = all()?;
     for c in list.iter_mut().filter(|c| c.url == url) {
@@ -205,6 +257,17 @@ pub fn record_check(url: &str, check: &Check) -> Result<()> {
 }
 
 /// Ready-to-paste client setups for one link.
+/// How to add poki-mcp (`poki-setup mcp serve`, stdio) to the agents on this computer.
+pub fn local_snippets(cli: &str) -> Vec<(String, String)> {
+    let quoted = if cli.contains(' ') { format!("\"{cli}\"") } else { cli.to_string() };
+    let json = serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": { "poki": { "command": cli, "args": ["mcp", "serve"] } } })).unwrap_or_default();
+    vec![
+        ("Claude Code".into(), format!("claude mcp add --scope user poki -- {quoted} mcp serve")),
+        ("Codex".into(), format!("codex mcp add poki -- {quoted} mcp serve")),
+        ("Cursor, Claude Desktop and others (JSON)".into(), json),
+    ]
+}
+
 pub fn snippets(url: &str) -> Vec<(String, String)> {
     vec![
         ("Claude.ai".into(), "Settings → Connectors → Add custom connector → paste the link → Connect. Keep Poki online and approve the connection on the phone when prompted.".into()),

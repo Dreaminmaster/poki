@@ -23,16 +23,16 @@ struct TaobaoProductList: View {
         ResultCardList(card: card, selected: selected, choose: choose, tint: Taobao.orange, carried: "taobao",
                        heading: card.items.first?.text("query"), subheading: nil, picture: 88) { item in
             VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: item.title).font(.subheadline).lineLimit(2)
+                Text(verbatim: item.title).font(.allo(.subheadline)).lineLimit(2)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(verbatim: item.text("price") ?? "")
-                        .font(.title3.weight(.semibold)).monospacedDigit()
+                        .font(.alloRounded(.title3, .semibold)).monospacedDigit()
                         .foregroundStyle(Taobao.orange)
                     if let label = item.text("price_label") {
-                        Text(verbatim: label).font(.caption).foregroundStyle(Taobao.orange)
+                        Text(verbatim: label).font(.allo(.caption)).foregroundStyle(Taobao.orange)
                     }
                     if let sold = item.text("sold") {
-                        Text(verbatim: sold).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                        Text(verbatim: sold).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                     }
                 }
                 ResultCardParts.caption(ResultCardParts.line([item.text("shop"), item.text("delivery")]), lines: 1)

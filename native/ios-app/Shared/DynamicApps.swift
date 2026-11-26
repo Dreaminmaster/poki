@@ -67,6 +67,8 @@ enum DynamicApps {
         lock.withLock { byID[id.lowercased()]?.name }
     }
 
+    /// Every installed User app (the Memory page's app list).
+    static var userApps: [Entry] { lock.withLock { entries.filter(\.user) } }
     /// The bundle id when the current phone refresh confirmed this exact id is installed.
     static func currentInstalledID(forID id: String) -> String? {
         lock.withLock {

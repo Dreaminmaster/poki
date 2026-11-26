@@ -29,8 +29,10 @@ its creation-time language. System-owned permission prompts and pickers remain c
   text. This is for known Poki/runtime status vocabulary, not for matching or translating user input.
 - UI date/list formatting uses `AppLocalization.locale`; the user's region and locale conventions
   are retained. Machine timestamps and protocol values keep their original formats.
-- Body fonts remain native. Prominent text uses Geist for English and system fonts for other
-  languages, preserving Dynamic Type and glyph coverage. Existing navigation bars update their
+- Text uses Allo (Shared/Typeface.swift) in every language: Allo Text for body text, Allo Rounded
+  for titles and prominent text. Both have SF Pro's cap and line height, so Chinese falls back to
+  PingFang on the same lines and at the same size, and every font scales with Dynamic Type. The Live
+  Activity keeps the system font for Chinese. Existing navigation bars update their
   fonts in place, without replacing controllers.
 
 User/model messages, task plans, user-supplied app/account names, diagnostic logs and recorded conversation text

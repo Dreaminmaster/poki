@@ -31,8 +31,12 @@ enum ModelCatalog {
         return choices.filter { on.contains($0.id) }
     }
 
+    /// Until the owner ticks models, the defaults and the recommended ones of the provider's list
+    /// (Terra, Haiku, Sonnet, Flash) are ticked.
     static func enabled(_ provider: ModelProvider, storage: PokiStorage = .live) -> Set<String> {
-        guard let saved = storage.defaults.stringArray(forKey: "models.enabled.\(provider.rawValue)") else { return defaults(provider, storage: storage) }
+        guard let saved = storage.defaults.stringArray(forKey: "models.enabled.\(provider.rawValue)") else {
+            return defaults(provider, storage: storage).union(listed(provider, storage: storage).map(\.id).filter(recommended))
+        }
         // A default added in an update (GPT-6.2 Sol) is switched on once for an owner who already chose
         // models; one they switch off afterwards stays off.
         guard provider != .custom else { return Set(saved) }
@@ -43,6 +47,15 @@ enum ModelCatalog {
         storage.defaults.set(Array(ids), forKey: "models.enabled.\(provider.rawValue)")
         storage.defaults.set(Array(introduced.union(new)), forKey: "models.introduced.\(provider.rawValue)")
         return ids
+    }
+
+    /// The models ticked for a new provider: the fast ones and the everyday ones, without a dated
+    /// snapshot or a preview. A custom model id is read after its provider's prefix.
+    static func recommended(_ id: String) -> Bool {
+        let model = (CustomProviders.parse(id)?.model ?? id).lowercased()
+        let name = model.split(separator: "/").last.map(String.init) ?? model
+        guard !name.contains("preview"), !name.contains("exp"), name.range(of: #"\d{4}-?\d{2}-?\d{2}"#, options: .regularExpression) == nil else { return false }
+        return ["terra", "haiku", "sonnet", "flash"].contains { name.contains($0) }
     }
 
     /// The defaults an owner's saved choice has already seen: before this list was kept, the defaults of

@@ -4,65 +4,10 @@ import UIKit
 // Speaking to Poki from the message field. The empty field's main button starts a talk with Poki at
 // once (the owner, 2026-11-13: one tap, no menu); dictation has its own microphone beside it. The talk
 // goes on in the chat with the field as its bar (pull request #250's interaction), and Talk with Poki
-// without a voice key says so in the field's place, with a button to the key's form in Settings. The
+// without a voice key says so in the notice slot above the field (NoticeSlot), with a button to the key's form in Settings. The
 // old Voice page no longer opens from anywhere a person can reach. The code and the look are this app's:
 // glass, Poki's blue and its brand band, the system's type. The bars in the talk's mark are LiveKit's
 // (TalkBars.swift) and the light along the bottom edge is Jacob Mobin's (TalkEdgeGlow.swift).
-
-/// In the message field's place, on its glass: Talk with Poki was asked for with no OpenAI key and no
-/// voice bridge. It says what is missing and goes straight to the OpenAI key's form in Settings. With
-/// the key there but Live Voice turned off, it says that and goes to Live Voice.
-struct VoiceKeyNotice: View {
-    var addKey: () -> Void
-    var close: () -> Void
-
-    var body: some View {
-        let off = ModelKeys.hasKey(.openai) && VoiceDirect.account == nil
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "key.fill").font(.body.weight(.semibold)).foregroundStyle(.white)
-                    .frame(width: 44, height: 44).background(BrandBand.diagonal, in: .circle)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(off ? LocalizedStringKey("Live Voice Is Off") : LocalizedStringKey("No Voice Key Set Up")).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
-                    Text(off ? LocalizedStringKey("Talk with Poki uses Live Voice on your OpenAI account. Turn it on in Settings. Dictate works without it.")
-                             : LocalizedStringKey("Talk with Poki needs an OpenAI API key. Add one in Settings. Dictate works without it."))
-                        .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("composer.speak.needs-key")
-            }
-            // Side by side at the trailing edge; one above the other when large text leaves no room.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { Spacer(minLength: 0); later; add(off) }
-                VStack(spacing: 8) { add(off).frame(maxWidth: .infinity); later.frame(maxWidth: .infinity) }
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var later: some View {
-        Button(action: close) {
-            Text("Not Now").font(.body.weight(.semibold)).foregroundStyle(Color(.label)).lineLimit(1)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Color(.label).opacity(0.1), in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("composer.speak.later")
-    }
-
-    private func add(_ off: Bool) -> some View {
-        Button(action: addKey) {
-            Text(off ? LocalizedStringKey("Open Settings") : LocalizedStringKey("Add Key")).font(.body.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Tint.blue, in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("composer.speak.add-key")
-    }
-}
 
 /// The message field while you talk with Poki: what the talk is doing and for how long, a way to stop
 /// Poki's answer while it speaks, Poki's voice on or off, and End. End here and End on the Live Activity
@@ -88,7 +33,7 @@ struct TalkBar: View {
             row
             // What went wrong, in full, under the row: a system's reason can run to several lines.
             if let reason = state.reason {
-                Text(verbatim: reason).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: reason).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6).padding(.bottom, 4)
@@ -115,10 +60,10 @@ struct TalkBar: View {
             HStack(spacing: 10) {
                 TalkOrb(state: state).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: state.word).font(.body.weight(.semibold)).foregroundStyle(Color(.label))
+                    Text(verbatim: state.word).font(.allo(.body, .semibold)).foregroundStyle(Color(.label))
                         .fixedSize(horizontal: false, vertical: true).contentTransition(.interpolate)
                     if let since, !state.isFailed {
-                        Text(since, style: .timer).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                        Text(since, style: .timer).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
                     }
                 }
                 .accessibilityElement(children: .combine)
@@ -153,7 +98,7 @@ struct TalkBar: View {
     private func round(_ symbol: String, label: LocalizedStringKey, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.body.weight(.medium)).foregroundStyle(Color(.label))
+                .font(.allo(.body, .medium)).foregroundStyle(Color(.label))
                 .contentTransition(.symbolEffect(.replace))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .frame(width: controlSize.side, height: controlSize.side)
@@ -170,7 +115,7 @@ struct TalkBar: View {
 
     private func capsule(_ title: LocalizedStringKey, fill: Color, ink: Color, identifier: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.body.weight(.semibold)).foregroundStyle(ink)
+            Text(title).font(.allo(.body, .semibold)).foregroundStyle(ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 20).padding(.vertical, 10).frame(minHeight: 48)
                 .background(fill, in: .capsule)
@@ -191,11 +136,11 @@ struct TalkOrb: View {
         ZStack {
             switch state {
             case .acting:
-                Image(systemName: "iphone").font(.title3.weight(.semibold))
+                Image(systemName: "iphone").font(.alloRounded(.title3, .semibold))
                     .symbolEffect(.pulse, options: .repeating)
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             case .failed:
-                Image(systemName: "exclamationmark").font(.title3.weight(.bold))
+                Image(systemName: "exclamationmark").font(.alloRounded(.title3, .bold))
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
             default:
                 TalkBars(mode: bars, barColor: .white, barSpacingFactor: 0.09, barMinOpacity: 0.4, loudness: state == .hearing ? 0.7 : 1)

@@ -52,6 +52,9 @@ struct ChatEntry: Identifiable, Equatable, Codable {
     var saveFailed: Bool?
     var failed: Bool?
     var memoryUse: TaskMemoryUse?
+    /// How the model said the whole task ended (finish_task's success), on its plan entry. Nil when it
+    /// never said, and in conversations saved before this existed: the card then reads the steps.
+    var succeeded: Bool?
     /// The small pictures of the photos and PDFs sent with your message (`ChatAttachment.thumbnail`).
     var attachments: [Data]?
     var textDocuments: [ChatTextDocument]?
@@ -88,6 +91,13 @@ struct PlanStep: Identifiable, Equatable, Codable {
     var text: String
     var state: State
     init(_ text: String, state: State = .current) { id = UUID(); self.text = text; self.state = state }
+
+    /// The step at `index` failed and a later step was done: the task went another way past it (a
+    /// skill that was not there, then the app opened directly), so it is not where the task failed.
+    static func recovered(_ steps: [PlanStep], at index: Int) -> Bool {
+        guard steps.indices.contains(index), steps[index].state == .failed else { return false }
+        return steps[(index + 1)...].contains { $0.state == .done }
+    }
 }
 
 enum ChatNote: Equatable, Codable {
@@ -126,6 +136,8 @@ struct ApprovalNote: Equatable, Codable {
     /// A refusal the owner can lift by saying yes in the chat (With Message Reply).
     var reply = false
     var answered: Date?
+    /// An answer from Screen History: what its card shows (SensesShareCard).
+    var history: SensesShare? = nil
 }
 
 /// The chat: the owner's messages, Poki's answers and the steps it takes, and the model loop that runs
@@ -661,9 +673,9 @@ final class ChatModel {
         case .direct(let client, let instructions, let notes):
             await began("direct", prepared.provider, prepared.model, task: prepared.text, countedScroll: prepared.countedScroll, isRetry: prepared.isRetry)
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false, localTask: localTask); return }
+            offeredMemories = notes
             awaitingModel = true
             client.say(prepared.message)
-            offeredMemories = notes
             taskResultCardMode = Harness.resultCardMode(for: taskRequest, rendersCards: kind == .poki)
             let completed = await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
@@ -747,7 +759,14 @@ final class ChatModel {
                                                    includeCountedScroll: includeCountedScroll,
                                                    includeCountedScrollReply: includeCountedScrollReply)
             offeredMemories = context.notes
-            let instructions = [context.text, restoredContext, prepared.continuation].compactMap { $0 }.joined(separator: "\n\n")
+            // Connectors: the accounts used automatically and those the message mentions with @.
+            let mentioned = ConnectorTools.mentioned(in: prepared.message)
+            await ConnectorTools.prepare(mentioned)
+            loop.connectorTools = splitSession != nil ? [] : ConnectorTools.tools(mentioned: mentioned) { [weak self] connector, summary, always in
+                await self?.app.clearConnectorStep(connector: connector, summary: summary, always: always) ?? false
+            }
+            let instructions = [context.text, restoredContext, prepared.continuation,
+                                Harness.connectorInstructions(loop.connectorTools.isEmpty ? [] : MCPConnectors.shared.connected.map(\.name))].compactMap { $0 }.joined(separator: "\n\n")
             let outcome = await loop.run(prepared.message.isEmpty ? Self.picturesOnly : prepared.message,
                                          images: prepared.images, instructions: instructions, maxTurns: Self.maxTurns,
                                          includeMemoryAttribution: includeMemoryAttribution,
@@ -1178,6 +1197,7 @@ final class ChatModel {
         task?.cancel()
         // A browser step waiting for a page or for the owner ends too.
         PokiBrowser.shared.taskStopped()
+        answerContext(nil)
         // A step waiting for an approval would hold the task until the approval ran out.
         if kind == .poki, ChatModel.delegatedBusy == nil { for approval in app.approvals { app.resolve(approval, approved: false) } }
         finishPlan(stopped: true)
@@ -1363,7 +1383,7 @@ final class ChatModel {
                 if args["finish"] as? Bool == true || actions.contains(where: { $0["launch"] != nil || $0["run"] != nil || $0["path"] != nil || $0["button"] != nil }) {
                     return splitViewRefusal("Keep both apps in place. Do not launch apps, use hardware buttons, or run skills. Finish with finish_task.")
                 }
-            case "report_plan", "finish_task", "count_messages", Harness.countedScrollReplyTool, "status", "screen_history": break
+            case "report_plan", "finish_task", "count_messages", Harness.countedScrollReplyTool, "status", SensesContext.name: break
             default:
                 return splitViewRefusal("Use the two visible apps with look and do for this task.")
             }
@@ -1419,6 +1439,8 @@ final class ChatModel {
             }
             if let card { showCard(card) }
             return PokiCore.ToolAnswer(text: Harness.recorded(result, cardShown: card != nil), jpeg: nil, isError: false)
+        case SensesContext.name:
+            return await personalContext(args)
         case let name where WebTools.names.contains(name):
             if let refusal = selectRoute(.web) { return refusal }
             let ids = args["used_memory_ids"] as? [String] ?? []
@@ -1432,7 +1454,8 @@ final class ChatModel {
             let found = await InstalledApps.shared.find(name: args["name"] as? String, purpose: args["purpose"] as? String)
             return PokiCore.ToolAnswer(text: found.text, jpeg: nil, isError: found.isError)
         case "skills", "routines":
-            if let action = args["action"] as? String, action == "save" || action == "remember" {
+            // A page write waits for the task's end like a note does: a failed task keeps nothing.
+            if let action = args["action"] as? String, ["save", "remember", "write_page"].contains(action) {
                 let required = action == "save" ? "name" : "text"
                 guard let value = (args[required] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
                     return PokiCore.ToolAnswer(text: "Give the \(required) to save.", jpeg: nil, isError: true)
@@ -1517,6 +1540,11 @@ final class ChatModel {
             }
             return response
         default:
+            // A routine made while the usual app came from a habit learned from Screen History would
+            // keep the guess after the owner forgot it. A note is the owner's own words and is saved.
+            if call.name == "routines", args["action"] as? String == "save", SensesMemories.shared.usualAppLine(for: taskRequest) != nil {
+                return PokiCore.ToolAnswer(text: "Not saved: this task's app came from a habit learned from Screen History, which the owner can forget or turn off, so no routine is kept for it.", jpeg: nil, isError: false)
+            }
             return await app.runTool(call.name, arguments: call.arguments)
         }
     }
@@ -1701,7 +1729,7 @@ final class ChatModel {
             updatePlan { steps in
                 for i in steps.indices where steps[i].state == .waiting { steps[i].state = .current }
             }
-        case .relay, .session: break
+        case .relay, .session, .stepIntent, .sessionNote: break
         }
     }
 
@@ -1770,6 +1798,7 @@ final class ChatModel {
         entries[i].ended = Date()
         entries[i].app = taskApp
         entries[i].total = modelPlan?.count
+        entries[i].succeeded = taskResult?.success
         if stopped { entries[i].stopped = true }
     }
 
@@ -1879,6 +1908,14 @@ final class ChatModel {
             // The phone is back with you for the passcode: the step waits, the card says it is your turn.
             modelPlan = Sample.coffeeSteps
             entries = [ChatEntry(.time(start)), ChatEntry(.you(Sample.coffee, delivered: true)), onIt, steps(Sample.coffeeSteps, done: 2, then: .waiting)]
+        #if DEBUG
+        case "card":
+            // A finished search with its result card (Taobao's list), for the card's look.
+            let json = #"{"app":"com.taobao.taobao4iphone","kind":"\#(Taobao.kind)","recommended":"a","primary":{"label":"查看","say":"打开 {title}"},"items":[{"id":"a","title":"象印保温杯 480ml","price":"¥199","sold":"3000+人付款"},{"id":"b","title":"膳魔师保温杯 500ml","price":"¥229","sold":"1万+人付款"},{"id":"c","title":"虎牌保温杯 360ml","price":"¥169","sold":"800+人付款"}]}"#
+            var entriesNow = [ChatEntry(.time(start)), ChatEntry(.you("找一款保温杯", delivered: true)), onIt, steps(Sample.momSteps, done: 4, then: nil)]
+            if let card = try? JSONDecoder().decode(ResultCard.self, from: Data(json.utf8)), card.problem == nil { entriesNow.append(ChatEntry(.card(card))) }
+            entries = entriesNow
+        #endif
         case "failed":
             var plan = ChatEntry(.plan([PlanStep(AppLocalization.text(LocalizedStringResource("Open Notification Center")), state: .done),
                                         PlanStep(AppLocalization.text(LocalizedStringResource("Tap Clear All")), state: .failed)]))
@@ -1901,6 +1938,65 @@ final class ChatModel {
     let isDemo = UserDefaults.standard.string(forKey: "pokiChat") == "demo"
     /// The step the demo waits on your answer for.
     private(set) var demoAsk: PendingApproval?
+
+    /// An answer from Screen History waits for the owner before it goes to the model (SensesContext).
+    struct ContextAsk: Equatable {
+        let id = UUID()
+        var expires: Date
+    }
+    private(set) var contextAsk: ContextAsk?
+    private var contextAnswer: CheckedContinuation<Bool?, Never>?
+
+    /// The owner's answer to the card, or nil when it ran out or the task stopped.
+    func answerContext(_ approved: Bool?) {
+        guard let waiting = contextAnswer else { return }
+        contextAnswer = nil
+        contextAsk = nil
+        waiting.resume(returning: approved)
+    }
+
+    /// Poki's model asked Screen History something. The model on this iPhone writes the answer and
+    /// judges it; the answer goes to Poki's model only when that judge or the owner said yes.
+    private func personalContext(_ args: [String: Any]) async -> PokiCore.ToolAnswer {
+        let question = args["question"] as? String ?? ""
+        let hours = (args["hours"] as? Int) ?? (args["hours"] as? Double).map { Int($0) } ?? 24
+        switch await SensesContext.draft(question: question, hours: hours, task: taskRequest) {
+        case .unavailable(let why):
+            return PokiCore.ToolAnswer(text: why, jpeg: nil, isError: true)
+        case .nothing:
+            return PokiCore.ToolAnswer(text: SensesContext.nothingFound, jpeg: nil, isError: false)
+        case .summary(let text, let share, let reason, let shown):
+            if stopAsked || !running { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
+            noteID = nil
+            var note = ApprovalNote(id: "context-\(UUID().uuidString)", summary: text, app: AppLocalization.text(LocalizedStringResource("Screen History")),
+                                    why: "", byModel: share, state: share ? .allowed : .asking, reason: reason, history: shown)
+            var approved: Bool? = true
+            if share {
+                note.answered = Date()
+                setNote(.approval(note))
+            } else {
+                setNote(.approval(note))
+                let ask = ContextAsk(expires: Date().addingTimeInterval(120))
+                Haptics.received()
+                approved = await withCheckedContinuation { (waiting: CheckedContinuation<Bool?, Never>) in
+                    contextAnswer = waiting
+                    contextAsk = ask
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(120))
+                        if self?.contextAsk?.id == ask.id { self?.answerContext(nil) }
+                    }
+                }
+                note.state = approved == true ? .allowed : approved == false ? .refused : .expired
+                note.reason = ""
+                note.answered = Date()
+                setNote(.approval(note))
+            }
+            noteID = nil
+            SensesContext.record(shared: approved == true, question: question)
+            guard approved == true else { return PokiCore.ToolAnswer(text: SensesContext.notShared, jpeg: nil, isError: true) }
+            return PokiCore.ToolAnswer(text: text, jpeg: nil, isError: false)
+        }
+    }
     private var demoTask: Task<Void, Never>?
 
     private func playDemo(_ text: String) {

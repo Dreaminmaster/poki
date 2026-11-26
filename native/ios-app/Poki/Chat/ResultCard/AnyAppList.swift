@@ -23,9 +23,9 @@ struct AnyAppRows: View {
                        heading: first?.text("heading"), subheading: first?.text("subheading"), picture: 56) { item in
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: item.title).font(.body.weight(.semibold)).lineLimit(2)
+                    Text(verbatim: item.title).font(.allo(.body, .semibold)).lineLimit(2)
                     if let subtitle = item.text("subtitle") {
-                        Text(verbatim: subtitle).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
+                        Text(verbatim: subtitle).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(2)
                     }
                     ResultCardParts.caption(item.text("detail"))
                     if let legs = ResultCardLeg.legs(of: item) { ResultCardChanges(legs: legs, warning: Tint.amberInk) }
@@ -35,10 +35,10 @@ struct AnyAppRows: View {
                 if item.text("value") != nil || item.text("value_note") != nil {
                     VStack(alignment: .trailing, spacing: 2) {
                         if let value = item.text("value") {
-                            Text(verbatim: value).font(.callout.weight(.semibold)).monospacedDigit()
+                            Text(verbatim: value).font(.allo(.callout, .semibold)).monospacedDigit()
                         }
                         if let note = item.text("value_note") {
-                            Text(verbatim: note).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: note).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
                         }
                     }
                     .fixedSize()

@@ -26,6 +26,9 @@ use tokio::io::AsyncWriteExt;
 #[path = "ax_direct.rs"]
 pub mod direct;
 
+#[path = "ax_front.rs"]
+pub mod front;
+
 // The first DTX auxiliary argument carries the archived NSData payload.
 // The handshake advertises capabilities before subscribing to accessibility:
 // capabilities {DTXBlockCompression:0, DTXConnection:1}, then clientNeedsAccessibility:true.

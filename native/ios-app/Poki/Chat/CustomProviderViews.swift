@@ -1,7 +1,21 @@
 import SwiftUI
 
-/// One custom provider: its addresses and the API each speaks, what it is used for (the text chat,
-/// live voice), and Delete.
+/// A custom provider in the providers list: its name and what it is used for.
+struct CustomAccountRow: View {
+    var provider: CustomProvider
+    var body: some View {
+        HStack(spacing: 12) {
+            ProviderTile(provider: .custom)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: provider.displayName)
+                Text(verbatim: ProviderUseValue.summary(.custom(provider.id))).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
+            }
+        }
+    }
+}
+
+/// One custom provider, laid out as a hosted one: its type and connection, its addresses and the API
+/// each speaks, reasoning, what it is used for (the tick lists), and Delete.
 struct CustomProviderDetail: View {
     @Environment(\.dismiss) private var dismiss
     var id: UUID
@@ -13,45 +27,61 @@ struct CustomProviderDetail: View {
             if let provider = CustomProviders.provider(id) {
                 Section {
                     LabeledContent("Type", value: ModelProvider.custom.name)
+                    LabeledContent("Connection", value: ModelAccounts.method(.custom))
                     LabeledContent("Key", value: CustomProviders.key(id) == nil ? AppLocalization.text(LocalizedStringResource("None")) : AppLocalization.text(LocalizedStringResource("Saved")))
-                    Button("Edit Service") { editing = true }
+                    Button("Edit Address and Key") { editing = true }
                 }
 
                 Section {
                     ForEach(Array(provider.endpoints.enumerated()), id: \.element.id) { index, endpoint in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: endpoint.normalized).lineLimit(2).truncationMode(.middle)
-                            Text(verbatim: apiLine(endpoint, first: index == 0)).font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: apiLine(endpoint, first: index == 0)).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                         }
                         .accessibilityElement(children: .combine)
                     }
-                } header: {
-                    Text("Addresses")
-                } footer: {
-                    if provider.endpoints.count > 1 {
-                        Text("Poki uses the first address. When it can’t be reached, Poki tries the next ones that speak the same API, in order.")
+                    Picker("Reasoning", selection: Binding(get: { provider.reasoning }, set: { value in
+                        var changed = provider
+                        changed.reasoning = value
+                        CustomProviders.upsert(changed)
+                    })) {
+                        Text("Automatic").tag(Bool?.none)
+                        Text("On").tag(Bool?.some(true))
+                        Text("Off").tag(Bool?.some(false))
                     }
+                } header: {
+                    Group {
+                        Text("Addresses")
+                    }
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        Text(provider.endpoints.count > 1
+                             ? LocalizedStringKey("Poki uses the first address. When it can’t be reached, Poki tries the next ones that speak the same API, in order. Automatic reasoning is on for models Poki knows as reasoning models.")
+                             : LocalizedStringKey("Automatic reasoning is on for models Poki knows as reasoning models, such as GPT-6.1 Sol."))
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
-                    NavigationLink { TextChatFeature(provider: .custom, custom: id) } label: {
-                        LabeledContent {
-                            Text(verbatim: chatValue(provider))
-                        } label: { SettingsLabel("Text Chat", systemImage: "bubble.left.and.text.bubble.right") }
-                    }
-                    NavigationLink { LiveVoiceFeature(account: .custom(id)) } label: {
-                        LabeledContent {
-                            Text(verbatim: VoiceDirect.isOn(.custom(id)) ? ModelCatalog.voiceModelID(for: .custom(id)) : AppLocalization.text(LocalizedStringResource("Off")))
-                        } label: { SettingsLabel("Live Voice", systemImage: "waveform") }
-                    }
+                    ProviderUseRows(provider: .custom(id))
                 } header: {
-                    Text("Use This Account For")
+                    Group {
+                        Text("Use This Provider For")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("Live voice needs the Realtime API at the first address.")
+                    Group {
+                        Text("Voice needs the Realtime API at the first address.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
-                    Button("Delete Service", role: .destructive) {
+                    Button("Delete Provider", role: .destructive) {
+                        if let pick = QuickFixes.accountPick, pick.provider == .custom, CustomProviders.parse(pick.model)?.provider == id {
+                            QuickFixes.pickAccount(.custom, model: nil)
+                        }
                         CustomProviders.remove(id)
                         if ModelKeys.selectedProvider == .custom, !ModelKeys.hasUsableKey,
                            let other = ModelProvider.allCases.first(where: { $0 != .custom && ModelAccounts.isSetUp($0) && ModelAccounts.canChat($0) }) {
@@ -69,17 +99,10 @@ struct CustomProviderDetail: View {
         .navigationTitle(Text(verbatim: CustomProviders.provider(id)?.displayName ?? ModelProvider.custom.name))
         .navigationBarTitleDisplayMode(.inline)
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in version = ModelKeys.saved }
-        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { CustomProviderEditor(id: id) }
+        .sheet(isPresented: $editing, onDismiss: { version = ModelKeys.saved }) { CustomProviderEditor(id: id).outsideStartFlow() }
     }
 
-    private func chatValue(_ provider: CustomProvider) -> String {
-        if ModelKeys.selectedProvider == .custom, let chosen = CustomProviders.parse(ModelKeys.selectedModel), chosen.provider == provider.id {
-            return chosen.model
-        }
-        return AppLocalization.text(LocalizedStringResource("Off"))
-    }
-
-    /// "Responses", "Automatic, found Responses", with "Backup" for the addresses after the first.
+    /// "Responses", "Automatic, uses Responses", with "Backup" for the addresses after the first.
     private func apiLine(_ endpoint: CustomEndpoint, first: Bool) -> String {
         let api = endpoint.api == .automatic
             ? (endpoint.found.map { AppLocalization.text(LocalizedStringResource("Automatic, uses \($0.name)")) } ?? CustomAPIStyle.automatic.name)
@@ -88,10 +111,11 @@ struct CustomProviderDetail: View {
     }
 }
 
-/// Adding or editing one custom provider: its name, its addresses each with its API, its model and
-/// thinking, and its key. Test Connection sends one small request to every address with what is on the
-/// page; Save tests too and keeps the page open when the first address fails, saved all the same. A
-/// saved key is only ever sent to the addresses it was saved for: a new address needs it typed again.
+/// Adding or editing one custom provider, in the same pane as a hosted provider's key: its address
+/// and the API it speaks, backup addresses, its key, Test Connection and Save. Its models are ticked
+/// afterwards under the provider, as a hosted provider's are; the test uses the service's own list.
+/// Save tests too and keeps the pane open when the first address fails, saved all the same. A saved
+/// key is only ever sent to the addresses it was saved for: a new address needs it typed again.
 struct CustomProviderEditor: View {
     @Environment(\.dismiss) private var dismiss
     var id: UUID?
@@ -99,7 +123,6 @@ struct CustomProviderEditor: View {
 
     @State private var draft: CustomProvider
     @State private var key = ""
-    @State private var discovery = CustomModelDiscovery()
     @State private var results: [UUID: Outcome] = [:]
     @State private var testing = false
     @State private var connectionTest: Task<Void, Never>?
@@ -111,6 +134,7 @@ struct CustomProviderEditor: View {
     struct Outcome: Equatable {
         var result: ConnectionCheck.Result
         var api: CustomAPIStyle
+        var model: String?
     }
 
     init(id: UUID?, onSave: @escaping () -> Void = {}) {
@@ -127,67 +151,63 @@ struct CustomProviderEditor: View {
             Form {
                 Section {
                     TextField("Name, such as Company Gateway", text: $draft.name).autocorrectionDisabled()
-                } header: { Text("Name") }
-
-                Section {
-                    ForEach($draft.endpoints) { $endpoint in
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("https://…/v1", text: $endpoint.url).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Picker("API", selection: $endpoint.api) {
-                                ForEach(CustomAPIStyle.allCases) { Text(verbatim: $0.name).tag($0) }
-                            }
-                            if let outcome = results[endpoint.id], !testing {
-                                ConnectionCheckFeedback(result: outcome.result, api: outcome.api)
-                                    .accessibilityIdentifier("customEditor.result")
-                            }
-                        }
-                    }
-                    .onDelete { draft.endpoints.remove(atOffsets: $0); if draft.endpoints.isEmpty { draft.endpoints = [CustomEndpoint(url: "")] } }
-                    Button("Add Address", systemImage: "plus") { draft.endpoints.append(CustomEndpoint(url: "", api: draft.endpoints.last?.api ?? .automatic)) }
                 } header: {
-                    Text("Addresses")
-                } footer: {
-                    Text("Poki uses the first address and tries the others in order when it can’t be reached. Automatic tries the Responses API first and uses chat completions where an address has none.")
+                    Group {
+     Text("Name") 
+                    }
+                    .settingsHeader()
                 }
 
                 Section {
-                    TextField("Model, such as llama-4-maverick", text: $draft.model).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button(action: fetchModels) {
-                        HStack {
-                            Text(discovery.loading ? "Reading the Model List…" : "Fetch Model List")
-                            Spacer()
-                            if discovery.loading { ProgressView() }
-                        }
+                    addressFields($draft.endpoints[0])
+                } header: {
+                    Group {
+                        Text("Address")
                     }
-                    .disabled(discovery.loading || testing || firstAddress == nil)
-                    .accessibilityIdentifier("customEditor.fetchModels")
-                    Picker("Reasoning", selection: $draft.reasoning) {
-                        Text("Automatic").tag(Bool?.none)
-                        Text("On").tag(Bool?.some(true))
-                        Text("Off").tag(Bool?.some(false))
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        Text("Automatic tries the Responses API first and uses chat completions where the address has none.")
+                    }
+                    .settingsFooter()
+                }
+
+                Section {
+                    ForEach(Array(draft.endpoints.dropFirst())) { endpoint in addressFields(binding(endpoint.id)) }
+                        .onDelete { offsets in draft.endpoints.remove(atOffsets: IndexSet(offsets.map { $0 + 1 })) }
+                    Button("Add Backup Address", systemImage: "plus") {
+                        draft.endpoints.append(CustomEndpoint(url: "", api: draft.endpoints.first?.api ?? .automatic))
                     }
                 } header: {
-                    Text("Model")
-                } footer: {
-                    if let problem = discovery.problem {
-                        Text(problem.message)
-                    } else {
-                        Text("Choose a model from the service, or enter its ID manually. Automatic reasoning is on for models Poki knows as reasoning models, such as GPT-6.1 Sol.")
+                    Group {
+                        Text("Backup Addresses")
                     }
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        Text("When the address can’t be reached, Poki tries these in order.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
                     SecureField(ModelProvider.custom.keyPrompt, text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
                 } header: {
-                    Text("Key")
-                } footer: {
-                    if !keyHosts.isEmpty, key.isEmpty, !newHosts.isEmpty {
-                        Text("The saved key is only sent to the addresses it was saved for. Enter it again to use it with the new address.")
-                    } else if !keyHosts.isEmpty {
-                        Text("A key is saved. Enter a new one to replace it.")
-                    } else {
-                        Text(verbatim: ModelProvider.custom.keyHelp)
+                    Group {
+                        Text("\(draft.displayName) key")
                     }
+                    .settingsHeader()
+                } footer: {
+                    Group {
+                        if !keyHosts.isEmpty, key.isEmpty, !newHosts.isEmpty {
+                            Text("The saved key is only sent to the addresses it was saved for. Enter it again to use it with the new address.")
+                        } else if !keyHosts.isEmpty {
+                            Text("A key is saved. Enter a new one to replace it.")
+                        } else {
+                            Text(verbatim: ModelProvider.custom.keyHelp)
+                        }
+                    }
+                    .settingsFooter()
                 }
 
                 if failed { Text("The keychain did not take the key. Try again.").foregroundStyle(Color(.systemRed)) }
@@ -203,33 +223,69 @@ struct CustomProviderEditor: View {
                     .disabled(testing || !canSave)
                     .accessibilityIdentifier("customEditor.test")
                 } footer: {
-                    if saved, !testing, results[draft.endpoints.first?.id ?? UUID()]?.result.passed == false {
-                        Text("Saved. Change it and save again, or keep it as it is.")
+                    Group {
+                        if !testing, let first = filled.first, let outcome = results[first.id] {
+                            VStack(alignment: .leading, spacing: 4) {
+                                resultView(outcome)
+                                ForEach(filled.dropFirst()) { backup in
+                                    if let other = results[backup.id] {
+                                        Text(verbatim: backup.normalized).lineLimit(1).truncationMode(.middle)
+                                        resultView(other)
+                                    }
+                                }
+                                if saved, !outcome.result.passed { Text("Saved. Change it and save again, or keep it as it is.") }
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("customEditor.result")
+                        }
                     }
+                    .settingsFooter()
                 }
 
                 if !keyHosts.isEmpty, CustomProviders.key(draft.id) != nil {
                     Section { Button("Remove Key", role: .destructive) { CustomProviders.removeKey(draft.id); keyHosts = [] } }
                 }
             }
-            .navigationTitle(Text(verbatim: id == nil ? AppLocalization.text(LocalizedStringResource("Add Custom Endpoint")) : draft.displayName))
+            .navigationTitle(Text(verbatim: id == nil ? ModelProvider.custom.name : draft.displayName))
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: draft.endpoints.first?.url) { _, _ in discovery.reset() }
-            .onChange(of: key) { _, _ in discovery.reset() }
             .onDisappear {
-                discovery.cancel()
                 connectionTest?.cancel()
                 connectionTest = nil
                 testing = false
-            }
-            .sheet(isPresented: $discovery.presenting) {
-                CustomModelPicker(models: discovery.models, selection: $draft.model)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(saved ? "Done" : "Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).disabled(!canSave || testing) }
             }
         }
+    }
+
+    /// An address of the draft by its id; one deleted meanwhile reads as empty and takes no change.
+    private func binding(_ id: UUID) -> Binding<CustomEndpoint> {
+        Binding(get: { draft.endpoints.first { $0.id == id } ?? CustomEndpoint(id: id, url: "") },
+                set: { new in if let i = draft.endpoints.firstIndex(where: { $0.id == id }) { draft.endpoints[i] = new } })
+    }
+
+    /// An address and its API, as one row group.
+    @ViewBuilder private func addressFields(_ endpoint: Binding<CustomEndpoint>) -> some View {
+        TextField("https://…/v1", text: endpoint.url).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+        Picker("API", selection: endpoint.api) {
+            ForEach(CustomAPIStyle.allCases) { Text(verbatim: $0.name).tag($0) }
+        }
+        .pickerStyle(.menu)
+    }
+
+    @ViewBuilder private func resultView(_ outcome: Outcome) -> some View {
+        Label {
+            Text(outcome.result.words)
+        } icon: {
+            Image(systemName: outcome.result.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        }
+        .foregroundStyle(outcome.result.passed ? Color(.systemGreen) : Color(.systemOrange))
+        if outcome.result.passed {
+            Text(verbatim: AppLocalization.text(LocalizedStringResource("Answered in the \(outcome.api.name) API")))
+        }
+        if let detail = outcome.result.detail { Text(verbatim: detail) }
     }
 
     // MARK: Addresses and the key
@@ -245,8 +301,6 @@ struct CustomProviderEditor: View {
     /// The addresses filled in, in order.
     private var filled: [CustomEndpoint] { draft.endpoints.filter { !$0.normalized.isEmpty } }
 
-    private var firstAddress: String? { filled.first.map(\.normalized).flatMap { Self.valid($0) ? $0 : nil } }
-
     /// Hosts on the page that the saved key was not saved for.
     private var newHosts: Set<String> { Set(filled.compactMap { Self.host($0.url) }).subtracting(keyHosts) }
 
@@ -259,20 +313,20 @@ struct CustomProviderEditor: View {
         return CustomProviders.key(draft.id) ?? ""
     }
 
-    private var canSave: Bool {
-        !filled.isEmpty && filled.allSatisfy { Self.valid($0.url) } && !draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func fetchModels() {
-        guard let firstAddress else { return }
-        let draftKey = key(for: firstAddress)
-        discovery.fetch(address: firstAddress, key: draftKey.isEmpty ? nil : draftKey)
-    }
+    private var canSave: Bool { !filled.isEmpty && filled.allSatisfy { Self.valid($0.url) } }
 
     // MARK: Testing and saving
 
-    /// Tests every address in turn. Automatic results for saved addresses are kept, and with
-    /// `closeIfPassed` the page closes when the first address works.
+    /// The model a test asks: the provider's own, else the first chat model the address lists.
+    private static func testModel(_ provider: CustomProvider, address: String, key: String) async -> String? {
+        let own = provider.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !own.isEmpty { return own }
+        return (try? await ModelCatalog.fetchCustom(address: address, key: key.isEmpty ? nil : key))?.first
+    }
+
+    /// Tests every address in turn. Once saved, what Automatic found at each is kept, a model the
+    /// test found becomes the provider's own when it had none, and with `closeIfPassed` the pane
+    /// closes when the first address works.
     private func test(closeIfPassed: Bool) {
         connectionTest?.cancel()
         testing = true
@@ -298,6 +352,17 @@ struct CustomProviderEditor: View {
         }
     }
 
+    /// A provider saved without a model takes the one its test answered with, so Chat has one ticked.
+    private func adopt(_ model: String) {
+        guard var current = CustomProviders.provider(draft.id), current.model.isEmpty else { return }
+        current.model = model
+        CustomProviders.upsert(current)
+        if !ModelKeys.hasUsableKey {
+            ModelKeys.selectedProvider = .custom
+            ModelKeys.selectedModel = CustomProviders.choiceID(current.id, model)
+        }
+    }
+
     private func save() {
         var provider = draft
         provider.endpoints = filled.map { var e = $0; e.url = e.normalized; return e }
@@ -305,7 +370,6 @@ struct CustomProviderEditor: View {
         do {
             // The saved key stays only while every address is one it was saved for.
             try ModelKeys.saveCustom(provider, typedKey: key, keepKey: newHosts.isEmpty)
-            discovery.reset()
             draft = CustomProviders.provider(provider.id) ?? provider
             keyHosts = CustomProviders.key(provider.id) == nil ? [] : Set(provider.endpoints.compactMap { Self.host($0.url) })
             saved = true

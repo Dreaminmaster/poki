@@ -788,9 +788,9 @@ private final class BearCanvas: UIView {
         if let reaction, !reacting(at: now) { self.reaction = nil }
         var outfitChanged = false
         if let dressing, let (index, _) = faceSkin {
-            let gesture = playback.move == .idle || playback.move == .blink
-                ? min(1, max(finalMove.raise, finalMove.arms, finalMove.scratch, finalMove.work)) : 1
-            dressing.poseArms(&standing[index], at: now, gesture: gesture)
+            // The clothes follow the bear's own joints as they are, at rest and through every gesture.
+            // They once tucked the arms into the clothes' fitting pose at rest, which hid the paws and
+            // snapped the arms out at the start of every wave (the owner, Nov 21 2026).
             outfitChanged = dressing.update(standing[index], at: now)
         }
         for (skin, joints) in zip(skins, standing) { skin.jointTransforms = joints }

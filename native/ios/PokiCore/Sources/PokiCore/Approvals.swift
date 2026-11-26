@@ -257,6 +257,10 @@ public struct Approval: Sendable, Equatable {
     /// can be offered Don't Ask Again. False where a payment, a deletion, Wallet or a screen not read yet
     /// would still ask.
     public var stopsWhenOff = false
+    /// The outside agent's MCP session that asked, nil for Poki's own chat and voice.
+    public var session: String? = nil
+    /// The agent's words on what the step is for (`do`'s `intent`), nil when it gave none.
+    public var intent: String? = nil
     /// What it covers: the same actions sent again on the same controls run once it is granted.
     var scope: ApprovalScope
     var workspaceSession: String?
@@ -547,8 +551,8 @@ final class Approvals: @unchecked Sendable {
         apply(.consumeGrant(scope: scope, workspaceSession: workspaceSession)).consumed
     }
 
-    func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil,
-                 stopsWhenOff: Bool = false, sourceSession: String? = nil) -> Approval {
+    func request(app: String, summary: String, reason: String, scope: ApprovalScope, workspaceSession: String? = nil, stopsWhenOff: Bool = false,
+                 session: String? = nil, intent: String? = nil, sourceSession: String? = nil) -> Approval {
         let date = Date()
         let approval = Approval(
             id: String(UUID().uuidString.prefix(8)).lowercased(),
@@ -558,6 +562,8 @@ final class Approvals: @unchecked Sendable {
             requested: date,
             expires: date.addingTimeInterval(lifetime),
             stopsWhenOff: stopsWhenOff,
+            session: session,
+            intent: intent,
             scope: scope,
             workspaceSession: workspaceSession,
             sourceSession: sourceSession

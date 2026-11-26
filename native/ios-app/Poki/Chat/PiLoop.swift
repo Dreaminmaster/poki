@@ -31,6 +31,12 @@ final class PiLoop {
     /// answered for the log.
     private let endpoint: CustomEndpointClient?
     private let stall = StallWatch()
+    /// The connectors' tools for the message under way (Settings › Connectors), beside the phone's.
+    private let shelf = ToolShelf()
+    var connectorTools: [AgentTool] {
+        get { shelf.tools }
+        set { shelf.tools = newValue }
+    }
 
     private struct FinishToolCache: @unchecked Sendable {
         private final class Store: @unchecked Sendable {
@@ -144,6 +150,7 @@ final class PiLoop {
         let endpoint = provider == .custom ? CustomEndpointClient(for: model, sessionID: sessionID) : nil
         self.endpoint = endpoint
         let stall = self.stall
+        let shelf = self.shelf
         let grants = HistoryDeliveryGrants()
         let policy = self.toolPolicy
         let variants = tools.map { spec -> ToolVariant in
@@ -288,7 +295,7 @@ final class PiLoop {
                                                 includeMemoryAttribution: currentPolicy.memoryAttribution,
                                                 includeCountedScroll: currentPolicy.countedScroll,
                                                 includeCountedScrollReply: currentPolicy.countedScrollReply,
-                                                resultCardMode: currentPolicy.resultCardMode)
+                                                resultCardMode: currentPolicy.resultCardMode) + shelf.tools
                 var context = request.context
                 context.tools = tools
                 context.messages = context.messages.map { message in
@@ -340,7 +347,7 @@ final class PiLoop {
                                           includeMemoryAttribution: includeMemoryAttribution,
                                           includeCountedScroll: includeCountedScroll,
                                           includeCountedScrollReply: includeCountedScrollReply,
-                                          resultCardMode: resultCardMode)
+                                          resultCardMode: resultCardMode) + shelf.tools
         use(instructions)
         let turns = Counter()
         let failure = Box()
@@ -491,6 +498,16 @@ final class HistoryDeliveryGrants: @unchecked Sendable {
             return safe
         }
         return result
+    }
+}
+
+/// The connectors' tools, read by pi's tasks at each request.
+private final class ToolShelf: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [AgentTool] = []
+    var tools: [AgentTool] {
+        get { lock.withLock { list } }
+        set { lock.withLock { list = newValue } }
     }
 }
 

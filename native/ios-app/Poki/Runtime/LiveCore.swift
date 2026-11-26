@@ -24,6 +24,11 @@ final class LiveCore: CoreSession {
         // Read at each step, from the saved choice the Approvals page shows: Never Ask lets optional
         // steps go; payments, deletions and guarded apps still wait.
         config.approvalMode = { ApprovalClassifier.mode(in: storage) }
+        // Agents › Computers: a computer the owner turned off, or has not answered yet, is refused.
+        config.computerAccess = { ComputerAccess.decision($0.id) }
+        // Read at each run, from Settings › Models › Fast Decisions: nil until a model is picked, and
+        // a routine then stops where the screen differs, as it always did.
+        config.decider = { QuickFixes.decider }
         // Apps by name, from the apps Poki knows and the phone's own app list; the two speed-ups read
         // their Testing Options switch.
         config.resolveApp = { KnownApps.launchID($0) }
@@ -35,7 +40,12 @@ final class LiveCore: CoreSession {
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
         let continuation = self.continuation
         pump = Task { [core] in
-            for await event in core.events { continuation.yield(Self.map(event)) }
+            for await event in core.events {
+                if case .toolStarted(let activity) = event, let intent = activity.intent {
+                    continuation.yield(.stepIntent(session: activity.session, intent: intent))
+                }
+                continuation.yield(Self.map(event))
+            }
         }
         core.onSession { signal in continuation.yield(.session(signal)) }
     }
@@ -56,12 +66,20 @@ final class LiveCore: CoreSession {
     deinit { pump?.cancel() }
 
     func start(relay: RelayAddress) { core.start(relay: relay) }
+    /// A computer's connection over USB or Wi-Fi (LocalListener): PokiCore proves both sides and
+    /// answers its requests as it answers the relay's (issue #609).
+    func serveLocal(_ connection: WebSocketConnection, transport: LocalTransport, computers: LocalComputers) async {
+        await core.serveLocal(connection, transport: transport, host: computers)
+    }
     func stop() { core.stop(); continuation.yield(.relay(.off)) }
     func resolveApproval(id: String, approved: Bool) { core.resolveApproval(id: id, approved: approved) }
     /// The person finished a handed-off screen (Done on the Live Activity): PokiCore lets inputs through again.
     func handoffDone(id: String) { core.handoffDone(id: id) }
     func clearTap(on text: String, inApp bundleID: String?, named name: String?, waiting seconds: Double) async -> TapClearance {
         await core.clearTap(on: text, inApp: bundleID, named: name, waiting: seconds)
+    }
+    func clearConnectorStep(connector: String, summary: String, always: Bool, waiting seconds: Double) async -> TapClearance {
+        await core.clearConnectorStep(connector: connector, summary: summary, always: always, waiting: seconds)
     }
     func accessChanged() { core.accessChanged() }
     /// The app's own MCP tools (ask_poki), after look, do and status.
@@ -112,10 +130,12 @@ final class LiveCore: CoreSession {
             switch outcome { case .done(let text): delivery = text; case .failed(let text): delivery = "failed: \(text)" }
             return .toolFinished(summary: activity.summary, delivery: delivery, app: facts.app, thumbnail: facts.thumbnail, error: facts.error, session: activity.session)
         case .approvalRequested(let approval):
-            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires, stopsWhenOff: approval.stopsWhenOff, sourceSession: approval.sourceSession))
+            return .approvalRequested(PendingApproval(id: approval.id, app: approval.app, summary: approval.summary, reason: approval.reason, expires: approval.expires, stopsWhenOff: approval.stopsWhenOff,
+                                                      session: approval.session, intent: approval.intent, sourceSession: approval.sourceSession))
         case .approvalEnded(let id, let approved): return .approvalEnded(id: id, approved: approved)
         case .handoffRequested(let id, let kind, let text, let app): return .handoffRequested(id: id, kind: kind, text: text, app: app)
         case .handoffEnded(let id, let how): return .handoffEnded(id: id, how: how)
+        case .sessionNote(let session, let text): return .sessionNote(session: session, text: text)
         }
     }
 }

@@ -47,16 +47,16 @@ struct CtripFlightList: View {
                     end(item.text("depart") ?? "", item.text("from"), day: nil, alignment: .leading)
                     Spacer(minLength: 6)
                     VStack(spacing: 2) {
-                        if let stops = item.text("stops") { Text(verbatim: stops).font(.caption) }
+                        if let stops = item.text("stops") { Text(verbatim: stops).font(.allo(.caption)) }
                         Capsule().fill(Color(.tertiaryLabel)).frame(width: 52, height: 1)
                         if let duration = item.text("duration") {
-                            Text(verbatim: duration).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: duration).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
                         }
                     }
                     Spacer(minLength: 6)
                     end(item.text("arrive") ?? "", item.text("to"), day: item.text("arrive_day"), alignment: .trailing)
                     Text(verbatim: item.text("price") ?? "")
-                        .font(.callout.weight(.semibold)).monospacedDigit()
+                        .font(.allo(.callout, .semibold)).monospacedDigit()
                         .foregroundStyle(Ctrip.blue)
                         .frame(minWidth: 72, alignment: .trailing)
                 }
@@ -75,11 +75,11 @@ struct CtripFlightList: View {
     private func end(_ time: String, _ airport: String?, day: String?, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text(verbatim: time).font(.title3.weight(.semibold)).monospacedDigit()
-                if let day { Text(verbatim: day).font(.caption2.weight(.semibold)).baselineOffset(6) }
+                Text(verbatim: time).font(.alloRounded(.title3, .semibold)).monospacedDigit()
+                if let day { Text(verbatim: day).font(.allo(.caption2, .semibold)).baselineOffset(6) }
             }
             if let airport {
-                Text(verbatim: airport).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                Text(verbatim: airport).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
             }
         }
     }
@@ -99,18 +99,18 @@ struct CtripHotelList: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: item.title).font(.body.weight(.semibold)).lineLimit(2)
+                        Text(verbatim: item.title).font(.allo(.body, .semibold)).lineLimit(2)
                         if let stars = item.text("stars") {
-                            Text(verbatim: stars).font(.caption).foregroundStyle(Color(.secondaryLabel))
+                            Text(verbatim: stars).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
                         }
                     }
                     if let subtitle = item.text("subtitle") {
-                        Text(verbatim: subtitle).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                        Text(verbatim: subtitle).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                     }
                     if item.text("rating") != nil || item.text("reviews") != nil {
                         HStack(spacing: 6) {
                             if let rating = item.text("rating") {
-                                Text(verbatim: rating).font(.caption.weight(.semibold)).monospacedDigit()
+                                Text(verbatim: rating).font(.allo(.caption, .semibold)).monospacedDigit()
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 5).padding(.vertical, 1)
                                     .background(Ctrip.blue, in: .rect(cornerRadius: 4))
@@ -141,7 +141,7 @@ struct CtripRoomList: View {
                        heading: card.roomHotelName, subheading: first?.text("dates"), picture: 64) { item in
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: item.title).font(.body.weight(.semibold)).lineLimit(2)
+                    Text(verbatim: item.title).font(.allo(.body, .semibold)).lineLimit(2)
                     ResultCardParts.caption(item.text("beds"))
                     ResultCardParts.caption(ResultCardParts.line([item.text("breakfast"), item.text("cancel")]))
                     ResultCardParts.caption(item.text("note"))
@@ -167,10 +167,10 @@ struct CtripFareList: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(verbatim: item.text("price") ?? "")
-                        .font(.title3.weight(.semibold)).monospacedDigit()
+                        .font(.alloRounded(.title3, .semibold)).monospacedDigit()
                         .foregroundStyle(Ctrip.blue)
                     if item.title != item.text("price") {
-                        Text(verbatim: item.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Text(verbatim: item.title).font(.allo(.subheadline, .medium)).lineLimit(1)
                     }
                 }
                 ResultCardParts.caption(item.text("cabin"))
@@ -193,12 +193,12 @@ struct CtripPrice: View {
         VStack(alignment: .trailing, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if let was {
-                    Text(verbatim: was).font(.caption).strikethrough().foregroundStyle(Color(.secondaryLabel))
+                    Text(verbatim: was).font(.allo(.caption)).strikethrough().foregroundStyle(Color(.secondaryLabel))
                 }
-                Text(verbatim: price ?? "").font(.callout.weight(.semibold)).monospacedDigit().foregroundStyle(Ctrip.blue)
+                Text(verbatim: price ?? "").font(.allo(.callout, .semibold)).monospacedDigit().foregroundStyle(Ctrip.blue)
             }
             if let total {
-                Text(verbatim: total).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: total).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
             }
         }
         .fixedSize()

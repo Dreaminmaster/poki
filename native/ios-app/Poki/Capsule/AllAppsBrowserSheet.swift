@@ -95,7 +95,7 @@ struct AllAppsBrowserSheet: View {
     private var header: some View {
         HStack(alignment: .center) {
             Text("Choose App")
-                .font(.title2.weight(.bold))
+                .font(.alloRounded(.title2, .bold))
                 .foregroundStyle(Color(.label))
             Spacer(minLength: 12)
             Button { onClose() } label: {
@@ -127,7 +127,7 @@ struct AllAppsBrowserSheet: View {
                 prompt: Text("Search apps or aliases (e.g. 12306, Bilibili)")
                     .foregroundStyle(Color(.secondaryLabel).opacity(0.85))
             )
-            .font(.subheadline)
+            .font(.allo(.subheadline))
             .foregroundStyle(Color(.label))
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -164,7 +164,7 @@ struct AllAppsBrowserSheet: View {
                         withAnimation(.snappy(duration: 0.22)) { selectedCategory = category }
                     } label: {
                         Text(verbatim: category.title)
-                            .font(.subheadline.weight(selected ? .semibold : .medium))
+                            .font(.allo(.subheadline, selected ? .semibold : .medium))
                             .foregroundStyle(selected ? Color.white : Color(.label).opacity(0.85))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
@@ -221,7 +221,7 @@ struct AllAppsBrowserSheet: View {
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Recently Used")
-                .font(.footnote.weight(.medium))
+                .font(.allo(.footnote, .medium))
                 .foregroundStyle(Color(.secondaryLabel))
                 .padding(.horizontal, 2)
 
@@ -231,7 +231,7 @@ struct AllAppsBrowserSheet: View {
                         VStack(spacing: 6) {
                             AppIconView(app: app.id, size: 38, alwaysLight: true)
                             Text(verbatim: app.displayName)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.allo(.caption2, .medium))
                                 .foregroundStyle(Color(.label).opacity(0.92))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
@@ -253,7 +253,7 @@ struct AllAppsBrowserSheet: View {
     private func categorySection(_ section: AppPickerSection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(verbatim: section.kind.title)
-                .font(.footnote.weight(.medium))
+                .font(.allo(.footnote, .medium))
                 .foregroundStyle(Color(.secondaryLabel))
                 .padding(.horizontal, 2)
 
@@ -289,14 +289,14 @@ struct AllAppsBrowserSheet: View {
                 .frame(width: 48, height: 48)
                 .background(surfaceFill, in: Circle())
             Text("No matching apps found")
-                .font(.subheadline.weight(.medium))
+                .font(.allo(.subheadline, .medium))
                 .foregroundStyle(Color(.secondaryLabel))
             Button {
                 searchText = ""
                 selectedCategory = .all
             } label: {
                 Text("Clear Search")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.allo(.subheadline, .semibold))
                     .foregroundStyle(AppPickerGlass.highlightBlue)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
@@ -324,12 +324,12 @@ private struct BrowserAppRowContent: View {
             AppIconView(app: app.id, size: 32, alwaysLight: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: app.displayName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.allo(.subheadline, .semibold))
                     .foregroundStyle(Color(.label))
                     .lineLimit(1)
                 if let subtitle = app.subtitle {
                     Text(verbatim: subtitle)
-                        .font(.caption)
+                        .font(.allo(.caption))
                         .foregroundStyle(Color(.secondaryLabel))
                         .lineLimit(1)
                 }
@@ -337,7 +337,7 @@ private struct BrowserAppRowContent: View {
             Spacer(minLength: 8)
             if inserted {
                 Text("Inserted")
-                    .font(.caption.weight(.semibold))
+                    .font(.allo(.caption, .semibold))
                     .foregroundStyle(AppPickerGlass.highlightBlue)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)

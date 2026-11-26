@@ -24,14 +24,16 @@ def main():
         parser.error("Keypad file does not exist.")
     if not args.stdin and not sys.stdin.isatty():
         parser.error("Use an interactive terminal for hidden passcode input.")
-    pin = sys.stdin.read().strip() if args.stdin else getpass.getpass("Passcode (hidden; not saved): ")
-    if len(pin) != 6 or not pin.isascii() or not pin.isdecimal():
-        print("Expected six ASCII digits; nothing sent.", file=sys.stderr)
+    pin = sys.stdin.read().rstrip("\r\n") if args.stdin else getpass.getpass("Passcode (hidden; not saved): ")
+    # Any passcode iOS allows. The helper enters one that is not 4 or 6 digits only after the
+    # accessibility tree shows the lock screen's passcode entry, empty.
+    if not 4 <= len(pin) <= 128 or not all(" " <= c <= "~" for c in pin):
+        print("Expected a passcode of 4 to 128 characters typed on a US keyboard; nothing sent.", file=sys.stderr)
         return 2
     try:
         result = subprocess.run(
             [str(args.native.resolve()), "--udid", args.device, "--keypad", str(args.keypad.resolve())],
-            input=pin, text=True, capture_output=True, timeout=30,
+            input=pin, text=True, capture_output=True, timeout=60,
         )
     except subprocess.TimeoutExpired:
         print("Input timed out. Inspect the phone; do not automatically retry.", file=sys.stderr)
@@ -39,7 +41,9 @@ def main():
     finally:
         del pin
     if result.returncode:
-        print("Input did not complete. Inspect the phone; do not automatically retry.", file=sys.stderr)
+        # The helper's own reason names no passcode (only why nothing or not everything was entered).
+        why = next((line for line in result.stderr.splitlines() if "Nothing was entered" in line), "")
+        print(why.split("Error: ", 1)[-1].strip('" ') or "Input did not complete. Inspect the phone; do not automatically retry.", file=sys.stderr)
         return 1
     print(json.dumps(json.loads(result.stdout)))
     return 0

@@ -15,9 +15,12 @@ struct AllStepsView: View {
                 Section {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in StepRow(row: row) }
                 } header: {
-                    if let first = model.recentSteps.first {
-                        Text("\(Self.stepCount(model)). Started at \(first.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")
+                    Group {
+                        if let first = model.recentSteps.first {
+                            Text("\(Self.stepCount(model)). Started at \(first.at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(AppLocalization.locale))).")
+                        }
                     }
+                    .settingsHeader()
                 }
             }
         }
@@ -64,9 +67,9 @@ private struct StepRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(ActivityWords.label(row.text)).lineLimit(2)
                     Spacer(minLength: 8)
-                    Text(row.at, style: .time).font(.caption).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                    Text(row.at, style: .time).font(.allo(.caption)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
                 }
-                Text(row.detail).font(.footnote).foregroundStyle(row.failed ? Color.red : Color.secondary).lineLimit(2)
+                Text(row.detail).font(.allo(.footnote)).foregroundStyle(row.failed ? Color.red : Color.secondary).lineLimit(2)
             }
         } icon: {
             Image(systemName: row.failed ? "xmark.circle.fill" : Self.symbol(for: row.text))

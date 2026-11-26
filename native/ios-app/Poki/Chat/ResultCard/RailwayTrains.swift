@@ -125,13 +125,13 @@ struct RailwayTrainsList: View {
             HStack(spacing: 6) {
                 AppIconView(app: card.app, size: 18, carried: "rails12306")
                 Text(verbatim: AppIconStore.name(card.app) ?? card.app)
-                    .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
             if let first {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: "\(first.from) → \(first.to)").font(.headline)
+                    Text(verbatim: "\(first.from) → \(first.to)").font(.allo(.headline))
                     if let date = first.date {
-                        Text(verbatim: date).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                        Text(verbatim: date).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                     }
                 }
                 .padding(.top, 6)
@@ -185,7 +185,7 @@ private struct TrainRow: View {
                 .layoutValue(key: TrainSlotKey.self, value: .arrive)
             if let price = displayPrice {
                 Text(verbatim: price)
-                    .font(.callout.weight(.semibold)).monospacedDigit()
+                    .font(.allo(.callout, .semibold)).monospacedDigit()
                     .foregroundStyle(RailwayTrains.fare)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -203,7 +203,7 @@ private struct TrainRow: View {
                 ) {
                     ForEach(Array(train.seats.enumerated()), id: \.offset) { _, seat in
                         Text(verbatim: "\(seat.name) \(seat.left)")
-                            .font(.caption)
+                            .font(.allo(.caption))
                             .foregroundStyle(Color(.secondaryLabel))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
@@ -213,7 +213,7 @@ private struct TrainRow: View {
             }
             if let note = train.note {
                 Text(verbatim: note)
-                    .font(.caption)
+                    .font(.allo(.caption))
                     .foregroundStyle(Color(.secondaryLabel))
                     .layoutValue(key: TrainSlotKey.self, value: .note)
             }
@@ -241,11 +241,11 @@ private struct TrainRow: View {
     private func end(_ time: String, _ station: String, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             Text(verbatim: time)
-                .font(.title3.weight(.semibold)).monospacedDigit()
+                .font(.alloRounded(.title3, .semibold)).monospacedDigit()
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Text(verbatim: station)
-                .font(.footnote)
+                .font(.allo(.footnote))
                 .foregroundStyle(Color(.secondaryLabel))
                 .lineLimit(1)
         }
@@ -254,13 +254,13 @@ private struct TrainRow: View {
     private var middle: some View {
         VStack(spacing: 2) {
             Text(verbatim: train.number)
-                .font(.subheadline.weight(.medium))
+                .font(.allo(.subheadline, .medium))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Capsule().fill(Color(.tertiaryLabel)).frame(width: 52, height: 1)
             if let duration = train.duration {
                 Text(verbatim: duration)
-                    .font(.caption2)
+                    .font(.allo(.caption2))
                     .foregroundStyle(Color(.secondaryLabel))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)

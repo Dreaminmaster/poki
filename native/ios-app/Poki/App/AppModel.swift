@@ -231,6 +231,8 @@ final class AppModel {
     /// Poki Runner or Poki's own process, fixed for this launch (Debug tab).
     let automationPath = AutomationPath.current
     private let core: LiveCore
+    /// Poki Setup's poki-mcp over the USB cable or the same Wi-Fi, beside the relay (issue #609).
+    private var localListener: LocalListener?
     private let launcher: RunnerLauncher
     private let pairer: DevicePairing
     private let pairingKeepAlive = KeepAlive()
@@ -345,6 +347,9 @@ final class AppModel {
 
     /// The outside agent driving the phone now: its MCP session's client, or the agent that handed
     /// a task to Poki. nil while Poki's own chat drives it.
+    /// Each outside session's latest stated intent, until its step is logged.
+    private var agentIntents: [String: String] = [:]
+
     var currentCaller: String? {
         let store = SessionStore.shared
         if let id = store.activeSessionID, let client = store.session(id)?.client { return client }
@@ -429,6 +434,14 @@ final class AppModel {
                 return await self.unlockForLocalTask(timeout: timeout)
             }
         }
+        let computers = LocalComputers(host: host) { [weak self] computer in
+            // The owner's OK, as for a connector sign-in from a client the relay does not know.
+            await self?.askToConnect(client: computer.describe, callback: computer.agent.isEmpty ? computer.app : "\(computer.app), \(computer.agent)", connector: computer.connector) ?? false
+        }
+        let log = self.log
+        localListener = LocalListener(serve: { [weak core] connection, transport in
+            await core?.serveLocal(connection, transport: transport, computers: computers)
+        }, log: { line in Task { @MainActor in log.add("local", line) } })
         // PokiCore asks for a restart after two silent requests in a row. A slow gesture can be one of
         // them while the runner is fine, so the runner is asked first; only a runner that does not
         // answer is started again (each restart costs seconds and flashes the automation banner).
@@ -942,9 +955,9 @@ final class AppModel {
         }
         switch app.install {
         case .url: return "In Poki, open Setup > Connect to this iPhone > \(app.name), tap Install, then confirm in \(app.name)."
-        case .appStore: return "Install LocalDevVPN from the App Store and tap Connect in it."
         case .toggle(let setting): return "In \(app.name), set \(setting), and keep \(app.name) connected."
         case .snippet: return "In Poki, open Setup > Connect to this iPhone > \(app.name) and add the lines it shows to \(app.name)."
+        case .appStore: return "In \(app.name), tap Connect, and keep \(app.name) connected."
         }
     }
 
@@ -1261,6 +1274,7 @@ final class AppModel {
             launchRunner()
         }
         if let relay { core.start(relay: relay) }
+        localListener?.start(name: deviceName)
         idleTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.checkIdle() } }
         openWhileInFront("turned on with Poki in front")
     }
@@ -1357,18 +1371,22 @@ final class AppModel {
         preparingCellularImage = false
         wantsOn = false
         if AskPoki.app === self, let chat = AskPoki.chat, chat.isRunningInSplitView { chat.stop() }
+        // Screen History reads over the local connection whether or not Poki is on: while it is on,
+        // the connection and its checks stay.
+        let historyReads = HistoryCapture.isEnabled
         guard sessionOn else {
-            if setup.loopback == .builtIn { tunnel.disconnect() }
+            if setup.loopback == .builtIn, !historyReads { tunnel.disconnect() }
             return
         }
-        if !inFront, !HistoryCapture.isEnabled { loopback.pause() }
+        if !inFront, !historyReads { loopback.pause() }
         log.add("session", automationPath == .inProcess ? "turned off: closing the in-process session" : "turned off: ending the runner")
         // The session closes and Poki stays: the next turn-on opens a new one in this same launch.
         if automationPath == .inProcess { closeInProcess("turned off") }
         for approval in approvals { ApprovalNotice.clear(approval.id) }
         core.stop()
+        localListener?.stop()
         launcher.stop()
-        if setup.loopback == .builtIn { tunnel.disconnect() }
+        if setup.loopback == .builtIn, !historyReads { tunnel.disconnect() }
         if automationPath == .runner {
             if !Self.onSimulator { Task { await RunnerProbe.shutdown() } }
             confirmRunnerEnded()
@@ -1959,9 +1977,11 @@ final class AppModel {
         // Every outside agent's session and step goes into the Sessions list, on or off.
         SessionStore.shared.observe(event, approvals: approvals)
         // The first agent through a connector names it (unless the owner did) and gives it its icon.
-        if case .session(.started(_, let client, _, let connector?)) = event {
+        if case .session(.started(_, let client, _, let connector?, _)) = event {
             identity.noteAgent(hash: connector, client: AgentName.pretty(client))
         }
+        // A computer running Poki MCP is listed on External Connections › Computers; a new one waits for the owner.
+        if case .session(.started(_, _, _, _, let computer?)) = event { ComputerAccess.shared.seen(computer) }
         // Events after Turn off (the core's own "stopped") are not for the screen. An approval is
         // the exception: a call that asks one (the on-device chat, the gym probe) waits on the
         // owner's answer whether or not Poki is on, and dropping it left that call waiting for the
@@ -2012,7 +2032,13 @@ final class AppModel {
                 state.headline = summary
                 state.caller = caller
             }
-        case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, _):
+        case .stepIntent(let session, let intent):
+            if let session { agentIntents[session] = intent }
+        case .sessionNote(let session, let text):
+            // The agent's note, in the owner's record with the run it came from.
+            ActionLog.shared.add(text, app: nil, ok: true, session: SessionStore.shared.activeSessionID,
+                                 caller: session.flatMap { SessionStore.shared.outsideClient(ofMCPSession: $0) } ?? currentCaller, kind: .note)
+        case .toolFinished(let summary, let delivery, let app, let thumbnail, let error, let stepSession):
             lastAgentActivity = Date(); lastStepAt = Date()
             if summary == "Look at the screen", AskPoki.chat?.waitingForSplitView == true { return }
             stepUnderWay = nil
@@ -2025,9 +2051,11 @@ final class AppModel {
             recentSteps.append(RecentStep(text: summary, app: app, failure: failed ? delivery : nil, at: Date()))
             // The owner's own record of every action, with the run it came from.
             let chat = AskPoki.chat
+            // An outside agent's step carries its stated intent, in its own words.
+            let intent = stepSession.flatMap { agentIntents.removeValue(forKey: $0) }
             ActionLog.shared.add(summary, app: app, ok: !failed,
                                  session: SessionStore.shared.activeSessionID ?? (chat?.running == true ? chat?.sessionID : nil),
-                                 caller: currentCaller)
+                                 caller: currentCaller, detail: intent.map { "“\($0)”" })
             if recentSteps.count > 20 { recentSteps.removeFirst(recentSteps.count - 20) }
             activity.record(step: summary, ok: !failed)
             activity.update { state in state.app = app ?? state.app }
@@ -2385,6 +2413,13 @@ final class AppModel {
         } else {
             ApprovalNotice.post(approval, after: 0)
         }
+    }
+
+    /// A connector's step (Settings › Connectors) asks with the same approval as a step on the phone.
+    func clearConnectorStep(connector: String, summary: String, always: Bool) async -> Bool {
+        let clearance = await core.clearConnectorStep(connector: connector, summary: summary, always: always, waiting: VoiceModel.approvalWait)
+        log.add("approval", "connector \(connector): \(clearance.mayTap ? "allowed" : "not allowed")")
+        return clearance.mayTap
     }
 
     func resolve(_ approval: PendingApproval, approved: Bool) {
@@ -2856,6 +2891,7 @@ final class AppModel {
         // The disk image downloads by itself (and is checked again when Poki turns on): it does not hold the step open.
         case .pairing: pairingPath != nil && pairingTrouble == nil
         case .automation: setup.uiAutomation
+        // Only Always keeps Poki up without the location indicator: While Using is not set up.
         case .background: background.always
         }
     }

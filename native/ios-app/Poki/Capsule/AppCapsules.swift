@@ -10,6 +10,9 @@ struct AppCapsule: Hashable, Identifiable {
     /// An installed app Poki does not list (DynamicApps): its one name counts only as written, in its own
     /// case, and a Chinese one only where an app goes, as an everyday word does.
     var installedOnly = false
+    /// A connector's capsule ("@Notion"): its SF Symbol stands where an app's icon does.
+    var symbol: String? = nil
+    var isConnector: Bool { id.hasPrefix(ConnectorCapsules.prefix) }
 
     /// The name this iPhone shows the app by.
     var name: String { KnownApps.byID[id.lowercased()]?.name(in: .current) ?? names[0] }
@@ -106,6 +109,23 @@ enum CapsuleText {
 
     static let weChatID = "com.tencent.xin"
 
+    /// Names the owner picked from the mention list while Poki runs: these make a capsule wherever they
+    /// are written, also an everyday word ("Notes", 设置) in the middle of a sentence.
+    nonisolated(unsafe) private static var confirmed: Set<String> = []
+    nonisolated(unsafe) private(set) static var confirmedRevision = 0
+    private static let confirmedLock = NSLock()
+    static var confirmedNames: Set<String> { confirmedLock.withLock { confirmed } }
+    /// For tests: no name picked.
+    static func forgetConfirmed() {
+        confirmedLock.withLock { confirmed = []; confirmedRevision += 1 }
+    }
+
+    static func confirm(_ name: String) {
+        confirmedLock.withLock {
+            if confirmed.insert(name).inserted { confirmedRevision += 1 }
+        }
+    }
+
     /// The name and marker immediately after WeChat are part of the request, not a second app.
     /// Stop at clause punctuation or a new app-opening instruction.
     static func weChatMiniProgramPrefix(in suffix: String) -> Substring? {
@@ -125,18 +145,21 @@ enum CapsuleText {
 
         static func starting(with unit: unichar) -> [Name] { table[fold(unit)] ?? [] }
 
-        /// Built again when the installed apps change (DynamicApps.version).
+        /// Built again when the installed apps, the connectors or the confirmed names change.
         private static var table: [unichar: [Name]] {
-            let version = DynamicApps.version
+            let version = DynamicApps.version &* 1_000_003 &+ ConnectorCapsules.revision &* 101 &+ CapsuleText.confirmedRevision
             if let built, built.version == version { return built.table }
             var table: [unichar: [Name]] = [:]
-            for app in AppCapsule.catalog {
+            let confirmed = CapsuleText.confirmedNames
+            for app in AppCapsule.catalog + ConnectorCapsules.current {
                 for name in app.names {
                     // A name in a script written without spaces (Chinese, Japanese, Korean) can sit inside
                     // a sentence; any other ("Strava", "Café") is a word of its own.
                     let spaced = !name.unicodeScalars.contains(where: CapsuleText.isUnspaced)
-                    let options: NSString.CompareOptions = AppCapsule.everydayWords.contains(name) || app.installedOnly ? .literal : .caseInsensitive
-                    let onlyAsApp = AppCapsule.everydayChinese.contains(name) || (app.installedOnly && !spaced)
+                    // A name picked in the mention list is the app wherever it stands.
+                    let picked = confirmed.contains(name)
+                    let options: NSString.CompareOptions = !picked && (AppCapsule.everydayWords.contains(name) || app.installedOnly) ? .literal : .caseInsensitive
+                    let onlyAsApp = !picked && (AppCapsule.everydayChinese.contains(name) || (app.installedOnly && !spaced))
                     let entry = Name(app: app, text: name as NSString, options: options, onlyAsApp: onlyAsApp)
                     table[fold((name as NSString).character(at: 0)), default: []].append(entry)
                 }
@@ -183,5 +206,25 @@ enum CapsuleText {
         let end = i + name.length
         if isLatinWordChar(name.character(at: name.length - 1)), end < text.length, isLatinWordChar(text.character(at: end)) { return false }
         return true
+    }
+}
+
+/// The connectors with an account, as capsules ("@Notion"), for the field and the bubbles. A snapshot
+/// that `MCPConnectors` updates, so the text code can read it from any thread.
+enum ConnectorCapsules {
+    static let prefix = "connector:"
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var list: [AppCapsule] = []
+    nonisolated(unsafe) private static var stamp = 0
+
+    static var current: [AppCapsule] { lock.withLock { list } }
+    static var revision: Int { lock.withLock { stamp } }
+
+    static func set(_ capsules: [AppCapsule]) {
+        lock.withLock {
+            guard capsules != list else { return }
+            list = capsules
+            stamp += 1
+        }
     }
 }

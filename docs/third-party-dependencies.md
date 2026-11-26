@@ -345,6 +345,22 @@ Versions below are the contents of `@img/sharp-libvips-darwin-arm64` 1.3.4 `vers
 
 The upstream notices also name libnsgif (MIT), but this macOS arm64 package does not report a libnsgif version. Its notice is retained without claiming it is present in the checked bundle.
 
+## Swift packages of the downloaded model
+
+The iPhone app links `MLXLLM`, `MLXLMCommon` and `Tokenizers` for the model the owner can download (see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#mlx-and-the-tokenizer-of-the-downloaded-model)). Swift Package Manager resolves them and the packages they depend on at build time; the ranges below are the ones the manifests declare (`native/ios-app/project-base.yml`, mlx-swift-lm 3.32.3 and swift-transformers 1.3.0), and a build's `Package.resolved` names the exact versions. Packages used only by tests, tools or documentation of these repositories are not linked into the app and are left out.
+
+| Package | Declared range | Declared license | Source repository | Brought in by |
+| --- | --- | --- | --- | --- |
+| `mlx-swift-lm` | 3.32.3 up to the next minor | MIT | [github.com/ml-explore/mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | the app |
+| `mlx-swift` | 0.32.3 up to the next minor | MIT | [github.com/ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift) | mlx-swift-lm |
+| `swift-numerics` | from 1.0.0 | Apache-2.0 | [github.com/apple/swift-numerics](https://github.com/apple/swift-numerics) | mlx-swift |
+| `swift-transformers` | from 1.3.0 | Apache-2.0 | [github.com/huggingface/swift-transformers](https://github.com/huggingface/swift-transformers) | the app |
+| `swift-jinja` | from 2.0.0 | Apache-2.0 | [github.com/huggingface/swift-jinja](https://github.com/huggingface/swift-jinja) | swift-transformers (`Tokenizers`) |
+| `swift-huggingface` | from 0.8.1 | Apache-2.0 | [github.com/huggingface/swift-huggingface](https://github.com/huggingface/swift-huggingface) | swift-transformers (`Hub`) |
+| `swift-collections` | from 1.0.0 | Apache-2.0 | [github.com/apple/swift-collections](https://github.com/apple/swift-collections) | swift-transformers |
+| `swift-crypto` | 3.0.0 up to 5.0.0 | Apache-2.0 | [github.com/apple/swift-crypto](https://github.com/apple/swift-crypto) | swift-transformers |
+| `yyjson` | 0.12.0 | MIT | [github.com/ibireme/yyjson](https://github.com/ibireme/yyjson) | swift-transformers |
+
 ## Updating this inventory
 
 When a lockfile, the pinned idevice revision, target architecture or libvips package changes, regenerate the affected package list from the exact package metadata and Cargo graph. Keep upstream license expressions intact, retain component notices, and distinguish optional packages from the packages selected for the supported target. External tool repositories and their terms are listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md#external-open-source-tools).
