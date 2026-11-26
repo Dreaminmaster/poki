@@ -66,6 +66,21 @@ final class ModelUsesTests: XCTestCase {
         XCTAssertEqual(ProviderRef.all.first, .local)
     }
 
+    func testChatGPTLiveVoiceFollowsTheSignedInChatAccountWithoutAVoicePicker() throws {
+        let fixture = try IsolatedTestStorage()
+        defer { XCTAssertNoThrow(try fixture.tearDown()) }
+        let storage = fixture.storage
+        fixture.defaults.set(ModelProvider.chatgpt.rawValue, forKey: "chat.provider")
+        XCTAssertEqual(ModelAccounts.chatGPTVoiceStatus(storage: storage), .signInAgain)
+
+        try fixture.seedCodexCredential()
+        XCTAssertEqual(ModelAccounts.chatGPTVoiceStatus(storage: storage), .active)
+
+        fixture.defaults.set(ModelProvider.openai.rawValue, forKey: "chat.provider")
+        XCTAssertEqual(ModelAccounts.chatGPTVoiceStatus(storage: storage), .off)
+        XCTAssertFalse(ProviderRef.account(.chatgpt).uses.contains(.voice))
+    }
+
     func testDecisionPickOnACustomProvider() {
         let custom = CustomProviders.upsert(CustomProvider(name: "One", endpoints: [CustomEndpoint(url: "https://one.test/v1")], model: "fast-flash"))
         let id = CustomProviders.choiceID(custom.id, "fast-flash")

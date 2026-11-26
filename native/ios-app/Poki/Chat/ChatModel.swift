@@ -673,9 +673,7 @@ final class ChatModel {
             guard runToken == token, !Task.isCancelled else { app.finishTask(switching: false, localTask: localTask); return }
             offeredMemories = notes
             awaitingModel = true
-            offeredMemories = notes
             client.say(prepared.message)
-            offeredMemories = notes
             taskResultCardMode = Harness.resultCardMode(for: taskRequest, rendersCards: kind == .poki)
             let completed = await run(client, instructions: instructions, delivered: prepared.you.id, token: token)
             let current = runToken == token
