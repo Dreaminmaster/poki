@@ -1,5 +1,5 @@
 // Draws the launch screen's word at 3x and its bear at 2x (see Poki/LaunchArt/README.md) and writes two PNGs.
-//   swift make-launch-art.swift <AlloRounded-Medium.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
+//   swift make-launch-art.swift <AlloRounded-Bold.ttf> <LaunchBear.png> <wordmark out.png> <bear out.png> <dark wordmark out.png>
 // The launch screen is drawn by iOS before Poki runs, so it cannot set Allo or a shadow itself: both are
 // drawn here, at build time, from the design's values.
 import CoreGraphics
@@ -8,19 +8,22 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// "Poki" over the light, in Allo Rounded Medium and a near-black ink (Black, then Bold, read too
-/// heavy, the owner, Nov 21 2026): ExtraBold in 0x3A3C41 read as a
-/// grey label, not a launch screen's word (the owner, Nov 20 2026). The font file passed in must be this weight.
+/// "Poki" over the light, in Allo Rounded Bold and a near-black ink: Medium read too light for a launch
+/// screen's word, so it is bold again, a little looser for balance (the owner, Nov 21 2026). Black read
+/// too heavy before it (Nov 21), and ExtraBold in 0x3A3C41 read as a grey label (Nov 20). The font file
+/// passed in must be this weight.
 enum Word {
   static let text = "Poki"
   static let colour: UInt32 = 0x1C1D21
   /// The same word for Dark Mode: the welcome's hello draws it over the dark home page (LaunchArt.on),
   /// where the light appearance's ink all but disappears.
   static let darkColour: UInt32 = 0xF2F4F7
-  static let weight = "Medium"
+  static let weight = "Bold"
   static let size: CGFloat = 60
   static let lineHeight: CGFloat = 64
-  static let tracking: CGFloat = -0.045
+  /// Letter spacing in ems: -0.03 (1.8 points at 60), up from the design's -0.045 so the heavier
+  /// letters do not crowd.
+  static let tracking: CGFloat = -0.03
   /// The picture's width, which LaunchScreen.storyboard holds the word to (132 by 64 points); the word
   /// is centred in it.
   static let width: CGFloat = 132
@@ -43,7 +46,7 @@ enum Bear {
 var scale: CGFloat = 3
 let args = CommandLine.arguments
 guard args.count == 6 else {
-  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-Medium.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
+  FileHandle.standardError.write("usage: make-launch-art.swift AlloRounded-Bold.ttf LaunchBear.png wordmark.png bear.png wordmark-dark.png\n".data(using: .utf8)!); exit(2)
 }
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 

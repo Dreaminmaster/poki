@@ -136,6 +136,8 @@ struct ApprovalNote: Equatable, Codable {
     /// A refusal the owner can lift by saying yes in the chat (With Message Reply).
     var reply = false
     var answered: Date?
+    /// An answer from Screen History: what its card shows (SensesShareCard).
+    var history: SensesShare? = nil
 }
 
 /// The chat: the owner's messages, Poki's answers and the steps it takes, and the model loop that runs
@@ -1963,11 +1965,11 @@ final class ChatModel {
             return PokiCore.ToolAnswer(text: why, jpeg: nil, isError: true)
         case .nothing:
             return PokiCore.ToolAnswer(text: SensesContext.nothingFound, jpeg: nil, isError: false)
-        case .summary(let text, let share, let reason):
+        case .summary(let text, let share, let reason, let shown):
             if stopAsked || !running { return PokiCore.ToolAnswer(text: "Task stopped. Action not executed.", jpeg: nil, isError: true) }
             noteID = nil
             var note = ApprovalNote(id: "context-\(UUID().uuidString)", summary: text, app: AppLocalization.text(LocalizedStringResource("Screen History")),
-                                    why: "", byModel: share, state: share ? .allowed : .asking, reason: reason)
+                                    why: "", byModel: share, state: share ? .allowed : .asking, reason: reason, history: shown)
             var approved: Bool? = true
             if share {
                 note.answered = Date()

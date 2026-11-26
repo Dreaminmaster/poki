@@ -72,7 +72,7 @@ enum ConnectorRoute: Hashable {
 /// (custom connectors, cached), else its symbol on Poki's soft ground.
 struct ConnectorIcon: View {
     /// Marks that already are a tile of their own.
-    static let tiles: Set<String> = ["Connector-stripe"]
+    static let tiles: Set<String> = ["Connector-stripe", "Connector-asana"]
     let connector: MCPConnector
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 29
     @State private var fetched: UIImage?

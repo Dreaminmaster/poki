@@ -750,13 +750,16 @@ struct BacktapeZoomMove<Content: View>: View {
     var current: BacktapeZoom
     var inward: Bool
     var anchor: UnitPoint
+    /// The page itself opening, not a zoom: a short fade and a slight zoom, from 0.97, so nothing on
+    /// the page jumps (the owner, Nov 21 2026).
+    var opening = false
     @ViewBuilder var content: Content
     @State private var arrived = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let leaving = own != current
-        let scale: CGFloat = reduceMotion ? 1 : leaving ? (inward ? 1.6 : 0.6) : arrived ? 1 : (inward ? 0.72 : 1.35)
+        let scale: CGFloat = reduceMotion ? 1 : leaving ? (inward ? 1.6 : 0.6) : arrived ? 1 : opening ? 0.97 : (inward ? 0.72 : 1.35)
         // The anchor is the point on screen, so it is found in the part of the list that shows.
         let anchor = self.anchor
         content
@@ -767,9 +770,10 @@ struct BacktapeZoomMove<Content: View>: View {
                                       y: (shown.minY + anchor.y * shown.height) / max(1, size.height))
                 return view.scaleEffect(scale, anchor: point)
             }
+            .opacity(opening && !arrived ? 0 : 1)
             .onAppear {
                 guard !arrived else { return }
-                withAnimation(.spring(duration: 0.46, bounce: 0.12)) { arrived = true }
+                withAnimation(opening ? .easeOut(duration: 0.22) : .spring(duration: 0.46, bounce: 0.12)) { arrived = true }
             }
     }
 }
@@ -789,6 +793,8 @@ struct BacktapeLibrary: View {
     @ObservedObject var lock = HistoryLock.shared
     @State private var notes = BacktapeNotes.shared
     @State private var zoom: BacktapeZoom = .hours
+    /// Whether the owner has zoomed yet: until then a list arriving is the page opening.
+    @State private var zoomed = false
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var inward = true
@@ -859,7 +865,7 @@ struct BacktapeLibrary: View {
     private func tape(_ zoom: BacktapeZoom) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                BacktapeZoomMove(own: zoom, current: self.zoom, inward: inward, anchor: point) {
+                BacktapeZoomMove(own: zoom, current: self.zoom, inward: inward, anchor: point, opening: !zoomed) {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(layout.groups[zoom] ?? []) { group in
                         if let start = group.start {
@@ -964,6 +970,7 @@ struct BacktapeLibrary: View {
         if let landing {
             places[next] = ScrollPosition(id: row(of: landing, in: next), anchor: UnitPoint(x: 0.5, y: point.y))
         }
+        zoomed = true
         withAnimation(.spring(duration: 0.46, bounce: 0.12)) { zoom = next }
     }
 

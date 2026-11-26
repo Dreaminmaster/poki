@@ -136,11 +136,8 @@ struct HistoryPage: View {
                 }
             }
         }
-        // With nothing kept yet the ask bar still sits at the foot (BacktapeLibrary has its own).
-        .bottomBar(softEdge: true) {
-            // No Ask Poki bar on Senses (the owner, Nov 21 2026): the timeline is the whole page.
-            EmptyView()
-        }
+        // No Ask Poki bar on Senses (the owner, Nov 21 2026): the timeline is the whole page, with the
+        // zoom bar BacktapeLibrary puts at its foot.
         .task(id: "\(capture.changes) \(capture.enabled)") { await load() }
     }
 

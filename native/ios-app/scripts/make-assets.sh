@@ -55,6 +55,13 @@ for svg in "$HERE"/Poki/ConnectorIcons/*.svg; do
     echo '{"images":[{"filename":"mark.svg","idiom":"universal"}],"info":{"version":1,"author":"poki"},"properties":{"preserves-vector-representation":true,"template-rendering-intent":"original"}}' > "$set/Contents.json"
   fi
 done
+# A connector whose company publishes only its full logo, as a picture: name.png in Poki/ConnectorIcons.
+for png in "$HERE"/Poki/ConnectorIcons/*.png; do
+  set="$APP/Connector-$(basename "$png" .png).imageset"
+  mkdir -p "$set"
+  cp "$png" "$set/logo.png"
+  echo '{"images":[{"filename":"logo.png","idiom":"universal"}],"info":{"version":1,"author":"poki"}}' > "$set/Contents.json"
+done
 # Proxy apps' own App Store icons (Poki/ProxyIcons, see its README) beside their names in Setup.
 for png in "$HERE"/Poki/ProxyIcons/*.png; do
   name="Proxy-$(basename "$png" .png)"
@@ -99,7 +106,7 @@ LAUNCH_IMAGES="$HERE/Poki/LaunchImages"
 rm -rf "$LAUNCH_IMAGES"
 mkdir -p "$LAUNCH_IMAGES"
 cp "$LAUNCH/LaunchBackdrop.png" "$LAUNCH_IMAGES/LaunchBackdrop.png"
-swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/AlloRounded-Medium.ttf" "$LAUNCH/LaunchBear.png" \
+swift "$HERE/scripts/make-launch-art.swift" "$HERE/Shared/Fonts/AlloRounded-Bold.ttf" "$LAUNCH/LaunchBear.png" \
   "$LAUNCH_IMAGES/LaunchWordmark@3x.png" "$LAUNCH_IMAGES/LaunchBear@2x.png" "$LAUNCH_IMAGES/LaunchWordmarkDark@3x.png"
 LAUNCH_GROUND='"red":"0xF5","green":"0xF7","blue":"0xFA"'
 LAUNCH_GROUND_DARK='"red":"0x05","green":"0x07","blue":"0x0D"'
