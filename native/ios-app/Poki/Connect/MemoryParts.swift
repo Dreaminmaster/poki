@@ -504,16 +504,16 @@ struct MemoryPageCard: View {
                     .onTapGesture {
                         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { page.open = page.open == item.id ? nil : item.id }
                     }
+                    // Only identify the tappable summary: an ancestor identifier can mask Source.
+                    .accessibilityIdentifier("memory.item.\(item.id)")
                     if page.open == item.id {
                         MemoryItemDetail(item: item, page: page)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
-                .accessibilityIdentifier("memory.item.\(item.id)")
             }
         }
         .padding(.vertical, 4)
-        .accessibilityIdentifier("memory.page.\(app ?? "about")")
     }
 }
 
