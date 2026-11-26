@@ -1,0 +1,39 @@
+name: Latest main test-only integration
+on:
+  push:
+    branches: [ci/latest-main-test-fixes-20261126]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: xcode-27-arm64
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Record exact revision and select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          git rev-parse HEAD | tee out/source-revision.txt
+          XCODE="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          node --version
+      - run: npm ci
+      - run: npm ci --prefix agent
+      - name: Required npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee out/node-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-test-only-integration
+          path: out/

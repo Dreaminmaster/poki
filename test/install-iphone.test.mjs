@@ -28,17 +28,67 @@ function runInstaller(state, { scenario = 'happy', env = {}, answer = {}, stateA
     env: { ...process.env, ...fastEnv, POKI_FAKE_SCENARIO: scenario, POKI_APPLE_ID: 'tester@example.com', POKI_SETUP_PASSWORD: 'correct horse', ...env },
   });
   const events = [];
+  const pendingAnswers = [];
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += chunk; });
-  createInterface({ input: child.stdout }).on('line', async line => {
+  createInterface({ input: child.stdout }).on('line', line => {
     const event = JSON.parse(line);
     events.push(event);
-    if (event.event === 'wait' && answer[event.wait]) await answer[event.wait](event);
+    if (event.event !== 'wait' || !answer[event.wait]) return;
+    // EventEmitter does not await async listeners. Keep each answer's outcome
+    // so a failed simulated input is not reported only as an installer timeout.
+    const pending = Promise.resolve().then(() => answer[event.wait](event)).then(result =>
+      typeof result?.code === 'number' && result.code !== 0 ? { wait: event.wait, code: result.code } : null,
+      error => ({ wait: event.wait, code: typeof error?.code === 'number' ? error.code : null }));
+    pendingAnswers.push(pending);
   });
-  return new Promise(resolve => child.on('close', code => resolve({ code, events, stderr })));
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', async code => {
+      try {
+        const failures = (await Promise.all(pendingAnswers)).filter(Boolean);
+        // Do not print raw answer output: other tests assert credential secrecy.
+        assert.deepEqual(failures, [], 'Simulated person answer failed');
+        resolve({ code, events, stderr });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 const sub = (state, ...args) => exec(process.execPath, [cli, ...args, '--state', state]);
+
+test('installer fixture reports a failed simulated answer instead of just a wait timeout', async t => {
+  const state = await stateDir(t);
+  await assert.rejects(
+    runInstaller(state, {
+      env: { POKI_INSTALL_WAIT_MS: '150' },
+      answer: { apple_code: async () => ({ code: 7, output: 'synthetic private answer output' }) },
+    }),
+    error => {
+      assert.deepEqual(error.actual, [{ wait: 'apple_code', code: 7 }]);
+      assert.doesNotMatch(error.message, /synthetic private answer output/);
+      return true;
+    },
+  );
+});
+
+test('installer fixture waits for a late answer before temporary state cleanup', async t => {
+  const state = await stateDir(t);
+  let completed = false;
+  const result = await runInstaller(state, {
+    env: { POKI_INSTALL_WAIT_MS: '150' },
+    answer: { apple_code: async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+      await writeFile(join(state, 'late-answer-marker'), 'finished');
+      completed = true;
+    } },
+  });
+  assert.equal(result.code, 3, result.stderr);
+  assert.equal(completed, true, 'all answer callbacks must finish before test cleanup');
+  assert.equal(await readFile(join(state, 'late-answer-marker'), 'utf8'), 'finished');
+});
 
 test('update-only refuses configuration changes before contacting the phone', async t => {
   for (const args of [['--channel', 'beta'], ['--model-key', 'openai'], ['--model-key-item', 'saved-key'], ['--reinstall']]) {
