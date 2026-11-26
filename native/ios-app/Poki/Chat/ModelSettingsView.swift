@@ -115,6 +115,23 @@ enum ModelAccounts {
     static func canChat(_ provider: ModelProvider) -> Bool { provider.wired }
     static func canTalkLive(_ provider: ModelProvider) -> Bool { provider == .chatgpt || provider == .openai || provider == .custom }
 
+    enum ChatGPTVoiceStatus {
+        case signInAgain, off, active
+
+        var label: LocalizedStringResource {
+            switch self {
+            case .signInAgain: "Sign In Again"
+            case .off: "Off"
+            case .active: "ChatGPT"
+            }
+        }
+    }
+
+    static func chatGPTVoiceStatus(storage: PokiStorage = .live) -> ChatGPTVoiceStatus {
+        guard CodexAccount.hasStoredCredential(service: storage.codexService, home: storage.codexHome) else { return .signInAgain }
+        return ModelKeys.selectedProvider(in: storage) == .chatgpt ? .active : .off
+    }
+
     static func method(_ provider: ModelProvider) -> String {
         switch provider {
         case .chatgpt: AppLocalization.text(LocalizedStringResource("Sign in with ChatGPT"))
@@ -203,6 +220,14 @@ private struct AccountDetail: View {
 
             Section {
                 ProviderUseRows(provider: .account(provider))
+                if provider == .chatgpt {
+                    LabeledContent {
+                        Text(ModelAccounts.chatGPTVoiceStatus().label)
+                    } label: {
+                        SettingsLabel("Live Voice", systemImage: "waveform")
+                    }
+                    .accessibilityIdentifier("provider.chatgpt.liveVoice")
+                }
             } header: {
                 Group {
                     Text("Use This Provider For")
@@ -212,6 +237,8 @@ private struct AccountDetail: View {
                 Group {
                     if !ModelAccounts.canChat(provider) {
                         Text("Poki keeps this key; chatting with \(provider.name) comes in an update.")
+                    } else if provider == .chatgpt {
+                        Text("Poki uses this ChatGPT sign-in for both text chat and live voice.")
                     } else if provider != .openai {
                         Text("Live voice runs on a Realtime API, which an OpenAI API key or a custom endpoint can open.")
                     }
