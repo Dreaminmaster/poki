@@ -25,6 +25,12 @@ jobs:
             tests: 'ConversationSearchTests:21 SessionArchiveTests:21 SessionBackupRestoreTests:3 ChatScrollTests:10'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
             expected_baseline: false
+          - pr: current-main-complete-candidate
+            device: iPad
+            ref: d3ada62883d2994f141c94e7a9a7690e2dad2754
+            tests: 'ConversationSearchTests:21 SessionArchiveTests:21 SessionBackupRestoreTests:3 ChatScrollTests:10'
+            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
+            expected_baseline: false
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
@@ -82,15 +88,19 @@ jobs:
                   if runtime.get('isAvailable') and identifier.startswith('com.apple.CoreSimulator.SimRuntime.iOS-') and rver is not None and (18, 0, 0) <= rver <= sdk:
                       runtimes.append((rver, identifier, runtime))
               for _, identifier, runtime in sorted(runtimes, key=lambda item: item[:2], reverse=True):
+                  # The Duo has a separate runtime and can report a folded/companion
+                  # viewport. It is not a conventional phone; reserve it for Duo tests.
+                  if sys.argv[2] == 'iPhone' and '-iPhone19-4' in identifier:
+                      continue
                   phones = []
                   for device in info.get('devices', {}).get(identifier, []):
                       device_type = device.get('deviceTypeIdentifier')
-                      if device.get('isAvailable') and device_type and device_type.startswith('com.apple.CoreSimulator.SimDeviceType.' + sys.argv[2] + '-'):
+                      if device.get('isAvailable') and device_type and (device_type.startswith('com.apple.CoreSimulator.SimDeviceType.' + sys.argv[2] + '-') and not (sys.argv[2] == 'iPhone' and device_type == 'com.apple.CoreSimulator.SimDeviceType.iPhone-Duo')):
                           phones.append((device.get('name', ''), device_type))
                   if not phones:
                       for item in runtime.get('supportedDeviceTypes', []):
                           device_type = item if isinstance(item, str) else item.get('identifier')
-                          if device_type and device_type.startswith('com.apple.CoreSimulator.SimDeviceType.' + sys.argv[2] + '-'):
+                          if device_type and (device_type.startswith('com.apple.CoreSimulator.SimDeviceType.' + sys.argv[2] + '-') and not (sys.argv[2] == 'iPhone' and device_type == 'com.apple.CoreSimulator.SimDeviceType.iPhone-Duo')):
                               phones.append((types.get(device_type, {}).get('name', device_type), device_type))
                   if phones:
                       phones.sort(key=lambda item: ('Pro' not in item[0], 'Max' in item[0], item[0]))
@@ -106,6 +116,10 @@ jobs:
                   sys.exit(1)
           PY
           CHOICE="$(python3 /tmp/poki-history-select.py "$SDK" "${{ matrix.device }}" < out/simctl-inventory.json)"
+          if [ "${{ matrix.device }}" = iPhone ] && [[ "$CHOICE" == *iPhone-Duo* ]]; then
+            echo "::error::A conventional iPhone job must not select iPhone Duo"
+            exit 1
+          fi
           read -r TYPE RUNTIME <<< "$CHOICE"
           printf 'SDK %s\nDevice type %s\nRuntime %s\n' "$SDK" "$TYPE" "$RUNTIME" | tee out/simulator-selection.log
           UDID="$(xcrun simctl create "Poki review ${{ matrix.pr }}" "$TYPE" "$RUNTIME")"
