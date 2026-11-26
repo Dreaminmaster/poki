@@ -85,10 +85,7 @@ struct SettingsRow: View {
         HStack(spacing: min(18, iconSpacing)) {
             SettingsIcon(symbol: symbol)
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
-            // The title stays on one line (the owner, Nov 20 2026: a pill made "Signing & Updates" wrap).
-            // The value sits beside it when both fit, and goes under the title when they do not, as it
-            // does at the accessibility sizes. The caption wraps either way.
-            TitleValueLayout(inline: !typeSize.isAccessibilitySize) {
+            TitleValueLayout(inline: !typeSize.isAccessibilitySize, truncatesValue: !warns) {
                 VStack(alignment: .leading, spacing: 2) {
                     titleText
                     // The start flow says it in the section's footer, and a row holds its title alone.
@@ -98,7 +95,7 @@ struct SettingsRow: View {
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
                     }
                 }
-                if let value { valueView(value).lineLimit(1) } else { Color.clear.frame(width: 0, height: 0) }
+                if let value { valueView(value).lineLimit(1).truncationMode(.tail) } else { Color.clear.frame(width: 0, height: 0) }
                 // Measured, never drawn: the title's width on one line.
                 titleText.fixedSize().hidden().accessibilityHidden(true)
             }
@@ -325,21 +322,53 @@ struct SettingsChoiceCard: View {
     }
 }
 
-/// A row's words and its value: the words (subview 0) take the room the value (1) leaves; the value
-/// sits at the trailing edge when the title (2, measured on one line and never drawn) fits beside it,
-/// and under the words otherwise, so a pill or a value never makes a title wrap.
+/// A row's words and its value: the title (subview 2, measured on one line and never drawn) stays
+/// intact while the words (0) take the room the value (1) leaves. Non-warning values stay beside
+/// the title on one line and truncate at the tail; warning pills and accessibility sizes stack the
+/// value under the words within the row width.
 struct TitleValueLayout: Layout {
     var inline = true
+    var truncatesValue = true
     var gap: CGFloat = 8
 
-    private func plan(_ width: CGFloat?, _ subviews: Subviews) -> (inline: Bool, value: CGSize, words: CGSize) {
-        let value = subviews[1].sizeThatFits(.unspecified)
+    private struct Plan {
+        var inline: Bool
+        var value: CGSize
+        var valueProposalWidth: CGFloat?
+        var words: CGSize
+    }
+
+    private func plan(_ width: CGFloat?, _ subviews: Subviews) -> Plan {
+        let idealValue = subviews[1].sizeThatFits(.unspecified)
         let title = subviews[2].sizeThatFits(.unspecified)
         let room = width ?? .infinity
-        let besides = inline && (value.width == 0 || title.width + gap + value.width <= room)
-        let wordsWidth = besides ? max(0, room - (value.width > 0 ? value.width + gap : 0)) : room
-        let words = subviews[0].sizeThatFits(ProposedViewSize(width: wordsWidth.isFinite ? wordsWidth : nil, height: nil))
-        return (besides, value, words)
+
+        guard idealValue.width > 0 else {
+            let words = subviews[0].sizeThatFits(ProposedViewSize(width: room.isFinite ? room : nil, height: nil))
+            return Plan(inline: inline, value: idealValue, valueProposalWidth: nil, words: words)
+        }
+
+        if inline {
+            if title.width + gap + idealValue.width <= room {
+                let wordsWidth = max(0, room - idealValue.width - gap)
+                let words = subviews[0].sizeThatFits(ProposedViewSize(width: wordsWidth.isFinite ? wordsWidth : nil, height: nil))
+                return Plan(inline: true, value: idealValue, valueProposalWidth: nil, words: words)
+            }
+            let available = room - title.width - gap
+            if truncatesValue, room.isFinite, available > 0 {
+                let fittedValue = subviews[1].sizeThatFits(ProposedViewSize(width: available, height: nil))
+                if fittedValue.width <= available + 0.5 {
+                    let wordsWidth = max(0, room - fittedValue.width - gap)
+                    let words = subviews[0].sizeThatFits(ProposedViewSize(width: wordsWidth, height: nil))
+                    return Plan(inline: true, value: fittedValue, valueProposalWidth: available, words: words)
+                }
+            }
+        }
+
+        let stackedWidth = room.isFinite ? room : nil
+        let words = subviews[0].sizeThatFits(ProposedViewSize(width: stackedWidth, height: nil))
+        let value = subviews[1].sizeThatFits(ProposedViewSize(width: stackedWidth, height: nil))
+        return Plan(inline: false, value: value, valueProposalWidth: stackedWidth, words: words)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -355,10 +384,12 @@ struct TitleValueLayout: Layout {
         if p.inline {
             subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
                               proposal: ProposedViewSize(width: p.words.width, height: nil))
-            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: .unspecified)
+            let valueProposal = p.valueProposalWidth.map { ProposedViewSize(width: $0, height: nil) } ?? .unspecified
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: valueProposal)
         } else {
             subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
-            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + p.words.height + 2), proposal: .unspecified)
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + p.words.height + 2),
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
         }
     }
 }
