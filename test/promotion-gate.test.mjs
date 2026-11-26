@@ -591,6 +591,32 @@ test('promotion.py changelog rejects missing, undated, empty, and mismatched ver
   }
 });
 
+test('beta.1 does not match a plain base version heading shared with stable releases', t => {
+  const gate = workflow('promotion-gate');
+  const publish = workflow('publish-promotion');
+  const gateStep = stepBlock(gate, 'verdict', 'name: CHANGELOG.md has an entry for this version');
+  const publishStep = stepBlock(publish, 'read', 'name: CHANGELOG.md has an entry for this version');
+  const baseOnlyChangelog = '# Changelog\n\n## [0.5.0] - 2026-11-24\n\n### Added\n- Stable release notes.\n';
+
+  const sandbox = makeSandbox(t, {
+    channels: beta050Channels,
+    changelog: baseOnlyChangelog,
+  });
+
+  const betaCli = sandbox.runPython(['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta']);
+  assert.notEqual(betaCli.status, 0, 'beta.1 must reject a plain [0.5.0] heading');
+  assert.match(betaCli.stdout + betaCli.stderr, /0\.5\.0-beta\.1/);
+
+  for (const [label, step] of [['promotion-gate verdict', gateStep], ['publish-promotion read', publishStep]]) {
+    const blocked = sandbox.runBash(stepCommands(step));
+    assert.notEqual(blocked.status, 0, `${label} must reject 0.5.0-beta.1 when CHANGELOG.md only has [0.5.0]`);
+    assert.match(blocked.stdout + blocked.stderr, /0\.5\.0-beta\.1/);
+  }
+
+  const stableCli = sandbox.runPython(['changelog', '--version', '0.5.0', '--channel', 'stable']);
+  assert.equal(stableCli.status, 0, `stable 0.5.0 should still match [0.5.0]: ${stableCli.stdout}${stableCli.stderr}`);
+});
+
 test('publish-promotion checks out CHANGELOG.md into pipeline and includes the version section in release notes', t => {
   const publish = workflow('publish-promotion');
   const publishBlock = jobBlock(publish, 'publish');
