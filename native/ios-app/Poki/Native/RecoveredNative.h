@@ -19,6 +19,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)loadDeveloperFrameworks:(NSError **)error;
 // Call from a worker queue: the upstream promise wait can take 3 seconds.
 - (nullable id)prepare:(NSError **)error;
+/// The same session, opened when none is, without turning Automation Mode on: no passcode screen and
+/// no banner from this call. A session whose Automation Mode is already on is returned as it is.
+- (nullable id)openWithoutAutomation:(NSError **)error;
+/// Whether Automation Mode was turned on for the current session and not paused since.
+- (BOOL)automationOn;
 - (nullable id)enabledSessionWithGeneration:(uint64_t *)generation;
 - (BOOL)isCurrent:(id)session generation:(uint64_t)generation;
 // Ends the current session (and Automation Mode with it). YES when one was open. The next prepare

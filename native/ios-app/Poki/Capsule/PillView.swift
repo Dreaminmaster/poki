@@ -14,11 +14,22 @@ struct PillMetrics {
     let pointSize: CGFloat
 
     var height: CGFloat { (pointSize * 1.5).rounded() }
-    var icon: CGFloat { height - 6 }
-    var labelFont: UIFont { .systemFont(ofSize: (pointSize * 0.88).rounded(), weight: .semibold) }
-    var leading: CGFloat { 3 }
-    var gap: CGFloat { 5 }
-    var trailing: CGFloat { leading + 2 }
+    /// The same space around the icon on its three sides: above, below and before it.
+    var inset: CGFloat { 3 }
+    var icon: CGFloat { height - 2 * inset }
+    var iconRadius: CGFloat { icon * 0.225 }
+    var labelFont: UIFont {
+        let size = (pointSize * 0.88).rounded()
+        return Typeface.uiFont(size: size, .semibold) ?? .systemFont(ofSize: size, weight: .semibold)
+    }
+    var leading: CGFloat { inset }
+    var gap: CGFloat { 6 }
+    /// After the name: as much room as the icon has before it, plus the gap the name keeps from it.
+    var trailing: CGFloat { inset + gap }
+    /// Every corner of the ground follows the icon's own (its radius plus the space around it), so
+    /// the shape is the same at both ends (the owner, Nov 21 2026: one round end and one square end
+    /// read as uneven).
+    var radius: CGFloat { iconRadius + inset }
 
     func size(for text: String) -> CGSize {
         let label = (text as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up)
@@ -37,14 +48,21 @@ struct PillView: View {
     private var metrics: PillMetrics { PillMetrics(pointSize: data.fontData.pointSize) }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: metrics.icon * 0.225, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: metrics.iconRadius, style: .continuous)
         let ink = data.onAccent ? Color.white : Color(.label)
         let fill = data.onAccent
             ? Color.white.opacity(0.22)
             : (scheme == .dark ? Color.white.opacity(0.13) : Color(.label).opacity(0.08))
         HStack(spacing: metrics.gap) {
             Group {
-                if let icon = AppIconStore.shared.icon(data.app.id, dark: false) {
+                if let symbol = data.app.symbol {
+                    // A connector: its symbol on Poki's blue, in the icon's shape.
+                    Image(systemName: symbol)
+                        .font(.system(size: metrics.icon * 0.55, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: metrics.icon, height: metrics.icon)
+                        .background(Tint.blue)
+                } else if let icon = AppIconStore.shared.icon(data.app.id, dark: false) {
                     Image(uiImage: icon).resizable().interpolation(.high)
                 } else {
                     DefaultAppIcon(size: metrics.icon)
@@ -62,7 +80,8 @@ struct PillView: View {
         .padding(.trailing, metrics.trailing)
         .frame(height: metrics.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(fill, in: RoundedRectangle(cornerRadius: metrics.icon * 0.225 + metrics.leading, style: .continuous))
+        .background(data.onAccent ? Color.white.opacity(0.22) : Color(.label).opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: metrics.radius, style: .continuous))
         .accessibilityLabel(Text(verbatim: data.label))
     }
 
@@ -74,7 +93,7 @@ struct PillView: View {
         // A capsule drawn with the placeholder is never kept: the icon is asked for (the App Store's,
         // for an app this iPhone has no icon of), and the capsule is drawn again when it arrives
         // (AppIconStore.changed).
-        guard AppIconStore.shared.icon(data.app.id, dark: false) != nil else {
+        guard data.app.symbol != nil || AppIconStore.shared.icon(data.app.id, dark: false) != nil else {
             drawn[key] = nil
             let id = data.app.id
             Task { await AppIconStore.shared.load(id) }

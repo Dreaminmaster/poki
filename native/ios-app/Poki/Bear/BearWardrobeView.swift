@@ -196,7 +196,7 @@ struct BearCustomizationView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .font(.body)
+                .font(.allo(.body))
                 .frame(maxWidth: 520, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 16)
                 .accessibilityIdentifier("wardrobe.pieces")
@@ -243,11 +243,11 @@ struct BearCustomizationView: View {
                         .clipShape(.circle)
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(slot.name).font(.caption2).foregroundStyle(.secondary)
-                    Text(piece.name).font(.caption.weight(.semibold))
+                    Text(slot.name).font(.allo(.caption2)).foregroundStyle(.secondary)
+                    Text(piece.name).font(.allo(.caption, .semibold))
                 }
                 Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
+                    .font(.allo(.caption2, .semibold))
                     .foregroundStyle(.secondary)
             }
             .foregroundStyle(.primary)
@@ -402,7 +402,7 @@ private struct BearPieceColors: View {
             }
             resetRow
         }
-        .font(.subheadline)
+        .font(.allo(.subheadline))
         .background(.fill.tertiary, in: .rect(cornerRadius: 12))
         .clipped()
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.3), value: hasOverrides)

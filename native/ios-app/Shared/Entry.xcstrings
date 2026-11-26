@@ -129,18 +129,50 @@
         }
       }
     },
-    "Poki starts the task on this iPhone and tells you when it is done." : {
+    "Gives Poki a task to do on this iPhone. Poki is an assistant that uses the apps on this iPhone the way you would, tapping and typing for you, and tells you when it is done." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在这台 iPhone 上开始做这个任务，做完后告诉你。"
+            "value" : "让 Poki 在这台 iPhone 上做一件事。Poki 是一个助手，会像你一样使用这台 iPhone 上的 App，替你点按和输入，做完后告诉你。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Poki 在這台 iPhone 上開始做這個任務，做完後告訴你。"
+            "value" : "讓 Poki 在這台 iPhone 上做一件事。Poki 是一個助理，會像你一樣使用這台 iPhone 上的 App，替你點按和輸入，做完後告訴你。"
+          }
+        }
+      }
+    },
+    "What Poki should do, in your own words, with every detail you gave, such as the app to use, names, times and amounts." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 要做什么，用你自己的话说，带上你给出的每个细节，比如要用的 App、名字、时间和金额。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 要做什麼，用你自己的話說，帶上你給出的每個細節，比如要用的 App、名字、時間和金額。"
+          }
+        }
+      }
+    },
+    "Off unless you ask for Split View. When on, Poki works in the two apps open side by side." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非你要求分屏，否则保持关闭。打开时，Poki 在并排打开的两个 App 里工作。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非你要求分割畫面，否則保持關閉。打開時，Poki 在並排打開的兩個 App 裡工作。"
           }
         }
       }
@@ -557,6 +589,44 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請先允許 Poki 使用麥克風。"
+          }
+        }
+      }
+    },
+    "Reconnect Poki" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新连接 Poki"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新連接 Poki"
+          }
+        }
+      }
+    },
+    "Poki opens its connection to this iPhone again and says whether it worked. The Poki Loopback shortcut uses it to repair the loopback." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki opens its connection to this iPhone again and says whether it worked. The Poki Loopback shortcut uses it to repair the loopback."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 重新连接这台 iPhone 并告诉你是否成功。Poki Loopback 快捷指令用它来修复回环连接。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki 重新連線這台 iPhone 並告訴你是否成功。Poki Loopback 捷徑用它來修復回環連線。"
           }
         }
       }

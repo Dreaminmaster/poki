@@ -189,13 +189,24 @@ enum BacktapeApps {
         return HistoryNames.app(app)
     }
 
-    /// Each app's share of a span's reads, the largest first.
+    /// Each app's share of a span's reads, the largest first. An app counts once, however its
+    /// identifier was written in a read (the owner, 2026-11-16: no repeated icons).
     static func shares(_ span: HistorySpan) -> [(app: String, share: Double)] {
         var counts: [String: Int] = [:]
         for entry in span.entries where !entry.app.isEmpty { counts[entry.app, default: 0] += 1 }
         let total = Double(max(1, counts.values.reduce(0, +)))
-        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
-            .map { (app: $0.key, share: Double($0.value) / total) }
+        var merged: [(app: String, count: Int)] = []
+        var places: [String: Int] = [:]
+        for (app, count) in counts.sorted(by: { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }) {
+            let key = name(app).lowercased()
+            if let index = places[key] {
+                merged[index].count += count
+            } else {
+                places[key] = merged.count
+                merged.append((app, count))
+            }
+        }
+        return merged.sorted { $0.count > $1.count }.map { (app: $0.app, share: Double($0.count) / total) }
     }
 }
 
@@ -239,6 +250,11 @@ struct BacktapeIconRow: View {
     var body: some View {
         let shares = Array(BacktapeApps.shares(span).prefix(limit))
         HStack(spacing: -5) {
+            // Poki and the agents that worked in this time come first, round.
+            ForEach(Array(span.workers.prefix(2)), id: \.self) { worker in
+                BacktapeWorkerBadge(by: worker, size: ((small + large) / 2).rounded())
+                    .zIndex(Double(limit + 1))
+            }
             ForEach(Array(shares.enumerated()), id: \.element.app) { index, item in
                 BacktapeAppIcon(app: item.app, size: (small + (large - small) * sqrt(item.share)).rounded(), order: index)
                     .zIndex(Double(limit - index))
@@ -362,17 +378,41 @@ final class BacktapeNotes {
     static let shared = BacktapeNotes()
 
     private(set) var notes: [String: BacktapeNote] = [:]
+    /// Tiles whose note is a draft of a span that was still in flight. A draft is never final:
+    /// once its span closes it is written again from the closed span, and stays grey till then.
+    private(set) var drafted: Set<String> = []
+    @ObservationIgnored private var closers: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var wanted: [String: BacktapeTile] = [:]
     @ObservationIgnored private var failed: Set<String> = []
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored var focus: Date?
+    /// Notes of spans that are not over yet. They are never kept in the store: they are written
+    /// again as the span fills, and once more, to keep, when it has ended.
+    private static var drafts: [String: (count: Int, at: Date, note: BacktapeNote)] = [:]
+
+    private static func draft(_ tile: BacktapeTile) -> BacktapeNote? {
+        guard let draft = drafts[tile.id] else { return nil }
+        let count = tile.span.entries.count
+        let fresh = draft.count == count || (draft.count * 5 >= count * 4 && Date().timeIntervalSince(draft.at) < 600)
+        return fresh ? draft.note : nil
+    }
+
+    /// The page may write: Backtape is unlocked, or it is off and only Poki's work is shown.
+    private var open: Bool { !HistoryCapture.shared.enabled || HistoryLock.shared.unlocked }
 
     private init() {}
 
     func appeared(_ tile: BacktapeTile) {
         wanted[tile.id] = tile
+        if drafted.contains(tile.id), tile.end <= Date() { work(); return }
         guard notes[tile.id] == nil else { return }
+        if tile.end > Date() {
+            if let draft = Self.draft(tile) { notes[tile.id] = draft; drafted.insert(tile.id) }
+            closeLater(tile)
+            work()
+            return
+        }
         let me = generation
         Task {
             let kept = await HistoryStore.shared.note(start: tile.zoom.key(tile.start))
@@ -384,11 +424,34 @@ final class BacktapeNotes {
 
     func disappeared(_ tile: BacktapeTile) {
         wanted[tile.id] = nil
+        closers.removeValue(forKey: tile.id)?.cancel()
+    }
+
+    /// Whether the tile's words may still change: its span is not over, or its note is a draft
+    /// from before it ended that has not been written again yet.
+    func pending(_ tile: BacktapeTile) -> Bool {
+        tile.end > Date() || drafted.contains(tile.id)
+    }
+
+    /// When a visible span in flight ends, its note is written again from the closed span, even
+    /// though the tile never left the screen.
+    private func closeLater(_ tile: BacktapeTile) {
+        guard closers[tile.id] == nil else { return }
+        let me = generation
+        closers[tile.id] = Task { [weak self] in
+            let wait = tile.end.timeIntervalSinceNow
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait + 1)) }
+            guard !Task.isCancelled, let self, self.generation == me else { return }
+            self.closers[tile.id] = nil
+            guard self.wanted[tile.id] != nil else { return }
+            self.failed.remove(tile.id)
+            self.work()
+        }
     }
 
     /// Whether a note is still to come for this tile, so its place is held.
     func waiting(_ tile: BacktapeTile) -> Bool {
-        notes[tile.id] == nil && !failed.contains(tile.id) && tile.end < Date() && BacktapeWriter.available
+        notes[tile.id] == nil && !failed.contains(tile.id) && BacktapeWriter.available
     }
 
     /// History changed (something was forgotten): every note is looked up again.
@@ -397,39 +460,56 @@ final class BacktapeNotes {
         worker?.cancel()
         worker = nil
         notes = [:]
+        drafted = []
         failed = []
+        closers.values.forEach { $0.cancel() }
+        closers = [:]
     }
 
     private func next() -> BacktapeTile? {
         let centre = focus ?? Date()
         return wanted.values
-            .filter { notes[$0.id] == nil && !failed.contains($0.id) && $0.end < Date() }
+            .filter { (notes[$0.id] == nil || (drafted.contains($0.id) && $0.end <= Date())) && !failed.contains($0.id) }
             .min { abs($0.start.timeIntervalSince(centre)) < abs($1.start.timeIntervalSince(centre)) }
     }
 
     private func work() {
-        guard worker == nil, BacktapeWriter.available, HistoryLock.shared.unlocked else { return }
+        guard worker == nil, BacktapeWriter.available, open else { return }
         let me = generation
         worker = Task {
             defer { if generation == me { worker = nil } }
             let store = HistoryStore.shared
             let sourceGeneration = await store.summaryGeneration()
-            while !Task.isCancelled, generation == me, HistoryLock.shared.unlocked, let tile = next() {
+            while !Task.isCancelled, generation == me, open, let tile = next() {
                 let key = tile.zoom.key(tile.start)
-                let kept = await store.note(start: key)
-                guard !Task.isCancelled, generation == me else { return }
-                if let kept {
-                    notes[tile.id] = kept
-                    continue
+                // A span still in flight gets a note for now, shown as pending. It is never kept.
+                let flying = tile.end > Date()
+                if !flying {
+                    let kept = await store.note(start: key)
+                    guard !Task.isCancelled, generation == me else { return }
+                    if let kept {
+                        notes[tile.id] = kept
+                        drafted.remove(tile.id)
+                        continue
+                    }
                 }
-                // A tile may still hold text from before deletion. Reread every span from the store.
-                let entries = await store.entries(from: tile.start, to: tile.end)
+                // A tile may still hold text from before deletion. Reread every span from the store,
+                // with what Poki did in it.
+                let entries = await BacktapeActivity.whole(from: tile.start, to: tile.end)
                 guard !Task.isCancelled, generation == me else { return }
                 let written = await BacktapeWriter.write(entries, period: tile.zoom.period)
                 guard !Task.isCancelled, generation == me else { return }
                 if let written {
-                    let saved = await store.keep(written, start: key, generation: sourceGeneration)
-                    guard !Task.isCancelled, generation == me, saved else { return }
+                    if flying {
+                        Self.drafts[tile.id] = (tile.span.entries.count, Date(), written)
+                        drafted.insert(tile.id)
+                        closeLater(tile)
+                    } else {
+                        let saved = await store.keep(written, start: key, generation: sourceGeneration)
+                        guard !Task.isCancelled, generation == me, saved else { return }
+                        Self.drafts[tile.id] = nil
+                        drafted.remove(tile.id)
+                    }
                     notes[tile.id] = written
                 } else {
                     failed.insert(tile.id)
@@ -448,7 +528,10 @@ struct BacktapeTileView: View {
     var kind: Kind
     var note: BacktapeNote?
     var waiting: Bool
-    var lit: Bool
+    /// The span is not over: its words may still change, so they are grey and breathing.
+    var pending = false
+    /// A 10 minute row opened to its details.
+    var open = false
     /// A 10 minute row grows with the text size, so two lines of summary always fit inside it.
     @ScaledMetric(relativeTo: .footnote) private var lineHeight = 60.0
     @ScaledMetric(relativeTo: .subheadline) private var timeWidth = 70.0
@@ -475,21 +558,28 @@ struct BacktapeTileView: View {
 
     private var text: String? {
         if let note {
-            let body = note.body.isEmpty ? note.title : note.body
+            // An opened row says its title on the line: the whole note is right under it.
+            let body = note.body.isEmpty || (open && !note.title.isEmpty) ? note.title : note.body
             // The small models often begin a sentence without its capital.
             return body.isEmpty ? nil : body.prefix(1).uppercased() + body.dropFirst()
         }
         if waiting { return nil }
-        let summary = tile.span.summary
-        return summary.isEmpty ? tile.span.title : summary
+        let plain = BacktapeWords.plain(tile.span)
+        return plain.isEmpty ? tile.span.title : plain
     }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         Group {
-            if kind == .line { line } else { card }
+            if kind == .line {
+                VStack(spacing: 0) {
+                    line.frame(height: height)
+                    if open { BacktapeDetail(tile: tile, note: note, pending: pending).transition(.opacity) }
+                }
+            } else {
+                card.frame(height: height)
+            }
         }
-        .frame(height: height)
         .background(alignment: .topTrailing) {
             BacktapeGlow(span: tile.span)
                 .frame(width: kind == .line ? 130 : 200, height: kind == .line ? 80 : 100)
@@ -497,8 +587,6 @@ struct BacktapeTileView: View {
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(shape)
-        // Where a zoom landed: the tiles lighten for a moment. No outline and no colour.
-        .overlay { shape.fill(Color.primary.opacity(lit ? 0.09 : 0)).allowsHitTesting(false) }
         .contentShape(shape)
     }
 
@@ -523,7 +611,7 @@ struct BacktapeTileView: View {
     private var line: some View {
         HStack(spacing: 10) {
             Text(verbatim: tile.start.formatted(Date.FormatStyle().hour().minute().locale(AppLocalization.locale)))
-                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .font(.alloRounded(.subheadline, .bold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -538,18 +626,18 @@ struct BacktapeTileView: View {
         let locale = AppLocalization.locale
         switch tile.zoom {
         case .weeks:
-            Text(verbatim: BacktapeLabels.week(tile.start)).font(.system(.title2, design: .rounded, weight: .bold))
+            Text(verbatim: BacktapeLabels.week(tile.start)).font(.alloRounded(.title2, .bold))
         case .days:
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(verbatim: tile.start.formatted(Date.FormatStyle().day().locale(locale)))
-                    .font(.system(kind == .wide ? .title3 : .headline, design: .rounded, weight: .bold))
+                    .font(.alloRounded(kind == .wide ? .title3 : .headline, .bold))
                 Text(verbatim: tile.start.formatted(Date.FormatStyle().weekday(.abbreviated).locale(locale)))
-                    .font(.caption.weight(.semibold))
+                    .font(.allo(.caption, .semibold))
                     .foregroundStyle(.secondary)
             }
         default:
             Text(verbatim: tile.start.formatted(Date.FormatStyle().hour().locale(locale)))
-                .font(.system(kind == .wide ? .title3 : .headline, design: .rounded, weight: .bold))
+                .font(.alloRounded(kind == .wide ? .title3 : .headline, .bold))
         }
     }
 
@@ -559,6 +647,9 @@ struct BacktapeTileView: View {
             if let text {
                 Text(verbatim: text)
                     .font(kind == .half ? .caption : .footnote)
+                    .fontWeight(open && kind == .line ? .semibold : .regular)
+                    .foregroundStyle(pending ? Color.secondary : Color.primary)
+                    .modifier(BacktapePending(on: pending))
                     .lineLimit(lines)
                     .multilineTextAlignment(.leading)
                     .transition(.opacity)
@@ -617,7 +708,7 @@ struct BacktapeZoomBar: View {
         HStack(spacing: 0) {
             ForEach(order) { item in
                 Text(LocalizedStringKey(item.title))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.allo(.subheadline, .semibold))
                     .foregroundStyle(item == zoom ? Color.primary : Color.secondary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 42)
@@ -651,8 +742,49 @@ final class BacktapeFrames {
     var frames: [String: CGRect] = [:]
 }
 
+/// A zoom's list content, scaled from the point the zoom started at: in from small or large as it
+/// arrives, and out past the page as it leaves (its last update, in the zoom's own animation). The
+/// scroll view around it keeps its size, so its soft edges under the bars never scale.
+struct BacktapeZoomMove<Content: View>: View {
+    var own: BacktapeZoom
+    var current: BacktapeZoom
+    var inward: Bool
+    var anchor: UnitPoint
+    @ViewBuilder var content: Content
+    @State private var arrived = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let leaving = own != current
+        let scale: CGFloat = reduceMotion ? 1 : leaving ? (inward ? 1.6 : 0.6) : arrived ? 1 : (inward ? 0.72 : 1.35)
+        // The anchor is the point on screen, so it is found in the part of the list that shows.
+        let anchor = self.anchor
+        content
+            .visualEffect { view, proxy in
+                let size = proxy.size
+                let shown = proxy.bounds(of: .scrollView) ?? CGRect(origin: .zero, size: size)
+                let point = UnitPoint(x: (shown.minX + anchor.x * shown.width) / max(1, size.width),
+                                      y: (shown.minY + anchor.y * shown.height) / max(1, size.height))
+                return view.scaleEffect(scale, anchor: point)
+            }
+            .onAppear {
+                guard !arrived else { return }
+                withAnimation(.spring(duration: 0.46, bounce: 0.12)) { arrived = true }
+            }
+    }
+}
+
+extension View {
+    /// The system's progressive blur under the bars (iOS 26); the bars' own material before it.
+    @ViewBuilder func softScrollEdges() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .all) } else { self }
+    }
+}
+
 struct BacktapeLibrary: View {
     var layout: BacktapeLayout
+    /// Senses' ask bar, under the zoom bar in the same bottom bar, so the soft edge covers both.
+    var askText: Binding<String>? = nil
     @ObservedObject var capture = HistoryCapture.shared
     @ObservedObject var lock = HistoryLock.shared
     @State private var notes = BacktapeNotes.shared
@@ -662,25 +794,26 @@ struct BacktapeLibrary: View {
     @State private var inward = true
     @State private var point: UnitPoint = .center
     @State private var target: String?
-    @State private var lit: Set<String> = []
+    /// Where each zoom's list stands. Set before a zoom, so the new list is laid out at its place
+    /// from its first frame and nothing loads in after the move.
+    @State private var places: [BacktapeZoom: ScrollPosition] = [:]
+    /// The 10 minute row that is open to its details.
+    @State private var expanded: String?
     @State private var pinched = false
     @State private var frames = BacktapeFrames()
     @State private var size: CGSize = .zero
-    @State private var asking: BacktapeTile?
-    @State private var pin = ""
-    @State private var wrong = false
     @State private var copied = 0
     @State private var forgotten = 0
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
+                // Only the list's content scales; the scroll view and its soft edges under the bars
+                // stay the size of the page and only fade, so nothing moves under the bars during a
+                // zoom (the flash the owner saw on 2026-11-19 was two scroll edges scaling there).
                 tape(zoom)
                     .id(zoom)
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: inward ? 0.72 : 1.35, anchor: point).combined(with: .opacity),
-                        removal: .scale(scale: inward ? 1.6 : 0.6, anchor: point).combined(with: .opacity)
-                    ))
+                    .transition(.opacity)
             }
             .coordinateSpace(.named("backtape"))
             .simultaneousGesture(
@@ -705,33 +838,20 @@ struct BacktapeLibrary: View {
             }
             .onChange(of: geometry.size) { _, new in size = new }
         }
-        .safeAreaInset(edge: .bottom) {
-            BacktapeZoomBar(zoom: zoom) { go($0, at: nil) }
-                .padding(.bottom, 8)
+        .bottomBar(softEdge: true) {
+            VStack(spacing: 10) {
+                BacktapeZoomBar(zoom: zoom) { go($0, at: nil) }
+                if let askText { PokiAskBar(text: askText, scope: .senses) }
+            }
+            .padding(.bottom, 8)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        // The settings pages' blue light (HomeBackdrop, as SettingsPageStyle draws it), frozen so a
+        // zoom never moves it: the soft edges under the bars blur the blue, with no band.
+        .background { HomeBackdrop(home: true, working: false, frozen: true).ignoresSafeArea() }
         .sensoryFeedback(.selection, trigger: zoom)
+        .sensoryFeedback(.selection, trigger: expanded)
         .sensoryFeedback(.success, trigger: copied)
         .sensoryFeedback(.impact(weight: .heavy), trigger: forgotten)
-        .alert(LocalizedStringKey(asking?.zoom.forget ?? "Forget"), isPresented: Binding(get: { asking != nil }, set: { if !$0 { asking = nil } })) {
-            SecureField("PIN", text: $pin).keyboardType(.numberPad)
-            Button("Forget", role: .destructive) {
-                let tile = asking
-                asking = nil
-                if lock.unlock(pin: pin), let tile {
-                    Task { await forget(tile) }
-                } else {
-                    wrong = true
-                }
-                pin = ""
-            }
-            Button("Cancel", role: .cancel) { pin = "" }
-        } message: {
-            Text("Enter the Screen History PIN to forget this. It cannot be brought back.")
-        }
-        .alert("Wrong PIN", isPresented: $wrong) {
-            Button("OK", role: .cancel) {}
-        }
     }
 
     // MARK: One zoom's list
@@ -739,11 +859,12 @@ struct BacktapeLibrary: View {
     private func tape(_ zoom: BacktapeZoom) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
+                BacktapeZoomMove(own: zoom, current: self.zoom, inward: inward, anchor: point) {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(layout.groups[zoom] ?? []) { group in
                         if let start = group.start {
                             Text(verbatim: zoom == .days ? BacktapeLabels.week(start) : BacktapeLabels.day(start))
-                                .font(.system(.title3, design: .rounded, weight: .bold))
+                                .font(.alloRounded(.title3, .bold))
                                 .padding(.top, 14)
                                 .padding(.horizontal, 4)
                                 .padding(.bottom, 2)
@@ -758,13 +879,18 @@ struct BacktapeLibrary: View {
                                     cell(first, .half)
                                     cell(second, .half)
                                 }
+                                .id("row-\(first.id)")
                             }
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
+                }
             }
+            .scrollPosition(Binding(get: { places[zoom] ?? ScrollPosition(idType: String.self) }, set: { places[zoom] = $0 }))
+            .softScrollEdges()
             .onAppear {
                 if let target { proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: point.y)) }
             }
@@ -772,7 +898,8 @@ struct BacktapeLibrary: View {
     }
 
     private func cell(_ tile: BacktapeTile, _ kind: BacktapeTileView.Kind) -> some View {
-        BacktapeTileView(tile: tile, kind: kind, note: notes.notes[tile.id], waiting: notes.waiting(tile), lit: lit.contains(tile.id))
+        BacktapeTileView(tile: tile, kind: kind, note: notes.notes[tile.id], waiting: notes.waiting(tile),
+                         pending: notes.pending(tile), open: expanded == tile.id)
             .id(tile.id)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("backtape")) } action: { frames.frames[tile.id] = $0 }
             .onAppear { notes.appeared(tile) }
@@ -780,20 +907,31 @@ struct BacktapeLibrary: View {
                 notes.disappeared(tile)
                 frames.frames[tile.id] = nil
             }
-            // A tap opens a week, a day or an hour, the same as pinching in on it.
+            // A tap opens a week, a day or an hour, the same as pinching in on it. A row of 10
+            // minutes opens in place, to its details.
             .onTapGesture {
-                if let finer = tile.zoom.finer { go(finer, from: tile) }
+                if let finer = tile.zoom.finer {
+                    go(finer, from: tile)
+                } else {
+                    withAnimation(.snappy(duration: 0.32)) { expanded = expanded == tile.id ? nil : tile.id }
+                }
             }
             // Raw screen text is only ever copied, never shown, and forgetting works on exactly what
             // the tile covers at this zoom.
             .contextMenu {
                 Section(BacktapeLabels.name(tile)) {
-                    Button { Task { await copy(tile) } } label: { Label("Copy Screen Text", systemImage: "doc.on.doc") }
-                    Button(role: .destructive) { ask(tile) } label: { Label(LocalizedStringKey(tile.zoom.forget), systemImage: "trash") }
+                    // Poki's own steps are the Activity Log's: they are neither screen text nor forgotten here.
+                    if tile.span.owned {
+                        Button { Task { await copy(tile) } } label: { Label("Copy Screen Text", systemImage: "doc.on.doc") }
+                        Button(role: .destructive) { ask(tile) } label: { Label(LocalizedStringKey(tile.zoom.forget), systemImage: "trash") }
+                    }
                 }
                 Section {
-                    ForEach(tile.span.apps.prefix(6), id: \.self) { app in
-                        Text(verbatim: BacktapeApps.name(app))
+                    ForEach(tile.span.workers, id: \.self) { worker in
+                        Text(verbatim: BacktapeActivity.name(worker))
+                    }
+                    ForEach(BacktapeApps.shares(tile.span).prefix(6), id: \.app) { item in
+                        Text(verbatim: BacktapeApps.name(item.app))
                     }
                 }
             }
@@ -803,7 +941,7 @@ struct BacktapeLibrary: View {
 
     /// Moves to `next`, keeping the place: zooming in, the tile under the fingers opens and its
     /// latest part lands where it was; zooming out, the parts close into the one tile that holds
-    /// them. The tiles that came out of the move are outlined for a moment.
+    /// them. Nothing is lit or dimmed after it (the owner, 2026-11-16): the move itself shows the place.
     private func go(_ next: BacktapeZoom, from tile: BacktapeTile? = nil, at location: CGPoint? = nil) {
         guard next != zoom else { return }
         let height = max(1, size.height)
@@ -812,29 +950,31 @@ struct BacktapeLibrary: View {
         let anchor = tile ?? nearest(spot)
         let goingIn = next.rawValue < zoom.rawValue
         let tiles = layout.tiles[next] ?? []
-        var marked: [BacktapeTile] = []
         var landing: BacktapeTile?
         if let anchor {
-            if goingIn {
-                marked = tiles.filter { $0.start >= anchor.start && $0.start < anchor.end }
-                landing = marked.first
-            } else {
-                landing = tiles.first { $0.start <= anchor.start && anchor.start < $0.end }
-                marked = landing.map { [$0] } ?? []
-            }
+            landing = goingIn
+                ? tiles.first { $0.start >= anchor.start && $0.start < anchor.end }
+                : tiles.first { $0.start <= anchor.start && anchor.start < $0.end }
         }
         inward = goingIn
         point = UnitPoint(x: min(0.9, max(0.1, spot.x / max(1, size.width))), y: min(0.8, max(0.2, spot.y / height)))
         target = landing?.id
         notes.focus = landing?.start
-        withAnimation(.spring(duration: 0.46, bounce: 0.12)) {
-            zoom = next
-            lit = Set(marked.map(\.id))
+        expanded = nil
+        if let landing {
+            places[next] = ScrollPosition(id: row(of: landing, in: next), anchor: UnitPoint(x: 0.5, y: point.y))
         }
-        Task {
-            try? await Task.sleep(for: .milliseconds(1100))
-            withAnimation(.easeOut(duration: 0.5)) { lit = [] }
+        withAnimation(.spring(duration: 0.46, bounce: 0.12)) { zoom = next }
+    }
+
+    /// The identity of the list's row a tile is in: its own, or for the second of a pair the pair's.
+    private func row(of tile: BacktapeTile, in zoom: BacktapeZoom) -> String {
+        for group in layout.groups[zoom] ?? [] {
+            for row in group.rows {
+                if case .pair(let first, let second) = row, first.id == tile.id || second.id == tile.id { return "row-\(first.id)" }
+            }
         }
+        return tile.id
     }
 
     private func nearest(_ spot: CGPoint) -> BacktapeTile? {
@@ -862,15 +1002,11 @@ struct BacktapeLibrary: View {
         copied += 1
     }
 
-    /// Forgetting is confirmed with Face ID or Touch ID, or with Poki's PIN where those are off.
+    /// Forgetting is confirmed with the system prompt: Face ID, Touch ID or the passcode, as the owner
+    /// set it on Face ID & Passcode.
     private func ask(_ tile: BacktapeTile) {
-        if lock.usesBiometrics {
-            Task {
-                if await lock.confirm(AppLocalization.bundle.localizedString(forKey: tile.zoom.forget, value: tile.zoom.forget, table: nil)) { await forget(tile) }
-            }
-        } else {
-            pin = ""
-            asking = tile
+        Task {
+            if await lock.confirm(AppLocalization.bundle.localizedString(forKey: tile.zoom.forget, value: tile.zoom.forget, table: nil)) { await forget(tile) }
         }
     }
 

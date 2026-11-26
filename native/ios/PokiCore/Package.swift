@@ -12,5 +12,7 @@ let package = Package(
         .testTarget(name: "PokiCoreTests", dependencies: ["PokiCore"]),
         // Drives look/do against a real WebDriverAgent in the iOS Simulator (CI's simulator job).
         .executableTarget(name: "poki-sim-check", dependencies: ["PokiCore"]),
+        // PokiCore on a Mac for an iOS Simulator, as a stdio MCP server that poki-mcp starts (#609).
+        .executableTarget(name: "poki-core-mac", dependencies: ["PokiCore"]),
     ]
 )

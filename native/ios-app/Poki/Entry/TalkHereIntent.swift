@@ -114,3 +114,11 @@ private struct TalkHereError: LocalizedError {
     let why: String
     var errorDescription: String? { why }
 }
+
+#if POKI_SIRI_TOOLS
+// A tool for Siri AI. This is what @AppIntent(.tool) adds, written out: the macro needs iOS 27.3,
+// and Poki runs from iOS 18, so only the conformance is limited to 27.3 and the intent stays
+// available (with its App Shortcut and control) on earlier versions.
+@available(iOS 27.3, *)
+extension TalkHereIntent: ToolIntent {}
+#endif

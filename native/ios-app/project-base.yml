@@ -17,6 +17,15 @@ packages:
   PiSwift:
     url: https://github.com/xibbon/PiSwift.git
     revision: 13f157d78ec2eb1ed95d5623518ec92f8aaf7ef0 # v1.6.0
+  # Apple's MLX language model library (MIT) and Hugging Face's tokenizers (Apache 2.0), for the
+  # model the owner can download to this iPhone: it decides for skills and writes Screen
+  # History's notes where Apple Intelligence is missing.
+  MLXSwiftLM:
+    url: https://github.com/ml-explore/mlx-swift-lm.git
+    minorVersion: 3.32.3
+  SwiftTransformers:
+    url: https://github.com/huggingface/swift-transformers.git
+    from: 1.3.0
 settings:
   base:
     POKI_BUNDLE_ID: nz.zheha.poki
@@ -66,16 +75,18 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
-        # Geist (SIL OFL 1.1, Shared/Fonts) for the Live Activity, in both bundles: the widget
-        # extension draws the island and falls back to SF Pro without its own copy.
-        UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, Geist-Bold.ttf, Geist-Black.ttf]
+        # Allo (SIL OFL 1.1, Shared/Fonts, cut by scripts/make-allo-fonts.py) for the app and the Live
+        # Activity, in both bundles: the widget extension draws the island and falls back to SF Pro
+        # without its own copy.
+        UIAppFonts: [AlloText-Regular.ttf, AlloText-Medium.ttf, AlloText-SemiBold.ttf, AlloText-Bold.ttf, AlloText-ExtraBold.ttf, AlloRounded-Medium.ttf, AlloRounded-SemiBold.ttf, AlloRounded-Bold.ttf, AlloRounded-ExtraBold.ttf, AlloRounded-Black.ttf]
         # While Poki is on, background location (with the blue location pill) keeps the app, and with it
         # the relay connection and the launcher, running; silent audio is the fallback. Poki never reads
         # or sends the location itself.
-        UIBackgroundModes: [location, audio, processing, screen-capture]
-        # iOS 26: the continued processing task that keeps Poki up while it is on (ContinuedRun). The
-        # signer rewrites the nz.zheha.poki prefix to the signed bundle id.
-        BGTaskSchedulerPermittedIdentifiers: ["$(POKI_BUNDLE_ID).run.*"]
+        UIBackgroundModes: [location, audio, fetch, screen-capture]
+        # Background App Refresh wakes Poki now and then so the keeper can start again (BackgroundRefresh).
+        # The app reads this name from here at run time. Poki Setup's signer rewrites the
+        # nz.zheha.poki prefix to the signed bundle id; a signer that leaves it alone works too.
+        BGTaskSchedulerPermittedIdentifiers: ["$(POKI_BUNDLE_ID).refresh"]
         # Documents/AgentBackup holds the agent's memory backup, which Poki Setup copies off and puts back.
         UIFileSharingEnabled: true
         NSLocationWhenInUseUsageDescription: Poki keeps running in the background while it is on, so agents can reach this iPhone. Poki does not record or send your location.
@@ -85,6 +96,7 @@ targets:
             CFBundleURLSchemes: [poki]
         NSLocalNetworkUsageDescription: Poki connects to this iPhone's own developer services to pair with it and to run the automation, and to the voice bridge on your Mac.
         NSFaceIDUsageDescription: Poki uses Face ID to unlock Screen History, so only you can open it.
+        NSPhotoLibraryUsageDescription: Poki shows your recent photos when you add to a message, so you can send one with a tap.
         NSCameraUsageDescription: Poki uses the camera to take photos you send in a message, and to scan the pairing code Poki Setup shows on your computer.
         NSMicrophoneUsageDescription: Poki listens while you talk to it in Voice, and sends that audio to OpenAI to understand what you ask.
         NSSpeechRecognitionUsageDescription: Poki uses speech recognition for dictation, to transcribe app audio on this iPhone, and to turn your recording into a text task if live voice can’t connect.
@@ -93,7 +105,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # _remotepairing._tcp: Poki reads this iPhone's own remote pairing port from it (iOS moves the port).
-        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp, _remotepairing._tcp]
+        NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing-manual-pairing._tcp, _remotepairing._tcp, _poki._tcp]
         LSApplicationQueriesSchemes: [karing, surge, loon, shadowrocket, sing-box, stash, quantumult-x, clashmi]
         # A pairing file sent by AirDrop, Files or Poki Setup opens in Poki (Setup > Pair This iPhone).
         CFBundleDocumentTypes:
@@ -119,6 +131,15 @@ targets:
         product: PiSwiftAgent
       - package: PiSwift
         product: PiSwiftAI
+      - package: MLXSwiftLM
+        product: MLXLLM
+      - package: MLXSwiftLM
+        product: MLXLMCommon
+      - package: SwiftTransformers
+        product: Tokenizers
+      # Connectors (remote MCP servers): pi's MCP client, streamable HTTP and OAuth.
+      - package: PiSwift
+        product: PiSwiftMCP
     preBuildScripts:
       - name: Build Codex Voice
         script: '"$SRCROOT/../codex-voice/build.sh" build "$POKI_CODEX_RUST_TARGET"'
@@ -127,7 +148,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(POKI_BUNDLE_ID)
         # The app draws with the system's colours; the Live Activity keeps the website's blue (Site).
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) POKI_APP
+        # POKI_SIRI_TOOLS: Siri AI may call Poki's actions as tools (@AppIntent(.tool)), which only
+        # the iOS 27.3 SDK knows. The IPA build (.github/actions/build-ipa) turns it on; any other
+        # build leaves it off and still builds.
+        POKI_SIRI_TOOLS_FLAG: ""
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) POKI_APP $(POKI_SIRI_TOOLS_FLAG)
         # PokiLauncher: the Rust static library from native/launcher, built for aarch64-apple-ios
         # before this project (see .github/workflows/ios-app.yml).
         SWIFT_OBJC_BRIDGING_HEADER: Poki/Runtime/Poki-Bridging-Header.h
@@ -186,7 +211,7 @@ targets:
         CFBundleLocalizations: [en, zh-Hans, zh-Hant]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        UIAppFonts: [Geist-Regular.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, Geist-Bold.ttf, Geist-Black.ttf]
+        UIAppFonts: [AlloText-Regular.ttf, AlloText-Medium.ttf, AlloText-SemiBold.ttf, AlloText-Bold.ttf, AlloText-ExtraBold.ttf, AlloRounded-Medium.ttf, AlloRounded-SemiBold.ttf, AlloRounded-Bold.ttf, AlloRounded-ExtraBold.ttf, AlloRounded-Black.ttf]
     entitlements:
       path: PokiWidgets/PokiWidgets.entitlements
       properties:

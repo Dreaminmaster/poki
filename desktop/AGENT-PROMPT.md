@@ -14,4 +14,4 @@ How to work
 6. Do not drive or tap the phone yourself, do not change Apple Account settings, and do not deploy the relay to Cloudflare unless I ask.
 7. If something fails twice, run `poki-setup support --json` and show me where the bundle was saved, and what failed.
 
-When `next` reports `ready`, tell me Poki is installed, how many days it is signed for, and that Poki Setup renews it by itself while this computer is on.
+When `next` reports `ready`, tell me Poki is installed, how many days it is signed for, and that Poki Setup renews it by itself while this computer is on. Then connect yourself to Poki: run `poki-setup mcp connect --json` and add Poki MCP with the command it gives for your agent (for Claude Code: `claude mcp add --scope user poki -- poki-setup mcp serve`, with the tool's full path in quotes). It reaches the phone over the cable, else this Wi-Fi, else the relay. The first time, Poki asks on the phone whether to allow this computer: tell me to tap Allow. Check it with the `connection` tool and one `look`.

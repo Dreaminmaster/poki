@@ -112,7 +112,7 @@ struct LoopbackShortcutSteps: View {
 
         Section {
             NavigationLink {
-                HistoryShortcutGuide().settingsPage().outsideStartFlow()
+                HistoryShortcutGuide().settingsPage().outsideStartFlow().onAppear { reconnect.asked = true }
             } label: {
                 Text("No Automation? Add It by Hand")
             }
@@ -141,7 +141,7 @@ struct GuideLine: View {
     var text: LocalizedStringKey
     var body: some View {
         Label { Text(text) } icon: { Image(systemName: "\(number).circle") }
-            .font(.subheadline)
+            .font(.allo(.subheadline))
     }
 }
 

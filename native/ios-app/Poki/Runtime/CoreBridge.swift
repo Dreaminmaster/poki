@@ -19,6 +19,10 @@ enum ShellEvent: Sendable {
     case handoffRequested(id: String, kind: String, text: String?, app: String?)
     /// `how` is "done" (the owner tapped Done) or "takenBack" (the model went on by itself).
     case handoffEnded(id: String, how: String)
+    /// An outside agent's words on what its next step is for (`do`'s intent), just before its toolStarted.
+    case stepIntent(session: String?, intent: String)
+    /// A line an outside agent added to its session's record (`do {note}`).
+    case sessionNote(session: String?, text: String)
 }
 
 enum RelayStatus: Sendable, Equatable {

@@ -43,16 +43,19 @@ struct ApprovalsSections: View {
                 }
                 .accessibilityIdentifier("approvals.mode")
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(ApprovalCopy.sensitiveSteps)
-                    switch model.approvalMode {
-                    case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
-                    case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
-                    case .off: Text(ApprovalCopy.neverAskFooter)
+                Group {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(ApprovalCopy.sensitiveSteps)
+                        switch model.approvalMode {
+                        case .reply: Text("With Message Reply, Poki asks you in the chat and your yes lets the step through. Away from Poki you can answer from the notification. Outside agents have no chat, so their steps ask with Allow and Don’t Allow.")
+                        case .confirm: Text("With Confirmation, you tap Allow or Don’t Allow on the Live Activity, in a notification, or here in Poki.")
+                        case .off: Text(ApprovalCopy.neverAskFooter)
+                        }
+                        Text(ApprovalCopy.alwaysConfirm)
+                        Text("Changes apply right away, starting from Poki’s next step.")
                     }
-                    Text(ApprovalCopy.alwaysConfirm)
-                    Text("Changes apply right away, starting from Poki’s next step.")
                 }
+                .settingsFooter()
             }
             if model.approvalMode != .off {
                 Section {
@@ -75,12 +78,15 @@ struct ApprovalsSections: View {
                     }
                     .padding(.vertical, 4)
                 } footer: {
-                    switch model.classifierLevel {
-                    case .permissive: Text("Permissive. Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
-                    case .balanced: Text("Balanced. Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
-                    case .strict: Text("Strict. Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
-                    case .everything: Text("Ask All. Nothing is approved automatically. Each request needs your answer.")
+                    Group {
+                        switch model.classifierLevel {
+                        case .permissive: Text("Your chat model approves a step in Poki’s own chat unless it clearly has nothing to do with what you asked, or you said no.")
+                        case .balanced: Text("Your chat model approves a step in Poki’s own chat when it directly serves what you asked for. You are asked about the rest.")
+                        case .strict: Text("Your chat model approves a step in Poki’s own chat only when you asked for that exact action. You are asked about the rest.")
+                        case .everything: Text("Nothing is approved automatically. Each request needs your answer.")
+                        }
                     }
+                    .settingsFooter()
                 }
             }
         }
@@ -113,12 +119,18 @@ struct AgentsView: View {
                     NavigationLink(value: SettingsRoute.memory) {
                         LabeledContent {
                             Text("\(RoutineStore.shared.usableSkills.count) skills")
-                        } label: { Label("Memory Library", systemImage: "brain") }
+                        } label: { Label("Memory", systemImage: "brain") }
                     }
                 } header: {
-                    Text("Poki Agent")
+                    Group {
+                        Text("Poki Agent")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
+                    Group {
+                        Text("The model used for Poki chat and voice on this iPhone. Memory stores skills and notes shared across agents.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -153,11 +165,17 @@ struct AgentsView: View {
                     }
                     .disabled(model.relayAddress == nil)
                 } header: {
-                    Text("External Agents")
+                    Group {
+                        Text("External Agents")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text(model.relayAddress == nil
-                         ? "Set your relay first. Each agent gets its own MCP address on it."
-                         : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                    Group {
+                        Text(model.relayAddress == nil
+                             ? "Set your relay first. Each agent gets its own MCP address on it."
+                             : "Each agent gets its own MCP address. Add it as a remote MCP server in Claude, Codex or any MCP client. It takes the agent’s name and icon when the agent first connects, unless you renamed it. Swipe to revoke.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -167,7 +185,7 @@ struct AgentsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("MCP Relay")
                                 Text(relayLine)
-                                    .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                                    .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                             }
                         } icon: {
                             Image(systemName: "antenna.radiowaves.left.and.right")
@@ -185,9 +203,15 @@ struct AgentsView: View {
                         }
                     }
                 } header: {
-                    Text("MCP Relay")
+                    Group {
+                        Text("MCP Relay")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                    Group {
+                        Text("The relay forwards agents’ requests to this iPhone while Poki is open or in the background. It stores nothing.")
+                    }
+                    .settingsFooter()
                 }
 
                 Section {
@@ -199,9 +223,15 @@ struct AgentsView: View {
                     }
                     NavigationLink(value: AgentsRoute.activityLog) { Label("Activity Log", systemImage: "list.bullet.rectangle") }
                 } header: {
-                    Text("Safety")
+                    Group {
+                        Text("Safety")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("When Poki asks you before a sensitive step, and the record of every action any agent ran on this iPhone.")
+                    Group {
+                        Text("When Poki asks you before a sensitive step, and the record of every action any agent ran on this iPhone.")
+                    }
+                    .settingsFooter()
                 }
             }
             .listStyle(.insetGrouped)
@@ -265,15 +295,26 @@ struct AdvancedView: View {
                 Button("Notification Settings", systemImage: "bell.badge") {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
                 }
-            } header: { Text("Notifications") }
+            } header: {
+                Group {
+     Text("Notifications") 
+                }
+                .settingsHeader()
+            }
             Section {
                 NavigationLink(value: SettingsRoute.diagnostics) { Label("Diagnostics", systemImage: "stethoscope") }
                 NavigationLink(value: SettingsRoute.log) { Label("Log", systemImage: "doc.text") }
                 NavigationLink { TestingOptionsView() } label: { Label("Testing Options", systemImage: "flask") }
             } header: {
-                Text("Debugging")
+                Group {
+                    Text("Debugging")
+                }
+                .settingsHeader()
             } footer: {
-                Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")
+                Group {
+                    Text("Diagnostics has connection checks and this iPhone’s addresses. Testing Options has switches being tried.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Advanced"))

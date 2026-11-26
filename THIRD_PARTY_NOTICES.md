@@ -40,6 +40,21 @@ The on-phone runner is built from [appium/WebDriverAgent](https://github.com/app
 
 The Poki app's Voice tab links Google's [WebRTC](https://webrtc.googlesource.com/src) through the unmodified prebuilt framework from [stasel/WebRTC](https://github.com/stasel/WebRTC) 155.0.0 (Swift Package Manager, `native/ios-app/project.yml`). WebRTC is BSD-3-Clause licensed (Copyright (c) 2011, The WebRTC project authors); its license and patent grant ship inside the framework (`WebRTC.xcframework/LICENSE`). The framework is downloaded at build time and not stored in this repository.
 
+## MLX and the tokenizer of the downloaded model
+
+The Poki app can run a model the owner downloads to the iPhone (Settings, Models, Local Models). It links three Swift packages for that, fetched by Swift Package Manager at build time (`native/ios-app/project-base.yml`) and not stored in this repository:
+
+| Repository | Products linked and version | License |
+| --- | --- | --- |
+| [ml-explore/mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | `MLXLLM`, `MLXLMCommon`; 3.32.x from 3.32.3 | MIT, Copyright (c) 2024 ml-explore; full text in [third_party/LICENSE.mlx-swift-lm](third_party/LICENSE.mlx-swift-lm). |
+| [ml-explore/mlx-swift](https://github.com/ml-explore/mlx-swift) | `MLX`, `MLXNN`, `MLXOptimizers`, through mlx-swift-lm; 0.32.x from 0.32.3 | MIT, Copyright (c) 2023 ml-explore; full text in [third_party/LICENSE.mlx-swift](third_party/LICENSE.mlx-swift). The package builds Apple's MLX and the libraries MLX bundles from source; their notices are in the package's own `ACKNOWLEDGMENTS.md`. |
+| [huggingface/swift-transformers](https://github.com/huggingface/swift-transformers) | `Tokenizers` (with its `Hub` target); 1.3.0 or later below 2.0 | Apache-2.0, Hugging Face; full text in [third_party/LICENSE.swift-transformers](third_party/LICENSE.swift-transformers). |
+
+The versions a build resolves are the ones in its `Package.resolved`. The [dependency inventory](docs/third-party-dependencies.md#swift-packages-of-the-downloaded-model) lists the packages these three bring with them.
+
+[native/ios-app/Poki/History/BacktapeModel.swift](native/ios-app/Poki/History/BacktapeModel.swift) holds an adapter, `BacktapeTokenizerLoader` and `BacktapeTokenizer`, that puts swift-transformers' tokenizer behind mlx-swift-lm's `Tokenizer` protocol. It is written out from what mlx-swift-lm's `#huggingFaceTokenizerLoader` macro expands to (the `MLXHuggingFace` target at 3.32.3), so the build needs no macro plugin. The mlx-swift-lm MIT license applies to that code.
+
+The model weights are not part of Poki and are not in this repository or in the app: the owner downloads them from Hugging Face to the iPhone, at a pinned revision, from [mlx-community/Qwen3-1.7B-4bit](https://huggingface.co/mlx-community/Qwen3-1.7B-4bit) or [mlx-community/Qwen3.5-2B-4bit](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit). Both are published under Apache-2.0.
 ## ChatGPT voice trust roots
 
 The Poki app's iOS Codex voice build links the Mozilla public CA roots from [webpki-roots 1.0.10](https://crates.io/crates/webpki-roots/1.0.10) through its [0.26.11 compatibility crate](https://crates.io/crates/webpki-roots/0.26.11). Both versions are licensed under [CDLA-Permissive-2.0](https://cdla.dev/permissive-2-0/) and pinned in the generated Codex build lockfile.
@@ -74,7 +89,7 @@ The iPhone app's Live Activity ([native/ios-app/Shared](native/ios-app/Shared), 
 - [onehumanbeing/esp32-iphone-agent](https://github.com/onehumanbeing/esp32-iphone-agent/tree/cc966294b96b18da9b04931ec96cab7962461c7f) at commit `cc966294`, copyright 2026 Henry Yuan, under the [MIT license](third_party/LICENSE.esp32-iphone-agent): the update token bucket (`ios/IPhoneAgent/App/LiveActivity.swift`) and the system-counted countdown (`ios/AgentActivity/AgentActivityWidget.swift`).
 - [leepokai/Codync](https://github.com/leepokai/Codync/tree/848070df40b788601bd0ae6c720fa77d823ab60e) at commit `848070d`, copyright 2026 Po Kai Lee, under the [Apache License 2.0](third_party/LICENSE.codync) with its [NOTICE](third_party/NOTICE.codync): the phase spring and row transition (`apps/ios/Kit/Sources/CodyncKit/Design/Motion.swift`, `ActivityCards.swift`), interpolated text and the expanded island's corner margins (`apps/ios/Widgets/CodyncWidgets.swift`). Poki changed these files: it ported the snippets into its own views.
 
-The app and the Live Activity draw their Latin text in [Geist](https://github.com/vercel/geist-font) 1.3.1 (Regular, Medium, SemiBold, Bold and Black, from the `geist` npm package), copyright 2023 Vercel in collaboration with basement.studio, under the SIL Open Font License 1.1. The fonts and their complete license are in [native/ios-app/Shared/Fonts](native/ios-app/Shared/Fonts) and are bundled in both the app and its widget extension.
+The app, its launch screen and the Live Activity draw their Latin text in [Allo](https://github.com/joshpuckett/allo) 1.0.3, copyright 2026 Josh Puckett and copyright 2016 The Inter Project Authors, under the SIL Open Font License 1.1. Poki bundles a Modified Version: ten static fonts (Allo Text and Allo Rounded) cut from `AlloVariable.ttf` by [native/ios-app/scripts/make-allo-fonts.py](native/ios-app/scripts/make-allo-fonts.py), which fixes roundness and optical size and enlarges the em to match SF Pro's cap and line height. The fonts and their complete license are in [native/ios-app/Shared/Fonts](native/ios-app/Shared/Fonts) and are bundled in both the app and its widget extension.
 
 ## iPhone app chat
 

@@ -49,11 +49,11 @@ struct ResultCardChanges: View {
             ForEach(Array(legs.dropFirst().enumerated()), id: \.offset) { index, leg in
                 let before = legs[index]
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "arrow.triangle.swap").font(.caption2).foregroundStyle(Color(.tertiaryLabel))
+                    Image(systemName: "arrow.triangle.swap").font(.allo(.caption2)).foregroundStyle(Color(.tertiaryLabel))
                     Text(verbatim: ResultCardParts.line([before.to ?? leg.from, times(before, leg), leg.wait]) ?? "")
-                        .font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                        .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                     if let change = leg.change {
-                        Text(verbatim: change).font(.caption).foregroundStyle(warning).lineLimit(1)
+                        Text(verbatim: change).font(.allo(.caption)).foregroundStyle(warning).lineLimit(1)
                     }
                 }
                 .accessibilityElement(children: .combine)

@@ -232,7 +232,7 @@ struct PokiHead: View {
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
                     PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
                         Text(verbatim: "Poki")
-                            .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
+                            .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
                             .padding(.horizontal, 12).frame(minHeight: 24)
                             .contentShape(Capsule())
                     }
@@ -327,7 +327,7 @@ struct ChatTopBar: View {
 
     private func glyph(_ symbol: String, dim: Bool = false) -> some View {
         Image(systemName: symbol)
-            .font(.body.weight(.semibold))
+            .font(.allo(.body, .semibold))
             .foregroundStyle(Color(.label).opacity(dim ? 0.35 : 1))
             .frame(width: sizes.button, height: sizes.button)
             .contentShape(.circle)
@@ -345,7 +345,7 @@ struct UpdatePill: View {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Tint.blue)
                 Text("Update Available").foregroundStyle(Color(.label))
             }
-            .font(.subheadline.weight(.medium))
+            .font(.allo(.subheadline, .medium))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 8)
             .padding(.horizontal, 16).frame(minHeight: 44)
@@ -448,8 +448,9 @@ enum HomeGreeting {
 }
 
 /// The greeting as the home page draws it, for the time `date` falls in: the hello in ink and the
-/// question in grey under it, centred under Poki's picture. System Semibold 28 tracked in by 0.6,
-/// with no space between the lines.
+/// question in grey under it, centred under Poki's picture. Allo Rounded Bold 28, prominent text as
+/// the conversations' "Poki" title is (the owner, Nov 20 2026: it was the system font), tracked in a
+/// little, with no space between the lines.
 struct HomeGreetingView: View {
     var date: Date
     @Environment(\.colorScheme) private var scheme
@@ -464,8 +465,8 @@ struct HomeGreetingView: View {
                 .foregroundStyle(dark ? Color(hex: 0x8D8D87) : Color(hex: 0x6F6F69))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: size, weight: .semibold))
-        .tracking(-0.6 * size / 28)
+        .font(Prominent.font(size: 28, relativeTo: .title, .bold))
+        .tracking(-0.3 * size / 28)
         .multilineTextAlignment(.center)
         // Read as one sentence: in Chinese the hello's comma runs on into the question.
         .accessibilityElement(children: .ignore)
@@ -529,6 +530,8 @@ struct HomePage<Footer: View>: View {
         .task(id: sessionStore.sessions.count) {
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
+        // The owner's habits and the recent tape, on this iPhone (at most every half hour).
+        .task { await SensesSuggestions.shared.refresh() }
         .onChange(of: AppLocalization.language, initial: true) { _, _ in
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
@@ -684,9 +687,9 @@ private struct ShortcutPill: View {
                     : AnyLayout(HStackLayout(spacing: 5))
                 layout {
                     if !idea.appName.isEmpty {
-                        Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                        Text(verbatim: idea.appName).font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label))
                     }
-                    Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
+                    Text(verbatim: idea.text).font(.allo(.subheadline)).foregroundStyle(Color(.label).opacity(0.7))
                 }
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
@@ -755,7 +758,7 @@ private struct ShortcutMenu: View {
                 Image(systemName: symbol).frame(width: 24)
                 Text(title).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.body).foregroundStyle(ink)
+            .font(.allo(.body)).foregroundStyle(ink)
             .padding(.horizontal, 18).frame(minHeight: 46).contentShape(.rect)
         }
         .buttonStyle(ShortcutRowStyle())

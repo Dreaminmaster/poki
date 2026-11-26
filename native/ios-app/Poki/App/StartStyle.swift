@@ -22,6 +22,34 @@ extension EnvironmentValues {
     @Entry var startDesign: StartDesign? = nil
 }
 
+/// A row's symbol in the start flow: Poki's blue (orange while it needs you), alone or on a tile.
+struct StartIcon<Icon: View>: View {
+    var design: StartDesign
+    var warns = false
+    @ViewBuilder var icon: Icon
+    @ScaledMetric(relativeTo: .body) private var tile = 29
+    @ScaledMetric(relativeTo: .body) private var glyph = 16
+
+    var body: some View {
+        let tint = warns ? Color(.systemOrange) : Color(.systemBlue)
+        switch design {
+        case .plain:
+            icon
+                .font(.system(size: min(glyph * 1.15, 26), weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: min(tile, 40))
+                .accessibilityHidden(true)
+        case .tiles:
+            icon
+                .font(.system(size: min(glyph, 22), weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: min(tile, 40), height: min(tile, 40))
+                .background(tint.gradient, in: .rect(cornerRadius: min(tile, 40) * 0.24, style: .continuous))
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 /// The start flow's ground: Poki's blue (the owner, Nov 21 2026: blue for the setup guidance pages),
 /// a deep night blue in Dark Mode, with the rows as cards on it. The tiles hello keeps the home light.
 struct StartGround: View {
@@ -63,7 +91,7 @@ struct StartButtons: View {
         VStack(spacing: 8) {
             Button(action: action) {
                 // Poki blue on a white button: the prominent glass takes the white tint on the blue ground.
-                Text(primary).font(.body.weight(.semibold)).foregroundStyle(StartGround.blue).frame(maxWidth: .infinity)
+                Text(primary).font(.allo(.body, .semibold)).foregroundStyle(StartGround.blue).frame(maxWidth: .infinity)
             }
             .controlSize(.large)
             .buttonBorderShape(.capsule)
@@ -73,7 +101,7 @@ struct StartButtons: View {
             .accessibilityIdentifier(primaryID)
             if let secondary {
                 Button(action: secondaryAction) {
-                    Text(secondary).font(.body).foregroundStyle(StartGround.ink).frame(maxWidth: .infinity, minHeight: 44)
+                    Text(secondary).font(.allo(.body)).foregroundStyle(StartGround.ink).frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier(secondaryID)
@@ -102,6 +130,7 @@ struct StartButtons: View {
 /// bottom. It comes in once the launch screen has faded onto it (`LaunchCurtain`'s hand over).
 struct StartHello: View {
     var design: StartDesign
+    var kind: FirstRun.Kind
     var replay = false
     var shown: Bool
     var setUp: () -> Void
@@ -124,8 +153,8 @@ struct StartHello: View {
                     .frame(maxWidth: .infinity)
                 Spacer(minLength: 16)
             }
-            StartButtons(primary: "Set Up Poki", action: setUp,
-                         secondary: replay ? "Not Now" : nil, secondaryAction: later,
+            StartButtons(primary: kind == .firstRun ? "Set Up Poki" : "Check Setup", action: setUp,
+                         secondary: kind == .firstRun && !replay ? nil : "Not Now", secondaryAction: later,
                          primaryID: "firstRun.primary", secondaryID: "firstRun.later")
                 .padding(.bottom, 8)
         }
@@ -160,11 +189,11 @@ struct StartHello: View {
         let text: TextAlignment = alignment == .center ? .center : .leading
         return VStack(alignment: alignment, spacing: 10) {
             Text(verbatim: headline)
-                .font(.largeTitle.weight(.bold))
+                .font(.alloRounded(.largeTitle, .bold))
                 .foregroundStyle(design == .plain ? StartGround.ink : Color(.label))
                 .accessibilityAddTraits(.isHeader)
             Text(verbatim: line)
-                .font(.body)
+                .font(.allo(.body))
                 .foregroundStyle(design == .plain ? StartGround.quietInk : Color(.secondaryLabel))
         }
         .multilineTextAlignment(text)
@@ -174,9 +203,19 @@ struct StartHello: View {
         .padding(.horizontal, 32)
     }
 
-    private var headline: String { AppLocalization.text(LocalizedStringResource("Hello, I’m Poki")) }
+    private var headline: String {
+        switch kind {
+        case .firstRun: AppLocalization.text(LocalizedStringResource("Hello, I’m Poki"))
+        case .update(let version): AppLocalization.text(LocalizedStringResource("Poki \(version) Is Here"))
+        }
+    }
 
-    private var line: String { AppLocalization.text(LocalizedStringResource("I do what you ask, right on your iPhone.")) }
+    private var line: String {
+        switch kind {
+        case .firstRun: AppLocalization.text(LocalizedStringResource("I do what you ask, right on your iPhone."))
+        case .update: AppLocalization.text(LocalizedStringResource("See what is set up and what is new."))
+        }
+    }
 }
 
 /// The top of a start flow page: the step's symbol large, its name as a large title and one line,
@@ -198,11 +237,11 @@ struct StartHero: View {
                     .contentTransition(.symbolEffect(.replace))
                     .accessibilityHidden(true)
                 Text(title)
-                    .font(.largeTitle.weight(.bold))
+                    .font(.alloRounded(.largeTitle, .bold))
                     .foregroundStyle(StartGround.ink)
                     .accessibilityAddTraits(.isHeader)
                 Text(line)
-                    .font(.body)
+                    .font(.allo(.body))
                     .foregroundStyle(StartGround.quietInk)
             }
             .multilineTextAlignment(.center)
@@ -236,6 +275,7 @@ enum StartRoute: Hashable {
 struct StartFlowPage: View {
     @Environment(AppModel.self) private var model
     var route: StartRoute
+    var kind: FirstRun.Kind
     @Binding var path: NavigationPath
     var finish: () -> Void
 
@@ -271,7 +311,7 @@ struct StartFlowPage: View {
             .settingsPage()
             .bottomBar(softEdge: true) { StartButtons(primary: "Continue", action: goOn) }
         case .summary:
-            WelcomePanel(path: $path, finish: finish)
+            WelcomePanel(kind: kind, path: $path, finish: finish)
         }
     }
 
@@ -283,8 +323,8 @@ struct StartFlowPage: View {
         } else if step == .background {
             // One button: iOS's request first, Settings once iOS answered short of Always.
             if model.background.authorization == .notDetermined {
-                StartButtons(primary: "Continue", action: goOn, secondary: "Set Up Later", secondaryAction: goOn)
-                    .disabledPrimary()
+                StartButtons(primary: "Allow Location", action: { model.background.requestPermission() },
+                             secondary: "Set Up Later", secondaryAction: goOn)
             } else {
                 StartButtons(primary: "Open Settings", action: { openSettings(model, for: step) },
                              secondary: "Set Up Later", secondaryAction: goOn)
@@ -318,7 +358,7 @@ extension View {
 /// The start flow's page for the Poki Loopback Shortcut: what it does in one line, then the steps.
 struct StartShortcutPage: View {
     var goOn: () -> Void
-    @ObservedObject private var reconnect = LoopbackShortcut.shared
+    @ObservedObject private var reconnect = HistoryReconnect.shared
 
     var body: some View {
         Form {
@@ -342,21 +382,19 @@ struct StartShortcutPage: View {
 struct StartModelsPage: View {
     var goOn: () -> Void
     @State private var hasModel = ModelKeys.hasUsableKey
-    @State private var adding = false
 
     var body: some View {
         Form {
             StartHero(symbol: "sparkles", title: "Connect a Model",
                       line: "Poki needs an AI account to think. Add one provider below. One is enough.",
                       done: hasModel)
-            ModelSettingsSections { adding = true }
+            ModelSettingsSections()
         }
         .navigationTitle(Text(verbatim: ""))
         .navigationBarTitleDisplayMode(.inline)
         .settingsPage()
         .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in hasModel = ModelKeys.hasUsableKey }
         .onAppear { hasModel = ModelKeys.hasUsableKey }
-        .sheet(isPresented: $adding) { AddAccount().outsideStartFlow() }
         .bottomBar(softEdge: true) {
             StartButtons(primary: "Continue", action: goOn, secondary: hasModel ? nil : "Set Up Later", secondaryAction: goOn)
         }

@@ -1,7 +1,8 @@
 import XCTest
 @testable import Poki
 
-/// The first run shows on a fresh install and never to someone updating from a version they used.
+/// The first run shows on a fresh install and never to someone updating from a version they used; an
+/// update's welcome shows once for each new version.
 @MainActor
 final class FirstRunDecisionTests: XCTestCase {
     private var folder: URL!
@@ -45,5 +46,25 @@ final class FirstRunDecisionTests: XCTestCase {
         FirstRun.finish(defaults: defaults)
         launch()
         XCTAssertEqual(record, "done")
+    }
+
+    func testAFreshInstallGetsTheFirstRunsWelcome() {
+        launch()
+        XCTAssertEqual(FirstRun.pending(defaults: defaults, version: "0.4.7"), .firstRun)
+    }
+
+    func testEachNewVersionGetsOneWelcome() {
+        launch()
+        FirstRun.finish(defaults: defaults, version: "0.4.7")
+        XCTAssertNil(FirstRun.pending(defaults: defaults, version: "0.4.7"))
+        XCTAssertEqual(FirstRun.pending(defaults: defaults, version: "0.4.8"), .update("0.4.8"))
+        FirstRun.finish(defaults: defaults, version: "0.4.8")
+        XCTAssertNil(FirstRun.pending(defaults: defaults, version: "0.4.8"))
+    }
+
+    func testAnUpdateFromBeforeTheWelcomePanelGetsTheUpdatesWelcome() throws {
+        defaults.set(Data([1]), forKey: "setup")
+        launch()
+        XCTAssertEqual(FirstRun.pending(defaults: defaults, version: "0.4.7"), .update("0.4.7"))
     }
 }

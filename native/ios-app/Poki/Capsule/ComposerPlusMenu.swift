@@ -47,11 +47,11 @@ struct ComposerPlusMenu: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("Frequent Apps")
-                    .font(.caption.weight(.semibold))
+                    .font(.allo(.caption, .semibold))
                     .foregroundStyle(Color(.label).opacity(0.78))
                 Spacer(minLength: 4)
                 Text("Tap to insert")
-                    .font(.caption2.weight(.medium))
+                    .font(.allo(.caption2, .medium))
                     .foregroundStyle(Color(.secondaryLabel))
             }
             .padding(.horizontal, 16)
@@ -160,11 +160,11 @@ struct ComposerPlusMenu: View {
                     .font(.system(size: 17, weight: .regular))
                     .frame(width: actionIconColumnWidth, alignment: .center)
                 Text(title)
-                    .font(.body)
+                    .font(.allo(.body))
                 Spacer(minLength: 8)
                 if let hint {
                     Text(verbatim: hint)
-                        .font(.caption.weight(.medium))
+                        .font(.allo(.caption, .medium))
                         .foregroundStyle(Color(.secondaryLabel))
                 }
             }

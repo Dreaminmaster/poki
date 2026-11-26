@@ -101,7 +101,8 @@ pub fn unpack(ipa: &Path, team: &str, requested: &std::collections::HashMap<Stri
         let old_id = info.get("CFBundleIdentifier").and_then(|s| s.as_string()).unwrap_or("").to_string();
         let new_id = team_bundle_id(&old_id, team);
         info.insert("CFBundleIdentifier".into(), new_id.clone().into());
-        // Background task identifiers must start with the bundle id (iOS 26's continued run).
+        // Background task identifiers follow the bundle id (the app reads its refresh task's name
+        // from here; iOS 26's continued run needed the prefix).
         if let Some(plist::Value::Array(ids)) = info.get_mut("BGTaskSchedulerPermittedIdentifiers") {
             for id in ids.iter_mut() {
                 let renamed = id.as_string().and_then(|s| s.strip_prefix(old_id.as_str()))
@@ -114,6 +115,7 @@ pub fn unpack(ipa: &Path, team: &str, requested: &std::collections::HashMap<Stri
             info.insert("PokiAppGroup".into(), group.clone().into());
         }
         write_info(&p, &info)?;
+        rename_in_app_intents(&p, &old_id, &new_id)?;
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let rel = p.strip_prefix(&app_dir).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
         let mut req = requested.get(&name).cloned().unwrap_or_else(|| entitlements::poki_defaults(crate::POKI_APP_GROUP));
@@ -128,6 +130,22 @@ pub fn unpack(ipa: &Path, team: &str, requested: &std::collections::HashMap<Stri
         let _ = std::fs::remove_file(b.path.join("embedded.mobileprovision"));
     }
     Ok(Unpacked { work, app_dir, bundles, app_group: group, version, build, dropped_extensions: dropped })
+}
+
+/// The App Shortcuts phrase index that Xcode writes (Metadata.appintents/root.ssu.yaml) names the
+/// bundle id the IPA was built with. On the phone the app has the team's id, so the index is moved
+/// to it with the Info.plist; otherwise it names an app that is not installed.
+fn rename_in_app_intents(bundle: &Path, old_id: &str, new_id: &str) -> Result<()> {
+    let path = bundle.join("Metadata.appintents").join("root.ssu.yaml");
+    let Ok(text) = std::fs::read_to_string(&path) else { return Ok(()) };
+    let from = format!("bundleIdentifier: {old_id}");
+    let renamed: Vec<String> = text.lines().map(|line| {
+        if line.trim_start() == from { line.replacen(&from, &format!("bundleIdentifier: {new_id}"), 1) } else { line.to_string() }
+    }).collect();
+    let mut out = renamed.join("\n");
+    if text.ends_with('\n') { out.push('\n'); }
+    if out != text { std::fs::write(&path, out)?; }
+    Ok(())
 }
 
 pub fn read_info(bundle: &Path) -> Result<plist::Dictionary> {
@@ -322,9 +340,11 @@ mod tests {
         info.insert("PokiAppGroup".into(), "group.nz.zheha.poki".into());
         info.insert("CFBundleShortVersionString".into(), "0.2.7".into());
         info.insert("CFBundleVersion".into(), "70".into());
-        info.insert("BGTaskSchedulerPermittedIdentifiers".into(), plist::Value::Array(vec!["nz.zheha.poki.run.*".into(), "nz.zheha.pokiother".into()]));
+        info.insert("BGTaskSchedulerPermittedIdentifiers".into(), plist::Value::Array(vec!["nz.zheha.poki.run.*".into(), "nz.zheha.poki.refresh".into(), "nz.zheha.pokiother".into()]));
         plist::to_file_binary(app.join("Info.plist"), &info).unwrap();
         std::fs::write(app.join("Poki"), b"binary").unwrap();
+        std::fs::create_dir_all(app.join("Metadata.appintents")).unwrap();
+        std::fs::write(app.join("Metadata.appintents/root.ssu.yaml"), "apiVersion: ssu/v1\nnlu:\n  shortcuts:\n    bundleIdentifier: nz.zheha.poki\n    intents: []\n").unwrap();
         let mut w = plist::Dictionary::new();
         w.insert("CFBundleIdentifier".into(), "nz.zheha.poki.widgets".into());
         w.insert("PokiAppGroup".into(), "group.nz.zheha.poki".into());
@@ -362,7 +382,8 @@ mod tests {
         let info = read_info(&u.app_dir).unwrap();
         assert_eq!(info.get("PokiAppGroup").unwrap().as_string(), Some("group.nz.zheha.poki.TEAM1"));
         let ids: Vec<_> = info.get("BGTaskSchedulerPermittedIdentifiers").unwrap().as_array().unwrap().iter().filter_map(|v| v.as_string()).collect();
-        assert_eq!(ids, vec!["nz.zheha.poki.TEAM1.run.*", "nz.zheha.pokiother"]);
+        assert_eq!(ids, vec!["nz.zheha.poki.TEAM1.run.*", "nz.zheha.poki.TEAM1.refresh", "nz.zheha.pokiother"]);
+        assert_eq!(std::fs::read_to_string(u.app_dir.join("Metadata.appintents/root.ssu.yaml")).unwrap(), "apiVersion: ssu/v1\nnlu:\n  shortcuts:\n    bundleIdentifier: nz.zheha.poki.TEAM1\n    intents: []\n");
         assert_eq!(u.bundles[0].requested.get("com.apple.security.application-groups").unwrap().as_array().unwrap()[0].as_string(), Some("group.nz.zheha.poki.TEAM1"));
         let out = dir.path().join("out.ipa");
         pack(&u, &out).unwrap();

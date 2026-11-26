@@ -70,23 +70,23 @@ private struct TransferRow: View {
                 end(ends.arrive, ends.to, alignment: .trailing)
                 if let price = item.text("price") {
                     Text(verbatim: price)
-                        .font(.callout.weight(.semibold)).monospacedDigit()
+                        .font(.allo(.callout, .semibold)).monospacedDigit()
                         .foregroundStyle(RailwayTrains.fare)
                         .frame(minWidth: 58, alignment: .trailing)
                 }
             }
             Text(verbatim: legs.map(\.number).joined(separator: " → "))
-                .font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                .font(.allo(.subheadline, .medium)).lineLimit(1).minimumScaleFactor(0.8)
             ResultCardChanges(legs: legs, warning: RailwayTransfers.change)
             ForEach(Array(legs.enumerated()), id: \.offset) { index, leg in
                 if !leg.seats.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("Leg \(index + 1)", comment: "A result card's leg of a journey with changes, as 12306 numbers them (1程, 2程)")
-                            .font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                            .font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 3))
                         Text(verbatim: leg.seats.map { "\($0.name) \($0.left)" }.joined(separator: "   "))
-                            .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                            .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
                 }
@@ -97,8 +97,8 @@ private struct TransferRow: View {
 
     private func end(_ time: String, _ station: String, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
-            Text(verbatim: time).font(.title3.weight(.semibold)).monospacedDigit()
-            Text(verbatim: station).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+            Text(verbatim: time).font(.alloRounded(.title3, .semibold)).monospacedDigit()
+            Text(verbatim: station).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
         }
     }
 
@@ -106,17 +106,17 @@ private struct TransferRow: View {
     private var middle: some View {
         VStack(spacing: 3) {
             if let duration = item.text("duration") {
-                Text(verbatim: duration).font(.caption2).foregroundStyle(Color(.secondaryLabel))
+                Text(verbatim: duration).font(.allo(.caption2)).foregroundStyle(Color(.secondaryLabel))
             }
             let stations = zip(legs, legs.dropFirst()).compactMap { $0.to ?? $1.from }
             if !stations.isEmpty {
                 Text(verbatim: stations.joined(separator: " "))
-                    .font(.caption.weight(.medium)).lineLimit(1)
+                    .font(.allo(.caption, .medium)).lineLimit(1)
                     .padding(.horizontal, 8).padding(.vertical, 2)
                     .overlay(Capsule().strokeBorder(Color(.separator)))
             }
             if let change = legs.dropFirst().compactMap(\.change).first {
-                Text(verbatim: change).font(.caption2).foregroundStyle(RailwayTransfers.change).lineLimit(1)
+                Text(verbatim: change).font(.allo(.caption2)).foregroundStyle(RailwayTransfers.change).lineLimit(1)
             }
         }
     }

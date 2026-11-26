@@ -31,7 +31,7 @@ In this file, "brand assets" means the Poki bear and everything in the two table
 This file does not claim anything that belongs to someone else, and it does not restrict the code.
 
 - **Source code.** All code in this repository, including the user interface code and the code and animation data next to the bear's pictures (`.swift`, `.json`), stays under the AGPL-3.0-only license, or under the license of the project it came from.
-- **Third-party material.** Other apps' icons (`native/ios-app/Poki/AppIcons/`, `native/ios-app/Poki/ProxyIcons/`), AI provider logos (`native/ios-app/Poki/ProviderIcons/`), the Geist fonts, contributors' profile pictures in `docs/images/acknowledgments.png`, and the code and designs listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) belong to their owners and keep their own terms.
+- **Third-party material.** Other apps' icons (`native/ios-app/Poki/AppIcons/`, `native/ios-app/Poki/ProxyIcons/`), AI provider logos (`native/ios-app/Poki/ProviderIcons/`), the Geist and Allo fonts, contributors' profile pictures in `docs/images/acknowledgments.png`, and the code and designs listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) belong to their owners and keep their own terms.
 - **Earlier copies.** This notice applies from the commit that adds it. It does not change the terms of copies published before that commit.
 
 ## What you can do without asking

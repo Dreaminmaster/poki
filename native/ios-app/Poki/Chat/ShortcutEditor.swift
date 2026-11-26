@@ -103,7 +103,7 @@ struct ShortcutEditor: View {
 
     private var card: some View {
         VStack(spacing: 14) {
-            Text("Edit Shortcut").font(.headline).foregroundStyle(Color(.label))
+            Text("Edit Shortcut").font(.allo(.headline)).foregroundStyle(Color(.label))
                 .accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
                 TextField("What Poki should do", text: $sentence, axis: .vertical)
@@ -130,7 +130,7 @@ struct ShortcutEditor: View {
             let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
             actions {
                 Button(action: close) {
-                    Text("Cancel").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                    Text("Cancel").font(.allo(.subheadline, .semibold)).frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(QuietCapsuleButtonStyle())
                 .accessibilityIdentifier("shortcut.edit.cancel")
@@ -163,7 +163,7 @@ struct ShortcutEditor: View {
             icon(app)
             Text(verbatim: appName).foregroundStyle(Color(.secondaryLabel)).fixedSize(horizontal: false, vertical: true)
             Image(systemName: choosing ? "chevron.up" : "chevron.down")
-                .font(.caption.weight(.bold)).foregroundStyle(Color(.tertiaryLabel))
+                .font(.allo(.caption, .bold)).foregroundStyle(Color(.tertiaryLabel))
         }
         .padding(.horizontal, 16).frame(minHeight: 50).contentShape(.rect)
     }
@@ -192,7 +192,7 @@ struct ShortcutEditor: View {
             HStack(spacing: 10) {
                 icon(id)
                 Text(verbatim: name).foregroundStyle(Color(.label)).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blue)
+                Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blue)
                     .opacity(id == app ? 1 : 0).frame(width: 20)
             }
             .padding(.horizontal, 16).frame(minHeight: 44).contentShape(.rect)
@@ -224,7 +224,7 @@ struct ShortcutEditor: View {
 private struct SaveCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            .font(.allo(.subheadline, .semibold)).foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: 50)
             .background(Tint.blue, in: .capsule)
             .opacity(configuration.isPressed ? 0.75 : 1)

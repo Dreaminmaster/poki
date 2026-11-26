@@ -23,8 +23,13 @@ enum BacktapeWriter {
         return false
     }
 
+    /// The model picked under Settings › Models › Senses: Apple's first, the downloaded one where
+    /// Apple's is missing, unless the owner picked otherwise or turned it off.
     @MainActor
-    static var available: Bool { apple }
+    static var available: Bool { testModel != nil || SensesLocalModel.current != nil }
+
+    /// Tests only: stands in for the model on this iPhone, so a test can see what it is asked.
+    @MainActor static var testModel: ((_ text: String, _ instructions: String) -> String?)?
 
     @MainActor
     static func write(_ entries: [HistoryEntry], period: String = "10 minutes") async -> BacktapeNote? {
@@ -40,14 +45,29 @@ enum BacktapeWriter {
         for index in 0..<take {
             let entry = entries[index * entries.count / take]
             let time = entry.at.formatted(date: long ? .abbreviated : .omitted, time: .shortened)
-            text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(room))\n\n"
+            if let by = entry.by {
+                // A step Poki took, for the owner or for an outside agent (BacktapeActivity).
+                let place = entry.app.isEmpty ? "" : " in \(HistoryNames.app(entry.app))"
+                text += "[\(time)] \(BacktapeActivity.name(by)) did: \(entry.text.prefix(room))\(place)\n\n"
+            } else {
+                text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(room))\n\n"
+            }
         }
+        var workers: [String] = []
+        for entry in entries { if let by = entry.by, !workers.contains(by) { workers.append(by) } }
+        let helpers = workers.map(BacktapeActivity.name).joined(separator: ", ")
+        let own = entries.contains { $0.by == nil }
+        let who = workers.isEmpty ? "" : """
+         Lines that say "\(helpers) did" are steps that assistant took on the iPhone for the person. \
+        Say those as what \(helpers) did, such as "\(BacktapeActivity.name(workers[0])) sent the message"\(own ? ", and the rest as what \"you\" did" : ""). \
+        Never say the person did an assistant's steps.
+        """
         let language = Locale(identifier: "en").localizedString(forIdentifier: AppLocalization.locale.identifier) ?? "English"
         let instructions = """
         You describe what a person did on their iPhone during \(period), from the text that was on \
         the screen. Write in \(language). First line: a title of at most 8 words. Then 2 or 3 plain \
         sentences that address the person as "you". Leave out buttons, menus, tab names and status \
-        bar items. Say only what the text shows. No lists, no headings, no quotation marks.
+        bar items. Say only what the text shows. No lists, no headings, no quotation marks.\(who)
         """
         guard let answer = await answer(to: text, instructions: instructions) else { return nil }
         let lines = answer.split(separator: "\n", omittingEmptySubsequences: true)
@@ -57,10 +77,20 @@ enum BacktapeWriter {
         return BacktapeNote(title: String(title.prefix(90)), body: lines.dropFirst().joined(separator: " "))
     }
 
+    /// One answer from the model on this iPhone, for Senses' other uses (SensesMemories,
+    /// SensesSuggestions, SensesContext). Nil without Apple Intelligence: nothing is downloaded and
+    /// nothing is sent anywhere.
+    @MainActor
+    static func ask(_ text: String, instructions: String) async -> String? {
+        if let testModel { return testModel(text, instructions) }
+        guard available else { return nil }
+        return await answer(to: text, instructions: instructions)
+    }
+
     @MainActor
     private static func answer(to text: String, instructions: String) async -> String? {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), apple {
+        if #available(iOS 26.0, *), SensesLocalModel.current == .apple {
             do {
                 let session = LanguageModelSession(instructions: instructions)
                 return try await session.respond(to: text).content
@@ -70,6 +100,7 @@ enum BacktapeWriter {
             }
         }
         #endif
-        return nil
+        guard case .downloaded = SensesLocalModel.current else { return nil }
+        return await BacktapeModel.shared.respond(to: text, instructions: instructions)
     }
 }

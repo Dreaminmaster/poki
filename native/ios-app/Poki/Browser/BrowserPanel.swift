@@ -33,10 +33,10 @@ struct BrowserCard: View {
                 BrowserIcon()
                 VStack(alignment: .leading, spacing: 1) {
                     Text(visit.host.isEmpty ? AppLocalization.text(LocalizedStringResource("Poki’s Browser")) : visit.host)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.allo(.subheadline, .semibold))
                         .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     Text(visit.title.isEmpty ? AppLocalization.text(LocalizedStringResource("Done")) : visit.title)
-                        .font(.caption)
+                        .font(.allo(.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 }
@@ -94,10 +94,10 @@ struct BrowserPanel: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(browser.host.isEmpty ? AppLocalization.text(LocalizedStringResource("Poki’s Browser")) : browser.host)
                 .accessibilityIdentifier("browser.header.title")
-                .font(.subheadline.weight(.semibold))
+                .font(.allo(.subheadline, .semibold))
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             Text(status)
-                .font(.caption)
+                .font(.allo(.caption))
                 .foregroundStyle(.secondary)
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
         }
@@ -143,9 +143,9 @@ struct BrowserPanel: View {
     @ViewBuilder private var page: some View {
         if browser.sheetShown {
             VStack(spacing: 6) {
-                Image(systemName: "hand.raised.fill").font(.title2).foregroundStyle(.secondary)
-                Text("You have the page").font(.subheadline.weight(.medium))
-                Text("Poki waits until you hand it back.").font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "hand.raised.fill").font(.alloRounded(.title2)).foregroundStyle(.secondary)
+                Text("You have the page").font(.allo(.subheadline, .medium))
+                Text("Poki waits until you hand it back.").font(.allo(.caption)).foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
             .padding(16)
@@ -186,7 +186,7 @@ struct BrowserStepList: View {
                         .fixedSize()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(step.text)
-                            .font(.footnote)
+                            .font(.allo(.footnote))
                             .foregroundStyle(step.state == .working ? .primary : .secondary)
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                             .fixedSize(horizontal: false, vertical: true)
@@ -213,9 +213,9 @@ struct BrowserStepList: View {
     @ViewBuilder private func icon(_ state: BrowserStep.State) -> some View {
         switch state {
         case .working: ProgressView().controlSize(.mini)
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.footnote)
-        case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).font(.footnote)
-        case .waiting: Image(systemName: "hand.raised.circle.fill").foregroundStyle(Color.accentColor).font(.footnote)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.allo(.footnote))
+        case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).font(.allo(.footnote))
+        case .waiting: Image(systemName: "hand.raised.circle.fill").foregroundStyle(Color.accentColor).font(.allo(.footnote))
         }
     }
 }
@@ -272,7 +272,7 @@ private struct BrowserInstructionBanner: View {
                 } icon: {
                     Image(systemName: "hand.raised.fill")
                 }
-                .font(.caption.weight(.semibold))
+                .font(.allo(.caption, .semibold))
                 .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 Button {
@@ -286,7 +286,7 @@ private struct BrowserInstructionBanner: View {
                     }
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .font(.caption.weight(.medium))
+                        .font(.allo(.caption, .medium))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

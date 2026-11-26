@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- The launch screen's template: scripts/make-assets.sh writes Poki/LaunchScreen.storyboard from it, with __V__
+     set to the launch pictures' version (see Poki/LaunchArt/README.md). Edit this file, not the written one. -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="22155" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="launch">
     <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="22131"/>
+        <capability name="Named colors" minToolsVersion="9.0"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
@@ -13,10 +17,14 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop.png" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
+                            <view opaque="NO" tag="4" userInteractionEnabled="NO" translatesAutoresizingMaskIntoConstraints="NO" id="ground">
+                                <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                                <color key="backgroundColor" name="LaunchGround-__V__"/>
+                            </view>
+                            <imageView opaque="NO" tag="1" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchBackdrop-__V__" translatesAutoresizingMaskIntoConstraints="NO" id="backdrop">
                                 <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                             </imageView>
-                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWordmark.png" translatesAutoresizingMaskIntoConstraints="NO" id="word">
+                            <imageView opaque="NO" tag="2" userInteractionEnabled="NO" contentMode="scaleToFill" image="LaunchWord-__V__" translatesAutoresizingMaskIntoConstraints="NO" id="word">
                                 <rect key="frame" x="132.16" y="263.68" width="128.68" height="62.39"/>
                             </imageView>
                             <view opaque="NO" userInteractionEnabled="NO" translatesAutoresizingMaskIntoConstraints="NO" id="bearColumn">
@@ -26,8 +34,12 @@
                                 <rect key="frame" x="-48" y="524.5" width="497" height="329.5"/>
                             </imageView>
                         </subviews>
-                        <color key="backgroundColor" red="0.96078431372549022" green="0.96862745098039216" blue="0.98039215686274506" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" systemColor="systemGroupedBackgroundColor"/>
                         <constraints>
+                            <constraint firstItem="ground" firstAttribute="top" secondItem="root" secondAttribute="top" id="gt"/>
+                            <constraint firstItem="ground" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" id="gb"/>
+                            <constraint firstItem="ground" firstAttribute="leading" secondItem="root" secondAttribute="leading" id="gl"/>
+                            <constraint firstItem="ground" firstAttribute="trailing" secondItem="root" secondAttribute="trailing" id="gr"/>
                             <constraint firstItem="backdrop" firstAttribute="top" secondItem="root" secondAttribute="top" id="bt"/>
                             <constraint firstItem="backdrop" firstAttribute="bottom" secondItem="root" secondAttribute="bottom" id="bb"/>
                             <constraint firstItem="backdrop" firstAttribute="leading" secondItem="root" secondAttribute="leading" id="bl"/>
@@ -53,8 +65,14 @@
         </scene>
     </scenes>
     <resources>
-        <image name="LaunchBackdrop.png" width="402" height="874"/>
+        <image name="LaunchBackdrop-__V__" width="402" height="874"/>
         <image name="LaunchBear.png" width="508" height="336.5"/>
-        <image name="LaunchWordmark.png" width="132" height="64"/>
+        <image name="LaunchWord-__V__" width="132" height="64"/>
+        <namedColor name="LaunchGround-__V__">
+            <color red="0.96078431372549022" green="0.96862745098039216" blue="0.98039215686274506" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+        <systemColor name="systemGroupedBackgroundColor">
+            <color red="0.94901960784313721" green="0.94901960784313721" blue="0.96862745098039216" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </systemColor>
     </resources>
 </document>

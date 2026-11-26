@@ -7,6 +7,9 @@ import OSLog
 public struct ToolResult: Sendable {
     public var text: String
     public var jpeg: Data?
+    /// The read's own PNG at the phone's full pixels, sent in place of the JPEG when the caller asked
+    /// for picture: "full" (to save to disk, or to read small text). Issue #609.
+    public var png: Data? = nil
     public var isError = false
     var splitView: PokiCore.SplitViewRead?
     var splitViewNeedsRead = false
@@ -16,6 +19,7 @@ public struct ToolResult: Sendable {
     /// that goes nowhere can be told from a task that moves. Nil when no tree was read.
     var screen: String?
     var waitingForOwner = false
+    var replayedSkills: [String] = []
     var offeredMemories: [MemoryNote] = []
     var readApp: String?
     var automationAuthorizationDeclined = false
@@ -58,6 +62,9 @@ final class Computer: @unchecked Sendable {
     /// The numbers of the latest read. An element that is still there in the next read keeps its
     /// number, so a `do` can list only what changed.
     var refs: [Int: Element] = [:]
+    /// The do call under way: the agent's intent and its MCP session, for an approval it asks.
+    var currentIntent: String?
+    var currentSession: String?
     var listed: [(ref: Int, element: Element)] = []
     var nextRef = 1
     /// Every element of the latest tree with a frame, listed or not (for what covers what).
@@ -185,11 +192,13 @@ final class Computer: @unchecked Sendable {
     var sessionApp: (bundle: String, name: String, session: String?)?
     /// The last run or path ended on a check that found what it looked for on screen.
     var runEndedOnARead = false
+    /// Steps fixed on the way since PokiCore started (status says so).
+    var fixesMade = 0
 
     var lastElements: [Element] { listed.map(\.element) }
     var layout: Layout { Layout(all: lastAll, screen: size ?? ScreenSize(width: 10_000, height: 10_000)) }
 
-    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0, "run_read": 0]
+    static let settle: [String: Double] = ["tap": 0.45, "type": 0.25, "key": 0.3, "swipe": 0.6, "drag": 0.35, "adjust": 0.2, "long_press": 0.4, "pinch": 0.6, "button": 0.7, "launch": 0.9, "scroll_to": 0.2, "wait": 0, "wait_until": 0, "run_read": 0]
     static let lineLimit = 120
     static let textLimit = 160
 
@@ -305,7 +314,7 @@ final class Computer: @unchecked Sendable {
 
         // Whether the screen changed since the read before (the one the model saw last).
         let visible = listable(reading.elements, screen, includeUnlabeledImages: selectedPane != nil)
-        let tree = visible.map { "\($0.key)@\($0.frame.described)" }.joined(separator: "\n")
+        let tree = visible.map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: "\n")
         let picture = reading.png.map { PictureSketch(png: $0) }
         let pictureMoved = picture.flatMap { now in lastPicture.map { now.differs(from: $0) } } ?? false
         var changedLine: String?
@@ -459,8 +468,7 @@ final class Computer: @unchecked Sendable {
             if tag.isEmpty, let size, coversScreenAlone(e, in: reading.elements, screen: size) {
                 tag = " (one element covering \(Int((e.frame.width * e.frame.height * 100 / (size.width * size.height)).rounded())) % of the screen with no parts in the tree: tap a point on the picture, not its number)"
             }
-            if e.isDisabled { tag += " [disabled]" }
-            return "\(mark)\(ref) \(e.type) \"\(text)\" \(e.frame.described)\(tag)"
+            return "\(mark)\(ref) \(e.type) \"\(text)\" \(e.frame.described)\(e.stateMark)\(tag)"
         }
         var body: [String] = []
         var heading: String
@@ -1015,7 +1023,7 @@ final class Computer: @unchecked Sendable {
             return true
         case .button:
             return target?.text?.lowercased() == "home" || !evidence.isEmpty
-        case .tap, .longPress, .pinch:
+        case .tap, .longPress, .pinch, .adjust:
             return evidence.contains(sourceForPoint(target))
         case .drag:
             if target?.array != nil { return evidence.contains(.screenshot) }
@@ -1091,7 +1099,17 @@ final class Computer: @unchecked Sendable {
 
     /// `byOwnersVoice`: the Voice tab's model acting for the owner, not the agent: it is not held back
     /// by a step handed to the owner, and it leaves the agent's unused approval in place.
-    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+    /// The intents on the actions themselves (`{tap, intent}`), for an approval when the call had none.
+    static func stepIntents(_ actions: [JSON]) -> String? {
+        let words = actions.compactMap { $0["intent"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return words.isEmpty ? nil : String(words.joined(separator: "; ").prefix(160))
+    }
+
+    func act(actions: [JSON], full: Bool, finish: Bool = false, session: String? = nil, answerBy: Double? = nil, app: JSON? = nil, byOwnersVoice: Bool = false, local: Bool = false, localTask: String? = nil, intent: String? = nil, onActionSucceeded: PokiCore.ActionSucceeded?) async -> ToolResult {
+        // Calls run one at a time (the core's gate): an approval this call asks for carries them.
+        currentIntent = intent
+        currentSession = local ? nil : session
+        defer { currentIntent = nil; currentSession = nil }
         resetScreenForNewTask(session: session, localTask: localTask)
         let originalActionCount = actions.count
         var actions = actions
@@ -1134,6 +1152,10 @@ final class Computer: @unchecked Sendable {
             actionSucceeded = onActionSucceeded
         }
         var result = restartNote(await actNow(actions: actions, full: full, finish: finish, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: actionSucceeded))
+        // An outside agent that gave no intent is reminded on every answer (the owner, Nov 21 2026).
+        if !local, session != nil, intent == nil, !actions.isEmpty {
+            result.text += "\nintent missing: give every do with actions an intent, one short sentence on what it is for. The owner reads it, and without it a sensitive step always goes to them."
+        }
         if local, let read = authorizationRead, read.task == localTask, let evidence = result.screenEvidence,
            host.currentRunner.automationRevision == read.revision {
             let keepErrorEvidence = result.isError && actions.contains { $0["run"] != nil || $0["path"] != nil }
@@ -1212,6 +1234,8 @@ final class Computer: @unchecked Sendable {
         var approvalWaited = 0.0
         var until: Double
         let revision: UInt64?
+        // Actions that find their own targets on the screen they land on (a path or a skill by text)
+        // need no read of the screen the owner left after authorizing automation.
         let needsCurrentScreen = actions.contains { !hasRequiredScreenEvidence($0, evidence: []) }
         let authorization: AuthorizationWait = local ? (needsCurrentScreen ? .freshScreen : .ready) : .none
         switch await waitForRunner(until: started + config.toolDeadline, authorization: authorization) {
@@ -1287,17 +1311,10 @@ final class Computer: @unchecked Sendable {
             return await readAndReply(until: until, full: true, error: "element \(stale.map(String.init).joined(separator: ", ")) is not in the latest read; nothing was sent. The current elements are below.")
         }
 
-        if config.sensitive.enabled {
-            var scan = SensitiveScan(front: lastForeground, secureOnScreen: lastElements.contains(where: \.isSecure))
-            for (at, action) in actions.enumerated() {
-                if scan.moved, let kind = ActionKind(action), presses(kind, action, scan, unread: false).contains(where: \.atPoint) {
-                    var result = await actNow(actions: Array(actions[..<at]), full: full, finish: false, session: session, answerBy: answerBy, byOwnersVoice: byOwnersVoice, local: local, localTask: localTask, onActionSucceeded: onActionSucceeded)
-                    result.text += "\nnot_sent from action \(at + 1): a coordinate action needs a fresh read after an earlier action that could change the screen. This check runs before the final screen comparison. Choose the remaining actions from the screen above and send them in a new do call. Do not repeat actions already sent."
-                    return result
-                }
-                if sensitive(action, &scan) != nil { break }
-            }
-        }
+        // A point or a number after an action that may have changed the screen is not refused up front:
+        // the screen is read again once it settles before that press (`run`'s `pressNow`), and the press
+        // waits for the owner only if what lies there now needs them. The model chains what it can
+        // foresee, and a press that landed somewhere else shows in the read after the actions.
 
         // The runner's start and the checks above are not the actions' time (seen on the phone: a
         // launch sent while the runner was starting had its 9 s used up before it went). The call's
@@ -1311,7 +1328,7 @@ final class Computer: @unchecked Sendable {
         var extra: [String] = []
         // The screen before the actions, for the read after them: only a read that differs from it
         // shows that the actions have landed.
-        let seenBefore: String? = size.flatMap { screen in lastTreeAt == nil ? nil : listable(lastAll, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        let seenBefore: String? = size.flatMap { screen in lastTreeAt == nil ? nil : listable(lastAll, screen).map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";") }
 
         // Approval: from the first action that needs it, nothing is sent until the owner approves it
         // on the phone. The actions before it are plain and go first (seen on the phone: a last
@@ -1320,6 +1337,7 @@ final class Computer: @unchecked Sendable {
         var did: [String] = []
         var error: String?
         var lastKind: String?
+        var replayedSkills: [String] = []
         var toRun = actions
         // What the screen said before these actions, for the send check: a message that was already there does not count as sent.
         let textsBefore = lastAll.filter { !$0.fromPicture && !Self.fieldTypes.contains($0.type) }.map(\.text)
@@ -1340,7 +1358,7 @@ final class Computer: @unchecked Sendable {
                 approvedNote = "approval: approved on the phone (\(reason))"
             } else {
                 if at > 0 {
-                    (did, error, lastKind) = await run(Array(actions[..<at]), started: started, until: until, onActionSucceeded: onActionSucceeded)
+                    (did, error, lastKind, replayedSkills) = await run(Array(actions[..<at]), started: started, until: until, onActionSucceeded: onActionSucceeded)
                     if error != nil {
                         return await readAndReply(until: until, full: full, changes: true, did: did, error: error, extra: ["action \(at + 1) and the actions after it were not sent (they would have needed the owner's approval: \(reason))"])
                     }
@@ -1348,7 +1366,7 @@ final class Computer: @unchecked Sendable {
                 let approval = approvals.pending.flatMap { $0.covers(scope, workspaceSession: workspaceSession) ? $0 : nil }
                     ?? approvals.request(app: lastForeground?.describe ?? "unknown", summary: labels(tail), reason: reason, scope: scope, workspaceSession: workspaceSession,
                                            stopsWhenOff: sensitiveSteps(actions, under: config.sensitive.asked(.off)).isEmpty,
-                                           sourceSession: sourceSession)
+                                           session: currentSession, intent: currentIntent ?? Self.stepIntents(tail), sourceSession: sourceSession)
                 // The time the owner takes is not the actions' time: the clock starts again after it.
                 let asked = now()
                 let outcome = await approvals.wait(id: approval.id, seconds: approvalHold(answerBy: answerBy))
@@ -1395,7 +1413,7 @@ final class Computer: @unchecked Sendable {
         let actionsStarted = now()
         let approved = approvedNote == nil ? [:] : Dictionary(steps.map { ($0.at, $0.reason) }, uniquingKeysWith: { a, _ in a })
         let movedBefore = actions[..<(actions.count - toRun.count)].contains { ActionKind($0)?.changesScreen($0) == true }
-        let (moreDid, moreError, moreKind) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onActionSucceeded: onActionSucceeded)
+        let (moreDid, moreError, moreKind, moreReplayedSkills) = await run(toRun, started: started, until: until, numberedFrom: actions.count - toRun.count, moved: movedBefore, approved: approved, onActionSucceeded: onActionSucceeded)
         let actionsTook = now() - actionsStarted
         did += moreDid
         error = moreError
@@ -1568,6 +1586,7 @@ final class Computer: @unchecked Sendable {
             }
             result.text = lines.joined(separator: "\n")
         }
+        result.replayedSkills = replayedSkills + moreReplayedSkills
         return result
     }
 
@@ -1738,8 +1757,9 @@ final class Computer: @unchecked Sendable {
     /// deadline. Stops at the first that fails.
     /// `moved`: an action sent before these may have changed the screen (`ActionKind.changesScreen`). `approved`: why the owner
     /// approved an action, by its number in the do.
-    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onActionSucceeded: PokiCore.ActionSucceeded?) async -> (did: [String], error: String?, lastKind: String?) {
+    func run(_ actions: [JSON], started: Double, until: Double, numberedFrom offset: Int = 0, moved: Bool = false, approved: [Int: String] = [:], onActionSucceeded: PokiCore.ActionSucceeded?) async -> (did: [String], error: String?, lastKind: String?, replayedSkills: [String]) {
         var did: [String] = []
+        var replayedSkills: [String] = []
         var error: String?
         var logError: String?
         var lastKind: String?
@@ -1775,11 +1795,13 @@ final class Computer: @unchecked Sendable {
                 }
             }
             do {
+                let replayed = ActionKind(action) == .run ? LockedBox<String?>(nil) : nil
                 let (kind, text) = try await withDeadline(left, "action \(index + 1)") { [self] in
                     try await Runner.$afterInput.withValue(afterInput) {
-                        try await perform(action, until: actionsUntil, backTarget: check.backTarget)
+                        try await perform(action, until: actionsUntil, backTarget: check.backTarget) { replayed?.value = $0 }
                     }
                 }
+                if let name = replayed?.value { replayedSkills.append(name) }
                 if let recorded { trace.append(recorded) }
                 lastKind = kind
                 did.append("\(text) (sent, \(Int(((now() - began) * 1000).rounded())) ms)")
@@ -1839,7 +1861,7 @@ final class Computer: @unchecked Sendable {
                 break
             }
         }
-        return (did, error, lastKind)
+        return (did, error, lastKind, replayedSkills)
     }
 
     /// Why an action that presses the screen is held back on the screen as it is now, after an action
@@ -1868,7 +1890,48 @@ final class Computer: @unchecked Sendable {
             guard let reason = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: false, in: scan.allElements ?? lastAll), reason != approved else { continue }
             return ("the action before it may have changed the screen, and where it touches now it needs the owner's approval (\(reason)). Choose the remaining actions from the fresh screen below and send them in a new do", nil)
         }
+        if let moved = movedUnder(kind, action, fresh: elements.all), await !stillMeant(action, moved: moved, fresh: listable(elements.all, screen), front: elements.foreground, until: until) {
+            return ("the action before it changed the screen where it touches: it was aimed at \(moved.meant), and \(moved.now) is there now. Choose the remaining actions from the fresh screen below and send them in a new do", nil)
+        }
         return (nil, backTarget)
+    }
+
+    /// A tap by number or point aimed at what the latest read had there, and what lies there on the
+    /// screen it lands on, when the two differ (by type and words); nil when the same element is
+    /// there, so the model's choice stands. Steps named by their text find their own target.
+    func movedUnder(_ kind: ActionKind, _ action: JSON, fresh: [Element]) -> (meant: String, now: String)? {
+        let specs: [JSON?] = switch kind {
+        case .tap, .longPress, .pinch: [action[kind.rawValue]]
+        case .type: [action["ref"]]
+        case .drag where action["drag"]?["to_pane"] == nil:
+            if let a = action["drag"]?.array, a.count == 4 { [[a[0], a[1]]] } else { [action["drag"]?["from"]] }
+        default: []
+        }
+        func name(_ e: Element?) -> String { e.map { "\($0.type) \"\($0.text.prefix(40))\"" } ?? "nothing" }
+        for case let spec? in specs {
+            guard let p = try? point(spec) else { continue }
+            let meant = target(spec), now = element(at: p, in: fresh)
+            if meant?.key != now?.key { return (name(meant), name(now)) }
+        }
+        return nil
+    }
+
+    static let stillMeantQuestion = "An agent driving an iPhone sent several steps at once. It chose `step` on the screen it read before; an earlier step in the same batch changed the screen. On `screen` as it is now, `there_now` lies where the step will touch. Is touching it still the step the agent meant (the same control, moved or renamed, or the obvious next control for that step)? Answer no when unsure."
+
+    /// With the owner's decision model on, whether a press whose target changed under it still fits:
+    /// asked once, with the screen as text and no picture, and trusted only at the policy's confidence.
+    /// Without a decision model, or with no clear yes, the press is held for the agent to choose again.
+    func stillMeant(_ action: JSON, moved: (meant: String, now: String), fresh: [Element], front: Foreground, until: Double) async -> Bool {
+        guard let decider = config.decider() else { return false }
+        let policy = config.deciderPolicy
+        let lines = fresh.filter { !$0.fromPicture && !$0.isSecure && !$0.text.isEmpty && !["Key", "Keyboard", "StatusBar", "ScrollBar"].contains($0.type) }
+            .prefix(policy.maxCandidates + 20).map { JSON.string("\($0.type) \"\($0.text.prefix(70))\"") }
+        let state: JSON = ["app": .string(front.describe), "step": .string("\(labels([action])) (aimed at \(moved.meant))"),
+                           "there_now": .string(moved.now), "screen": .array(Array(lines))]
+        guard let answers = try? await decider.decide(state: state, questions: [DecisionQuestion(id: "meant", instructions: Self.stillMeantQuestion, kind: .yesNo)],
+                                                      timeout: max(0.3, min(decider.patience ?? policy.timeout, until - now() - 0.3))),
+              let p = answers["meant"]?.confidence else { return false }
+        return p >= policy.minConfidence
     }
 
     private struct NumberTapTarget {
@@ -2485,7 +2548,7 @@ final class Computer: @unchecked Sendable {
             }) else { break }
             let treeAt = now()
             samples += 1
-            let signature = listable(tree.elements, screen).map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";")
+            let signature = listable(tree.elements, screen).map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";")
             let wasUnset = lastElements == nil
             if !signature.isEmpty, signature != before {
                 if targetAt == nil { targetAt = treeAt }
@@ -2550,7 +2613,7 @@ final class Computer: @unchecked Sendable {
     /// The screen once two reads in a row agree, or the latest read when `until` comes first; nil when
     /// nothing could be read.
     func settledRead(until: Double) async -> (all: [Element], foreground: Foreground)? {
-        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)@\($0.frame.described)" }.joined(separator: ";") }
+        func signature(_ elements: [Element]) -> String { elements.map { "\($0.key)\($0.stateMark)@\($0.frame.described)" }.joined(separator: ";") }
         var latest: (all: [Element], foreground: Foreground)?
         var last: String?
         while until - now() > 0.3 {
@@ -2689,6 +2752,9 @@ final class Computer: @unchecked Sendable {
         return false
     }
 
+    /// More of the screen than this, and an element is content rather than a control (`presses`).
+    static let contentShare = 0.5
+
     func element(at point: (x: Double, y: Double), in elements: [Element]? = nil) -> Element? {
         (elements ?? lastElements).filter { f in f.frame.x <= point.x && point.x <= f.frame.x + f.frame.width && f.frame.y <= point.y && point.y <= f.frame.y + f.frame.height }
             .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
@@ -2773,22 +2839,39 @@ final class Computer: @unchecked Sendable {
             guard let spec else { return nil }
             let atPoint = spec.array != nil || spec["x"] != nil
             let e = unread ? nil : scan.elements == nil || atPoint ? target(spec, in: scan.elements) : under(try? point(spec))
-            return (localDrag && isPhotoContent(e) ? nil : e, atPoint, .tap)
+            return (localDrag && isPhotoContent(e) ? nil : control(e), atPoint, .tap)
         }
         func stroke(in spec: JSON?, _ direction: String, _ distance: String) -> [(element: Element?, atPoint: Bool, judged: Press)] {
-            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance),
-                  let down = element(at: (path.0, path.1), in: scan.elements), !isPhotoContent(down),
-                  down == element(at: (path.2, path.3), in: scan.elements) else { return [] }
-            return [(down, false, .stroke)]
+            guard !unread, let screen = size, let path = try? swipePath(try area(spec, screen), direction, distance) else { return [] }
+            return strokeBetween((path.0, path.1), (path.2, path.3))
+        }
+        /// A finger that goes down at one point and lifts at another presses only what holds both ends
+        /// (a control takes a touch that began outside it as no press), and only a control: a photo
+        /// or a page under the whole stroke is content.
+        func strokeBetween(_ from: (x: Double, y: Double), _ to: (x: Double, y: Double)) -> [(element: Element?, atPoint: Bool, judged: Press)] {
+            guard !unread, let down = element(at: from, in: scan.elements), down == element(at: to, in: scan.elements), !isPhotoContent(down), let pressed = control(down) else { return [] }
+            return [(pressed, false, .stroke)]
+        }
+        /// An element that covers most of the screen is a photo, a page or a list, not a control: its
+        /// words (a photo's description, a page's text) say nothing about what a touch on it does.
+        func control(_ e: Element?) -> Element? {
+            guard let e, let screen = size, screen.width > 0, screen.height > 0 else { return e }
+            return e.frame.width * e.frame.height > Self.contentShare * screen.width * screen.height ? nil : e
         }
         switch kind {
-        case .tap, .longPress, .pinch: return [at(spec)].compactMap { $0 }
+        case .tap, .longPress, .pinch, .adjust: return [at(spec)].compactMap { $0 }
         // The field is tapped before the text goes.
         case .type: return [at(action["ref"])].compactMap { $0 }
         case .drag:
             if spec?["to_pane"] != nil { return [at(spec?["from"])].compactMap { $0 } }
-            if let a = spec?.array, a.count == 4 { return [at([a[0], a[1]]), at([a[2], a[3]])].compactMap { $0 } }
-            return [at(spec?["from"]), at(spec?["to"])].compactMap { $0 }
+            // A drag is a stroke: moving a floating button or a slider presses nothing on the way. One
+            // that picks something up first (hold_ms) drops it on what lies at its end, judged by that
+            // element's words (a drop on Delete).
+            let ends: (from: JSON?, to: JSON?) = if let a = spec?.array, a.count == 4 { ([a[0], a[1]], [a[2], a[3]]) } else { (spec?["from"], spec?["to"]) }
+            guard let from = at(ends.from), let to = at(ends.to) else { return [] }
+            if (spec?["hold_ms"]?.double ?? 0) > 0 { return to.element == nil ? [] : [(to.element, to.atPoint, .stroke)] }
+            guard let a = try? point(ends.from ?? .null), let b = try? point(ends.to ?? .null) else { return from.element != nil && from.element == to.element ? [(from.element, false, .stroke)] : [] }
+            return strokeBetween(a, b)
         case .back:
             guard let button = (backTarget ?? currentBackTarget).button else { return [] }
             return [(scan.elements == nil ? button : under(button.frame.centre), false, .button)]
@@ -2819,10 +2902,10 @@ final class Computer: @unchecked Sendable {
             if let r = rules.reason(touching: press.element, typing: false, app: press.judged == .stroke ? nil : scan.front, secureOnScreen: scan.secureOnScreen, in: tree) { return r }
             guard press.judged == .tap else { continue }
             if unread, messaging { return "sending a message (a tap in \(app) on a screen not read yet)" }
-            // After a launch or a run nothing of the app's screen was read: a Delete there reads as nothing.
-            // The home screen after Home opens apps, which ask for themselves.
-            if !scan.read, scan.front != nil { return "a tap on a screen not read yet (in \(app))" }
-            if scan.moved, press.atPoint { return "a tap at a point on a screen that may have changed since it was read (in \(app))" }
+            // Elsewhere a press on a screen not read yet (after a launch, a run or a tap that opened
+            // another screen) is judged when it is sent: `pressNow` reads the screen it lands on and
+            // holds it there if a Delete or a Pay lies under it. Asking up front for every such press
+            // made the owner approve a Back after a drag, and kept agents from chaining steps.
         }
         switch kind {
         case .launch:
@@ -2871,7 +2954,7 @@ final class Computer: @unchecked Sendable {
             }
             // Waiting, handing the screen over, swipes, Home and launches are not input in a guarded app.
             if let bundle = scan.front?.bundleID, rules.guardedApps.contains(bundle) { return "input in \(app)" }
-        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .pinch, .waitUntil, .wait:
+        case .button, .tap, .back, .handoff, .swipe, .scrollTo, .longPress, .drag, .adjust, .pinch, .waitUntil, .wait:
             break
         }
         return nil

@@ -3,7 +3,7 @@ import UIKit
 import XCTest
 @testable import Poki
 
-/// Settings › Approvals, where the chat's "Approvals are off" line links.
+/// Security › Approvals, the page the chat's "Approvals are off" line opens.
 @MainActor
 final class ApprovalsPageTests: XCTestCase {
     /// The page lets the owner choose the way of asking again: its Approval Method is a control to pick
