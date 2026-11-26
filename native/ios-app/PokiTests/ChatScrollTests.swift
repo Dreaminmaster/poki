@@ -145,6 +145,17 @@ final class ChatScrollTests: XCTestCase {
         XCTAssertNil(Self.button(in: window, id: "chat.latest"), "Returning to the newest voice line must hide the button")
     }
 
+    func testExactSearchJumpReachesAnEarlierEntryBeforeAcknowledgement() throws {
+        let (scroll, feed) = try transcript()
+        let selected = try XCTUnwrap(feed.entries.first?.id)
+        let jump = ConversationSearchJump(sessionID: "test", entryID: selected)
+        feed.jump = jump
+        settle(for: 5) { feed.appliedJump == jump.requestID }
+        XCTAssertEqual(feed.appliedJump, jump.requestID, "A visible exact target must acknowledge the request")
+        XCTAssertLessThan(scroll.contentOffset.y + scroll.adjustedContentInset.top, 160,
+                          "The first entry must actually be near the viewport, not merely in the transcript")
+    }
+
     func testSendingWhileReadingBackShowsTheNewMessage() throws {
         let (scroll, feed) = try transcript()
         readBack(scroll)

@@ -346,10 +346,10 @@ struct MemoryScopeView: View {
         } header: {
             Group {
                 MemoryHeader("Memory")
+                    .accessibilityIdentifier("memory.group.memory")
             }
             .settingsHeader()
         }
-        .accessibilityIdentifier("memory.group.memory")
     }
 
     /// One kind's group: nothing at all when it is empty (no blank block).

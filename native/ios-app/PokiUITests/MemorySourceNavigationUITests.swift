@@ -126,7 +126,21 @@ final class MemorySourceNavigationUITests: XCTestCase {
         let target = app.staticTexts[phrase]
         XCTAssertTrue(target.waitForExistence(timeout: 15), "Search must open the matching transcript message")
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: target)
-        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 12), .completed,
+        let settled = XCTWaiter.wait(for: [visible], timeout: 12)
+        if settled != .completed {
+            let diagnostics = XCTAttachment(string: """
+                target: \(target.debugDescription)
+                target frame: \(target.frame)
+                app frame: \(app.frame)
+                keyboards: \(app.keyboards.count)
+                hierarchy:
+                \(app.debugDescription)
+                """)
+            diagnostics.name = "Exact search target viewport diagnostics"
+            diagnostics.lifetime = .keepAlways
+            add(diagnostics)
+        }
+        XCTAssertEqual(settled, .completed,
                        "The exact matching message must settle within the viewport")
         screenshot(app, name: "Conversation search exact message in viewport")
         return app
