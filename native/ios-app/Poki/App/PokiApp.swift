@@ -41,6 +41,8 @@ struct PokiApp: App {
         FirstRun.decide()
         // Record the installed version as seen only on a true fresh install so What's New shows after updates.
         WhatsNew.decide(priorFirstRun: priorFirstRun)
+        // The one-time hint on Poki's picture (`PokiMenuTip`), held back while a welcome is up.
+        PokiMenuTip.configure(welcomeUp: FirstRun.due() != nil)
         // Page titles in Allo Rounded, the face for prominent text (Shared/Typeface.swift).
         if let large = Prominent.uiFont(.largeTitle, .bold), let inline = Prominent.uiFont(.headline, .semibold) {
             UINavigationBar.appearance().largeTitleTextAttributes = [.font: large]

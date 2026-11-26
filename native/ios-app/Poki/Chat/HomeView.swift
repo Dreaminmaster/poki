@@ -178,6 +178,11 @@ struct PokiFlight: View {
                                  accessibilityIdentifier: "home.poki") {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
+                        // The one-time hint that the picture opens the menu, on a view of its own so the
+                        // picture and its bear are never made again when it comes and goes.
+                        .background {
+                            if !writing { Color.clear.popoverTip(PokiMenuTip(), arrowEdge: .top) }
+                        }
                     } else if let openCustomization {
                         Button {
                             tap()
@@ -230,17 +235,26 @@ struct PokiHead: View {
                     // The menu is the name pill alone: the system draws its own glass around a menu's
                     // label in a glass group, and a label that held the picture's place too put the
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
-                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
-                        Text(verbatim: "Poki")
-                            .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
-                            .padding(.horizontal, 12).frame(minHeight: 24)
-                            .contentShape(Capsule())
+                    // Anchored as the picture's menu is, so its opening is seen (a SwiftUI menu's tap is
+                    // not, on iOS 27) and opening it here also retires the hint on the home page.
+                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization,
+                             anchor: .below(spacing: 6),
+                             accessibilityLabel: "Poki, " + PokiStatusCopy.word(status),
+                             accessibilityIdentifier: "chat.header.details") {
+                        // The chevron says the name opens a menu, as a title menu does in the system's apps.
+                        HStack(spacing: 3) {
+                            Text(verbatim: "Poki")
+                                .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.bold)).imageScale(.small)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12).frame(minHeight: 24)
+                        .contentShape(Capsule())
                     }
                     .glassSurface(in: Capsule())
                     .glassAppearing()
-                    .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-                    .accessibilityIdentifier("chat.header.details")
-                    .accessibilityShowsLargeContentViewer()
+                    .accessibilityShowsLargeContentViewer { Text(verbatim: "Poki") }
                 }
             }
             .frame(minHeight: 24)
