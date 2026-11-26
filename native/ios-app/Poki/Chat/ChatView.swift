@@ -697,6 +697,13 @@ struct ChatTranscript<Footer: View>: View {
 
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var follow = ChatFollow.newest
+    @State private var visibleSearchEntries: Set<UUID> = []
+    @State private var finishedSearchJump: UUID?
+
+    private var seekingSearchEntry: Bool {
+        guard let jump else { return false }
+        return finishedSearchJump != jump.requestID
+    }
 
     private var tracksScroll: Bool { !entries.isEmpty || typing || canRetry || live || Footer.self != EmptyView.self }
 
@@ -746,9 +753,15 @@ struct ChatTranscript<Footer: View>: View {
         // nothing moves under you (ESP-468). The bottom anchor alone did neither: a new conversation,
         // still shorter than the screen, stayed at its top while the keyboard and the approval card
         // covered its task card, and a reader further up was dragged down by every reply.
-        .defaultScrollAnchor(tracksScroll && follow != .reading ? .bottom : nil, for: .sizeChanges)
+        .defaultScrollAnchor(tracksScroll && follow != .reading && !seekingSearchEntry ? .bottom : nil, for: .sizeChanges)
+        .onScrollTargetVisibilityChange(idType: UUID.self, threshold: 0.1) { ids in
+            visibleSearchEntries = Set(ids)
+        }
         .onScrollGeometryChange(for: ChatFollow.Frame.self, of: ChatFollow.Frame.init) { old, new in
-            guard tracksScroll else { return }
+            // The keyboard and navigation transition can resize the transcript
+            // while an exact-message jump is still settling. Do not follow the
+            // bottom in competition with that one-shot request.
+            guard tracksScroll, !seekingSearchEntry else { return }
             let next = follow.after(old, new)
             follow = next.follow
             if next.scroll { position.scrollTo(edge: .bottom) }
@@ -756,19 +769,41 @@ struct ChatTranscript<Footer: View>: View {
         // Your finger stops the chat on its way down to the newest: from there on you are reading.
         .onScrollPhaseChange { _, phase, context in
             guard tracksScroll else { return }
+            if phase == .interacting, seekingSearchEntry, let jump {
+                // Once the reader takes over, never fight their gesture.
+                finishedSearchJump = jump.requestID
+                follow = .reading
+                return
+            }
             if phase == .interacting, follow == .reaching, !ChatFollow.Frame(context.geometry).atEnd { follow = .reading }
         }
         .task(id: jump) {
             // Only read the exact saved entry; never create or send a new action.
             guard let jump, entries.contains(where: { $0.id == jump.entryID }) else { return }
             await Task.yield()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, finishedSearchJump != jump.requestID else { return }
             follow = .reading
-            position.scrollTo(id: jump.entryID, anchor: .center)
-            onSearchJumpApplied(jump.requestID)
+            // SwiftUI can accept scrollTo before the new transcript is laid out.
+            // Confirm the real target enters the viewport before acknowledging
+            // the jump, with bounded retries only during the transition.
+            for _ in 0..<12 {
+                guard !Task.isCancelled, finishedSearchJump != jump.requestID else { return }
+                position.scrollTo(id: jump.entryID, anchor: .center)
+                do { try await Task.sleep(for: .milliseconds(125)) }
+                catch { return }
+                guard !Task.isCancelled, finishedSearchJump != jump.requestID else { return }
+                if visibleSearchEntries.contains(jump.entryID) {
+                    finishedSearchJump = jump.requestID
+                    onSearchJumpApplied(jump.requestID)
+                    return
+                }
+            }
+            // Leave the request unacknowledged if the target never appeared.
+            // Stop retrying so normal reading and subsequent sends still work.
+            finishedSearchJump = jump.requestID
         }
         .onChange(of: lastSent) { _, sent in
-            if sent != nil { toNewest(animated: false) }
+            if sent != nil, !seekingSearchEntry { toNewest(animated: false) }
         }
         // Reserve the scroll-to-bottom button's height in the bottom bar while reading back so it
         // never sits over a result card's action button.
