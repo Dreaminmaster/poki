@@ -19,10 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: search-main-nov26
+          - pr: current-main-complete-candidate
             device: iPhone
-            ref: ca6f080d5b6c26adf9d2b7c9e40d7fb60aa0c2d9
-            tests: 'ConversationSearchTests:18 SessionArchiveTests:18'
+            ref: d3ada62883d2994f141c94e7a9a7690e2dad2754
+            tests: 'ConversationSearchTests:21 SessionArchiveTests:21 SessionBackupRestoreTests:3 ChatScrollTests:10'
             ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
             expected_baseline: false
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
@@ -220,7 +220,7 @@ jobs:
           import json, sys
           suite, minimum = sys.argv[1:]
           d = json.load(open(f"out/{suite}.json"))
-          assert d["totalTestCount"] >= int(minimum), d
+          assert d["totalTestCount"] == int(minimum), d
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
           done
