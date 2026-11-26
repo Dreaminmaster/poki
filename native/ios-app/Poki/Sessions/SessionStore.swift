@@ -244,7 +244,12 @@ final class SessionStore {
     /// An outside agent's session with no call for this long is over (most clients never send DELETE).
     static let agentIdle: TimeInterval = 10 * 60
 
-    private(set) var sessions: [SavedSession] = []
+    /// In-memory invalidation for conversation search, separate from the user's
+    /// conversation timestamps. Includes in-place edits and load/delete/trim paths.
+    private(set) var searchRevision: UInt64 = 0
+    private(set) var sessions: [SavedSession] = [] {
+        didSet { searchRevision &+= 1 }
+    }
     private(set) var isInitialReady = false
     private(set) var isLoaded = false
     /// A conversation that just left the list, archived or deleted. The screen that still shows it
@@ -721,10 +726,10 @@ final class SessionStore {
         return [time] + lines.map { line in
             var entry: ChatEntry
             switch line.role {
-            case .you: entry = ChatEntry(.you(line.text, delivered: true))
-            case .poki: entry = ChatEntry(.poki(line.text))
-            case .tool: entry = ChatEntry(.step(line.text, ok: true))
-            case .note: entry = ChatEntry(.note(.problem(line.text)))
+            case .you: entry = ChatEntry(.you(line.text, delivered: true), id: line.id)
+            case .poki: entry = ChatEntry(.poki(line.text), id: line.id)
+            case .tool: entry = ChatEntry(.step(line.text, ok: true), id: line.id)
+            case .note: entry = ChatEntry(.note(.problem(line.text)), id: line.id)
             }
             entry.at = line.at
             return entry

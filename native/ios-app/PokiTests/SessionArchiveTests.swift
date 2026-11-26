@@ -40,6 +40,48 @@ final class SessionArchiveTests: XCTestCase {
 
     private func launch() -> SessionStore { SessionStore(folder: folder, defaults: defaults) }
 
+    func testLateStopInvalidatesSearchWithoutChangingConversationOrder() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let saved = try save("stopped-search", lines: ["Find the museum", "Stopping…"],
+                             updated: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        let store = launch()
+        let entry = try XCTUnwrap(saved.entries.last)
+        let before = store.searchRevision
+        let oldSnapshot = ConversationSearchIndex.snapshot(in: store.ordered)
+        XCTAssertEqual(ConversationSearchIndex.search(oldSnapshot, query: "Stopping").first?.entryID, entry.id)
+
+        store.finishStopping(entry.id, in: saved.id, text: "Stopped.")
+        XCTAssertNotEqual(store.searchRevision, before)
+        let current = try XCTUnwrap(store.session(saved.id))
+        XCTAssertEqual(current.updated, saved.updated, "Finishing an old stop must not move the conversation")
+        XCTAssertEqual(current.entries.map(\.id), saved.entries.map(\.id))
+        let newSnapshot = ConversationSearchIndex.snapshot(in: store.ordered)
+        XCTAssertTrue(ConversationSearchIndex.search(newSnapshot, query: "Stopping").isEmpty)
+        XCTAssertEqual(ConversationSearchIndex.search(newSnapshot, query: "Stopped").first?.entryID, entry.id)
+        store.flush()
+    }
+
+    func testVoiceSearchTargetSurvivesTranscriptSaveAndReload() throws {
+        defaults.set(true, forKey: SessionStore.archivedEarlierKey)
+        let store = launch()
+        let started = Date()
+        let first = VoiceLine(role: .you, text: "Find the lighthouse")
+        let second = VoiceLine(role: .poki, text: "I'll look for it.")
+        store.save(voice: "voice-search", started: started, lines: [first], live: true)
+        let initial = try XCTUnwrap(store.session("voice-search"))
+        let hits = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [initial]), query: "lighthouse")
+        let target = try XCTUnwrap(hits.first(where: { $0.entryID != nil })?.entryID)
+        XCTAssertEqual(target, first.id)
+
+        store.save(voice: "voice-search", started: started, lines: [first, second], live: false)
+        let updated = try XCTUnwrap(store.session("voice-search"))
+        XCTAssertEqual(Array(updated.entries.dropFirst().map(\.id)), [first.id, second.id])
+        XCTAssertEqual(ConversationSearchIndex.resolve(hits, in: [updated]).first(where: { $0.entryID != nil })?.entryID, target)
+        store.flush()
+        let reopened = try XCTUnwrap(launch().session("voice-search"))
+        XCTAssertEqual(Array(reopened.entries.dropFirst().map(\.id)), [first.id, second.id])
+    }
+
     func testUpgradeArchivesEveryEarlierConversationOnce() throws {
         let first = try saveEarlier("old-1", lines: ["Add oat milk to my list", "Added."])
         let second = try saveEarlier("old-2", lines: ["What iOS version is this?", "iOS 27.3."])
@@ -269,9 +311,13 @@ final class SessionArchiveTests: XCTestCase {
         let store = launch()
         XCTAssertEqual(store.listed.count, SessionStore.limit)
         XCTAssertNil(store.session("listed-0"), "the oldest listed conversation is the one over the limit")
+        // trim removes the in-memory row immediately, but queues its file deletion.
+        // Drain the serial write queue before asserting on disk or reopening the store.
+        store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("listed-0.json").path))
         XCTAssertEqual(Set(store.archivedSessions.map(\.id)), Set(archived.map(\.id)), "no archived conversation is taken")
         let relaunched = launch()
+        XCTAssertNil(relaunched.session("listed-0"), "the evicted conversation must not return after reload")
         for session in archived { XCTAssertEqual(relaunched.session(session.id)?.entries, session.entries) }
     }
 
