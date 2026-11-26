@@ -54,6 +54,7 @@ final class InProcessProbe: ObservableObject {
             case "later": await later()
             case "read": await readOnly()
             case "separate": await separateTrial()
+            case "quiet": await quietReads()
             case "delivery": await deliveryCheck()
             case "lifecycle": await lifecycleCheck(model: model, rounds: defaults.integer(forKey: "pokiProbeRounds") > 0 ? defaults.integer(forKey: "pokiProbeRounds") : 5)
             case "reopen": await reopenCycle(rounds: defaults.integer(forKey: "pokiProbeRounds") > 0 ? defaults.integer(forKey: "pokiProbeRounds") : 5)
@@ -439,6 +440,59 @@ final class InProcessProbe: ObservableObject {
         }
         let line = result.keys.sorted().map { "\($0)=\(result[$0].map { "\($0)" } ?? "")" }.joined(separator: " ")
         note("separate session: \(line); watch whether the banner goes now", (["step": "separate_result"] as [String: Any]).merging(result) { a, _ in a })
+    }
+
+    /// Screen History's question (issue 484): can Poki's own session read another app while iOS
+    /// shows no Automation Running banner? Two readings, each after a wait in which the person leaves
+    /// Poki for another app and watches the top of the screen. First with a session that never turned
+    /// Automation Mode on, then with one that turned it on and paused it. Neither reading taps or
+    /// types. The person's part of the answer is whether the banner showed during each wait.
+    func quietReads() async {
+        guard begin("reads with Automation Mode off") else { return }
+        defer { end() }
+        let wait = max(5, Double(delay) ?? 8)
+        func line(_ result: [String: Any]) -> String {
+            result.keys.sorted().map { "\($0)=\(result[$0].map { "\($0)" } ?? "")" }.joined(separator: " ")
+        }
+        func reads(_ result: [String: Any]) -> Bool {
+            (result["front_ok"] as? Bool) == true && (result["tree_ok"] as? Bool) == true && ((result["tree_elements"] as? Int) ?? 0) > 1
+                && (result["automation_on"] as? Bool) == false && (result["automation_on_after"] as? Bool) == false
+                && !HistoryCapture.isPoki(result["front_bundle"] as? String ?? "")
+        }
+        func trial() async -> [String: Any] {
+            await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+                queue.async { c.resume(returning: PKInProcess.shared().quietReadTrial()) }
+            }
+        }
+        let closed = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+            queue.async { c.resume(returning: PKInProcess.shared().close()) }
+        }
+        note("quiet read 1 of 2 (never on): session \((closed["closed"] as? Bool) == true ? "closed" : "was not open"). Leave Poki for another app now; reading in \(Int(wait)) s. Watch for the banner.",
+             (["step": "quiet_never_start"] as [String: Any]).merging(closed) { a, _ in a })
+        try? await Task.sleep(for: .seconds(wait))
+        let never = await trial()
+        note("quiet read 1 of 2 (never on): \(reads(never) ? "READ" : "not read") \(line(never))",
+             (["step": "quiet_never", "reads": reads(never)] as [String: Any]).merging(never) { a, _ in a })
+        // The second reading turns Automation Mode on first (the banner shows, and after a restart
+        // iOS asks for the passcode), pauses it, and reads once the banner has had time to go.
+        guard await prepare() else {
+            note("quiet read 2 of 2 (paused): not made, Automation Mode did not turn on", ["step": "quiet_paused", "reads": false])
+            return
+        }
+        let paused = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+            queue.async { c.resume(returning: PKInProcess.shared().pauseAutomation()) }
+        }
+        note("quiet read 2 of 2 (paused): Automation Mode \((paused["paused"] as? Bool) == true ? "paused" : "NOT paused") by \(paused["how"] ?? "?"). Stay in the other app; reading in \(Int(wait)) s. Watch whether the banner goes.",
+             (["step": "quiet_paused_start"] as [String: Any]).merging(paused) { a, _ in a })
+        try? await Task.sleep(for: .seconds(wait))
+        let after = await trial()
+        note("quiet read 2 of 2 (paused): \(reads(after) ? "READ" : "not read") \(line(after))",
+             (["step": "quiet_paused", "reads": reads(after)] as [String: Any]).merging(after) { a, _ in a })
+        _ = await withCheckedContinuation { (c: CheckedContinuation<[String: Any], Never>) in
+            queue.async { c.resume(returning: PKInProcess.shared().close()) }
+        }
+        note("quiet reads: never on \(reads(never) ? "read" : "did not read"), paused \(reads(after) ? "read" : "did not read"). The banner is the person's to report.",
+             ["step": "quiet_result", "never_on": reads(never), "paused": reads(after)])
     }
 
     /// Issue 347's check: the session is closed (the banner goes) and opened again in this same
@@ -864,7 +918,7 @@ struct InProcessSection: View {
                 Text("Poki itself").tag(AutomationPath.inProcess.rawValue)
             }
             if path != running.rawValue {
-                Text("Takes effect when Poki starts again.").font(.caption).foregroundStyle(.orange)
+                Text("Takes effect when Poki starts again.").font(.allo(.caption)).foregroundStyle(.orange)
             }
             ProbeField(probe: probe).frame(height: 44)
             HStack {
@@ -873,6 +927,7 @@ struct InProcessSection: View {
             }.disabled(probe.running)
             Button("Compare both paths (5 rounds)") { Task { await probe.benchmark(model: model, rounds: 5) } }.disabled(probe.running)
             Button("Close and reopen (5 rounds)") { Task { await probe.reopenCycle(rounds: 5) } }.disabled(probe.running)
+            Button("Read with Automation Mode off") { Task { await probe.quietReads() } }.disabled(probe.running)
             Button("Reopen, then tap, type and open an app") { Task { await probe.deliveryCheck() } }.disabled(probe.running)
             Button("Whole tasks, 5 rounds, then a session that cannot read") { Task { await probe.lifecycleCheck(model: model, rounds: 5) } }.disabled(probe.running)
             HStack {
@@ -892,9 +947,15 @@ struct InProcessSection: View {
             .monospacedDigit()
             ForEach(probe.lines.indices.reversed(), id: \.self) { i in Text(probe.lines[i]).font(.caption2.monospaced()).textSelection(.enabled) }
         } header: {
-            Text("In-process automation")
+            Group {
+                Text("In-process automation")
+            }
+            .settingsHeader()
         } footer: {
-            Text("Taps and types from Poki itself, without Poki Runner. Self test taps the field above and types into it. Later waits, then taps the point (x, y) and types, in whatever app is in front.")
+            Group {
+                Text("Taps and types from Poki itself, without Poki Runner. Self test taps the field above and types into it. Later waits, then taps the point (x, y) and types, in whatever app is in front.")
+            }
+            .settingsFooter()
         }
     }
 }

@@ -1465,13 +1465,18 @@ final class ChatHarnessTests: XCTestCase {
         for ending in Ending.allCases {
             var actions: [[String: Any]] = [["run": ["name": name, "step_memory_ids": ["1": [opening.id]]]]]
             let needsApproval = ending == .declined || ending == .stopped
-            if needsApproval { actions.append(["tap": 1, "used_memory_ids": [followUp.id]]) }
             if ending == .failed { actions.append(["wait": -1, "used_memory_ids": [followUp.id]]) }
+            // A tap chained after the run would be judged on the screen it lands on and handed back
+            // unsent, so the follow-up that needs the owner goes in its own do, on the fresh screen.
+            var dos = [FakeCompletions.tool("do", ["actions": actions])]
+            if needsApproval {
+                dos.append(FakeCompletions.tool("do", ["actions": [["tap": 1, "used_memory_ids": [followUp.id]]]]))
+            }
             let server = try FakeCompletions(replies: [
                 FakeCompletions.tool("report_plan", ["steps": ["Open Settings", "Finish the check"], "currentStep": 2]),
                 FakeCompletions.tool("look", ["full": true]),
                 FakeCompletions.tool("skills", ["action": "list"]),
-                FakeCompletions.tool("do", ["actions": actions]),
+            ] + dos + [
                 FakeCompletions.tool("finish_task", [
                     "success": ending == .completed, "summary": "Settings check ended.",
                     "details": [], "answer": ["kind": "action"],
@@ -1480,7 +1485,9 @@ final class ChatHarnessTests: XCTestCase {
             ])
             let automation = FakeAutomation()
             _ = automation.prepare()
-            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Delete" }),
+            // A Pay button asks wherever it is. A lone Delete asks only inside a menu or a dialog
+            // (main's rules, kept for 0.5.1), and a chained tap is judged on the screen it lands on.
+            let chat = chat(on: server, transport: SessionScreenTransport(session: automation, screenLabel: { "Pay" }),
                             automation: automation)
             let session = chat.sessionID
             let app = try XCTUnwrap(app)
@@ -1526,7 +1533,8 @@ final class ChatHarnessTests: XCTestCase {
                 XCTAssertTrue(answer.contains("run \"\(name)\": 1 steps in"), answer)
                 if ending == .declined {
                     XCTAssertEqual(result.success, false, result.text)
-                    XCTAssertTrue(answer.contains("not_sent from action 2: the owner declined on the phone"), answer)
+                    let declined = Self.toolAnswer(try XCTUnwrap(server.requests.dropFirst(5).first))
+                    XCTAssertTrue(declined.contains("not_sent from action 1: the owner declined on the phone"), declined)
                     XCTAssertTrue(chat.entries.contains {
                         if case .note(.approval(let note)) = $0.kind { return note.state == .refused && !note.byModel }
                         return false
@@ -2391,7 +2399,8 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertTrue(prompt.contains("two visible iPhone Split View apps"))
         XCTAssertFalse(prompt.contains("web_open"))
         let offered = (request["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
-        XCTAssertEqual(Set(offered), ["look", "do", "status", "report_plan", "finish_task"])
+        // personal_context is the chat's way into Screen History since the Senses work (6600edd8).
+        XCTAssertEqual(Set(offered), ["look", "do", "status", "personal_context", "report_plan", "finish_task"])
     }
 
     func testInterruptedConversationReachesModelAfterReload() async throws {
@@ -2813,7 +2822,7 @@ final class ChatHarnessTests: XCTestCase {
                 let urlString = request.url?.absoluteString ?? ""
                 let json = request.httpBody.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
                 let hasCacheKey = json["prompt_cache_key"] != nil
-                let trackedHeaders: Set<String> = ["session_id", "x-client-request-id", "x-session-affinity"]
+                let trackedHeaders: Set<String> = ["session_id", "session-id", "x-client-request-id", "x-session-affinity"]
                 let routingHeaders = (request.allHTTPHeaderFields ?? [:]).keys
                     .map { $0.lowercased() }
                     .filter { trackedHeaders.contains($0) }
@@ -2896,7 +2905,7 @@ final class ChatHarnessTests: XCTestCase {
         XCTAssertEqual(attempts[0].url, "https://api.openai.com/v1/responses")
         XCTAssertEqual(attempts[0].statusCode, 503)
         XCTAssertTrue(attempts[0].hasPromptCacheKey, "Official api.openai.com primary should keep prompt_cache_key")
-        XCTAssertEqual(attempts[0].routingHeaders, ["session_id", "x-client-request-id"])
+        XCTAssertEqual(attempts[0].routingHeaders, ["session-id", "x-client-request-id"])
 
         XCTAssertEqual(attempts[1].url, "https://strict-backup.example/v1/responses")
         XCTAssertFalse(attempts[1].hasPromptCacheKey, "Third-party backup must not receive prompt_cache_key")

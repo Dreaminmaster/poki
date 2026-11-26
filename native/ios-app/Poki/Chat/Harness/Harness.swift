@@ -138,7 +138,12 @@ enum Harness {
     }
 
     static var instructions: String {
-        [system, chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed), WebTools.instructions].joined(separator: "\n\n")
+        // Screen History reaches Poki's chat through personal_context only (SensesContext): a model on
+        // this iPhone answers and checks the answer first. The raw screen_history query, which hands
+        // screen text straight to the model, stays for outside agents only.
+        // Who Poki is comes first, then the phone's tool rules, then the browser's (#479). The
+        // Senses merge (6600edd8) had put the tool rules ahead of the identity.
+        [system, chatToolInstructions(includeScreenHistory: false), WebTools.instructions].joined(separator: "\n\n")
     }
 
     static let splitViewInstructions = """
@@ -147,6 +152,14 @@ enum Harness {
     For cross-pane drag, read the destination pane first, then select the source pane with look and send do with {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} using destination-local coordinates. Read the destination again to verify arrival, including the image itself for photos, and report unconfirmed transfers rather than risking duplicates.
     Check the target field and content before typing, and verify the result in the same pane. Wait for the owner's decision on approvals, leave password manager apps unopened, stop on checkout or payment pages unless purchase was explicitly requested, and use handoff for passwords, verification, or owner-only prompts. Call finish_task after verifying the final result, setting success=false when unverified.
     """
+
+    /// With connectors in use: their tools reach the service directly, which is faster than its app.
+    static func connectorInstructions(_ names: [String]) -> String? {
+        guard !names.isEmpty else { return nil }
+        return """
+        Connectors in use: \(names.joined(separator: ", ")). Their tools are named after the connector (for example notion__search; a second account adds a number, notion2__search) and reach the service directly. Prefer a connector's tool over opening its app on the phone when it can do the step. A message that writes @Name means that connector. Steps that change data may wait for the owner's approval; if one is not approved, say so and do not try it another way.
+        """
+    }
 
     private static let screenScrollInstruction = "For a request measured in pages or screens, scroll the requested number of screens and verify those moves with the screen tools."
 
@@ -268,7 +281,7 @@ enum Harness {
         if inSplitView {
             var parts = [splitViewInstructions, screenScrollInstruction]
             if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
-            if HistoryCapture.agentQueryAllowed { parts.append(PokiCore.screenHistoryInstructions) }
+            if SensesContext.offered { parts.append(SensesContext.brief) }
             if ApprovalClassifier.mode == .reply { parts.append(replyApprovals) }
             return (parts.joined(separator: "\n\n"), [])
         }
@@ -276,7 +289,8 @@ enum Harness {
         let brief = SkillStore.shared.taskBrief(for: task, apps: namedBundleIDs)
         var parts = [systemPrompt(for: task, includeAutomaticUnlock: includeAutomaticUnlock), screenScrollInstruction]
         if countedScroll { parts.append(countedScrollSection(includeReply: countedScrollReply)) }
-        parts.append(chatToolInstructions(includeScreenHistory: HistoryCapture.agentQueryAllowed))
+        // Screen History reaches the chat through personal_context only (SensesContext).
+        parts.append(chatToolInstructions(includeScreenHistory: false))
         parts.append(WebTools.instructions)
         parts.append("To continue or resume, match one unfinished task from this conversation or an explicitly selected saved task; if none or several match, ask which task before calling action tools. Treat long-term notes and saved skills strictly as preferences and reusable steps, never pending tasks.")
         // Matching skills sit in the brief below, so the first call can invoke the skill directly.
@@ -303,6 +317,9 @@ enum Harness {
             parts.append("When a saved memory changes an action in do, add used_memory_ids: [\"ID\"] on that item in actions or path.steps (not outer path/run), or on web_open/web_click/web_type. For a saved skill, check numbered steps via skills show and set run.step_memory_ids (1-based, e.g. {\"2\":[\"ID\"]}). Report only IDs that drove the action.")
         }
         parts.append("A skill or memory you ask to save is kept only after finish_task(success=true); call finish_task even for remember-only tasks and skip failed/interrupted attempts. Set optional=true only on unrequested automatic saves; omit it when requested.")
+        if SensesContext.offered { parts.append(SensesContext.brief) }
+        // The usual app for what this asks, learned from Screen History, when the owner named none.
+        if let usual = SensesMemories.shared.usualAppLine(for: task) { parts.append(usual) }
         if let apps = appIDs(namedBundleIDs) { parts.append(apps) }
         if !brief.text.isEmpty { parts.append(brief.text) }
         return (parts.joined(separator: "\n\n"), brief.notes)
@@ -328,9 +345,11 @@ enum Harness {
         return "Use these iPhone bundle ids for apps named in this request:\n" + lines.joined(separator: "\n")
     }
 
-    /// Poki's sandbox browser tools sit beside the phone tools.
+    /// Poki's sandbox browser tools sit beside the phone tools. personal_context is always listed (a
+    /// loop keeps its tools for its whole life) and answers that it is off until the owner turns it on.
+    /// Screen History reaches Poki's chat only through personal_context (SensesContext).
     static var tools: [ToolSpec] {
-        toolSpecs(inSplitView: false, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+        toolSpecs(inSplitView: false, includeScreenHistory: false)
     }
 
     /// Bundle ids from the phone's own app list, with the App Store's search as the backup (InstalledApps).
@@ -340,7 +359,7 @@ enum Harness {
         schema: ["type": "object", "properties": ["name": string, "purpose": string], "additionalProperties": false])
 
     static var splitViewTools: [ToolSpec] {
-        toolSpecs(inSplitView: true, includeScreenHistory: HistoryCapture.agentQueryAllowed)
+        toolSpecs(inSplitView: true, includeScreenHistory: false)
     }
 
     /// A Pi loop holds executable implementations, even for tools currently withheld.
@@ -356,23 +375,23 @@ enum Harness {
         if !inSplitView {
             let webTools = includeMemoryAttribution ? WebTools.specs.map(withActionMemoryIDs) : WebTools.specs
             let extra = resultCardMode == .none ? [findApp] : [findApp, getScreenshot]
-            return catalogTools(includeScreenHistory: includeScreenHistory, includeMemoryAttribution: includeMemoryAttribution) + extra + webTools + taskTools
+            // Screen History reaches Poki's chat through personal_context only (SensesContext).
+            return catalogTools(includeScreenHistory: false, includeMemoryAttribution: includeMemoryAttribution) + extra + webTools + [SensesContext.spec] + taskTools
         }
         return [
             ToolSpec(name: "look", description: "Read the app, numbered UI elements and screenshot of the left or right pane. Select a pane explicitly when you first read and whenever moving between apps. Points use the selected screenshot’s own coordinates.",
                      schema: object(["pane": ["type": "string", "enum": ["left", "right"]], "full": ["type": "boolean"]], [])),
             ToolSpec(name: "do", description: "Act in the selected pane, then read it. Actions include {tap: ref or [x,y]}, {type: text, ref?: number}, {key: return|delete|tab|space|escape}, {scroll_to: text}, {swipe: direction}, {back: true}, {wait_until: text}, {handoff: {kind, text}}, and {drag: {from: ref or [x,y], to: [x,y], to_pane: left or right}} for a continuous cross-pane drag. Read the destination first and the source second. The drop point uses destination-local coordinates. Read the destination after sending the drag. Do not switch apps or end Split View.",
                      schema: object(["actions": ["type": "array", "items": ["type": "object"], "minItems": 0, "maxItems": 20], "full": ["type": "boolean"]], ["actions"])),
-        ] + catalogTools(includeScreenHistory: includeScreenHistory, includeMemoryAttribution: includeMemoryAttribution).filter { $0.name == "status" || $0.name == "screen_history" } + taskTools
+        ] + catalogTools(includeScreenHistory: false, includeMemoryAttribution: includeMemoryAttribution).filter { $0.name == "status" } + [SensesContext.spec] + taskTools
     }
 
     /// Keep the cached task prompt consistent with the current tool catalog.
     nonisolated static func historyInstructions(_ text: String, allowed: Bool) -> String {
-        let instruction = PokiCore.screenHistoryInstructions
-        if allowed {
-            return text.contains(instruction) ? text : text + "\n\n" + instruction
-        }
-        return text.replacingOccurrences(of: instruction, with: "")
+        // Poki's own chat reads Screen History only through personal_context (SensesContext), whatever
+        // outside agents are allowed: the raw query's instructions are always taken out.
+        _ = allowed
+        return text.replacingOccurrences(of: PokiCore.screenHistoryInstructions, with: "")
     }
 
     /// PokiCore's catalog: look, do and status.

@@ -86,6 +86,13 @@ final class SelfSigner {
     private(set) var lastCheck: Date?
     /// When the installed Poki stops opening: its own profile's expiry. Nil when it has none (simulator).
     let expiry: Date? = SelfSigner.installedProfileExpiry() ?? SelfSigner.screenshotExpiry
+    /// A free Apple Account's team signed the installed Poki: its profile lasts 7 days, so Poki keeps
+    /// opening past that only when it renews itself, signed in to the Apple Account here.
+    var freeSigning: Bool = SelfSigner.installedFreeSigning
+    nonisolated static let installedFreeSigning: Bool = installedProfileIsFree() ?? screenshotFreeSigning
+    /// Poki Setup put Poki on this phone just now: its signing key still waited in the container at
+    /// this launch (`start()` takes it into the Keychain and deletes the file).
+    let handedAtLaunch = FileManager.default.fileExists(atPath: SelfSigner.handedIdentity.path)
     let installedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     let installedBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
 
@@ -132,6 +139,13 @@ final class SelfSigner {
     private let log = AppLog.shared
 
     var signedIn: Bool { status?.signed_in == true || Self.screenshotSignedIn }
+    /// Free signing with no working Apple sign-in here: Poki stops opening when the profile ends,
+    /// unless a computer renews it. The start flow and the sheet after setup ask for the sign-in.
+    var needsAppleAccountForRenewal: Bool { freeSigning && (!signedIn || sessionExpired) }
+
+    /// The Apple ID Poki Setup signed Poki with (from signing-identity.json), to fill in the sign-in.
+    static let handedAppleIDKey = "signer.handedAppleID"
+    var handedAppleID: String? { UserDefaults.standard.string(forKey: Self.handedAppleIDKey).flatMap { $0.isEmpty ? nil : $0 } }
     var needsCode: Bool { status?.needs_code == true }
     /// Apple took a code but never opened the session: nothing signs in until the person does.
     var needsReauth: Bool { status?.needs_reauth == true }
@@ -230,6 +244,9 @@ final class SelfSigner {
                 if let imported = try? await decode([String: AnyDecodable].self, ["op": "import_identity", "path": Self.handedIdentity.path]),
                    imported["imported"]?.value as? Bool == true {
                     log.add("signing", "took Poki Setup's signing key into the Keychain")
+                    if let appleID = imported["apple_id"]?.value as? String, !appleID.isEmpty {
+                        UserDefaults.standard.set(appleID, forKey: Self.handedAppleIDKey)
+                    }
                 }
                 await reload()
                 loadReady()
@@ -842,15 +859,46 @@ final class SelfSigner {
         #endif
     }
 
-    /// The ExpirationDate of Poki's own embedded.mobileprovision (a CMS envelope around a plist).
-    nonisolated static func installedProfileExpiry() -> Date? {
+    /// `-pokiSigningDays 6`: a simulator's screenshot profile of 7 days or less is a free team's.
+    nonisolated private static var screenshotFreeSigning: Bool {
+        #if targetEnvironment(simulator)
+        guard UserDefaults.standard.object(forKey: "pokiSigningDays") != nil else { return false }
+        return UserDefaults.standard.double(forKey: "pokiSigningDays") <= 7
+        #else
+        false
+        #endif
+    }
+
+    /// Poki's own embedded.mobileprovision (a CMS envelope around a plist). Nil when it has none (simulator).
+    nonisolated static func installedProfile() -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: url),
-              let start = data.range(of: Data("<?xml".utf8)),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return profilePlist(data)
+    }
+
+    nonisolated static func profilePlist(_ data: Data) -> [String: Any]? {
+        guard let start = data.range(of: Data("<?xml".utf8)),
               let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex) else { return nil }
         let plist = data.subdata(in: start.lowerBound..<end.upperBound)
-        let dict = (try? PropertyListSerialization.propertyList(from: plist, format: nil)) as? [String: Any]
-        return dict?["ExpirationDate"] as? Date
+        return (try? PropertyListSerialization.propertyList(from: plist, format: nil)) as? [String: Any]
+    }
+
+    /// The ExpirationDate of Poki's own profile.
+    nonisolated static func installedProfileExpiry() -> Date? {
+        installedProfile()?["ExpirationDate"] as? Date
+    }
+
+    /// Whether the installed profile is a free team's. Nil when Poki has no profile (simulator).
+    nonisolated static func installedProfileIsFree() -> Bool? {
+        installedProfile().map(profileIsFree)
+    }
+
+    /// A free Apple Account's profiles last 7 days, a paid team's a year. Apple does not say which
+    /// kind of team made a profile, so its lifetime tells them apart (an hour of slack for clocks).
+    nonisolated static func profileIsFree(_ profile: [String: Any]) -> Bool {
+        guard let created = profile["CreationDate"] as? Date, let expires = profile["ExpirationDate"] as? Date else { return false }
+        if profile["ProvisionsAllDevices"] as? Bool == true { return false }
+        return expires.timeIntervalSince(created) <= 7 * 86_400 + 3600
     }
 }
 

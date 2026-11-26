@@ -39,12 +39,15 @@ struct VoiceView: View {
                         .accessibilityIdentifier("voice.dictationButton")
                     Toggle(isOn: $voice.muted) { SettingsLabel("Mute Poki’s Voice", systemImage: "speaker.slash") }
                 } footer: {
-                    if micDenied { Text("Poki can't use the microphone. Allow it in Settings, Privacy, Microphone.").foregroundStyle(.orange) }
-                    else if voice.canTalkLive {
-                        Text("In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud, also while you are in another app. It ends by itself 8 seconds after an answer if nobody speaks. Tap End to stop sooner. The microphone in the message field only dictates.")
-                    } else {
-                        Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Settings › Models. Dictation in the message field works with every model.")
+                    Group {
+                        if micDenied { Text("Poki can't use the microphone. Allow it in Settings, Privacy, Microphone.").foregroundStyle(.orange) }
+                        else if voice.canTalkLive {
+                            Text("In the chat, the waveform button starts a live conversation: Poki listens, acts and answers out loud, also while you are in another app. It ends by itself 8 seconds after an answer if nobody speaks. Tap End to stop sooner. The microphone in the message field only dictates.")
+                        } else {
+                            Text("A live conversation uses OpenAI’s Realtime voice, which needs an OpenAI API key in Settings › Models. Dictation in the message field works with every model.")
+                        }
                     }
+                    .settingsFooter()
                 }
                 #if canImport(ScreenCaptureKit)
                 if #available(iOS 27, *) {
@@ -156,7 +159,7 @@ struct VoiceAdvancedRows: View {
             Button(action: saveBridge) { SettingsRow(title: "Save Address", symbol: "checkmark") }
                 .disabled(bridgeText.trimmingCharacters(in: .whitespaces).isEmpty)
             Text(bridgeRejected ? "That is not a voice bridge address. It looks like http://192.168.1.10:47830/voice/ followed by a long code." : "Optional, for live voice without an OpenAI key on this iPhone. Run bin/voice-bridge.mjs on your Mac and enter the address it gives.")
-                .font(.footnote).foregroundStyle(bridgeRejected ? Color.orange : Color.secondary)
+                .font(.allo(.footnote)).foregroundStyle(bridgeRejected ? Color.orange : Color.secondary)
         }
     }
 

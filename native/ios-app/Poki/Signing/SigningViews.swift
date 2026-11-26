@@ -24,7 +24,10 @@ struct AccountPage: View {
                 Button("Verify") { Task { await signer.finishSignIn(code: code); code = "" } }
                     .disabled(code.count != 6 || signer.working != nil)
             } footer: {
-                Text("Apple sent a six-digit code to your trusted devices or phone number.")
+                Group {
+                    Text("Apple sent a six-digit code to your trusted devices or phone number.")
+                }
+                .settingsFooter()
             }
             VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
         } else if signer.signedIn, !signer.sessionExpired {
@@ -43,12 +46,19 @@ struct AccountPage: View {
                     LabeledContent("Team", value: team.is_free ? AppLocalization.text(LocalizedStringResource("\(team.name) (Free, 7-day signing)")) : team.name)
                 }
             } footer: {
-                Text(signer.status?.keeps_password == true
-                     ? "Poki keeps the password in this iPhone’s Keychain to sign itself again every week."
-                     : "Poki signs in again when its signing is due, and asks you for the password then.")
+                Group {
+                    Text(signer.status?.keeps_password == true
+                         ? "Poki keeps the password in this iPhone’s Keychain to sign itself again every week."
+                         : "Poki signs in again when its signing is due, and asks you for the password then.")
+                }
+                .settingsFooter()
             }
             .task { if signer.teams.isEmpty, signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
-            Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
+            Section {
+                Button(role: .destructive) { Task { await signer.signOut() } } label: {
+                    Text("Sign Out").frame(maxWidth: .infinity)
+                }
+            }
         } else {
             if signer.needsReauth, signer.lastError != SelfSigner.reauthMessage {
                 Section { Label(SelfSigner.localizedErrorText(SelfSigner.reauthMessage), systemImage: "exclamationmark.triangle").foregroundStyle(Tint.amberInk) }
@@ -60,7 +70,7 @@ struct AccountPage: View {
                     .task { if signer.working == nil, !signer.needsCode, !signer.rateLimited { await signer.loadTeams() } }
             }
             Section {
-                TextField("Apple ID", text: $appleID)
+                TextField("Apple Account", text: $appleID)
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -69,17 +79,31 @@ struct AccountPage: View {
                     .textContentType(.password)
                 Toggle("Keep Me Signed In", isOn: $keepPassword)
             } footer: {
-                Text("You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple.")
+                Group {
+                    Text("You can use a free Apple Account. Signing lasts 7 days, and Poki automatically prepares a renewal before it expires. Your Apple Account and password are sent only to Apple.")
+                }
+                .settingsFooter()
             }
             Section {
-                Button("Sign In") { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } }
-                    .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
+                // Centred and bold, as a form's own action button: plain, it read as an empty field.
+                Button { Task { await signer.signIn(appleID: appleID, password: password, keepPassword: keepPassword); password = "" } } label: {
+                    Text("Sign In").font(.allo(.body, .semibold)).frame(maxWidth: .infinity)
+                }
+                .disabled(appleID.isEmpty || password.isEmpty || signer.working != nil)
             }
             // Signing in again is for the same account, so its Apple ID is already there.
-            .onAppear { if appleID.isEmpty, signer.sessionExpired { appleID = signer.status?.apple_id ?? "" } }
+            // After Poki Setup, the Apple ID it signed Poki with.
+            .onAppear {
+                if appleID.isEmpty, signer.sessionExpired { appleID = signer.status?.apple_id ?? "" }
+                if appleID.isEmpty, let handed = signer.handedAppleID { appleID = handed }
+            }
             // The account is still stored, so it can be signed out here as when its sign-in works.
             if signer.sessionExpired, signer.signedIn {
-                Section { Button("Sign Out", role: .destructive) { Task { await signer.signOut() } } }
+                Section {
+                    Button(role: .destructive) { Task { await signer.signOut() } } label: {
+                        Text("Sign Out").frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
         SignerActivityRows(signer: signer, offersSignIn: false)
@@ -93,7 +117,7 @@ struct SessionExpiredLabel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Apple Sign-In Expired").font(Prominent.font(.headline, .semibold))
                 Text("Poki signs itself with your Apple Account to renew and update without a Mac. Sign in again to keep that working.")
-                    .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
             }
         } icon: {
             Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(.orange)
@@ -250,18 +274,31 @@ struct SigningSection: View {
                 SignerAction(signer: signer, title: "Prepare Renewal Now", systemImage: "arrow.clockwise") { await signer.prepare(kind: "refresh") }
             }
         } footer: {
-            Text(footer)
+            Group {
+                Text(footer)
+            }
+            .settingsFooter()
         }
 
         Section {
-            NavigationLink { AppleAccountPage() } label: {
-                AppleAccountRow(appleID: signer.signedIn ? signer.status?.apple_id : nil, signedIn: signer.signedIn)
+            // While the update asks for the sign-in, its row above opens this same page: a second
+            // "Not Signed In" here said it twice (Nov 20 2026).
+            if signer.updateStep != .signIn {
+                NavigationLink { AppleAccountPage() } label: {
+                    AppleAccountRow(appleID: signer.signedIn ? signer.status?.apple_id : nil, signedIn: signer.signedIn)
+                }
             }
             NavigationLink { SigningOptionsPage() } label: {
                 SettingsRow(title: "Advanced", symbol: "slider.horizontal.3")
             }
         } footer: {
-            Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+            // While the update itself asks for the sign-in, the footer above already says why.
+            if signer.updateStep != .signIn {
+                Group {
+                    Text("Optional. To renew Poki without a Mac, sign in to your Apple Account here.")
+                }
+                .settingsFooter()
+            }
         }
         SignerActivityRows(signer: signer)
     }
@@ -297,10 +334,10 @@ private struct SignedUntilRow: View {
             SettingsIcon(symbol: "signature")
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Signed Until").font(.body).foregroundStyle(Color(.label))
+                Text("Signed Until").font(.allo(.body)).foregroundStyle(Color(.label))
                 if let expiry {
                     Text(expiry, format: .dateTime.month(.abbreviated).day().year())
-                        .font(.footnote).foregroundStyle(Color(.secondaryLabel))
+                        .font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel))
                 }
                 if typeSize.isAccessibilitySize { left }
             }
@@ -312,9 +349,9 @@ private struct SignedUntilRow: View {
 
     @ViewBuilder private var left: some View {
         if let expiry {
-            Text(expiry, style: .relative).font(.subheadline).monospacedDigit().foregroundStyle(countdownColor)
+            Text(expiry, style: .relative).font(.allo(.subheadline)).monospacedDigit().foregroundStyle(countdownColor)
         } else {
-            Text("Unknown").font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+            Text("Unknown").font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
         }
     }
 }
@@ -387,9 +424,15 @@ struct SigningOptionsPage: View {
                         }
                     }
                 } header: {
-                    SettingsHeader("Release Channel")
+                    Group {
+                        SettingsHeader("Release Channel")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("Poki receives updates from the selected release channel.")
+                    Group {
+                        Text("Poki receives updates from the selected release channel.")
+                    }
+                    .settingsFooter()
                 }
             }
             Section {
@@ -416,9 +459,15 @@ struct SigningOptionsPage: View {
                         .onSubmit { save() }
                 }
             } header: {
-                SettingsHeader("Sign-In Server")
+                Group {
+                    SettingsHeader("Sign-In Server")
+                }
+                .settingsHeader()
             } footer: {
-                Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
+                Group {
+                    Text("Signing in to your Apple Account in Poki requires a sign-in server to verify this iPhone. The server never sees your Apple Account or password. Change this only if signing in continues to fail.")
+                }
+                .settingsFooter()
             }
             SignerActivityRows(signer: signer)
         }
@@ -453,7 +502,7 @@ private struct ChoiceRow: View {
                 title.foregroundStyle(Color(.label))
                 Spacer()
                 if selected {
-                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Tint.blueText)
+                    Image(systemName: "checkmark").font(.allo(.body, .semibold)).foregroundStyle(Tint.blueText)
                         .accessibilityHidden(true)
                 }
             }
@@ -489,9 +538,15 @@ struct VerificationCodeSheet: View {
                             }
                         }
                 } header: {
-                    Text("Two-Factor Authentication")
+                    Group {
+                        Text("Two-Factor Authentication")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
+                    Group {
+                        Text("Enter the 6-digit verification code sent to your trusted devices or phone number.")
+                    }
+                    .settingsFooter()
                 }
                 VerificationCodeRecoverySection(signer: signer, clearCode: { code = "" })
                 SignerActivityRows(signer: signer, offersSignIn: false)

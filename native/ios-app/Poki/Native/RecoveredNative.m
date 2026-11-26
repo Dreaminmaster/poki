@@ -311,8 +311,19 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
 }
 - (id)prepare:(NSError **)error {
     [_prepareLock lock];
-    @try { return [self prepareLocked:error]; }
+    @try { return [self prepareLocked:error enable:YES]; }
     @finally { [_prepareLock unlock]; }
+}
+- (id)openWithoutAutomation:(NSError **)error {
+    [_prepareLock lock];
+    @try { return [self prepareLocked:error enable:NO]; }
+    @finally { [_prepareLock unlock]; }
+}
+- (BOOL)automationOn {
+    [_lifecycleLock lock];
+    BOOL value = _observed != nil && _enabled == _observed && !_invalidated && _enabledGeneration == _generation;
+    [_lifecycleLock unlock];
+    return value;
 }
 - (BOOL)loadDeveloperFrameworks:(NSError **)error {
     [_frameworkLock lock];
@@ -349,7 +360,7 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
     }
     return YES;
 }
-- (id)prepareLocked:(NSError **)error {
+- (id)prepareLocked:(NSError **)error enable:(BOOL)enable {
     if (![self loadDeveloperFrameworks:error]) return nil;
     Class cls = NSClassFromString(@"XCTRunnerDaemonSession");
     if (![cls respondsToSelector:@selector(sharedSessionPromiseAndImplicitlyInitiateSession:)]) {
@@ -463,6 +474,8 @@ static NSArray<NSString *> *SRSelectorsWith(Class cls, NSString *part) {
     [_lifecycleLock unlock];
     if (!current) { SRFail(error, @"native_session_invalidated"); return nil; }
     if (reused) return session;
+    // The session as it is, for a check of what it answers with Automation Mode off (issue 484).
+    if (!enable) return session;
     // The one call that waits on the owner: iOS shows its passcode screen from inside it. How long it
     // has been waiting is the evidence for asking the owner; a slow session open is not.
     [_lifecycleLock lock]; _enablingSince = NSProcessInfo.processInfo.systemUptime; [_lifecycleLock unlock];

@@ -23,13 +23,13 @@ struct DianpingPlaceList: View {
         ResultCardList(card: card, selected: selected, choose: choose, tint: Dianping.orange, carried: "dianping",
                        heading: card.items.first?.text("query"), subheading: nil, picture: 64) { item in
             VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: item.title).font(.body.weight(.semibold)).lineLimit(1)
+                Text(verbatim: item.title).font(.allo(.body, .semibold)).lineLimit(1)
                 if let subtitle = item.text("subtitle") {
-                    Text(verbatim: subtitle).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
+                    Text(verbatim: subtitle).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if let rating = item.text("rating") {
-                        Text(verbatim: rating).font(.subheadline.weight(.semibold)).monospacedDigit()
+                        Text(verbatim: rating).font(.allo(.subheadline, .semibold)).monospacedDigit()
                             .foregroundStyle(Dianping.orange)
                     }
                     ResultCardParts.caption(ResultCardParts.line([item.text("reviews"), item.text("price")]), lines: 1)

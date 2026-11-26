@@ -49,13 +49,13 @@ struct ResultCardList<Row: View>: View {
             HStack(spacing: 6) {
                 AppIconView(app: card.app, size: 18, carried: carried)
                 Text(verbatim: AppIconStore.name(card.app) ?? card.app)
-                    .font(.caption).foregroundStyle(Color(.secondaryLabel))
+                    .font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel))
             }
             if let heading {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(verbatim: heading).font(.headline).lineLimit(2)
+                    Text(verbatim: heading).font(.allo(.headline)).lineLimit(2)
                     if let subheading {
-                        Text(verbatim: subheading).font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                        Text(verbatim: subheading).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                     }
                 }
                 .padding(.top, 6)
@@ -76,7 +76,7 @@ enum ResultCardParts {
     /// A grey caption line, or nothing.
     @ViewBuilder static func caption(_ text: String?, lines: Int = 2) -> some View {
         if let text {
-            Text(verbatim: text).font(.caption).foregroundStyle(Color(.secondaryLabel)).lineLimit(lines)
+            Text(verbatim: text).font(.allo(.caption)).foregroundStyle(Color(.secondaryLabel)).lineLimit(lines)
         }
     }
 

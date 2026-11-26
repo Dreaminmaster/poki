@@ -147,9 +147,15 @@ struct ChatGPTSignIn: View {
                     }
                 } else {
                     Section {
-                        Button("Continue with ChatGPT") { authorize(.browser(openBrowser)) }
-                            .disabled(working)
-                            .accessibilityIdentifier("chatgpt.sign-in.browser")
+                        HStack {
+                            Button("Continue with ChatGPT") { authorize(.browser(openBrowser)) }
+                                .disabled(working)
+                                .accessibilityIdentifier("chatgpt.sign-in.browser")
+                            if working {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
                     } footer: {
                         Text("Use your ChatGPT subscription for text chat and live voice. Your sign-in stays in this iPhone’s Keychain.")
                     }
@@ -194,6 +200,9 @@ struct ChatGPTSignIn: View {
                 guard CodexAccount.accessToken != nil else { throw CodexVoice.Failure.signIn }
                 try? ChatGPTAccount.signOut()
                 ModelKeys.selectedProvider = .chatgpt
+                // The plan's model list is read now, not after a failed read's wait.
+                ModelCatalog.clearFailures(.chatgpt)
+                Task { await ModelCatalog.refreshStale() }
                 closeBrowser()
                 onSignedIn()
                 dismiss()
@@ -210,9 +219,11 @@ struct ChatGPTSignIn: View {
             .flatMap(\.windows).first(where: \.isKeyWindow) else { throw CodexVoice.Failure.signIn }
         let next = ChatGPTBrowserSession(anchor: anchor)
         browser = next
-        try next.open(url) { cancelled in
+        try next.open(url) { outcome in
+            // A returned sheet means the sign-in server finished. Its result arrives as login/completed.
+            guard outcome != .returned else { return }
             CodexVoice.shared.cancelLogin()
-            if !cancelled { problem = AppLocalization.text("Could not sign in to ChatGPT. Try again.") }
+            if outcome == .failed { problem = AppLocalization.text("Could not sign in to ChatGPT. Try again.") }
         }
     }
 
@@ -236,7 +247,13 @@ struct ChatGPTSignIn: View {
 }
 
 @MainActor
-private final class ChatGPTBrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
+final class ChatGPTBrowserSession: NSObject, ASWebAuthenticationPresentationContextProviding {
+    /// The iOS build of the Codex sign-in server sends the browser here once the token exchange ends,
+    /// on success and on failure. OpenAI only accepts the http loopback redirect for this client.
+    static let callbackScheme = "poki-chatgpt"
+
+    enum Outcome: Equatable { case returned, cancelled, failed }
+
     private let anchor: ASPresentationAnchor
     private var session: ASWebAuthenticationSession?
 
@@ -244,15 +261,19 @@ private final class ChatGPTBrowserSession: NSObject, ASWebAuthenticationPresenta
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { anchor }
 
-    func open(_ url: URL, onClose: @escaping @MainActor (Bool) -> Void) throws {
-        // The browser follows the HTTP redirect. Codex's loopback server receives the code
-        // and reports completion after saving the account.
-        let next = ASWebAuthenticationSession(url: url, callbackURLScheme: nil) { [weak self] _, error in
-            let cancelled = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+    static func outcome(callbackURL: URL?, error: Error?) -> Outcome {
+        if let callbackURL, callbackURL.scheme == callbackScheme { return .returned }
+        if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { return .cancelled }
+        return .failed
+    }
+
+    func open(_ url: URL, onClose: @escaping @MainActor (Outcome) -> Void) throws {
+        let next = ASWebAuthenticationSession(url: url, callback: .customScheme(Self.callbackScheme)) { [weak self] callbackURL, error in
+            let outcome = Self.outcome(callbackURL: callbackURL, error: error)
             Task { @MainActor in
                 guard let self, self.session != nil else { return }
                 self.session = nil
-                onClose(cancelled)
+                onClose(outcome)
             }
         }
         next.presentationContextProvider = self

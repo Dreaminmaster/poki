@@ -22,8 +22,8 @@ struct UberEatsItemList: View {
         ResultCardList(card: card, selected: selected, choose: choose, tint: UberEats.green, carried: "uber-eats",
                        heading: card.items.first?.text("store"), subheading: nil, picture: 64) { item in
             VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: item.title).font(.body.weight(.medium)).lineLimit(2)
-                Text(verbatim: item.text("price") ?? "").font(.subheadline).monospacedDigit()
+                Text(verbatim: item.title).font(.allo(.body, .medium)).lineLimit(2)
+                Text(verbatim: item.text("price") ?? "").font(.allo(.subheadline)).monospacedDigit()
                 ResultCardParts.caption(ResultCardParts.line([item.text("detail"), item.text("calories")]))
                 ResultCardParts.caption(item.text("note"))
             }

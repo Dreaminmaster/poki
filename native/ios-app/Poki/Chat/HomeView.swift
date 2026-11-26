@@ -178,6 +178,11 @@ struct PokiFlight: View {
                                  accessibilityIdentifier: "home.poki") {
                             Color.clear.frame(width: side, height: side).contentShape(.circle)
                         }
+                        // The one-time hint that the picture opens the menu, on a view of its own so the
+                        // picture and its bear are never made again when it comes and goes.
+                        .background {
+                            if !writing { Color.clear.popoverTip(PokiMenuTip(), arrowEdge: .top) }
+                        }
                     } else if let openCustomization {
                         Button {
                             tap()
@@ -230,17 +235,26 @@ struct PokiHead: View {
                     // The menu is the name pill alone: the system draws its own glass around a menu's
                     // label in a glass group, and a label that held the picture's place too put the
                     // whole of Poki in one pill. The glass is on the menu, so it opens from the pill.
-                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization) {
-                        Text(verbatim: "Poki")
-                            .font(.caption.weight(.semibold)).foregroundStyle(Color(.label))
-                            .padding(.horizontal, 12).frame(minHeight: 24)
-                            .contentShape(Capsule())
+                    // Anchored as the picture's menu is, so its opening is seen (a SwiftUI menu's tap is
+                    // not, on iOS 27) and opening it here also retires the hint on the home page.
+                    PokiMenu(openModel: openModel, tapped: openDetails, openCustomization: openCustomization,
+                             anchor: .below(spacing: 6),
+                             accessibilityLabel: "Poki, " + PokiStatusCopy.word(status),
+                             accessibilityIdentifier: "chat.header.details") {
+                        // The chevron says the name opens a menu, as a title menu does in the system's apps.
+                        HStack(spacing: 3) {
+                            Text(verbatim: "Poki")
+                                .font(.allo(.caption, .semibold)).foregroundStyle(Color(.label))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.bold)).imageScale(.small)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12).frame(minHeight: 24)
+                        .contentShape(Capsule())
                     }
                     .glassSurface(in: Capsule())
                     .glassAppearing()
-                    .accessibilityLabel(Text(verbatim: "Poki, " + PokiStatusCopy.word(status)))
-                    .accessibilityIdentifier("chat.header.details")
-                    .accessibilityShowsLargeContentViewer()
+                    .accessibilityShowsLargeContentViewer { Text(verbatim: "Poki") }
                 }
             }
             .frame(minHeight: 24)
@@ -327,7 +341,7 @@ struct ChatTopBar: View {
 
     private func glyph(_ symbol: String, dim: Bool = false) -> some View {
         Image(systemName: symbol)
-            .font(.body.weight(.semibold))
+            .font(.allo(.body, .semibold))
             .foregroundStyle(Color(.label).opacity(dim ? 0.35 : 1))
             .frame(width: sizes.button, height: sizes.button)
             .contentShape(.circle)
@@ -345,7 +359,7 @@ struct UpdatePill: View {
                 Image(systemName: "arrow.down.circle.fill").foregroundStyle(Tint.blue)
                 Text("Update Available").foregroundStyle(Color(.label))
             }
-            .font(.subheadline.weight(.medium))
+            .font(.allo(.subheadline, .medium))
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, 8)
             .padding(.horizontal, 16).frame(minHeight: 44)
@@ -448,8 +462,9 @@ enum HomeGreeting {
 }
 
 /// The greeting as the home page draws it, for the time `date` falls in: the hello in ink and the
-/// question in grey under it, centred under Poki's picture. System Semibold 28 tracked in by 0.6,
-/// with no space between the lines.
+/// question in grey under it, centred under Poki's picture. Allo Rounded Bold 28, prominent text as
+/// the conversations' "Poki" title is (the owner, Nov 20 2026: it was the system font), tracked in a
+/// little, with no space between the lines.
 struct HomeGreetingView: View {
     var date: Date
     @Environment(\.colorScheme) private var scheme
@@ -464,8 +479,8 @@ struct HomeGreetingView: View {
                 .foregroundStyle(dark ? Color(hex: 0x8D8D87) : Color(hex: 0x6F6F69))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: size, weight: .semibold))
-        .tracking(-0.6 * size / 28)
+        .font(Prominent.font(size: 28, relativeTo: .title, .bold))
+        .tracking(-0.3 * size / 28)
         .multilineTextAlignment(.center)
         // Read as one sentence: in Chinese the hello's comma runs on into the question.
         .accessibilityElement(children: .ignore)
@@ -529,6 +544,8 @@ struct HomePage<Footer: View>: View {
         .task(id: sessionStore.sessions.count) {
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
+        // The owner's habits and the recent tape, on this iPhone (at most every half hour).
+        .task { await SensesSuggestions.shared.refresh() }
         .onChange(of: AppLocalization.language, initial: true) { _, _ in
             shortcutStore.refreshInBackground(sessions: sessionStore.sessions, routines: { RoutineStore.shared.routines })
         }
@@ -598,6 +615,8 @@ struct HomePage<Footer: View>: View {
                 .opacity(home ? 1 : 0)
                 .offset(y: home || reduceMotion ? 0 : 14)
                 .animation(HomeMotion.pills(home, reduceMotion), value: home)
+                // They go and come back with the keyboard, on its own curve: a fade, a slight scale
+                // and a small drop toward the field (the owner, Nov 21 2026: they jumped).
                 .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)).combined(with: .offset(y: 10)))
             }
             Spacer().frame(height: 34)
@@ -684,9 +703,9 @@ private struct ShortcutPill: View {
                     : AnyLayout(HStackLayout(spacing: 5))
                 layout {
                     if !idea.appName.isEmpty {
-                        Text(verbatim: idea.appName).font(.subheadline.weight(.semibold)).foregroundStyle(Color(.label))
+                        Text(verbatim: idea.appName).font(.allo(.subheadline, .semibold)).foregroundStyle(Color(.label))
                     }
-                    Text(verbatim: idea.text).font(.subheadline).foregroundStyle(Color(.label).opacity(0.7))
+                    Text(verbatim: idea.text).font(.allo(.subheadline)).foregroundStyle(Color(.label).opacity(0.7))
                 }
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .fixedSize(horizontal: false, vertical: true)
@@ -755,7 +774,7 @@ private struct ShortcutMenu: View {
                 Image(systemName: symbol).frame(width: 24)
                 Text(title).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.body).foregroundStyle(ink)
+            .font(.allo(.body)).foregroundStyle(ink)
             .padding(.horizontal, 18).frame(minHeight: 46).contentShape(.rect)
         }
         .buttonStyle(ShortcutRowStyle())

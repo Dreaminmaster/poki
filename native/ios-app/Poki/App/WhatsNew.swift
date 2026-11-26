@@ -451,7 +451,7 @@ struct WhatsNewView: View {
                     .accessibilityIdentifier("whatsNew.title")
 
                 Text(verbatim: "Poki \(release.version)")
-                    .font(.footnote.weight(.semibold))
+                    .font(.allo(.footnote, .semibold))
                     .monospacedDigit()
                     .foregroundStyle(Tint.blueText)
                     .padding(.vertical, 4)
@@ -502,11 +502,11 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(verbatim: item.title.resolved(for: language))
-                            .font(.subheadline.weight(.semibold))
+                            .font(.allo(.subheadline, .semibold))
                             .foregroundStyle(Self.primaryInk)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(verbatim: item.summary.resolved(for: language))
-                            .font(.footnote)
+                            .font(.allo(.footnote))
                             .foregroundStyle(Self.secondaryInk)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -539,7 +539,7 @@ struct WhatsNewView: View {
     private var continueBar: some View {
         Button(action: onContinue) {
             Text(verbatim: AppLocalization.text(LocalizedStringResource("Continue")))
-                .font(.body.weight(.semibold))
+                .font(.allo(.body, .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .background(

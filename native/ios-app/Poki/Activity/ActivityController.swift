@@ -88,10 +88,12 @@ final class ActivityController {
 
     var enabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
-    /// True where something else already says Poki is on while nothing happens (iOS 26's continued
-    /// processing task has its own Lock Screen and island UI): then there is no idle Live Activity.
-    /// It starts when work begins or Poki needs the person, and goes when the run has folded.
-    var hidesWhenIdle: () -> Bool = { false }
+    /// True when the owner turned Ready off: no idle Live Activity. It starts when work begins while
+    /// Poki is in front, and goes when the run has folded.
+    /// No Ready Live Activity while Poki waits for work (the owner, Nov 21 2026: Show Ready is gone).
+    var hidesWhenIdle: () -> Bool = { true }
+    /// Ready is off unless the owner turned it on in Settings › Connection: no Live Activity while
+    /// nothing happens.
     /// Poki is in front: iOS starts a Live Activity only then.
     var canStart: () -> Bool = { true }
     /// The device name `start` was last asked with: the activity is wanted, shown or not.
@@ -213,6 +215,10 @@ final class ActivityController {
         return tail
     }
 
+    /// Nothing is happening and Ready is not wanted. A pop-up still on the activity (Paired, a
+    /// pairing code) stays until it clears.
+    private var hidesNow: Bool { activity != nil && state.isQuiet && state.event == nil && hidesWhenIdle() }
+
     /// Takes the activity off the screen but keeps it wanted: the next work brings it back.
     private func hide() {
         worker?.cancel(); worker = nil; plainWaiting = false
@@ -237,7 +243,7 @@ final class ActivityController {
         // No idle activity where iOS's background task stands in: it comes with the work and goes with it.
         if activity == nil, let wanted, !state.isQuiet, canStart() {
             start(deviceName: wanted)
-        } else if activity != nil, state.isQuiet, hidesWhenIdle() {
+        } else if hidesNow {
             hide()
         }
         // Something needs the person and there is no Live Activity to pop up: a banner instead (an
@@ -499,7 +505,7 @@ final class ActivityController {
             try? await Task.sleep(for: eventLifetime)
             guard !Task.isCancelled, let self, self.state.event == shown else { return }
             self.state.event = nil
-            self.send(alert: nil, critical: false)
+            if self.hidesNow { self.hide() } else { self.send(alert: nil, critical: false) }
         }
     }
 

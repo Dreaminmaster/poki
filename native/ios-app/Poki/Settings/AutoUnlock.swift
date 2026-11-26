@@ -19,9 +19,11 @@ final class AutoUnlock {
     @ObservationIgnored private var attempt: OSAllocatedUnfairLock<Bool>?
     @ObservationIgnored private var configurationVersion: UInt64 = 0
 
+    /// Any passcode iOS allows (the owner, Nov 21 2026): 4 or 6 digits, a custom numeric code of any
+    /// length, or an alphanumeric one. Only line breaks and other control characters are refused, since
+    /// Return submits the lock screen's field.
     static func accepts(_ passcode: String) -> Bool {
-        let bytes = passcode.utf8
-        return (bytes.count == 4 || bytes.count == 6) && bytes.allSatisfy { (48...57).contains($0) }
+        (4...128).contains(passcode.count) && !passcode.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }
     }
 
     func save(_ passcode: String) throws {

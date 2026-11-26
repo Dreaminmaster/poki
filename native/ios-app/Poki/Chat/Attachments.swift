@@ -51,7 +51,7 @@ struct ChatTextDocumentChip: View {
             Label {
                 VStack(alignment: .leading) {
                     Text(verbatim: document.name).lineLimit(1)
-                    Text(verbatim: document.sizeLabel).font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: document.sizeLabel).font(.allo(.caption)).foregroundStyle(.secondary)
                 }
             } icon: {
                 Image(systemName: "doc.text")
@@ -179,10 +179,10 @@ struct AttachmentStrip: View {
                         if case .text = item.kind {
                             VStack(spacing: 4) {
                                 Image(systemName: "doc.text")
-                                Text(verbatim: item.label).font(.caption2).lineLimit(1)
+                                Text(verbatim: item.label).font(.allo(.caption2)).lineLimit(1)
                                 if let content = item.textContent {
                                     Text(verbatim: ChatTextDocument(name: item.label, content: content).sizeLabel)
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .font(.allo(.caption2)).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(4)
@@ -248,7 +248,7 @@ struct AttachmentThumb: View {
         .shadow(color: Color(red: 24 / 255, green: 56 / 255, blue: 120 / 255).opacity(0.12), radius: 6, y: 4)
         .overlay(alignment: .bottomLeading) {
             if pdf {
-                Text(verbatim: "PDF").font(.system(size: min(18, pdfLabelSize), weight: .bold)).foregroundStyle(.white)
+                Text(verbatim: "PDF").font(.allo(size: min(18, pdfLabelSize), .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Color(.systemRed), in: .capsule)
                     .padding(6)

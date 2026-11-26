@@ -111,11 +111,12 @@ function evalWorkflowExpr(expr, context) {
     .replace(/github\.event\.label\.name/g, 'ctx.labelName')
     .replace(/github\.event\.pull_request\.number/g, 'ctx.prNumber')
     .replace(/needs\.read\.outputs\.channel/g, 'ctx.channel')
+    .replace(/steps\.r\.outputs\.channel/g, 'ctx.channel')
     .replace(/needs\.read\.outputs\.gym_run/g, 'ctx.gymRun');
   return Function('ctx', `return Boolean(${jsExpr});`)(context);
 }
 
-function makeSandbox(t, { channels, ghState = {} } = {}) {
+function makeSandbox(t, { channels, changelog, ghState = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'poki-promotion-gate-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, 'bin'));
@@ -123,6 +124,9 @@ function makeSandbox(t, { channels, ghState = {} } = {}) {
   writeFileSync(join(dir, 'bin/gh'), ghStub);
   chmodSync(join(dir, 'bin/gh'), 0o755);
   writeFileSync(join(dir, '.github/scripts/promotion.py'), readFileSync(join(root, '.github/scripts/promotion.py')));
+  if (changelog !== undefined) {
+    writeFileSync(join(dir, 'CHANGELOG.md'), changelog);
+  }
   writeFileSync(
     join(dir, '.github/channels.json'),
     JSON.stringify(channels ?? {
@@ -413,4 +417,286 @@ test('missing, partial, or forged scorecards are still rejected by verdict and p
   const regressed = forgedBox.runPython(['gym', 'base', 'new']);
   assert.notEqual(regressed.status, 0);
   assert.match(regressed.stdout + regressed.stderr, /gym-scorecard\.txt: 1 failures, the last beta had 0/);
+});
+
+const stale042Changelog = [
+  '# Changelog',
+  '',
+  '## [0.4.2] Beta - 2026-11-15',
+  '',
+  '### Automation',
+  '- Automation watermark shows only while Poki operates your phone.',
+  '',
+  '## [0.4.1] - Unreleased',
+  '',
+  '### Fixed',
+  '- Explain how to finish a stalled update.',
+  '',
+  '## [Unreleased]',
+  '',
+  '### Added',
+  '- ',
+  '',
+].join('\n');
+
+const beta050Channels = {
+  soak_days: 3,
+  promotions: [
+    {
+      channel: 'beta',
+      proposed: '2026-11-24T10:01:01Z',
+      version: '0.5.0-beta.1',
+      tag: 'app-0.5.0-beta.1',
+      base_version: '0.5.0',
+      build: '2500',
+      source: 'app-0.5.0-alpha.2500',
+      sha: promotedSha,
+      version_bump: '0.5.0 -> 0.5.1',
+    },
+  ],
+};
+
+test('0.5.0 Beta 1 promotion fails gate and publish when CHANGELOG.md stops at 0.4.2, and passes once documented', t => {
+  const gate = workflow('promotion-gate');
+  const publish = workflow('publish-promotion');
+
+  const gateStep = stepBlock(gate, 'verdict', 'name: CHANGELOG.md has an entry for this version');
+  const gateIf = gateStep.match(/^        if:\s*(.+)$/m)?.[1].trim();
+  assert.ok(gateIf, 'promotion-gate changelog step has an if guard');
+  assert.equal(evalWorkflowExpr(gateIf, { channel: 'beta' }), true);
+  assert.equal(evalWorkflowExpr(gateIf, { channel: 'stable' }), true);
+  assert.equal(evalWorkflowExpr(gateIf, { channel: '' }), false);
+
+  const publishStep = stepBlock(publish, 'read', 'name: CHANGELOG.md has an entry for this version');
+  const publishIf = publishStep.match(/^        if:\s*(.+)$/m)?.[1].trim();
+  assert.ok(publishIf, 'publish-promotion changelog step has an if guard');
+  assert.equal(evalWorkflowExpr(publishIf, { channel: 'beta' }), true);
+  assert.equal(evalWorkflowExpr(publishIf, { channel: 'stable' }), true);
+  assert.equal(evalWorkflowExpr(publishIf, { channel: '' }), false);
+
+  const sandbox = makeSandbox(t, {
+    channels: beta050Channels,
+    changelog: stale042Changelog,
+  });
+
+  for (const [label, step] of [['promotion-gate verdict', gateStep], ['publish-promotion read', publishStep]]) {
+    const blocked = sandbox.runBash(stepCommands(step));
+    assert.notEqual(blocked.status, 0, `${label} must reject 0.5.0-beta.1 when CHANGELOG.md stops at 0.4.2`);
+    assert.match(blocked.stdout + blocked.stderr, /CHANGELOG\.md/);
+    assert.match(blocked.stdout + blocked.stderr, /0\.5\.0/);
+  }
+
+  writeFileSync(
+    join(sandbox.dir, 'CHANGELOG.md'),
+    [
+      '# Changelog',
+      '',
+      '## [Unreleased]',
+      '',
+      '## [0.5.0-beta.1] - 2026-11-24',
+      '',
+      '### Added',
+      '- Rebuilt Live Voice with faster push-to-talk and mid-call controls (#660, #659).',
+      '',
+      stale042Changelog,
+    ].join('\n'),
+  );
+
+  for (const [label, step] of [['promotion-gate verdict', gateStep], ['publish-promotion read', publishStep]]) {
+    const allowed = sandbox.runBash(stepCommands(step));
+    assert.equal(allowed.status, 0, `${label} should pass once 0.5.0-beta.1 is in CHANGELOG.md: ${allowed.stdout}${allowed.stderr}`);
+  }
+});
+
+test('promotion.py changelog rejects missing, undated, empty, and mismatched version sections', t => {
+  const sandbox = makeSandbox(t, { channels: beta050Channels });
+
+  const missingFile = sandbox.runPython(['changelog']);
+  assert.notEqual(missingFile.status, 0);
+  assert.match(missingFile.stdout + missingFile.stderr, /CHANGELOG\.md/);
+
+  const cases = [
+    {
+      name: 'undated Unreleased heading',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.0-beta.1] - Unreleased\n\n### Added\n- Voice update.\n',
+      error: /YYYY-MM-DD|date/i,
+    },
+    {
+      name: 'invalid calendar date',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.0-beta.1] - 2026-02-31\n\n### Added\n- Voice update.\n',
+      error: /date/i,
+    },
+    {
+      name: 'empty bullets and subheadings only',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.0-beta.1] - 2026-11-24\n\n### Added\n- \n\n### Fixed\n*\n\n[0.5.0-beta.1]: https://example.test/0.5.0\n',
+      error: /no release notes|empty/i,
+    },
+    {
+      name: 'version prefix mismatch',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.00] - 2026-11-24\n\n- Different version.\n',
+      error: /0\.5\.0-beta\.1/,
+    },
+    {
+      name: 'beta.2 does not reuse beta.1 or generic beta heading',
+      args: ['changelog', '--version', '0.4.2-beta.2', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.4.2-beta.1] - 2026-11-15\n\n- Beta 1 change.\n\n## [0.4.2] Beta - 2026-11-15\n\n- Generic beta.\n',
+      error: /0\.4\.2-beta\.2/,
+    },
+    {
+      name: 'stable release does not accept beta-only heading',
+      args: ['changelog', '--version', '0.5.0', '--channel', 'stable'],
+      content: '# Changelog\n\n## [0.5.0-beta.1] - 2026-11-24\n\n- Beta change.\n',
+      error: /0\.5\.0/,
+    },
+  ];
+
+  for (const tc of cases) {
+    writeFileSync(join(sandbox.dir, 'CHANGELOG.md'), tc.content);
+    const res = sandbox.runPython(tc.args);
+    assert.notEqual(res.status, 0, `${tc.name} must fail`);
+    assert.match(res.stdout + res.stderr, tc.error, tc.name);
+  }
+
+  const validCases = [
+    {
+      name: 'beta.1 accepts SemVer prerelease heading',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.0-beta.1] - 2026-11-24\n\n### Added\n- Rebuilt Live Voice.\n',
+    },
+    {
+      name: 'beta.1 accepts legacy Beta N heading',
+      args: ['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.5.0] Beta 1 - 2026-11-24\n\n### Added\n- Rebuilt Live Voice.\n',
+    },
+    {
+      name: 'beta.2 accepts exact beta.2 heading',
+      args: ['changelog', '--version', '0.4.2-beta.2', '--channel', 'beta'],
+      content: '# Changelog\n\n## [0.4.2-beta.2] - 2026-11-16\n\n### Changed\n- Includes Poki Setup 0.2.4.\n',
+    },
+    {
+      name: 'stable accepts dated base heading',
+      args: ['changelog', '--version', '0.5.0', '--channel', 'stable'],
+      content: '# Changelog\n\n## [0.5.0] - 2026-11-28\n\n### Added\n- Stable release notes.\n',
+    },
+  ];
+
+  for (const tc of validCases) {
+    writeFileSync(join(sandbox.dir, 'CHANGELOG.md'), tc.content);
+    const res = sandbox.runPython(tc.args);
+    assert.equal(res.status, 0, `${tc.name} should pass: ${res.stdout}${res.stderr}`);
+  }
+});
+
+test('beta.1 does not match a plain base version heading shared with stable releases', t => {
+  const gate = workflow('promotion-gate');
+  const publish = workflow('publish-promotion');
+  const gateStep = stepBlock(gate, 'verdict', 'name: CHANGELOG.md has an entry for this version');
+  const publishStep = stepBlock(publish, 'read', 'name: CHANGELOG.md has an entry for this version');
+  const baseOnlyChangelog = '# Changelog\n\n## [0.5.0] - 2026-11-24\n\n### Added\n- Stable release notes.\n';
+
+  const sandbox = makeSandbox(t, {
+    channels: beta050Channels,
+    changelog: baseOnlyChangelog,
+  });
+
+  const betaCli = sandbox.runPython(['changelog', '--version', '0.5.0-beta.1', '--channel', 'beta']);
+  assert.notEqual(betaCli.status, 0, 'beta.1 must reject a plain [0.5.0] heading');
+  assert.match(betaCli.stdout + betaCli.stderr, /0\.5\.0-beta\.1/);
+
+  for (const [label, step] of [['promotion-gate verdict', gateStep], ['publish-promotion read', publishStep]]) {
+    const blocked = sandbox.runBash(stepCommands(step));
+    assert.notEqual(blocked.status, 0, `${label} must reject 0.5.0-beta.1 when CHANGELOG.md only has [0.5.0]`);
+    assert.match(blocked.stdout + blocked.stderr, /0\.5\.0-beta\.1/);
+  }
+
+  const stableCli = sandbox.runPython(['changelog', '--version', '0.5.0', '--channel', 'stable']);
+  assert.equal(stableCli.status, 0, `stable 0.5.0 should still match [0.5.0]: ${stableCli.stdout}${stableCli.stderr}`);
+});
+
+test('publish-promotion checks out CHANGELOG.md into pipeline and includes the version section in release notes', t => {
+  const publish = workflow('publish-promotion');
+  const publishBlock = jobBlock(publish, 'publish');
+  const pipelineStep = publishBlock.split('\n      - ').slice(1).find(s => s.includes('path: pipeline'));
+  assert.ok(pipelineStep, 'publish job checks out pipeline');
+  assert.doesNotMatch(pipelineStep, /^\s+if:\s*env\.CHANNEL == 'beta'/m, 'pipeline checkout runs for both beta and stable');
+  assert.match(pipelineStep, /CHANGELOG\.md/, 'pipeline sparse-checkout includes CHANGELOG.md');
+
+  const notesCmd = stepCommands(stepBlock(publish, 'publish', 'name: Notes'));
+  const sandbox = makeSandbox(t, { channels: beta050Channels });
+  mkdirSync(join(sandbox.dir, 'pipeline/.github/scripts'), { recursive: true });
+  writeFileSync(
+    join(sandbox.dir, 'pipeline/.github/scripts/promotion.py'),
+    readFileSync(join(root, '.github/scripts/promotion.py')),
+  );
+  writeFileSync(
+    join(sandbox.dir, 'bin/git'),
+    '#!/usr/bin/env bash\nexit 1\n',
+  );
+  chmodSync(join(sandbox.dir, 'bin/git'), 0o755);
+
+  writeFileSync(join(sandbox.dir, 'pipeline/CHANGELOG.md'), stale042Changelog);
+  const blocked = sandbox.runBash(notesCmd, {
+    CHANNEL: 'beta',
+    LABEL: '0.5.0-beta.1',
+    BASE: '0.5.0',
+    BUILD: '2500',
+    SOURCE: 'app-0.5.0-alpha.2500',
+    TAG: 'app-0.5.0-beta.1',
+  });
+  assert.notEqual(blocked.status, 0, 'Notes step must fail closed if CHANGELOG.md lacks the target version');
+
+  writeFileSync(
+    join(sandbox.dir, 'pipeline/CHANGELOG.md'),
+    [
+      '# Changelog',
+      '',
+      '## [0.5.0-beta.1] - 2026-11-24',
+      '',
+      '### Added',
+      '- Rebuilt Live Voice with faster push-to-talk (#660).',
+      '',
+      '[0.5.0-beta.1]: https://github.com/JosssphZhou/poki/releases/tag/app-0.5.0-beta.1',
+      '',
+    ].join('\n'),
+  );
+  const ok = sandbox.runBash(notesCmd, {
+    CHANNEL: 'beta',
+    LABEL: '0.5.0-beta.1',
+    BASE: '0.5.0',
+    BUILD: '2500',
+    SOURCE: 'app-0.5.0-alpha.2500',
+    TAG: 'app-0.5.0-beta.1',
+  });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  const notes = readFileSync(join(sandbox.dir, 'notes.md'), 'utf8');
+  assert.match(notes, /Rebuilt Live Voice with faster push-to-talk \(#660\)\./);
+  assert.doesNotMatch(notes, /^\[0\.5\.0-beta\.1\]: /m, 'trailing reference link definitions are stripped from release notes');
+  assert.match(notes, /Beta 1 of Poki 0\.5\.0/);
+});
+
+test('repository CHANGELOG.md has a valid dated section for every release recorded in .github/channels.json', () => {
+  const channels = JSON.parse(readFileSync(join(root, '.github/channels.json'), 'utf8'));
+  assert.ok(channels.promotions.length > 0);
+  for (const rec of channels.promotions) {
+    const res = spawnSync(
+      'python3',
+      [
+        '.github/scripts/promotion.py',
+        'changelog',
+        '--version', rec.version,
+        '--base-version', rec.base_version,
+        '--channel', rec.channel,
+      ],
+      { cwd: root, encoding: 'utf8' },
+    );
+    assert.equal(
+      res.status,
+      0,
+      `CHANGELOG.md must cover ${rec.version} (${rec.tag}): ${res.stdout}${res.stderr}`,
+    );
+  }
 });

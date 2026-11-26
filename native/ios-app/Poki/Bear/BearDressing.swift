@@ -140,12 +140,9 @@ final class BearDressing {
     let root = Entity()
     private var current: [BearOutfitSlot: Piece] = [:]
     private var outgoing: [BearOutfitSlot: Piece] = [:]
-    private var armRest: Float = 0
-    private var armChange = (from: Float(0), start: TimeInterval(0))
     private var selection = BearOutfitSelection.bare
     private var colors = BearWornColors()
     private let names: [String]
-    private let arms: [(Int, simd_quatf)]
     private let light: Entity?
     private var pending = false
 
@@ -155,16 +152,6 @@ final class BearDressing {
             let source = Entity()
             source.components.set(ImageBasedLightComponent(source: .single(resource), intensityExponent: 0.55))
             return source
-        }
-        // Local joint deltas from the standing pose to the garment fitting pose.
-        let offsets: [(String, SIMD4<Float>)] = [
-            ("UpperArm_R", SIMD4(-0.001750, 0.001576, -0.024753, 0.999691)),
-            ("Forearm_R", SIMD4(0.402428, 0, -0.298865, 0.865293)),
-            ("UpperArm_L", SIMD4(-0.001750, -0.001576, 0.024753, 0.999691)),
-            ("Forearm_L", SIMD4(0.402428, 0, 0.298865, 0.865293))
-        ]
-        arms = offsets.compactMap { name, offset in
-            names.firstIndex { $0 == name || $0.hasSuffix("/" + name) }.map { ($0, simd_normalize(simd_quatf(vector: offset))) }
         }
         if let source = self.light { root.addChild(source) }
     }
@@ -195,15 +182,6 @@ final class BearDressing {
                 }
             }
         }
-        if changes.contains(.clothes) {
-            let start: TimeInterval
-            switch motion {
-            case .animated: start = now
-            case .fade: start = next.clothes == nil ? now + 0.15 : -.infinity
-            case .immediate: start = -.infinity
-            }
-            armChange = (armRest, start)
-        }
         for slot in BearOutfitSlot.allCases where next[slot] != selection[slot] || colors[slot] != self.colors[slot] {
             current[slot]?.recolor(colors[slot])
         }
@@ -211,16 +189,6 @@ final class BearDressing {
         self.colors = colors
         pending = true
         return true
-    }
-
-    func poseArms(_ joints: inout [Transform], at now: TimeInterval, gesture: Float) {
-        let target: Float = current[.clothes] == nil ? 0 : 1
-        let weight = Float(min(max((now - armChange.start) / 0.28, 0), 1))
-        armRest = armChange.from + (target - armChange.from) * BearIdle.ease(weight)
-        guard armRest > 0 else { return }
-        for (index, offset) in arms {
-            joints[index].rotation *= simd_slerp(simd_quatf(), offset, armRest * (1 - gesture))
-        }
     }
 
     func update(_ joints: [Transform], at now: TimeInterval) -> Bool {

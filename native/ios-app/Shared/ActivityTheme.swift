@@ -152,42 +152,43 @@ struct ActivityTheme {
     /// The island's outline, always: the system draws it only over a dark background.
     var outline = Site.boardBlue
 
-    /// Geist for English, as on the board; the system font for Chinese. Geist has no Chinese
-    /// characters, and with it the Lock Screen and the island laid Chinese lines out narrower than
-    /// they drew them, cutting off their ends (seen on the iPhone 17 Pro simulator).
-    static var usesGeist: Bool {
+    /// Allo for English (Rounded for the lines that lead, Text for the ones under them); the system
+    /// font for Chinese. With a custom font the Lock Screen and the island laid Chinese lines out
+    /// narrower than they drew them, cutting off their ends (seen with Geist on the iPhone 17 Pro
+    /// simulator).
+    static var usesAllo: Bool {
         let lang = AppLocalization.language
         return lang.hasPrefix("en")
     }
-    private static func font(_ name: String, _ weight: Font.Weight, _ size: CGFloat) -> Font {
-        usesGeist ? .custom(name, size: size) : .system(size: size, weight: weight)
+    private static func font(_ face: Typeface.Face, _ weight: Font.Weight, _ size: CGFloat) -> Font {
+        usesAllo ? .custom(Typeface.name(face, weight), size: size) : .system(size: size, weight: weight)
     }
     /// Which step this is, over the title ("Step 2 of 5"), and the app beside it.
-    var kicker: Font { Self.font("Geist-SemiBold", .semibold, 13) }
-    var place: Font { Self.font("Geist-Medium", .medium, 13) }
+    var kicker: Font { Self.font(.text, .semibold, 13) }
+    var place: Font { Self.font(.text, .medium, 13) }
     /// A question or a thing to do: 20 points, bold.
-    var title: Font { Self.font("Geist-Bold", .bold, 20) }
+    var title: Font { Self.font(.rounded, .bold, 20) }
     /// What the step under way does, and a finished run's title: 19 points, semibold.
-    var step: Font { Self.font("Geist-SemiBold", .semibold, 19) }
+    var step: Font { Self.font(.rounded, .semibold, 19) }
     /// What Poki is up to on a short Lock Screen card ("Poki's asleep", "Poki's done"): the card's main
     /// line, large enough to read at a glance on the Lock Screen (ESP-467).
-    var status: Font { Self.font("Geist-Bold", .bold, 24) }
-    var titleTracking: CGFloat { Self.usesGeist ? -0.2 : 0 }
-    var subtitle: Font { Self.font("Geist-Medium", .medium, 13) }
-    var button: Font { Self.font("Geist-SemiBold", .semibold, 15) }
+    var status: Font { Self.font(.rounded, .bold, 24) }
+    var titleTracking: CGFloat { Self.usesAllo ? -0.2 : 0 }
+    var subtitle: Font { Self.font(.text, .medium, 13) }
+    var button: Font { Self.font(.rounded, .semibold, 15) }
     /// The compact island's top line (what the task is doing), or its count when nothing is said.
-    var compact: Font { Self.font("Geist-SemiBold", .semibold, 13) }
+    var compact: Font { Self.font(.rounded, .semibold, 13) }
     /// Under it: the count ("2/5", "Step 7").
-    var compactCount: Font { Self.font("Geist-Medium", .medium, 11).monospacedDigit() }
+    var compactCount: Font { Self.font(.text, .medium, 11).monospacedDigit() }
     /// The pairing code in the compact island, with tabular digits.
     /// Short of room: the count and the countdown inside the 28-point circle.
-    var narrowCount: Font { Self.font("Geist-SemiBold", .semibold, 12).monospacedDigit() }
-    var narrowTimer: Font { Self.font("Geist-SemiBold", .semibold, 11).monospacedDigit() }
-    var compactCode: Font { Self.font("Geist-Bold", .bold, 13).monospacedDigit() }
+    var narrowCount: Font { Self.font(.text, .semibold, 12).monospacedDigit() }
+    var narrowTimer: Font { Self.font(.text, .semibold, 11).monospacedDigit() }
+    var compactCode: Font { Self.font(.rounded, .bold, 13).monospacedDigit() }
     /// Times and countdowns: the text face with tabular digits, as the system writes its timers.
-    var value: Font { Self.font("Geist-SemiBold", .semibold, 15).monospacedDigit() }
+    var value: Font { Self.font(.text, .semibold, 15).monospacedDigit() }
     /// The pairing code, large.
-    var code: Font { Self.font("Geist-Black", .black, 46).monospacedDigit() }
+    var code: Font { Self.font(.rounded, .black, 46).monospacedDigit() }
     var codeTracking: CGFloat = -0.92
 
     func palette(_ surface: ActivitySurface) -> ActivityPalette { surface == .lockScreen ? lock : island }

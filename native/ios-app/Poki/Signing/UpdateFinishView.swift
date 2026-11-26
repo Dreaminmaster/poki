@@ -16,9 +16,9 @@ struct UpdateFinishView: View {
                         .controlSize(.large)
                 }
                 Text(needsReopen ? "Reopen Poki" : "Finishing the Update")
-                    .font(.title2.bold())
+                    .font(.alloRounded(.title2, .bold))
                 Text(message)
-                    .font(.body)
+                    .font(.allo(.body))
                     .multilineTextAlignment(.center)
             }
             .padding(32)

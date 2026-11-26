@@ -5,7 +5,10 @@ import Foundation
 enum HistoryBridge {
     /// Prepared on the launcher callback thread. The main actor checks the current capture
     /// permissions before handing these bytes to the store.
-    struct Read: Sendable {
+    /// `line` is the launcher's whole progress line, for the engine's events (tunnel, held runs,
+    /// counts); it is parsed once here, off the main thread, and only read after.
+    struct Read: @unchecked Sendable {
+        let line: [String: Any]
         let ok: Bool
         let app: String
         let title: String
@@ -13,6 +16,7 @@ enum HistoryBridge {
         let tree: Data?
 
         init(_ line: [String: Any]) {
+            self.line = line
             ok = line["ok"] as? Bool == true
             app = line["app"] as? String ?? ""
             title = line["title"] as? String ?? ""
@@ -78,4 +82,27 @@ enum HistoryBridge {
     }
 
     static func cancel() { poki_history_cancel() }
+
+    /// Holds or lets go the reads of the run in progress. The run keeps its tunnel.
+    static func pause(_ on: Bool) { poki_history_pause(on) }
+
+    /// A run with no tunnel tries five times a second for the coming seconds: the moment around a
+    /// change of network is the one in which a new tunnel can be opened.
+    static func hurry(_ seconds: UInt32) { poki_history_hurry(seconds) }
+
+    /// Asks the run to look at its tunnel now. Its answer is a line of the run's that carries the
+    /// number returned here as "check", with "event" alive, dead or none. With `replace` a tunnel
+    /// that does not answer is given up and a new one tried at once.
+    static func check(replace: Bool) -> UInt64 { poki_history_check(replace) }
+
+    /// Tells the launcher which apps' screens it leaves unread: those in `skip` always, and with
+    /// `only` every app that is not in it. It holds for the run in progress and the runs to come.
+    /// A screen is read on the app's own main thread, so one that would be thrown away here is
+    /// better not read at all.
+    static func policy(skip: [String], only: [String]?) {
+        let lists: [String: Any] = ["skip": skip, "only": only.map { $0 as Any } ?? NSNull()]
+        guard let json = try? JSONSerialization.data(withJSONObject: lists) else { return }
+        _ = String(decoding: json, as: UTF8.self).withCString { poki_history_policy($0) }
+    }
 }
+

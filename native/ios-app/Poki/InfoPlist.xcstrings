@@ -25,6 +25,30 @@
         }
       }
     },
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Info.plist",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Poki shows your recent photos when you add to a message, so you can send one with a tap."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加到消息时，Poki 会显示你最近的照片，轻点即可发送。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入訊息時，Poki 會顯示你最近的照片，輕點即可傳送。"
+          }
+        }
+      }
+    },
     "NSCameraUsageDescription" : {
       "comment" : "Info.plist",
       "extractionState" : "manual",

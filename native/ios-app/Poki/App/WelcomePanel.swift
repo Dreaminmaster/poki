@@ -13,19 +13,25 @@ enum SetupItem: Hashable {
     case models
     /// Screen History, Memory, Dictation, Notifications and Agents, all optional.
     case features
+    /// The Apple Account, last, when a free Apple Account signed Poki (7-day signing): signed in
+    /// here, Poki renews itself before it stops opening (issue #740).
+    case appleAccount
 
-    static var all: [SetupItem] {
+    static var all: [SetupItem] { all(freeSigning: SelfSigner.installedFreeSigning) }
+
+    static func all(freeSigning: Bool) -> [SetupItem] {
         SetupStep.shown.flatMap { $0 == .loopback ? [SetupItem.step($0), .shortcut] : [SetupItem.step($0)] }
-            + [.models, .features]
+            + [.models, .features] + (freeSigning ? [.appleAccount] : [])
     }
 
     /// Still to do: Guide Me starts at the first of these. The features are optional, never open.
     @MainActor func isOpen(_ model: AppModel) -> Bool {
         switch self {
         case .step(let step): !model.stepReadyForUse(step)
-        case .shortcut: !LoopbackShortcut.shared.isSetUp
+        case .shortcut: !HistoryReconnect.shared.isSetUp
         case .models: !ModelKeys.hasUsableKey
         case .features: false
+        case .appleAccount: model.signer.needsAppleAccountForRenewal
         }
     }
 
@@ -40,8 +46,6 @@ struct SetupSections: View {
     @Binding var path: NavigationPath
     /// On the Setup page: Guide Me under the card, which walks the list one page at a time.
     var guideMe = false
-    /// Settings › Setup hides the optional groups that already live on the Settings home page.
-    var includeOptionalGroups = true
 
     @State private var hasModel = ModelKeys.hasUsableKey
     @State private var modelName = ModelKeys.selectedModelName
@@ -70,47 +74,74 @@ struct SetupSections: View {
             .settingsFooter()
         }
 
-        if includeOptionalGroups {
-            Section {
-                NavigationLink(value: DetailsRoute.model) {
-                    SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
-                                symbol: "sparkles", value: hasModel ? modelName : nil,
-                                accessory: hasModel ? .done : nil)
-                }
-                .accessibilityIdentifier("firstRun.models")
-            } header: {
-                Group {
-                    SettingsHeader("Models")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Poki needs an AI account to think. Add one provider below. One is enough.")
-                }
-                .settingsFooter()
-            }
+        WelcomeCellularSection()
 
-            WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
-
-            Section {
-                NavigationLink(value: DetailsRoute.agents) {
-                    SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
-                }
-                .accessibilityIdentifier("firstRun.agents")
-                .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
-                .onAppear(perform: refresh)
-            } header: {
-                Group {
-                    SettingsHeader("Connections")
-                }
-                .settingsHeader()
-            } footer: {
-                Group {
-                    Text("Let Claude, ChatGPT and other agents use this iPhone")
-                }
-                .settingsFooter()
+        Section {
+            NavigationLink(value: DetailsRoute.model) {
+                SettingsRow(title: "Accounts", caption: hasModel ? nil : "Sign in or add a key",
+                            symbol: "sparkles", value: hasModel ? modelName : nil,
+                            accessory: hasModel ? .done : nil)
             }
+            .accessibilityIdentifier("firstRun.models")
+            WelcomeLocalModels()
+        } header: {
+            Group {
+                SettingsHeader("Models")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Poki thinks with a model from your own account. Local models run on this iPhone and keep what they read on it.")
+            }
+            .settingsFooter()
+        }
+
+        WelcomeFeaturesSection(openSenses: { path.append(DetailsRoute.screenHistory) })
+
+        if model.signer.freeSigning { appleAccountSection }
+
+        Section {
+            NavigationLink(value: DetailsRoute.agents) {
+                SettingsRow(title: "External Connections", symbol: "chevron.left.forwardslash.chevron.right")
+            }
+            .accessibilityIdentifier("firstRun.agents")
+            .onReceive(NotificationCenter.default.publisher(for: ModelKeys.changed)) { _ in refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
+            .onAppear(perform: refresh)
+        } header: {
+            Group {
+                SettingsHeader("Connections")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("Let Claude, ChatGPT and other agents use this iPhone")
+            }
+            .settingsFooter()
+        }
+    }
+
+    /// A free Apple Account's install: the sign-in that lets Poki renew itself.
+    private var appleAccountSection: some View {
+        let needs = model.signer.needsAppleAccountForRenewal
+        return Section {
+            // Settings' own page, in the system's look, as the steps open from this list.
+            NavigationLink { AppleAccountPage().outsideStartFlow() } label: {
+                SettingsRow(title: "Apple Account", caption: needs ? "Sign in so Poki keeps opening" : nil,
+                            symbol: "person.crop.circle", value: needs ? nil : model.signer.status?.apple_id,
+                            warns: needs, accessory: needs ? nil : .done)
+            }
+            .accessibilityIdentifier("firstRun.appleAccount")
+        } header: {
+            Group {
+                SettingsHeader("Signing & Updates")
+            }
+            .settingsHeader()
+        } footer: {
+            Group {
+                Text("A free Apple Account signs Poki for 7 days. Signed in here, Poki renews itself.")
+            }
+            .settingsFooter()
         }
     }
 
@@ -163,6 +194,7 @@ struct SetupGuideMe: View {
 /// item still open.
 struct WelcomePanel: View {
     @Environment(AppModel.self) private var model
+    var kind: FirstRun.Kind
     @Binding var path: NavigationPath
     var finish: () -> Void
 
@@ -182,7 +214,7 @@ struct WelcomePanel: View {
             SetupSections(path: $path)
         }
         .settingsPage()
-        .navigationTitle(AppLocalization.text("Set Up Poki"))
+        .navigationTitle(kind == .firstRun ? AppLocalization.text("Set Up Poki") : AppLocalization.text("Check Setup"))
         // A safe-area bar on iOS 26, so the rows fade under the buttons through the system's scroll
         // edge instead of showing through them (the footer's words ran into Finish Later).
         .bottomBar(softEdge: true) { buttons }
@@ -195,7 +227,7 @@ struct WelcomePanel: View {
 
     private var buttons: some View {
         StartButtons(primary: primaryWord, action: primary,
-                     secondary: nextStep != nil || !hasModel ? ("Finish Later") : nil,
+                     secondary: nextStep != nil || !hasModel ? (kind == .firstRun ? "Finish Later" : "Not Now") : nil,
                      secondaryAction: finish)
     }
 
@@ -291,10 +323,7 @@ struct WelcomeFeaturesSection: View {
 
     var body: some View {
         Section {
-            Button(action: openSenses) {
-                SettingsRow(title: "Screen History", symbol: "rectangle.stack")
-            }
-            .accessibilityIdentifier("firstRun.screenHistory")
+            WelcomeSensesRow(open: openSenses)
             NavigationLink(value: SettingsRoute.memory) {
                 SettingsRow(title: "Memory", caption: "What Poki keeps about you and your apps", symbol: "bookmark")
             }
@@ -385,7 +414,7 @@ extension View {
                 Group {
                     switch route {
                     case .model, .voiceKey: ModelSettingsView()
-                    case .screenHistory: ScreenHistorySettingsView()
+                    case .screenHistory: HistoryPage()
                     case .agents: AgentsAndRelayView(path: path)
                     default: EmptyView()
                     }

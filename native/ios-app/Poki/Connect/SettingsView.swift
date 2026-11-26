@@ -68,19 +68,22 @@ struct SettingsHome: View {
                 HStack(spacing: 12) {
                     BearAvatar(size: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("This iPhone").font(.headline)
+                        Text("This iPhone").font(.allo(.headline))
                         Text(verbatim: model.identity.label.isEmpty ? "—" : "\(model.identity.label.prefix(12))…")
                             .font(.footnote.monospaced()).foregroundStyle(Color(.secondaryLabel))
                     }
                     Spacer()
                     let relay = Health.relay(model)
                     Label(relay.word, systemImage: "circle.fill")
-                        .labelStyle(.titleAndIcon).font(.subheadline)
+                        .labelStyle(.titleAndIcon).font(.allo(.subheadline))
                         .foregroundStyle(relay.color == Site.ok ? Color.green : relay.color == Site.bad ? Color.red : Color.secondary)
                 }
                 .padding(.vertical, 4)
             } footer: {
-                Text("The relay forwards requests to this iPhone while Poki is open or in the background. It stores nothing; when offline, clients receive an error.")
+                Group {
+                    Text("The relay forwards requests to this iPhone while Poki is open or in the background. It stores nothing; when offline, clients receive an error.")
+                }
+                .settingsFooter()
             }
 
             Section {
@@ -100,9 +103,15 @@ struct SettingsHome: View {
                     Label(Self.friendly(error), systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 }
             } header: {
-                Text("Agents")
+                Group {
+                    Text("Agents")
+                }
+                .settingsHeader()
             } footer: {
-                if model.relayAddress == nil { Text("Set your relay address first: each agent’s address is on your relay.") }
+                Group {
+                    if model.relayAddress == nil { Text("Set your relay address first: each agent’s address is on your relay.") }
+                }
+                .settingsFooter()
             }
 
             // The in-process path has no Poki Runner to start or stop (ESP-152).
@@ -118,9 +127,15 @@ struct SettingsHome: View {
                         Button("Stop Runner", role: .destructive) { model.pauseRunner() }.disabled(!model.approvals.isEmpty)
                     }
                 } header: {
-                    Text("Runner")
+                    Group {
+                        Text("Runner")
+                    }
+                    .settingsHeader()
                 } footer: {
-                    Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    Group {
+                        Text("iOS shows the automation banner only while the runner is active. Poki starts it when needed and stops it when idle. Don’t close Poki Runner while an agent is working.")
+                    }
+                    .settingsFooter()
                 }
             }
 
@@ -140,11 +155,17 @@ struct SettingsHome: View {
                 }
                 .foregroundStyle(Color(.label))
             } header: {
-                Text("This iPhone")
+                Group {
+                    Text("This iPhone")
+                }
+                .settingsHeader()
             } footer: {
-                Text(model.automationPath == .inProcess
-                     ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents."
-                     : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
+                Group {
+                    Text(model.automationPath == .inProcess
+                         ? "iOS shows the automation banner only while Poki’s automation session is open. Poki opens it when an agent asks and closes it when idle. Memory stores skills and notes shared across agents."
+                         : "Memory stores skills and notes shared across agents. Diagnostics: logs, checks, background hold, addresses, and Live Activity preview.")
+                }
+                .settingsFooter()
             }
         }
         .navigationTitle(AppLocalization.text("Agents and Relay"))
@@ -191,15 +212,26 @@ struct RelayView: View {
                     .focused($focused)
                     .submitLabel(.done).onSubmit(save)
             } header: {
-                Text("Relay Address")
-            } footer: {
-                if rejected {
-                    Text("That is not a relay address. Enter the address deploy.sh printed, such as https://poki-relay.you.workers.dev.").foregroundStyle(.red)
-                } else {
-                    Text("Poki has no default relay. Deploy your own to your Cloudflare account with deploy/cf-relay/deploy.sh from the Poki repository, then enter the address it prints. Screenshots and taps pass only through that relay.")
+                Group {
+                    Text("Relay Address")
                 }
+                .settingsHeader()
+            } footer: {
+                Group {
+                    if rejected {
+                        Text("That is not a relay address. Enter the address deploy.sh printed, such as https://poki-relay.you.workers.dev.").foregroundStyle(.red)
+                    } else {
+                        Text("Poki has no default relay. Deploy your own to your Cloudflare account with deploy/cf-relay/deploy.sh from the Poki repository, then enter the address it prints. Screenshots and taps pass only through that relay.")
+                    }
+                }
+                .settingsFooter()
             }
-            Section("Status") { LabeledContent("Relay", value: statusText) }
+            Section { LabeledContent("Relay", value: statusText) } header: {
+                Group {
+     Text("Status") 
+                }
+                .settingsHeader()
+            }
         }
         .navigationTitle(AppLocalization.text("Relay"))
         .navigationBarTitleDisplayMode(.inline)
@@ -261,7 +293,10 @@ struct ConnectorDetail: View {
                     copied = true
                 }
             } footer: {
-                Text("Add this URL as a remote MCP server in your client. Anyone with this link can control this iPhone while Poki is running. Keep it private, and revoke it here if compromised.")
+                Group {
+                    Text("Add this URL as a remote MCP server in your client. Anyone with this link can control this iPhone while Poki is running. Keep it private, and revoke it here if compromised.")
+                }
+                .settingsFooter()
             }
             }
             Section {
@@ -273,18 +308,21 @@ struct ConnectorDetail: View {
                     HStack(spacing: 12) {
                         AgentBadge(name: session.client ?? "", size: 32)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: session.name).font(.body.weight(.semibold)).lineLimit(1)
+                            Text(verbatim: session.name).font(.allo(.body, .semibold)).lineLimit(1)
                             let line = session.lastLine
-                            if !line.isEmpty { Text(verbatim: line).font(.subheadline).foregroundStyle(Color(.secondaryLabel)).lineLimit(2) }
+                            if !line.isEmpty { Text(verbatim: line).font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel)).lineLimit(2) }
                         }
                         Spacer(minLength: 8)
                         Text(session.live ? AppLocalization.text(LocalizedStringResource("now")) : ChatTime.row(session.updated))
-                            .font(.subheadline).foregroundStyle(Color(.secondaryLabel))
+                            .font(.allo(.subheadline)).foregroundStyle(Color(.secondaryLabel))
                     }
                     .accessibilityElement(children: .combine)
                 }
             } header: {
-                Text("Recent Use")
+                Group {
+                    Text("Recent Use")
+                }
+                .settingsHeader()
             }
             Section {
                 LabeledContent("Added", value: secret.created.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)))

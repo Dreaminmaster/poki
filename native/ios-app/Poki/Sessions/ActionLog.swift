@@ -13,7 +13,9 @@ final class ActionLog {
     static let slack = 500
 
     struct Entry: Codable, Identifiable, Hashable {
-        enum Kind: String, Codable { case approval }
+        /// `observing`: a Screen History change from its Observing Record, made for the page and never
+        /// written to the log's file. `note`: a line an agent added to its session.
+        enum Kind: String, Codable { case approval, observing, note }
         var id = UUID()
         var at: Date
         var text: String
@@ -31,7 +33,12 @@ final class ActionLog {
         /// One line of text for a copied log.
         var line: String {
             let time = at.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(AppLocalization.locale))
-            let mark = kind == .approval ? (ok ? "approval allowed" : "approval refused") : (ok ? "ok" : "failed")
+            let mark = switch kind {
+            case .approval: ok ? "approval allowed" : "approval refused"
+            case .observing: "observing"
+            case .note: "note"
+            case nil: ok ? "ok" : "failed"
+            }
             let place = AppName.display(app).map { " in \($0)" } ?? ""
             let more = [detail, why.map(ActivityWords.reason)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "; ")
             return "\(time)  [\(mark)] \(ActivityWords.label(text))\(place)\(more.isEmpty ? "" : " (\(more))")"
@@ -110,13 +117,52 @@ final class ActionLog {
             let day = calendar.startOfDay(for: entry.at)
             if days.last?.day != day { days.append((day, [])) }
             let d = days.count - 1
-            if let last = days[d].runs.last, last.session == entry.session, last.caller == entry.caller, entry.session != nil {
+            let observing = entry.kind == .observing
+            if let last = days[d].runs.last, (observing && last.entries.last?.kind == .observing)
+                || (!observing && last.entries.last?.kind != .observing && last.session == entry.session && last.caller == entry.caller && entry.session != nil) {
                 days[d].runs[days[d].runs.count - 1].entries.append(entry)
             } else {
                 days[d].runs.append(Run(id: entry.id, session: entry.session, caller: entry.caller, entries: [entry]))
             }
         }
         return days
+    }
+}
+
+/// The Observing Record in the Activity Log (the owner, Nov 21 2026): simplified, so it never floods the
+/// log. Only changes show: a state that repeats the one before is dropped, an app left out again within
+/// half an hour adds to the line before, and so do Poki's checks before sharing within ten minutes.
+enum ObservingDigest {
+    static func entries(_ records: [HistoryRecord]) -> [ActionLog.Entry] {
+        var out: [ActionLog.Entry] = []
+        var counts: [Int] = []
+        var lastState: String?
+        for record in records.sorted(by: { $0.at < $1.at }) {
+            let state = HistoryCapture.Status(rawValue: record.kind) != nil
+            if state {
+                guard record.kind != lastState else { continue }
+                lastState = record.kind
+            }
+            let window: TimeInterval? = switch record.kind {
+            case "leftOut": 1800
+            case "shared", "notShared": 600
+            default: nil
+            }
+            if let window, let i = out.lastIndex(where: { $0.text == record.kind }),
+               record.at.timeIntervalSince(out[i].at) < window,
+               record.kind != "leftOut" || out[i].app == record.detail {
+                counts[i] += 1
+                out[i].at = record.at
+                continue
+            }
+            out.append(ActionLog.Entry(at: record.at, text: record.kind, app: record.kind == "leftOut" ? record.detail : nil,
+                                       ok: record.kind != "dropped", session: nil, kind: .observing))
+            counts.append(1)
+        }
+        for i in out.indices where counts[i] > 1 {
+            out[i].detail = AppLocalization.text(LocalizedStringResource("\(counts[i]) times"))
+        }
+        return out
     }
 }
 
@@ -128,13 +174,14 @@ struct ActionLogView: View {
     private var log: ActionLog { ActionLog.shared }
 
     enum Show: String, CaseIterable, Identifiable {
-        case all, approvals, failed
+        case all, approvals, failed, observing
         var id: String { rawValue }
         var title: LocalizedStringKey {
             switch self {
             case .all: "All"
             case .approvals: "Approvals"
             case .failed: "Failed"
+            case .observing: "Observing"
             }
         }
     }
@@ -145,20 +192,25 @@ struct ActionLogView: View {
     @State private var search = ""
     @State private var shownDays = 7
     @State private var open: Set<UUID> = []
+    /// Screen History's changes, read only while it is unlocked: they name apps and questions.
+    @State private var observing: [ActionLog.Entry] = []
+    @ObservedObject private var lock = HistoryLock.shared
+    @ObservedObject private var capture = HistoryCapture.shared
 
     private var filtering: Bool { show != .all || who != nil || !search.isEmpty }
 
     private var matching: [ActionLog.Entry] {
         let words = search.trimmingCharacters(in: .whitespaces)
-        return log.entries.reversed().filter { entry in
+        return (log.entries + observing).sorted { $0.at > $1.at }.filter { entry in
             switch show {
             case .all: break
             case .approvals: if entry.kind != .approval { return false }
-            case .failed: if entry.ok { return false }
+            case .failed: if entry.ok || entry.kind == .observing { return false }
+            case .observing: if entry.kind != .observing { return false }
             }
-            if let who, (entry.caller ?? "") != who { return false }
+            if let who, entry.kind == .observing || (entry.caller ?? "") != who { return false }
             if words.isEmpty { return true }
-            return [entry.text, ActivityWords.label(entry.text), entry.app, entry.detail, entry.caller].compactMap { $0 }
+            return [entry.text, label(entry), entry.app, entry.detail, entry.caller].compactMap { $0 }
                 .contains { $0.localizedCaseInsensitiveContains(words) }
         }
     }
@@ -181,7 +233,17 @@ struct ActionLogView: View {
                     .listRowInsets(EdgeInsets())
                 }
             }
-            if log.entries.isEmpty {
+            // The Observing Record's changes join the log once Screen History is open (they name apps).
+            if capture.enabled || !observing.isEmpty, !lock.unlocked {
+                Section {
+                    Button { Task { await lock.open() } } label: {
+                        SettingsRow(title: "Show Observing Changes", symbol: "eye")
+                    }
+                    .disabled(lock.asking || lock.unavailable)
+                    .accessibilityIdentifier("activity.showObserving")
+                }
+            }
+            if log.entries.isEmpty && observing.isEmpty {
                 ContentUnavailableView("No Actions Yet", systemImage: "list.bullet.rectangle",
                                        description: Text("Every tap, swipe and keystroke Poki makes on this iPhone is listed here, whoever asked for it."))
                     .listRowBackground(Color.clear)
@@ -215,7 +277,10 @@ struct ActionLogView: View {
             }
             if !log.entries.isEmpty {
                 Section {} footer: {
-                    Text("Poki keeps its latest \(ActionLog.keep) entries on this iPhone. Entries can’t be deleted by hand.")
+                    Group {
+                        Text("Poki keeps its latest \(ActionLog.keep) entries on this iPhone. Entries can’t be deleted by hand.")
+                    }
+                    .settingsFooter()
                 }
             }
         }
@@ -237,10 +302,23 @@ struct ActionLogView: View {
             }
         }
         .onAppear { log.load() }
+        .task(id: lock.unlocked) {
+            observing = lock.unlocked ? ObservingDigest.entries(await HistoryStore.shared.records(limit: 2000)) : []
+        }
     }
 
     private func title(_ run: ActionLog.Run) -> String {
-        run.session.flatMap { SessionStore.shared.session($0)?.name } ?? run.caller ?? "Poki"
+        if run.entries.first?.kind == .observing { return AppLocalization.text("Screen History") }
+        return run.session.flatMap { SessionStore.shared.session($0)?.name } ?? run.caller ?? "Poki"
+    }
+
+    /// The words of an entry: a step's own, or an observing change's name.
+    private func label(_ entry: ActionLog.Entry) -> String {
+        switch entry.kind {
+        case .observing: AppLocalization.bundle.localizedString(forKey: HistoryNames.record(entry.text), value: nil, table: nil)
+        case .note: entry.text
+        default: ActivityWords.label(entry.text)
+        }
     }
 
     @ViewBuilder private func menu(_ run: ActionLog.Run) -> some View {
@@ -267,7 +345,19 @@ struct ActionLogView: View {
         }
     }
 
-    private func badge(_ caller: String?, ok: Bool, approval: Bool) -> some View {
+    @ViewBuilder private func badge(_ caller: String?, ok: Bool, approval: Bool, observing: Bool = false) -> some View {
+        if observing {
+            Image(systemName: "eye")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Tint.blueText)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Tint.blue.opacity(0.14)))
+        } else {
+            plainBadge(caller, ok: ok, approval: approval)
+        }
+    }
+
+    private func plainBadge(_ caller: String?, ok: Bool, approval: Bool) -> some View {
         // Who asked for it: the agent's badge, or Poki's own.
         Group {
             if let caller { CallerBadge(name: caller, size: 28) } else { PokiAvatar(size: 28) }
@@ -288,14 +378,14 @@ struct ActionLogView: View {
         if run.approvals > 0 { parts.append(AppLocalization.text(LocalizedStringResource("\(run.approvals) approvals"))) }
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
-            badge(run.caller, ok: run.failed == 0, approval: false)
+            badge(run.caller, ok: run.failed == 0, approval: false, observing: run.entries.first?.kind == .observing)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: title(run)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                Text(verbatim: parts.joined(separator: ", ")).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                Text(verbatim: parts.joined(separator: ", ")).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
             Spacer(minLength: 4)
             if let first = run.entries.first {
-                Text(first.at, style: .time).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+                Text(first.at, style: .time).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
             }
         }
     }
@@ -303,19 +393,20 @@ struct ActionLogView: View {
     private func row(_ entry: ActionLog.Entry) -> some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
-            badge(entry.caller, ok: entry.ok, approval: entry.kind == .approval)
+            badge(entry.caller, ok: entry.ok, approval: entry.kind == .approval, observing: entry.kind == .observing)
             VStack(alignment: .leading, spacing: 2) {
-                Text(ActivityWords.label(entry.text)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
+                Text(verbatim: label(entry)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 if let detail = entry.detail {
-                    Text(verbatim: detail).font(.footnote).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
+                    Text(verbatim: detail).font(.allo(.footnote)).foregroundStyle(entry.ok ? Color(.secondaryLabel) : Color.orange).lineLimit(typeSize.isAccessibilitySize || !entry.ok ? nil : 2)
                 }
-                let context = [AppName.display(entry.app), entry.session.flatMap { SessionStore.shared.session($0)?.name }].compactMap { $0 }.joined(separator: ", ")
+                let place = entry.kind == .observing ? entry.app.map(HistoryNames.app) : AppName.display(entry.app)
+                let context = [place, entry.session.flatMap { SessionStore.shared.session($0)?.name }].compactMap { $0 }.joined(separator: ", ")
                 if !context.isEmpty {
-                    Text(context).font(.footnote).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                    Text(context).font(.allo(.footnote)).foregroundStyle(Color(.secondaryLabel)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 }
             }
             Spacer(minLength: 4)
-            Text(entry.at, style: .time).font(.footnote).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
+            Text(entry.at, style: .time).font(.allo(.footnote)).monospacedDigit().foregroundStyle(Color(.secondaryLabel))
         }
     }
 }

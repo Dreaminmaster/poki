@@ -9,12 +9,15 @@ PR (gate) and published when it merges into main (publish-promotion.yml).
 
   promotion.py propose <beta|stable> [from-tag] [override reason]   edits channels.json (+ VERSION)
   promotion.py pending                                              the record not yet published, as JSON
+  promotion.py changelog [--file PATH] [--version V --channel C] [--extract]
+                                                                    exit 1 if CHANGELOG.md lacks this version
   promotion.py soak                                                 exit 1 if a stable's beta is too new
   promotion.py gym-run <head sha> [exclude run id]                  newest completed gate run with scorecards
   promotion.py gym <baseline dir> <new dir>                         exit 1 if the Gym got worse
 
 Needs gh (GH_TOKEN, GH_REPO). Prints GitHub Actions outputs as key=value lines on stdout.
 """
+import argparse
 import datetime as dt
 import json
 import os
@@ -25,6 +28,7 @@ from pathlib import Path
 
 CHANNELS = Path(".github/channels.json")
 VERSION_FILE = Path("native/ios-app/VERSION")
+CHANGELOG = Path("CHANGELOG.md")
 
 
 def gh(*args):
@@ -152,6 +156,144 @@ def pending():
     return None
 
 
+CHANGELOG_HEADING_RE = re.compile(
+    r"^##\s+\[(?P<version>\d+\.\d+\.\d+(?:-beta\.\d+)?)\]"
+    r"(?:\s+(?P<qual>Beta(?:\s+\d+)?))?"
+    r"(?:\s*-\s*(?P<date>.*))?\s*$"
+)
+LINK_DEF_RE = re.compile(r"^\[[^\]]+\]:\s+\S+")
+
+
+def _heading_priority(match, channel, version, base_version):
+    h_version = match.group("version")
+    h_qual = match.group("qual")
+    if "-beta." in h_version and h_qual:
+        return None
+    if "-beta." in h_version:
+        h_base, beta_part = h_version.split("-beta.", 1)
+        h_kind, h_beta = "beta_exact", int(beta_part)
+    elif h_qual:
+        h_base = h_version
+        if h_qual == "Beta":
+            h_kind, h_beta = "beta_generic", None
+        else:
+            h_kind, h_beta = "beta_exact", int(h_qual.split()[1])
+    else:
+        h_base, h_kind, h_beta = h_version, "base", None
+
+    if h_base != base_version:
+        return None
+    if channel == "beta":
+        m = re.fullmatch(r"(\d+\.\d+\.\d+)-beta\.(\d+)", version)
+        if not m or m.group(1) != base_version:
+            sys.exit(f"beta version {version!r} does not match base_version {base_version!r}")
+        target_beta = int(m.group(2))
+        if h_kind == "beta_exact" and h_beta == target_beta:
+            return 0
+        if target_beta == 1 and h_kind == "beta_generic":
+            return 1
+        return None
+    if channel == "stable":
+        if version != base_version:
+            sys.exit(f"stable version {version!r} does not match base_version {base_version!r}")
+        return 0 if h_kind == "base" else None
+    sys.exit(f"promotion channel {channel!r} must be beta or stable")
+
+
+def _clean_section_body(lines):
+    body = list(lines)
+    while body and (not body[-1].strip() or LINK_DEF_RE.match(body[-1].strip())):
+        body.pop()
+    while body and not body[0].strip():
+        body.pop(0)
+    return body
+
+
+def _has_release_notes(body_lines):
+    for line in body_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.fullmatch(r"[-*+]\s*", stripped) or LINK_DEF_RE.match(stripped):
+            continue
+        return True
+    return False
+
+
+def find_changelog_section(text, channel, version, base_version, path_label="CHANGELOG.md"):
+    lines = text.splitlines()
+    sections = [i for i, line in enumerate(lines) if re.match(r"^##\s+", line)]
+    best = None
+    for idx, start in enumerate(sections):
+        heading = lines[start].strip()
+        match = CHANGELOG_HEADING_RE.match(heading)
+        if not match:
+            continue
+        priority = _heading_priority(match, channel, version, base_version)
+        if priority is None:
+            continue
+        end = sections[idx + 1] if idx + 1 < len(sections) else len(lines)
+        if best is None or priority < best[0]:
+            best = (priority, heading, match, lines[start + 1:end])
+    if best is None:
+        sys.exit(
+            f"{path_label} has no dated section for Poki {version}. "
+            f"Add '## [{version}] - YYYY-MM-DD' with user-visible changes before releasing."
+        )
+    _, heading, match, raw_body = best
+    date_str = (match.group("date") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+        sys.exit(f"{path_label} section '{heading}' must include a YYYY-MM-DD release date.")
+    try:
+        dt.date.fromisoformat(date_str)
+    except ValueError:
+        sys.exit(f"{path_label} section '{heading}' has invalid release date {date_str!r}.")
+    body = _clean_section_body(raw_body)
+    if not _has_release_notes(body):
+        sys.exit(f"{path_label} section '{heading}' has no release notes.")
+    return heading, "\n".join(body)
+
+
+def changelog(argv):
+    parser = argparse.ArgumentParser(prog="promotion.py changelog")
+    parser.add_argument("--file", default=str(CHANGELOG))
+    parser.add_argument("--version")
+    parser.add_argument("--base-version")
+    parser.add_argument("--channel")
+    parser.add_argument("--extract", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.version or args.channel or args.base_version:
+        if not args.version or not args.channel:
+            sys.exit("--version and --channel must be given together")
+        channel = args.channel
+        version = args.version
+        base_version = args.base_version or re.sub(r"-beta\.\d+$", "", version)
+    else:
+        data = load()
+        rec = next((r for r in reversed(data["promotions"]) if not tag_exists(r["tag"])), None)
+        if not rec:
+            print("no pending promotion")
+            return
+        rec = check(rec)
+        channel, version, base_version = rec["channel"], rec["version"], rec["base_version"]
+
+    path = Path(args.file)
+    if not path.is_file():
+        sys.exit(f"{args.file} not found; add a dated section for Poki {version} before releasing.")
+    heading, body = find_changelog_section(
+        path.read_text(encoding="utf-8"),
+        channel,
+        version,
+        base_version,
+        path_label=args.file,
+    )
+    if args.extract:
+        print(body)
+    else:
+        print(f"{args.file} has a dated section for Poki {version}: {heading}")
+
+
 def soak():
     data = load()
     rec = next((r for r in reversed(data["promotions"]) if not tag_exists(r["tag"])), None)
@@ -232,6 +374,8 @@ if __name__ == "__main__":
         propose(rest[0], rest[1] if len(rest) > 1 and rest[1] else None, rest[2] if len(rest) > 2 and rest[2] else None)
     elif cmd == "pending":
         pending()
+    elif cmd == "changelog":
+        changelog(rest)
     elif cmd == "soak":
         soak()
     elif cmd == "gym-run":

@@ -98,6 +98,8 @@ struct MemoryItem: Identifiable, Equatable {
     var params: [String] = []
     var otherApps: [String] = []
     var savedBy: String?
+    /// Skills: the steps fixed on the way and kept (a renamed button, a prompt closed).
+    var fixes = 0
 }
 
 /// Where a memory was heard: the app the conversation was about, when, and the conversation itself.
@@ -172,6 +174,32 @@ final class MemoryLibrary {
         return latest.keys.sorted { latest[$0]! != latest[$1]! ? latest[$0]! > latest[$1]! : $0 < $1 }
     }
 
+    /// A page's memories in the page's own order (About You: nil).
+    func pageLines(_ app: String?) -> [MemoryItem] {
+        items.filter { $0.kind == .memory && $0.app?.lowercased() == app?.lowercased() }
+    }
+
+    /// The page's one line for the index, and whether the owner locked it whole.
+    func pageSummary(_ app: String?) -> String? { store?.page(app)?.summary }
+    func pageLocked(_ app: String?) -> Bool { store?.page(app)?.isLocked == true }
+
+    /// The owner's write of a whole page: a line already there keeps its id and where it came from,
+    /// a new one is the owner's and locked; a line left out is forgotten. `locked` locks the page whole.
+    func writePage(_ app: String?, text: String, locked: Bool) {
+        guard let store else {
+            // The sample: the page's lines become the text's.
+            let words = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            items.removeAll { $0.kind == .memory && $0.app == app && !words.contains($0.text) }
+            for w in words where !items.contains(where: { $0.kind == .memory && $0.app == app && $0.text == w }) {
+                items.append(MemoryItem(id: UUID().uuidString, kind: .memory, text: w, app: app, source: .wrote, updated: Date(), locked: true))
+            }
+            return
+        }
+        if text != store.page(app)?.text { store.writePage(app: app, text: text, by: RoutineStore.owner) }
+        if locked != (store.page(app)?.isLocked == true) { store.setPageLocked(app, locked) }
+        reload()
+    }
+
     /// Skills with no app, for the Other row.
     var other: [MemoryItem] { items(in: nil, .skill) }
 
@@ -188,44 +216,53 @@ final class MemoryLibrary {
 
     // MARK: Changing
 
-    /// Adds a memory the owner wrote; it is locked from the start.
-    func add(_ text: String, app: String?) {
+    /// Adds a memory the owner wrote; locked from the start unless the editor's switch left it open.
+    func add(_ text: String, app: String?, locked: Bool = true) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= Self.noteLimit else { return }
         if let store {
-            store.remember(clean, by: RoutineStore.owner, app: app, locked: true)
+            store.remember(clean, by: RoutineStore.owner, app: app, locked: locked)
             reload()
             return
         }
-        let item = MemoryItem(id: UUID().uuidString, kind: .memory, text: clean, app: app, source: .wrote, updated: Date(), locked: true)
+        let item = MemoryItem(id: UUID().uuidString, kind: .memory, text: clean, app: app, source: .wrote, updated: Date(), locked: locked)
         items.append(item)
         log(.added, .owner, item)
     }
 
-    /// Saves the owner's change; the item locks.
-    func edit(_ id: String, text: String, app: String?) {
+    /// Saves the owner's change. A change of words or app locks the item, as the store does, unless the
+    /// editor's switch says Poki may still change it; the switch alone can lock or unlock it too.
+    func edit(_ id: String, text: String, app: String?, locked: Bool = true) {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= Self.noteLimit, let i = items.firstIndex(where: { $0.id == id }) else { return }
         let before = items[i]
         // Saving the same words again changes nothing (a skill keeps its name; a memory its app too).
-        guard clean != before.text || (before.kind == .memory && app != before.app) else { return }
+        let changed = clean != before.text || (before.kind == .memory && app != before.app)
         if let store {
-            switch before.kind {
-            case .memory: store.editNote(id, text: clean, app: .some(app))
-            case .skill: store.rename(before.text, to: clean, by: RoutineStore.owner)
-            case .habit: break
+            if changed {
+                switch before.kind {
+                case .memory: store.editNote(id, text: clean, app: .some(app))
+                case .skill: store.rename(before.text, to: clean, by: RoutineStore.owner)
+                case .habit: break
+                }
             }
+            // The store locked what it changed; the switch has the last word.
+            let lockedNow = changed ? true : before.locked
+            // A skill is found by its name, which the rename may just have changed.
+            if lockedNow != locked { store.setLocked(before.kind == .skill ? (changed ? clean : before.text) : id, locked) }
             reload()
             return
         }
-        items[i].text = clean
-        items[i].app = app
-        items[i].source = .edited
-        // What you wrote or changed was not heard in a conversation: no link back to one.
-        items[i].heard = nil
-        items[i].locked = true
-        items[i].updated = Date()
-        log(.edited, .owner, items[i], previous: before.text == clean ? nil : before.text)
+        if changed {
+            items[i].text = clean
+            items[i].app = app
+            items[i].source = .edited
+            // What you wrote or changed was not heard in a conversation: no link back to one.
+            items[i].heard = nil
+            items[i].updated = Date()
+            log(.edited, .owner, items[i], previous: before.text == clean ? nil : before.text)
+        }
+        items[i].locked = locked
     }
 
     func setLocked(_ id: String, _ locked: Bool) {
@@ -357,7 +394,7 @@ final class MemoryLibrary {
             source: .task, updated: routine.updated, locked: routine.isLocked, steps: routine.steps.count, ok: routine.ok, runs: routine.runs,
             lastMs: routine.lastMs, stale: routine.stale,
             stop: routine.lastStop.map { AppLocalization.text(LocalizedStringResource("Step \($0.step): \($0.why)")) },
-            params: routine.params.keys.sorted(), otherApps: routine.otherApps, savedBy: routine.savedBy)
+            params: routine.params.keys.sorted(), otherApps: routine.otherApps, savedBy: routine.savedBy, fixes: routine.fixes ?? 0)
     }
 
     /// A line of Recent Updates from the store's log. The item is the one on the page when it is
@@ -371,7 +408,14 @@ final class MemoryLibrary {
         default: return nil
         }
         let item: MemoryItem
-        if let note = record.note {
+        if let page = record.page ?? record.pageBefore {
+            // A whole page written at once: the line names the page and shows its first words.
+            item = MemoryItem(id: "page:" + (page.app ?? ""), kind: .memory,
+                              text: record.page?.summary ?? record.page?.lines.first?.text ?? page.summary ?? "",
+                              app: page.app, source: source(record.by, heard: false), updated: record.at)
+            return MemoryChange(id: record.id, at: record.at, action: action, actor: actor(record.by), item: item,
+                                previous: record.pageBefore?.lines.first?.text, undone: record.undone == true)
+        } else if let note = record.note {
             item = Self.item(note)
         } else if let name = record.routineName {
             item = routines.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map(Self.item)
