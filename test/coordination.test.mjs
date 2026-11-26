@@ -132,11 +132,12 @@ test('an occupied simulator cannot be booted through explicit, selected or batch
  assert.equal((await f.events()).filter(e=>e.args?.some(a=>['boot','spawn','bootstatus','create'].includes(a))).length,0);
 });
 
-test('cancel during recording recovery preserves dispatched input and finishes cleanup before takeover',async t=>{
+for (const [suffix, text] of [['', 'Fixture'], [' (command text in input)', 'screencapture screencapture']]) {
+ test('cancel during recording recovery preserves dispatched input and finishes cleanup before takeover'+suffix,async t=>{
  const f=await fixture(t),b=await f.connect();const lease=value(await f.call('acquire_device',{device:'fixture-phone'}));
  const started=await f.call('start_recording');assert.ok(!started.isError,'Recording must start before testing recovery');assert.equal(value(started).recording,true);
  await f.set({recordingBlock:true});
- const input=f.call('type_text',{text:'Fixture',submit:true});
+ const input=f.call('type_text',{text,submit:true});
  // Wait for the replacement receiver to reach the deliberately blocked first-frame phase.
  // Counting raw command substrings can miss the phase or hide a failed initial recording.
  await f.until(log=>log.includes('"recording_recovery_blocked":true'));
@@ -146,6 +147,7 @@ test('cancel during recording recovery preserves dispatched input and finishes c
  assert.ok(value(await b.callTool({name:'acquire_device',arguments:{device:'fixture-phone'}})).lease_id);
  assert.equal((await f.events()).filter(e=>e.args?.includes('screencapture')).length,2);
 });
+}
 
 
 test('request cancellation leaves another device and another session recording intact',async t=>{
