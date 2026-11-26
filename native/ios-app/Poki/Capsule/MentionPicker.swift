@@ -20,6 +20,7 @@ struct MentionPicker: View {
         }
         .padding(.vertical, 6)
         .frame(width: min(width, 320))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .glassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: .card)
         .glassAppearing()
         .accessibilityElement(children: .contain)
@@ -38,7 +39,7 @@ struct MentionPicker: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14).frame(minHeight: 44).contentShape(.rect)
+        .padding(.horizontal, 18).frame(minHeight: 44).contentShape(.rect)
     }
 }
 
@@ -67,8 +68,17 @@ struct MentionIcon: View {
     }
 }
 
+/// A row pressed as a native menu's is: a rounded highlight inset from the glass's edges, so it never
+/// runs past the rounded corners, with the whole row as the target.
 private struct MentionRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.background(Color(.label).opacity(configuration.isPressed ? 0.08 : 0))
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.label).opacity(configuration.isPressed ? 0.1 : 0))
+                    .padding(.horizontal, 6)
+            }
+            .contentShape(.rect)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

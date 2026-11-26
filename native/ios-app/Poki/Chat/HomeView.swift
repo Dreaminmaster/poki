@@ -601,6 +601,8 @@ struct HomePage<Footer: View>: View {
                 .opacity(home ? 1 : 0)
                 .offset(y: home || reduceMotion ? 0 : 14)
                 .animation(HomeMotion.pills(home, reduceMotion), value: home)
+                // They go and come back with the keyboard, on its own curve: a fade, a slight scale
+                // and a small drop toward the field (the owner, Nov 21 2026: they jumped).
                 .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)).combined(with: .offset(y: 10)))
             }
             Spacer().frame(height: 34)

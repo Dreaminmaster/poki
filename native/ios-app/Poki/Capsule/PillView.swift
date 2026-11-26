@@ -24,8 +24,10 @@ struct PillMetrics {
     }
     var leading: CGFloat { inset }
     var gap: CGFloat { 6 }
-    /// After the name: as much room as the icon has before it, plus the gap the name keeps from it.
-    var trailing: CGFloat { inset + gap }
+    /// After the name: about the room the icon has before it, plus a hair for the round end, so the
+    /// name ends as close to the edge as the icon starts (the owner, Nov 21 2026: the right side read
+    /// three times wider).
+    var trailing: CGFloat { inset + 2 }
     /// Every corner of the ground follows the icon's own (its radius plus the space around it), so
     /// the shape is the same at both ends (the owner, Nov 21 2026: one round end and one square end
     /// read as uneven).

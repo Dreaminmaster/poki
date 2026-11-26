@@ -4,8 +4,8 @@ import SwiftUI
 import UIKit
 
 /// Plus in the message field: a sheet that rises from the bottom, with no title and no headers.
-/// Three plain ways to add something (Photos, Camera, Files), the apps used most as a row of large
-/// icons with More for every app, the connectors, and how this chat runs (the model and approvals).
+/// The apps used most as a row of large icons with More for every app, first (the owner, Nov 21 2026),
+/// then three plain ways to add something (Photos, Camera, Files), the connectors, and how this chat runs (the model and approvals).
 struct ComposerAddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -26,6 +26,11 @@ struct ComposerAddSheet: View {
         NavigationStack(path: $path) {
             List {
                 Section {
+                    appRow
+                }
+                .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
+
+                Section {
                     Button(action: choosePhotos) { SettingsLabel("Photos", systemImage: "photo.on.rectangle") }
                         .disabled(room == 0)
                         .accessibilityIdentifier("composer.photos")
@@ -37,11 +42,6 @@ struct ComposerAddSheet: View {
                         .accessibilityIdentifier("composer.files")
                 }
                 .foregroundStyle(Color(.label))
-
-                Section {
-                    appRow
-                }
-                .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0))
 
                 Section {
                     let connected = ConnectorCapsules.current.map { MentionMatch(capsule: $0, insert: $0.names[0]) }
