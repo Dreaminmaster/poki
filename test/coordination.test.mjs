@@ -134,9 +134,12 @@ test('an occupied simulator cannot be booted through explicit, selected or batch
 
 test('cancel during recording recovery preserves dispatched input and finishes cleanup before takeover',async t=>{
  const f=await fixture(t),b=await f.connect();const lease=value(await f.call('acquire_device',{device:'fixture-phone'}));
- await f.call('start_recording');await f.set({recordingBlock:true});
+ const started=await f.call('start_recording');assert.ok(!started.isError,'Recording must start before testing recovery');assert.equal(value(started).recording,true);
+ await f.set({recordingBlock:true});
  const input=f.call('type_text',{text:'Fixture',submit:true});
- await f.until(log=>log.split('screencapture').length===3);
+ // Wait for the replacement receiver to reach the deliberately blocked first-frame phase.
+ // Counting raw command substrings can miss the phase or hide a failed initial recording.
+ await f.until(log=>log.includes('"recording_recovery_blocked":true'));
  const stop=value(await f.call('cancel_device',{lease_id:lease.lease_id}));
  const response=await input, result=value(response);assert.equal(result.sent,true);assert.equal(result.text_verified,true);assert.equal(result.submit_sent,true);assert.equal(result.recording.resumed,false);
  assert.equal(response._meta.cleanup.recordings[0].recording,false);assert.equal(stop.reason,'cancelled');
