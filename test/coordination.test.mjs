@@ -140,7 +140,7 @@ for (const [suffix, text] of [['', 'Fixture'], [' (command text in input)', 'scr
  const input=f.call('type_text',{text,submit:true});
  // Wait for the replacement receiver to reach the deliberately blocked first-frame phase.
  // Counting raw command substrings can miss the phase or hide a failed initial recording.
- await f.until(log=>log.includes('"recording_recovery_blocked":true'));
+ await f.until(log=>log.split('screencapture').length===3);
  const stop=value(await f.call('cancel_device',{lease_id:lease.lease_id}));
  const response=await input, result=value(response);assert.equal(result.sent,true);assert.equal(result.text_verified,true);assert.equal(result.submit_sent,true);assert.equal(result.recording.resumed,false);
  assert.equal(response._meta.cleanup.recordings[0].recording,false);assert.equal(stop.reason,'cancelled');
