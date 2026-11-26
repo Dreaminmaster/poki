@@ -10,24 +10,47 @@ Build numbers correspond to the GitHub Actions run number or commit count of the
 
 ## [Unreleased]
 
+## [0.5.1-beta.1] - 2026-11-26
+
+Build 2912.
+
 ### Added
-- Show the active model as a button under the message composer while writing, and keep the Input Field preview on one row when the button is turned off. Thanks to @ZhehanZhang (#758, #760).
-- Support GPT-6.2 Astra and Sol and update built-in model lists with PiSwift v1.6.0. Thanks to @ZhehanZhang (#755, #761, #765).
-- Close the ChatGPT sign-in sheet automatically once the local loopback callback completes. Thanks to @ZhehanZhang (#769).
+- Redesigned step-by-step guided setup from Loopback (with installed proxy app detection and free LocalDevVPN from the App Store) through the Poki Loopback Shortcut, background location setup, and model accounts, paired with a unified Setup page and Guide Me walkthrough. Thanks to @ZhehanZhang (#649).
+- Post-setup **Keep Poki Opening** Apple Account sign-in prompt for free 7-day signing installs, pre-filling the Apple Account from Poki Setup so Poki can renew itself automatically on your iPhone. Thanks to @ZhehanZhang (#744).
+- Remote MCP **Connectors** (`Settings > Connectors`) with built-in presets for Notion, Linear, GitHub, Atlassian, Asana, Canva, Stripe, and Hugging Face, plus two-step **Add Custom Connector** setup with live server checks, multi-account support, per-account approval modes, and per-tool toggles. Thanks to @ZhehanZhang (#649, #652).
+- **Senses** and always-on **Screen History** with a direct timeline view, soft-zoom transitions, automatic developer disk image remounting after reboot, the Poki Loopback Shortcut reconnect action, provisional habit memories, personalized home suggestions, and structured Screen History share cards when answers are shared with your chat model. Thanks to @ZhehanZhang (#649, #652).
+- On-device **Local Models** (`Settings > Models > Local`) supporting Apple Intelligence and downloadable 4-bit MLX models (Qwen 3 1.7B and Qwen 3.5 2B on iPhones with 6 GB RAM or more), unified per-use model pickers (**Chat**, **Voice**, **Decisions**, **Senses**), and fast decision models (**Quick Fixes**) that help skills and one-call action paths recover from unexpected screens. Thanks to @ZhehanZhang (#649).
+- Active model button under the message composer while writing, opening a native sheet to switch models and approval modes without losing your draft, with a matching one-row preview in `Settings > Input Field` when turned off. Thanks to @ZhehanZhang and @ScottH1122 (#758, #760).
+- Built-in support for GPT-6.2 Sol and GPT-6.2 Astra across OpenAI, ChatGPT, and OpenRouter (with PiSwift v1.6.0), automatic 24-hour model list refreshes with failure backoff, and ChatGPT plan model discovery. Thanks to @ZhehanZhang (#755, #761, #765).
+- One-time "Tap Poki" discovery tip on the home screen bear and a menu chevron on the conversation Poki pill so model and approval controls are easier to find. Thanks to @ZhehanZhang (#747).
+- Direct local MCP connections over USB or Wi-Fi (with relay fallback), per-computer access switches in `Settings > External Connections > Computers`, simulator MCP serving (`poki-setup mcp serve --simulator`), and PokiCore element state reporting, slider adjustments, and screenshot sizing options. Thanks to @ZhehanZhang (#649).
+- Siri AI tool support for **Send Task to Poki**, **Talk to Poki**, and **Poki Anytime** on iOS 27.3 or later, and **Get Debug Bundle** in `Settings > Advanced` to export a redacted diagnostic archive. Thanks to @ZhehanZhang (#649).
+- Close the ChatGPT sign-in sheet automatically once the local loopback callback completes, with a native progress indicator while signing in. Thanks to @ZhehanZhang (#769).
 
 ### Changed
-- Move Screen History JSON processing off the main thread for smoother app responsiveness. Thanks to @ZhehanZhang (#731).
-- Display mounted developer disk image readiness and errors on the loopback page. Thanks to @ScottH1122 (#522).
+- Reorganized Settings into **How Poki Works**, **Safety and Access** (grouping Approvals, Screen History, Activity Log, Face ID & Passcode, and External Connections), and **This App**, replacing Poki's separate PIN with system Face ID, Touch ID, and Passcode, replacing the 4-segment sensitivity control with a slider, and hiding the Ready Live Activity by default. Thanks to @ZhehanZhang (#649, #653).
+- Switched the Poki app typeface to Allo, added a layered dark launch screen, unified chat bubble and task card surfaces, organized Memory into dedicated per-area pages with an in-page ask bar, and simplified the bear wardrobe onto one page with consistent tile sizes. Thanks to @ZhehanZhang (#649, #651).
+- Refined the message composer with evenly padded app capsules, native rounded mention row highlights, apps listed first in the `+` sheet (dropping duplicate Model and Approvals rows), and home suggestion pills that animate smoothly with the keyboard. Thanks to @ZhehanZhang (#651, #653).
+- Reduced Screen History overhead by moving JSON processing off the main thread and skipping accessibility reads on unchanged screens for up to 30 minutes. Thanks to @ZhehanZhang (#650, #731).
+- Display mounted developer disk image readiness and errors on the Loopback detail page when local automation is already ready. Thanks to @ScottH1122 (#522).
+- Adopted the full Contributor Covenant 3.0 alongside concise six-language community rules in `CODE_OF_CONDUCT.md` (#618, #683 thanks to @ZhehanZhang).
 
 ### Fixed
-- Size the `@` app mention picker to match its visible results. Thanks to @creamtea47 (#763).
-- Register iPhones with blank device names in Poki Setup. Thanks to @kongyanye (#762).
-- Reuse the pairing record accepted by the iPhone across every USB setup step. Thanks to @ZhehanZhang (#757).
-- Retry Apple sign-in automatically after error `-22411` and follow updated anisette servers. Thanks to @ZhehanZhang (#742).
-- Close automation sessions that finish opening after a close request was already sent. Thanks to @ZhehanZhang (#743).
-- Open target apps beside Poki during iPhone Duo Split View tasks and harden Duo cover app launch and display confirmation (#607, #728).
-- Synchronize ChatGPT voice completion replies with pending phone actions (#730).
-- Validate result card actions for every item, clear navigation state when the built-in browser stops, compact oversized Live Activity payloads, share concurrent installed-app refreshes, and retry pairing searches after network path changes. Thanks to @ScottH1122 (#706, #711, #712, #713, #720).
+- Keep `SettingsRow` leading titles intact and truncate long trailing values (such as custom provider-prefixed model names) on one line, while letting warning and action labels wrap cleanly at accessibility Dynamic Type sizes (#787).
+- Open target apps beside Poki during iPhone Duo Split View tasks and harden folded Duo cover display launching, compatibility-window normalization, and display confirmation (#607, #728).
+- Synchronize ChatGPT Live Voice completion replies with in-flight phone actions so Poki waits until tools and turns finish before speaking completion (#730).
+- Close automation sessions that finish opening after a close or Stop request was already sent, preventing the iOS "Automation Running" watermark from staying stuck on screen. Thanks to @ZhehanZhang (#743).
+- Retry Apple Account sign-in automatically after error `-22411` with loop protection and update fallback anisette servers (`new.ani.sidestore.io`, `mac-ani.jkcoxson.com`, `ani.iloader.app`, `ani3.stikstore.app`). Thanks to @ZhehanZhang (#742).
+- Size the `@` app mention picker to match its visible results instead of stretching to full height for short lists. Thanks to @creamtea47 (#763).
+- Register iPhones with blank device names in Poki Setup by falling back to `iOS Device`. Thanks to @kongyanye (#762).
+- Reuse the pairing record accepted by the iPhone across every USB setup step in Poki Setup. Thanks to @ZhehanZhang (#757).
+- Validate result card actions for every selectable item, clear navigation state when the built-in browser stops, compact oversized Live Activity payloads by UTF-8 byte budget, share concurrent installed-app refreshes, and retry Bonjour pairing searches after network path changes. Thanks to @ScottH1122 (#706, #711, #712, #713, #720).
+- Fix local model downloads stalling at 99%, preserve chat memory attribution and atomic saves for successful tasks, improve Pinyin mention composition, and prevent action paths from sending input into Poki. Thanks to @ZhehanZhang (#649).
+
+### Security
+- Keep captured screen text out of online Home follow-up prompts when Insights uses an online Chat Model, sending only screen titles, app names, and timestamps, and bind prompt creation and delivery to the same model setting. Thanks to @ZhehanZhang (#788).
+- Check both the shared summary and raw local model answer before sharing Screen History context with Poki's chat model or external agents, and fail closed in the agent unlock helper unless the iOS lock screen is confirmed. Thanks to @ZhehanZhang (#649, #652).
+- Strip PiSwift v1.6.0's renamed `session-id` header during failover to third-party custom backup endpoints so official endpoint sessions are never forwarded. Thanks to @ZhehanZhang (#765).
 
 ## [0.5.0-beta.1] - 2026-11-24
 
@@ -231,7 +254,8 @@ Build 1260. Replaces the entire iPhone app interface; on first launch after upgr
 - Poki Agent for sending iPhone tasks from iMessage, Telegram, or the terminal with reusable route learning.
 - Initial standalone iOS app prototype with loopback pairing, relay support (`deploy/cf-relay/deploy.sh`), and Lock Screen approval before sensitive actions.
 
-[Unreleased]: https://github.com/JosssphZhou/poki/compare/app-0.5.0-beta.1...HEAD
+[Unreleased]: https://github.com/JosssphZhou/poki/compare/app-0.5.1-beta.1...HEAD
+[0.5.1-beta.1]: https://github.com/JosssphZhou/poki/compare/app-0.5.0-beta.1...app-0.5.1-beta.1
 [0.5.0-beta.1]: https://github.com/JosssphZhou/poki/compare/app-0.4.7-beta.1...app-0.5.0-beta.1
 [0.4.7-beta.1]: https://github.com/JosssphZhou/poki/compare/app-0.4.6-beta.1...app-0.4.7-beta.1
 [0.4.6-beta.1]: https://github.com/JosssphZhou/poki/compare/app-0.4.5-beta.1...app-0.4.6-beta.1
