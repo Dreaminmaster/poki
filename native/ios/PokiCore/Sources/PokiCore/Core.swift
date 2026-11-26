@@ -392,8 +392,8 @@ public final class PokiCore: @unchecked Sendable {
         guard let computer, let access = config.computerAccess else { return nil }
         switch access(computer) {
         case true?: return nil
-        case false?: return "This computer's access is turned off on the iPhone (Poki › Settings › Agents › Computers). Ask the owner to turn it on."
-        case nil: return "This computer is new to the iPhone. Ask the owner to allow \(computer.name) in Poki › Settings › Agents › Computers, then try again."
+        case false?: return "This computer's access is turned off on the iPhone (Poki › Settings › External Connections › Computers). Ask the owner to turn it on."
+        case nil: return "This computer is new to the iPhone. Ask the owner to allow \(computer.name) in Poki › Settings › External Connections › Computers, then try again."
         }
     }
     var relay: RelayClient?
