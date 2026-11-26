@@ -9,16 +9,18 @@ permissions:
 jobs:
   recording-phase:
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: original
-            ref: 226771994f07fc19ba8fb179cb0364c4e12b50c6
           - label: explicit-phase
-            ref: 537a7c3826596502a51ab18228f478bb2d8cf75c
-    name: Recording cancellation - ${{ matrix.label }}
+            ref: 8054a0acdd67305b1a96ebe3e84cfd57567a285b
+            negative: false
+          - label: substring-control
+            ref: 4949cad1238f8d074293f1d231cb69963918a0a5
+            negative: true
+    name: Recording phase log collision - ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,26 +38,34 @@ jobs:
           mkdir -p out
           git rev-parse HEAD | tee out/source-revision.txt
           test "$(git rev-parse HEAD)" = "$EXPECTED"
-          node --version | tee out/node-version.txt
           npm ci
-      - name: Repeat recording recovery cases without changing deadlines
+      - name: Verify ordinary cancellation and command-text collision
         shell: bash
+        env:
+          NEGATIVE: ${{ matrix.negative }}
         run: |
           set -euo pipefail
-          failures=0
-          for i in 1 2 3 4 5; do
-            set +e
-            node --test --test-concurrency=1 --test-name-pattern='^(cancel during recording recovery preserves dispatched input|input receipt survives recording recovery failure|healthy recording survives more than four inputs|automatic recording retries remain bounded)' test/coordination.test.mjs 2>&1 | tee "out/repeat-$i.log"
-            status=${PIPESTATUS[0]}
-            set -e
-            printf '%s\n' "$status" > "out/repeat-$i.status"
-            if [ "$status" != 0 ] || ! grep -Fxq 'ℹ tests 4' "out/repeat-$i.log" || ! grep -Fxq 'ℹ pass 4' "out/repeat-$i.log"; then failures=$((failures+1)); fi
-          done
-          printf 'failed_iterations=%s\n' "$failures" | tee out/summary.txt
-          test "$failures" = 0
+          set +e
+          node --test --test-concurrency=1 --test-name-pattern='^cancel during recording recovery preserves dispatched input and finishes cleanup before takeover' test/coordination.test.mjs 2>&1 | tee out/regression.log
+          status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$status" > out/status.txt
+          grep -Fxq 'ℹ tests 2' out/regression.log
+          grep -Fxq 'ℹ skipped 0' out/regression.log
+          if [ "$NEGATIVE" = true ]; then
+            test "$status" = 1
+            grep -Fxq 'ℹ pass 1' out/regression.log
+            grep -Fxq 'ℹ fail 1' out/regression.log
+            grep -F '✖ cancel during recording recovery preserves dispatched input and finishes cleanup before takeover (command text in input)' out/regression.log
+            grep -F 'Timed out waiting for a command in the fixture log' out/regression.log
+          else
+            test "$status" = 0
+            grep -Fxq 'ℹ pass 2' out/regression.log
+            grep -Fxq 'ℹ fail 0' out/regression.log
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: recording-phase-${{ matrix.label }}
+          name: recording-log-collision-${{ matrix.label }}
           path: out/
           if-no-files-found: error
