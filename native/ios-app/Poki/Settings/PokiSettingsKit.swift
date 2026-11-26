@@ -85,7 +85,7 @@ struct SettingsRow: View {
         HStack(spacing: min(18, iconSpacing)) {
             SettingsIcon(symbol: symbol)
                 .padding(.vertical, SettingsRowMetrics.iconLineInset)
-            TitleValueLayout(inline: !typeSize.isAccessibilitySize, truncatesValue: !warns) {
+            TitleValueLayout(inline: !typeSize.isAccessibilitySize, truncatesValue: !warns && !valueIsAction) {
                 VStack(alignment: .leading, spacing: 2) {
                     titleText
                     // The start flow says it in the section's footer, and a row holds its title alone.
@@ -95,7 +95,13 @@ struct SettingsRow: View {
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1).truncationMode(.middle)
                     }
                 }
-                if let value { valueView(value).lineLimit(1).truncationMode(.tail) } else { Color.clear.frame(width: 0, height: 0) }
+                if let value {
+                    valueView(value)
+                        .lineLimit(wrapsValueWhenStacked ? nil : 1)
+                        .truncationMode(.tail)
+                } else {
+                    Color.clear.frame(width: 0, height: 0)
+                }
                 // Measured, never drawn: the title's width on one line.
                 titleText.fixedSize().hidden().accessibilityHidden(true)
             }
@@ -114,18 +120,29 @@ struct SettingsRow: View {
         Text(title).font(.allo(.body)).foregroundStyle(Color(.label)).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
     }
 
+    private var wrapsValueWhenStacked: Bool {
+        typeSize.isAccessibilitySize && (warns || valueIsAction)
+    }
+
     @ViewBuilder private func valueView(_ value: String) -> some View {
         if warns, startDesign != nil {
             Text(verbatim: value).font(.allo(.body)).foregroundStyle(Color(.systemOrange))
+                .multilineTextAlignment(.leading)
         } else if warns {
-            Text(verbatim: value).font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
+            let pill = Text(verbatim: value).font(.allo(.footnote, .semibold)).foregroundStyle(Tint.amberInk)
+                .multilineTextAlignment(.leading)
                 .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(Tint.amberSoft, in: .capsule)
+            if wrapsValueWhenStacked {
+                pill.background(Tint.amberSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                pill.background(Tint.amberSoft, in: .capsule)
+            }
         } else {
             HStack(spacing: 6) {
                 if let dot { Circle().fill(dot).frame(width: 7, height: 7) }
                 Text(verbatim: value).font(.allo(startDesign == nil ? .subheadline : .body))
                     .foregroundStyle(valueIsAction ? Tint.blueText : Color(.secondaryLabel))
+                    .multilineTextAlignment(.leading)
             }
         }
     }
@@ -323,9 +340,9 @@ struct SettingsChoiceCard: View {
 }
 
 /// A row's words and its value: the title (subview 2, measured on one line and never drawn) stays
-/// intact while the words (0) take the room the value (1) leaves. Non-warning values stay beside
-/// the title on one line and truncate at the tail; warning pills and accessibility sizes stack the
-/// value under the words within the row width.
+/// intact while the words (0) take the room the value (1) leaves. Standard values stay beside the
+/// title on one line and truncate at the tail; warnings, actions, and accessibility sizes stack
+/// under the words within the row width.
 struct TitleValueLayout: Layout {
     var inline = true
     var truncatesValue = true
