@@ -28,8 +28,8 @@ enum SensesModel {
     }
 
     /// One answer from the chosen model, or nil.
-    static func ask(_ text: String, instructions: String) async -> String? {
-        switch choice {
+    static func ask(_ text: String, instructions: String, using insightModel: SensesInsightModel? = nil) async -> String? {
+        switch insightModel ?? choice {
         case .onDevice:
             return await BacktapeWriter.ask(text, instructions: instructions)
         case .chat:

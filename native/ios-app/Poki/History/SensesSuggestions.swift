@@ -152,13 +152,8 @@ final class SensesSuggestions {
             .filter { capture.keeps($0.app) && BacktapeApps.service($0.app) == nil && !$0.text.isEmpty }
         // Too little on the tape to know what the owner is in the middle of.
         guard entries.count >= 6 else { return [] }
-        let take = min(entries.count, 14)
-        var text = ""
-        for index in 0..<take {
-            let entry = entries[index * entries.count / take]
-            let time = entry.at.formatted(date: .omitted, time: .shortened)
-            text += "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n\(entry.text.prefix(170))\n\n"
-        }
+        let model = SensesModel.choice
+        let text = Self.followUpPrompt(from: entries, using: model)
         let language = Locale(identifier: "en").localizedString(forIdentifier: AppLocalization.locale.identifier) ?? "English"
         let instructions = """
         You read what was on a person's iPhone screen in the last hours and propose things an \
@@ -169,8 +164,18 @@ final class SensesSuggestions {
         words, starting with a verb. Never propose sending, replying to or calling anyone. Never \
         mention people's names, message text, money, health, passwords, codes or anything personal.
         """
-        guard let answer = await SensesModel.ask(text, instructions: instructions) else { return [] }
+        guard let answer = await SensesModel.ask(text, instructions: instructions, using: model) else { return [] }
         return Array(Self.handle(answer, entries: entries, existing: existing).prefix(room))
+    }
+
+    static func followUpPrompt(from entries: [HistoryEntry], using model: SensesInsightModel) -> String {
+        let take = min(entries.count, 14)
+        return (0..<take).map { index in
+            let entry = entries[index * entries.count / take]
+            let time = entry.at.formatted(date: .omitted, time: .shortened)
+            let title = "[\(time)] \(HistoryNames.app(entry.app)) \(entry.title)\n"
+            return title + (model == .onDevice ? "\(entry.text.prefix(170))\n\n" : "\n")
+        }.joined()
     }
 
     /// What may be shown of the model's answer. A line passes only when it names an app the owner
