@@ -316,6 +316,9 @@ enum ProviderUseValue {
     /// "Chat, Decisions", "Not in use": the uses a provider runs now.
     @MainActor static func summary(_ provider: ProviderRef) -> String {
         let uses = ModelUse.allCases.filter { use in
+            if use == .voice, provider == .account(.chatgpt) {
+                return ModelAccounts.chatGPTVoiceStatus() == .active
+            }
             let pick = ModelPicks.current(use)
             return ModelPicks.groups(use).first { $0.id == provider.id }?.items.contains { $0.pick == pick } ?? false
         }
