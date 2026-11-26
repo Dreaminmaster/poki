@@ -33,7 +33,7 @@ enum PokiStatusCopy {
     /// can do now and what starts it.
     static func line(_ power: PowerTile) -> String {
         switch power {
-        case .turnOn: AppLocalization.text(LocalizedStringResource("Poki is off. Agents can’t connect to this iPhone until you turn it on."))
+        case .turnOn: AppLocalization.text(LocalizedStringResource("Poki is off. Send a task in Poki before connecting an agent."))
         case .resume: AppLocalization.text(LocalizedStringResource("Poki is paused. It resumes automatically upon a new task or agent request."))
         case .pause: AppLocalization.text(LocalizedStringResource("Poki can tap and type on this iPhone when you send a task or an agent requests it."))
         }
@@ -41,8 +41,7 @@ enum PokiStatusCopy {
 }
 
 extension PowerTile {
-    /// Where Poki stands for the settings card's status words: off, paused by you, or on. The card has no
-    /// button for it; Connection's Automation switch turns Poki on and pauses it.
+    /// Where Poki stands for the settings card's status words: off, paused by you, or on. The card has no power button.
     @MainActor static func card(model: AppModel) -> PowerTile {
         if !(model.sessionOn || model.wantsOn) { return .turnOn }
         return model.ownerPaused ? .resume : .pause

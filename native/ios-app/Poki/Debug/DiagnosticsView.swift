@@ -161,7 +161,7 @@ struct TestingOptionsView: View {
                 .settingsHeader()
             } footer: {
                 Group {
-                    Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Security.")
+                    Text("Off by default. ask_poki lets outside agents hand a repetitive task to Poki's own agent. Changes take effect the next time Poki opens. The Auto-Classifier is in Settings › Approvals.")
                 }
                 .settingsFooter()
             }

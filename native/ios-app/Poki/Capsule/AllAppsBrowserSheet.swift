@@ -164,7 +164,7 @@ struct AllAppsBrowserSheet: View {
                         withAnimation(.snappy(duration: 0.22)) { selectedCategory = category }
                     } label: {
                         Text(verbatim: category.title)
-                            .font(.subheadline.weight(selected ? .semibold : .medium))
+                            .font(.allo(.subheadline, selected ? .semibold : .medium))
                             .foregroundStyle(selected ? Color.white : Color(.label).opacity(0.85))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
@@ -231,7 +231,7 @@ struct AllAppsBrowserSheet: View {
                         VStack(spacing: 6) {
                             AppIconView(app: app.id, size: 38, alwaysLight: true)
                             Text(verbatim: app.displayName)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.allo(.caption2, .medium))
                                 .foregroundStyle(Color(.label).opacity(0.92))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)

@@ -60,7 +60,7 @@ struct ChatView: View {
     /// The message field has the keyboard.
     @State private var writing = false
     @State private var composerSettingsPresented = false
-    /// Plus's sheet is up: photos, files, mentions and how the chat runs.
+    /// Plus's sheet is up: apps, photos, files and connectors.
     @State private var adding = false
     @State private var scrollReplyQuestion: UUID?
     @State private var standaloneDraft = ""
@@ -591,7 +591,7 @@ extension SetupIssueHint {
         guard model.relayStatus.isOffline else { return nil }
         return SetupIssueHint(
             message: AppLocalization.text(LocalizedStringResource("MCP Relay is offline: agents can’t reach this iPhone.")),
-            link: AppLocalization.text(LocalizedStringResource("Agents ›")),
+            link: AppLocalization.text(LocalizedStringResource("External Connections ›")),
             target: .agents
         )
     }
@@ -1433,6 +1433,8 @@ struct ComposerInputView: View {
     @State private var mentionCaretX: CGFloat?
     @State private var composerWidth: CGFloat = 340
     @State private var showingAllApps = false
+    /// More was tapped in Plus's sheet: the app browser opens when the sheet has gone down.
+    @State private var allAppsAfterAdding = false
     @State private var allAppsInitialSearch = ""
     @State private var pendingMentionReplaceLength = 0
     @State private var recentAppsVersion = 0
@@ -1671,7 +1673,13 @@ struct ComposerInputView: View {
         }
         // Plus: a sheet that rises from the bottom (it was a menu that appeared at once). The library,
         // Files and the camera open over it, and it goes down once they have added something.
-        .sheet(isPresented: $adding) { addSheet }
+        // More in the sheet opens every app (AllAppsBrowserSheet) once the sheet is down: two sheets at
+        // once on one view do not present.
+        .sheet(isPresented: $adding, onDismiss: {
+            guard allAppsAfterAdding else { return }
+            allAppsAfterAdding = false
+            showingAllApps = true
+        }) { addSheet }
         .onAppear { _ = MCPConnectors.shared }
         .onChange(of: focused) { _, now in if !now { mentions.update(nil) } }
         .sheet(isPresented: $showingAllApps, onDismiss: {
@@ -1922,7 +1930,10 @@ struct ComposerInputView: View {
 
     private var recentAppIDs: [String] {
         _ = recentAppsVersion
-        return RecentAppsStore.shared.recentIDs
+        // One list for the sheet's row and the browser's Recently Used: names sent or picked in Poki
+        // (MentionRecents) first, then what the browser recorded.
+        var seen = Set<String>()
+        return (MentionRecents.ids + RecentAppsStore.shared.recentIDs).filter { seen.insert($0.lowercased()).inserted }
     }
 
     /// Plus's sheet, with the library, Files and the camera opening over it.
@@ -1934,11 +1945,12 @@ struct ComposerInputView: View {
                          mention: mention,
                          moreApps: {
                              // The full list of this iPhone's apps (AllAppsBrowserSheet), over the conversation.
-                             adding = false
                              pendingMentionReplaceLength = 0
                              allAppsInitialSearch = ""
-                             showingAllApps = true
-                         })
+                             allAppsAfterAdding = true
+                             adding = false
+                         },
+                         mentionedIDs: AppPickerCatalog.mentionedBundleIDs(in: input))
             .photosPicker(isPresented: $choosingPhotos, selection: $picked, maxSelectionCount: max(1, Self.most - attachments.count), matching: .images)
             .fileImporter(isPresented: $choosingFiles, allowedContentTypes: AttachmentReader.fileTypes, allowsMultipleSelection: true) { result in
                 guard pickerGeneration == attachmentDraft.generation, case .success(let urls) = result else { return }
@@ -2012,6 +2024,7 @@ struct ComposerInputView: View {
         editorBridge.scheduleCursor(result.cursorUTF16)
         input = result.text
         RecentAppsStore.shared.record(app.id)
+        MentionRecents.used(app.id)
         recentAppsVersion += 1
         adding = false
         if keepFocus {

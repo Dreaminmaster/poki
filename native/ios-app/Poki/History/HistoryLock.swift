@@ -9,7 +9,7 @@ import notify
 /// own: a row that leads behind the lock asks the system first and opens its page only once the prompt
 /// has passed, so nothing shows before it.
 ///
-/// The device's biometric always opens it. One choice, on Security › Face ID & Passcode: Also Allow
+/// The device's biometric always opens it. One choice, on Settings › Face ID & Passcode: Also Allow
 /// iPhone Passcode, under the biometric, never in its place (the owner, Nov 21 2026). An iPhone with no
 /// biometric set up can use Senses only after the owner acknowledged the risk: then its passcode opens
 /// history.
@@ -430,7 +430,7 @@ struct UnlockLink<Label: View>: View {
     }
 }
 
-/// Security › Face ID & Passcode: the device's biometric and the iPhone passcode, with or in place of
+/// Settings › Face ID & Passcode: the device's biometric and the iPhone passcode, with or in place of
 /// it. One of them always stays on; changing either asks the system prompt first.
 struct HistoryLockSettings: View {
     @ObservedObject private var lock = HistoryLock.shared
@@ -447,7 +447,7 @@ struct HistoryLockSettings: View {
             } footer: {
                 Group {
                     if lock.biometricsReady {
-                        Text(verbatim: String(format: AppLocalization.text("Senses, clearing Screen History and these settings ask for %@."), lock.biometricsLabel))
+                        EmptyView()
                     } else if lock.biometrics.blockedOrDeniedOnHardware {
                         Text(verbatim: String(format: AppLocalization.text("%@ is off for Poki. Turn it on in Settings › Poki."), lock.biometricsLabel))
                     } else {

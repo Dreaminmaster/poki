@@ -80,8 +80,6 @@ final class LiveActivityTests: XCTestCase {
     }
 
     func testReadyOffStartsNoIdleActivityAndKeepsItWanted() {
-        UserDefaults.standard.set(true, forKey: ActivityController.hidesReadyKey)
-        defer { UserDefaults.standard.removeObject(forKey: ActivityController.hidesReadyKey) }
         let activity = ActivityController()
         activity.start(deviceName: "iPhone")
         XCTAssertFalse(activity.isRunning, "With Ready off nothing shows while Poki waits")

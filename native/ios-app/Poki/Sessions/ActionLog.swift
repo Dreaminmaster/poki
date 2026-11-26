@@ -241,11 +241,6 @@ struct ActionLogView: View {
                     }
                     .disabled(lock.asking || lock.unavailable)
                     .accessibilityIdentifier("activity.showObserving")
-                } footer: {
-                    Group {
-                        Text("When Screen History was reading, paused or left an app out. They show after Face ID, Touch ID or your passcode.")
-                    }
-                    .settingsFooter()
                 }
             }
             if log.entries.isEmpty && observing.isEmpty {
