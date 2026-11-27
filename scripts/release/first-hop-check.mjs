@@ -198,14 +198,14 @@ function selfCheck() {
   same('tie on pre-alpha', () => pick(tie, 'pre-alpha').tag, 'ios-prealpha-latest');
   same('tie on alpha', () => pick(tie, 'alpha').tag, 'ios-alpha-latest');
   const both = [
-    gh('app-0.3.0', false, '2026-11-14T05:00:00Z', 'Poki-external-0.3.0.ipa'),
+    gh('app-0.3.0', false, '2026-11-14T05:00:00Z', 'Poki-external-0.3.0-700.ipa'),
     gh('app-0.3.0-beta.1', true, '2026-11-12T05:00:00Z', 'Poki-external-0.3.0-beta.1.ipa'),
     gh('app-alpha-latest', true, '2026-11-09T06:00:00Z', 'Poki-external-0.2.9-650.ipa'),
     gh('app-prealpha-latest', true, '2026-11-09T06:00:00Z', 'Poki-external-0.2.9-660.ipa'),
     gh('ios-alpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-650.ipa'),
     gh('ios-prealpha-latest', true, '2026-11-08T05:00:00Z', 'Poki-external-0.2.9-660.ipa'),
   ];
-  same('stable pick', () => { const stable = pick(both, 'stable'); return `${stable.tag} ${stable.version} (${stable.build})`; }, 'app-0.3.0 0.3.0 ()');
+  same('stable pick', () => { const stable = pick(both, 'stable'); return `${stable.tag} ${stable.version} (${stable.build})`; }, 'app-0.3.0 0.3.0 (700)');
   same('beta pick', () => pick(both.slice(1), 'beta').tag, 'app-0.3.0-beta.1');
   same('alpha pick', () => pick(both.slice(2), 'alpha').build, '650');
   same('pre-alpha pick', () => pick(both.slice(2), 'pre-alpha').build, '660');

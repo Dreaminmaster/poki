@@ -1,7 +1,7 @@
 # Publishes a merged promotion (propose-promotion.yml, promotion-gate.yml): the record in
 # .github/channels.json whose tag does not exist yet. Beta keeps the numeric build in its IPA name:
 #   beta    Poki-external-0.3.0-712.ipa on app-0.3.0-beta.1, a prerelease, with the Gym scorecards
-#   stable  Poki-external-0.3.0.ipa on app-0.3.0, a full release (never marked Latest: GitHub's
+#   stable  Poki-external-0.3.0-712.ipa on app-0.3.0, a full release (never marked Latest: GitHub's
 #           Latest is Poki MCP's v* release, which the Mac server's update check reads)
 # Poki Setup files come along from the source release. Created as a draft, checked, then published.
 # A stable waits for approval in the "stable" environment (Settings > Environments > stable >
@@ -169,7 +169,13 @@ jobs:
             fi
           else
             gh release download "$SOURCE" --dir src
-            cp src/Poki-external-*.ipa "dist/Poki-external-$LABEL.ipa"
+            # Installed Poki 0.4.0 and earlier read the build from the file name and refuse an
+            # update whose name carries none, so a stable keeps the beta's numeric build.
+            ipa="Poki-external-$LABEL${BUILD:+-$BUILD}.ipa"
+            cp src/Poki-external-*.ipa "dist/$ipa"
+            if [ -n "$BUILD" ]; then
+              python3 pipeline/.github/scripts/verify-ipa-version.py "dist/$ipa" "$BASE" "$BUILD"
+            fi
             cp src/Poki-signing.zip dist/
             cp src/PokiSetup-* src/SHA256SUMS-desktop.txt dist/ 2>/dev/null || true
           fi

@@ -38,7 +38,7 @@ Compatibility depends on the build, not just the 0.2.2 version label: revision `
 661, already recognizes both schemes. This is a source check, not a check of the shipped binary. Pre-alpha and Alpha continue to publish those compatibility
 copies. New Betas use `app-*`; the independently numbered `ios-beta-*` compatibility records below remain available to installed clients.
 
-N is the number of commits reachable from the source commit, on `main` or the hotfix branch. New Beta IPA filenames retain the numeric build, which must match `CFBundleVersion` inside the app. Stable filenames still omit it.
+N is the number of commits reachable from the source commit, on `main` or the hotfix branch. New Beta IPA filenames retain the numeric build, which must match `CFBundleVersion` inside the app. Stable filenames carry the promoted Beta's build too (`Poki-external-X.Y.Z-N.ipa`), because installed Poki 0.4.0 and earlier read the build from the name and never install an update that has none.
 
 ## One build, promoted
 
@@ -126,9 +126,9 @@ Both carry `Poki-external-X.Y.Z-N.ipa`, `Poki-signing.zip`, `poki-relay-worker.j
 
 `draft` and `public` are not behind an environment approval. Only the repository owner runs them, or
 someone the owner has told to for that build; agents do not, and a draft that exists is not that
-permission. Releases of a later version sort above both. A Stable's `Poki-external-X.Y.Z.ipa` is
-offered with an empty build and will need the same second release; the script does not make that
-one yet.
+permission. Releases of a later version sort above both. A Stable's `Poki-external-X.Y.Z-N.ipa`
+carries the promoted Beta's build, so older clients read the same version and build from its name as
+the signed copy reports, and the Stable needs no second release.
 
 To take a Beta back, return `app-X.Y.Z-beta.K` to a draft first and `ios-beta-X.Y.Z-N` second. In
 the other order Stable and Beta users are offered the beta-named file alone and stay on an update
