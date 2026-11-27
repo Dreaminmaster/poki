@@ -19,18 +19,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: current-main-complete-candidate
+          - pr: backup-restore-stable-051-positive
             device: iPhone
-            ref: d3ada62883d2994f141c94e7a9a7690e2dad2754
-            tests: 'ConversationSearchTests:21 SessionArchiveTests:21 SessionBackupRestoreTests:3 ChatScrollTests:10'
-            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testNarrowMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
+            ref: 0bf8e08b9dc444a7f40feea789c50ec89e67b997
+            tests: 'SessionBackupRestoreTests:3 SessionArchiveTests:16'
+            ui_tests: ''
             expected_baseline: false
-          - pr: current-main-complete-candidate
-            device: iPad
-            ref: d3ada62883d2994f141c94e7a9a7690e2dad2754
-            tests: 'ConversationSearchTests:21 SessionArchiveTests:21 SessionBackupRestoreTests:3 ChatScrollTests:10'
-            ui_tests: 'testConversationSearchOpensNormalMessageAtExactHit testWideMemorySourceOpensActualTranscriptWithoutReplacingDraft testConversationSearchRevealsSelectedGreetingOnly'
-            expected_baseline: false
+          - pr: backup-restore-stable-051-negative
+            device: iPhone
+            ref: 1d6261071f4e38592a1e81713de2ea51514ae989
+            tests: ''
+            ui_tests: ''
+            expected_baseline: true
     name: PR ${{ matrix.pr }} (${{ matrix.device }})
     runs-on: xcode-27
     # 0.5.0 adds the pinned Codex Voice Rust workspace to the first clean build.
@@ -238,7 +238,7 @@ jobs:
           assert d["failedTests"] == 0 and d["skippedTests"] == 0, d
           PY
           done
-      - name: Confirm unpatched implementation fails the exact retry assertions
+      - name: Confirm original backup restore fails the interruption regressions
         if: matrix.expected_baseline == true
         shell: bash
         run: |
@@ -251,25 +251,24 @@ jobs:
           set +e
           "$TIMEOUT" 1800 xcodebuild test-without-building -project native/ios-app/Poki.xcodeproj -scheme Poki \
             -destination "id=$UDID" -derivedDataPath build/history-review \
-            -only-testing:PokiTests/SessionArchiveTests/testScopedFlushRetriesItsOwnFailedWrite \
-            -only-testing:PokiTests/SessionArchiveTests/testScopedFlushRetriesOnlyRequestedFailedSave \
-            -parallel-testing-enabled NO -resultBundlePath out/scoped-baseline.xcresult \
+            -only-testing:PokiTests/SessionBackupRestoreTests \
+            -parallel-testing-enabled NO -resultBundlePath out/backup-baseline.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-            2>&1 | tee out/scoped-baseline.log
+            2>&1 | tee out/backup-baseline.log
           status=${PIPESTATUS[0]}
           set -e
           test "$status" = 65
-          xcrun xcresulttool get test-results summary --path out/scoped-baseline.xcresult | tee out/scoped-baseline.json
+          xcrun xcresulttool get test-results summary --path out/backup-baseline.xcresult | tee out/backup-baseline.json
           python3 - <<'PY'
           import json
-          d = json.load(open("out/scoped-baseline.json"))
-          log = open("out/scoped-baseline.log").read()
-          assert d["totalTestCount"] == 2 and d["failedTests"] == 2 and d["skippedTests"] == 0, d
-          for name in ("testScopedFlushRetriesItsOwnFailedWrite", "testScopedFlushRetriesOnlyRequestedFailedSave"):
+          d = json.load(open("out/backup-baseline.json"))
+          log = open("out/backup-baseline.log").read()
+          assert d["totalTestCount"] == 3 and d["failedTests"] == 2 and d["passedTests"] == 1 and d["skippedTests"] == 0, d
+          for name in ("testLiveBackupBecomesInterruptedAndResumableAfterReload", "testMissingTaskCardIsAddedOnlyOnceOnBackupImport"):
               assert name in json.dumps(d.get("testFailures", [])), d
-          assert "XCTUnwrap failed" in log, log[-4000:]
-          assert "An explicit scoped flush must retry an earlier failed write" in log, log[-4000:]
-          print("Both expected old-code assertion failures reproduced; this is a negative baseline, not passing application tests.")
+          assert "A restored interrupted task must remain resumable" in log, log[-4000:]
+          assert "Expected an interrupted task card" in log, log[-4000:]
+          print("Both old-code interruption failures reproduced; the older-backup protection still passes.")
           PY
       - name: Verify actual conversation search and Memory source taps
         if: matrix.ui_tests != ''
