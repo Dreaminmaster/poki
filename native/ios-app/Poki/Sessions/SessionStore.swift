@@ -913,8 +913,10 @@ final class SessionStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var session = try decoder.decode(SavedSession.self, from: data)
-        session.live = false
         if let mine = self.session(session.id), mine.updated >= session.updated { return }
+        // A backed-up task has no running engine in this process. Use the same
+        // interruption state and task card as a conversation loaded after a relaunch.
+        session.markInterruptedTask()
         put(session)
     }
 
