@@ -48,6 +48,30 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertEqual(ChatView.transcriptEntries([greeting, otherGreeting], revealed: greeting.id).map(\.id), [greeting.id])
     }
 
+    func testReadOnlyPreviewRetainsGreetingAfterScrollWithoutChangingActiveSelection() {
+        let active = ConversationSearchJump(sessionID: "active", entryID: UUID())
+        let greeting = ChatEntry(.poki("Saved greeting"))
+        let unrelated = ChatEntry(.poki("Unrelated greeting"))
+        let user = ChatEntry(.you("First request", delivered: true))
+        let entries = [greeting, unrelated, user]
+        let preview = ConversationSearchJump(sessionID: "saved", entryID: greeting.id)
+        var navigation = ConversationSearchNavigation()
+        navigation.open(active, preview: false)
+        navigation.open(preview, preview: true)
+        let route = DetailsRoute.sessionPreview(preview.sessionID, entryID: preview.entryID)
+        navigation.consume(preview.requestID)
+
+        XCTAssertNil(navigation.pending)
+        XCTAssertEqual(navigation.revealedEntry(in: "active"), active.entryID)
+        XCTAssertNil(navigation.revealedEntry(in: "saved"))
+        guard case .sessionPreview(let id, let entryID) = route else {
+            return XCTFail("Expected a read-only conversation destination")
+        }
+        XCTAssertEqual(id, "saved")
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: entryID).map(\.id), [greeting.id, user.id])
+        XCTAssertEqual(ChatView.transcriptEntries(entries, revealed: nil).map(\.id), [user.id])
+    }
+
     func testFindsOlderMessageEvenWhenLastLineDoesNotMatch() {
         let old = ChatEntry(.you("明天下午去海港拍照", delivered: true))
         let newest = ChatEntry(.poki("Understood."))
@@ -106,6 +130,22 @@ final class ConversationSearchTests: XCTestCase {
         XCTAssertTrue(find(in: all, query: "late ferry").first?.session.archived != nil)
         // The session may be deleted between the background search and main-actor resolution.
         XCTAssertTrue(ConversationSearchIndex.resolve(rawHits, in: [active]).isEmpty)
+    }
+
+    func testSearchDropsReplacedMessageButKeepsOtherCurrentHits() {
+        let replaced = ChatEntry(.poki("needle replaced"))
+        let retained = ChatEntry(.you("needle retained", delivered: true))
+        let original = sample(entries: [replaced, retained])
+        let raw = ConversationSearchIndex.search(ConversationSearchIndex.snapshot(in: [original]), query: "needle")
+        XCTAssertEqual(raw.count, 2)
+
+        var current = original
+        current.entries[0] = ChatEntry(.poki("needle updated"))
+        let resolved = ConversationSearchIndex.resolve(raw, in: [current])
+        XCTAssertEqual(resolved.map(\.entryID), [retained.id], "A hit is not valid just because its conversation still exists")
+        XCTAssertFalse(ConversationSearchIndex.hasTarget(replaced.id, in: current))
+        XCTAssertTrue(ConversationSearchIndex.hasTarget(retained.id, in: current))
+        XCTAssertTrue(ConversationSearchIndex.hasTarget(nil, in: current))
     }
 
     func testCancellationClearsPendingSearchWithoutReportingOldHits() async {
