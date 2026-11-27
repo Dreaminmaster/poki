@@ -120,6 +120,17 @@
       "source": "app-0.5.1-alpha.2912",
       "sha": "72f47a2d02b2529fe0ddf2dadbd4e7bad50e5417",
       "version_bump": "0.5.1 -> 0.5.2"
+    },
+    {
+      "channel": "stable",
+      "proposed": "2026-11-27T05:30:40Z",
+      "version": "0.5.1",
+      "tag": "app-0.5.1",
+      "base_version": "0.5.1",
+      "build": "2912",
+      "source": "app-0.5.1-beta.1",
+      "sha": "72f47a2d02b2529fe0ddf2dadbd4e7bad50e5417",
+      "soak_override": "Owner-approved 2026-11-27: promote now"
     }
   ]
 }
