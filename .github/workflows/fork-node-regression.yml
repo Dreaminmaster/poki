@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 9b1b965675b8da531ca0a24b1ff73c8dbb69d8d8
+          ref: a09fdfc48983af16a74867f1a4d2f6ba075c04d0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           git rev-parse HEAD | tee out/source-revision.txt
-          test "$(git rev-parse HEAD)" = 9b1b965675b8da531ca0a24b1ff73c8dbb69d8d8
+          test "$(git rev-parse HEAD)" = a09fdfc48983af16a74867f1a4d2f6ba075c04d0
           XCODE="$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)"
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version | tee out/xcode-version.txt
@@ -39,6 +39,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: current-main-fixture-integration
+          name: stable-051-four-fixes-integration
           path: out/
           if-no-files-found: error
